@@ -228,7 +228,8 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
             let period_doubling_crossed =
                 prev_tests.period_doubling * new_tests.period_doubling < 0.0;
-            let neimark_sacker_crossed = prev_tests.neimark_sacker * new_tests.neimark_sacker < 0.0;
+            let neimark_sacker_crossed =
+                neimark_sacker_crossed_with_complex_pairs(&prev_diag, &diagnostics);
 
             // Detect equilibrium bifurcations
             let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
@@ -788,7 +789,8 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
             let period_doubling_crossed =
                 prev_tests.period_doubling * new_tests.period_doubling < 0.0;
-            let neimark_sacker_crossed = prev_tests.neimark_sacker * new_tests.neimark_sacker < 0.0;
+            let neimark_sacker_crossed =
+                neimark_sacker_crossed_with_complex_pairs(&self.prev_diag, &diagnostics);
 
             // Detect equilibrium bifurcations
             let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
@@ -1514,7 +1516,8 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
             let period_doubling_crossed =
                 prev_tests.period_doubling * new_tests.period_doubling < 0.0;
-            let neimark_sacker_crossed = prev_tests.neimark_sacker * new_tests.neimark_sacker < 0.0;
+            let neimark_sacker_crossed =
+                neimark_sacker_crossed_with_complex_pairs(&prev_diag, &diag);
 
             // Detect equilibrium bifurcations
             let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
@@ -2571,6 +2574,29 @@ fn hopf_crossed_with_complex_pairs(
         && prev_pairs == new_pairs
 }
 
+fn neimark_sacker_crossed_with_complex_pairs(
+    prev_diag: &PointDiagnostics,
+    new_diag: &PointDiagnostics,
+) -> bool {
+    let prev_pairs = hopf_pair_count(&prev_diag.eigenvalues);
+    let new_pairs = hopf_pair_count(&new_diag.eigenvalues);
+    let prev_outside = prev_diag
+        .eigenvalues
+        .iter()
+        .filter(|eigenvalue| eigenvalue.im > 1.0e-8 && eigenvalue.norm_sqr() > 1.0)
+        .count();
+    let new_outside = new_diag
+        .eigenvalues
+        .iter()
+        .filter(|eigenvalue| eigenvalue.im > 1.0e-8 && eigenvalue.norm_sqr() > 1.0)
+        .count();
+    prev_diag.test_values.neimark_sacker * new_diag.test_values.neimark_sacker < 0.0
+        && prev_pairs > 0
+        && new_pairs > 0
+        && prev_pairs == new_pairs
+        && prev_outside != new_outside
+}
+
 fn neutral_saddle_crossed_with_real_pairs(
     prev_diag: &PointDiagnostics,
     new_diag: &PointDiagnostics,
@@ -2768,6 +2794,94 @@ mod tests {
     use super::*;
     use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
     use nalgebra::{DMatrix, DVector};
+
+    fn cycle_diagnostics(ns_test: f64, eigenvalues: Vec<Complex<f64>>) -> PointDiagnostics {
+        PointDiagnostics {
+            test_values: TestFunctionValues::limit_cycle(1.0, 1.0, ns_test),
+            eigenvalues,
+            cycle_points: None,
+        }
+    }
+
+    #[test]
+    fn ns_crossing_guard_rejects_a_stable_real_to_complex_transition() {
+        let real = cycle_diagnostics(
+            0.4 * 0.6 - 1.0,
+            vec![
+                Complex::new(1.0, 0.0),
+                Complex::new(0.4, 0.0),
+                Complex::new(0.6, 0.0),
+            ],
+        );
+        let pair = Complex::from_polar(0.5, 0.2);
+        let complex = cycle_diagnostics(
+            pair.norm_sqr() - 1.0,
+            vec![Complex::new(1.0, 0.0), pair, pair.conj()],
+        );
+        assert!(!neimark_sacker_crossed_with_complex_pairs(&real, &complex));
+    }
+
+    #[test]
+    fn ns_crossing_guard_accepts_a_genuine_complex_unit_circle_crossing() {
+        let inside_pair = Complex::from_polar(0.99, 0.4);
+        let outside_pair = Complex::from_polar(1.01, 0.4);
+        let inside = cycle_diagnostics(
+            inside_pair.norm_sqr() - 1.0,
+            vec![Complex::new(1.0, 0.0), inside_pair, inside_pair.conj()],
+        );
+        let outside = cycle_diagnostics(
+            outside_pair.norm_sqr() - 1.0,
+            vec![Complex::new(1.0, 0.0), outside_pair, outside_pair.conj()],
+        );
+        assert!(neimark_sacker_crossed_with_complex_pairs(&inside, &outside));
+    }
+
+    #[test]
+    fn ns_crossing_guard_rejects_a_reciprocal_real_pair_crossing() {
+        let below = cycle_diagnostics(
+            0.4 * 2.4 - 1.0,
+            vec![
+                Complex::new(1.0, 0.0),
+                Complex::new(0.4, 0.0),
+                Complex::new(2.4, 0.0),
+            ],
+        );
+        let above = cycle_diagnostics(
+            0.4 * 2.6 - 1.0,
+            vec![
+                Complex::new(1.0, 0.0),
+                Complex::new(0.4, 0.0),
+                Complex::new(2.6, 0.0),
+            ],
+        );
+        assert!(!neimark_sacker_crossed_with_complex_pairs(&below, &above));
+    }
+
+    #[test]
+    fn ns_crossing_guard_rejects_a_reciprocal_real_pair_with_an_unrelated_complex_pair() {
+        let stable_pair = Complex::from_polar(0.5, 0.4);
+        let below = cycle_diagnostics(
+            -0.04,
+            vec![
+                Complex::new(1.0, 0.0),
+                stable_pair,
+                stable_pair.conj(),
+                Complex::new(0.4, 0.0),
+                Complex::new(2.4, 0.0),
+            ],
+        );
+        let above = cycle_diagnostics(
+            0.04,
+            vec![
+                Complex::new(1.0, 0.0),
+                stable_pair,
+                stable_pair.conj(),
+                Complex::new(0.4, 0.0),
+                Complex::new(2.6, 0.0),
+            ],
+        );
+        assert!(!neimark_sacker_crossed_with_complex_pairs(&below, &above));
+    }
 
     #[test]
     fn test_palc_simple_fold() {

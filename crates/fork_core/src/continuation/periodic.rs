@@ -2429,20 +2429,90 @@ pub(crate) fn cycle_tests_from_multipliers(
 
     let mut cf_test = 1.0;
     let mut pd_test = 1.0;
-    let mut ns_test = 1.0;
+    let mut nontrivial = Vec::with_capacity(values.len().saturating_sub(1));
     for (idx, mu) in values.iter().enumerate() {
         if idx == trivial_idx {
             continue;
         }
+        nontrivial.push(*mu);
         let real_tolerance = 1e-8 * mu.norm().max(1.0);
         if mu.im.abs() <= real_tolerance {
             cf_test = saturated_product(cf_test, mu.re - 1.0);
             pd_test = saturated_product(pd_test, mu.re + 1.0);
-        } else if mu.im > real_tolerance {
-            // Count one representative of each conjugate pair.
-            ns_test = saturated_product(ns_test, mu.norm_sqr() - 1.0);
         }
     }
+
+    // The NS condition is the bialternate-product determinant
+    //
+    //     product_{i < j} (mu_i * mu_j - 1),
+    //
+    // after removing the autonomous trivial multiplier.  For a conjugate
+    // pair this contains |mu|^2 - 1, but unlike selecting only currently
+    // complex pairs it is continuous when two stable real multipliers collide
+    // and leave the real axis.  A spectrum with fewer than two nontrivial
+    // multipliers cannot contain an NS pair and uses a fixed positive sentinel.
+    let ns_test = if nontrivial.len() < 2 {
+        1.0
+    } else {
+        const MAX_COMPLEX_PRODUCT_NORM: f64 = 1.0e150;
+        let shifted_multiplier_product = |left: Complex<f64>, right: Complex<f64>| {
+            let left_norm = left.norm();
+            let right_norm = right.norm();
+            if left_norm == 0.0 || right_norm == 0.0 {
+                return Complex::new(-1.0, 0.0);
+            }
+            if !left_norm.is_finite() || !right_norm.is_finite() {
+                return Complex::new(f64::NAN, f64::NAN);
+            }
+            if left_norm > MAX_COMPLEX_PRODUCT_NORM / right_norm {
+                let phase = (left / left_norm) * (right / right_norm);
+                return phase / phase.norm() * MAX_COMPLEX_PRODUCT_NORM;
+            }
+            left * right - Complex::new(1.0, 0.0)
+        };
+        let saturated_complex_product = |accumulator: Complex<f64>, factor: Complex<f64>| {
+            let accumulator_norm = accumulator.norm();
+            let factor_norm = factor.norm();
+            if accumulator_norm == 0.0 || factor_norm == 0.0 {
+                return Complex::new(0.0, 0.0);
+            }
+            if !accumulator_norm.is_finite() || !factor_norm.is_finite() {
+                return Complex::new(f64::NAN, f64::NAN);
+            }
+            let phase = (accumulator / accumulator_norm) * (factor / factor_norm);
+            let phase_norm = phase.norm();
+            if !phase_norm.is_finite() || phase_norm == 0.0 {
+                return Complex::new(f64::NAN, f64::NAN);
+            }
+            let magnitude = if accumulator_norm > MAX_COMPLEX_PRODUCT_NORM / factor_norm {
+                MAX_COMPLEX_PRODUCT_NORM
+            } else {
+                (accumulator_norm * factor_norm).min(MAX_COMPLEX_PRODUCT_NORM)
+            };
+            phase / phase_norm * magnitude
+        };
+
+        let mut product = Complex::new(1.0, 0.0);
+        for left in 0..nontrivial.len() - 1 {
+            for right in left + 1..nontrivial.len() {
+                let factor = shifted_multiplier_product(nontrivial[left], nontrivial[right]);
+                product = saturated_complex_product(product, factor);
+            }
+        }
+        if !product.re.is_finite() || !product.im.is_finite() {
+            f64::NAN
+        } else {
+            // A real dynamical system has a conjugation-closed Floquet
+            // spectrum, so the complete bialternate product is real.  Refuse
+            // an NS flag if a badly resolved spectrum violates that invariant.
+            let reality_tolerance = 1e-7 * product.norm().max(1.0);
+            if product.im.abs() > reality_tolerance {
+                f64::NAN
+            } else {
+                product.re
+            }
+        }
+    };
 
     (cf_test, pd_test, ns_test, values)
 }
@@ -4316,6 +4386,53 @@ mod tests {
         let (cf, pd, ns, _) =
             cycle_tests_from_multipliers(&[Complex::new(0.5, 0.0), Complex::new(-0.5, 0.0)]);
         assert!(cf.is_nan() && pd.is_nan() && ns.is_nan());
+    }
+
+    #[test]
+    fn ns_test_does_not_cross_at_a_stable_real_to_complex_transition() {
+        // A real pair may collide and leave the real axis while remaining
+        // strictly inside the unit disk.  That spectral-type transition is
+        // not a Neimark-Sacker bifurcation, so the NS test must keep its sign.
+        let (_, _, real_pair_test, _) = cycle_tests_from_multipliers(&[
+            Complex::new(1.0, 0.0),
+            Complex::new(0.4, 0.0),
+            Complex::new(0.6, 0.0),
+        ]);
+        let complex_pair = Complex::from_polar(0.5, 0.2);
+        let (_, _, complex_pair_test, _) = cycle_tests_from_multipliers(&[
+            Complex::new(1.0, 0.0),
+            complex_pair,
+            complex_pair.conj(),
+        ]);
+
+        assert!(
+            real_pair_test * complex_pair_test > 0.0,
+            "stable real and complex pairs must stay on the same side of the NS condition: {real_pair_test}, {complex_pair_test}"
+        );
+    }
+
+    #[test]
+    fn ns_test_remains_finite_for_a_stiff_floquet_spectrum() {
+        let inside_pair = Complex::from_polar(0.99, 0.4);
+        let outside_pair = Complex::from_polar(1.01, 0.4);
+        let spectrum = |pair: Complex<f64>| {
+            vec![
+                Complex::new(1.0, 0.0),
+                pair,
+                pair.conj(),
+                Complex::new(1.0e200, 0.0),
+                Complex::new(2.0e-200, 0.0),
+            ]
+        };
+
+        let (_, _, inside_test, _) = cycle_tests_from_multipliers(&spectrum(inside_pair));
+        let (_, _, outside_test, _) = cycle_tests_from_multipliers(&spectrum(outside_pair));
+        assert!(inside_test.is_finite(), "inside test={inside_test}");
+        assert!(outside_test.is_finite(), "outside test={outside_test}");
+        assert!(
+            inside_test * outside_test < 0.0,
+            "the critical complex pair must still change the NS sign: {inside_test}, {outside_test}"
+        );
     }
 
     #[test]

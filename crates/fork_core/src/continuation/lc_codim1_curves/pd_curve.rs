@@ -8,7 +8,10 @@
 //! Key difference from LPC: uses **antiperiodic** boundary conditions for the
 //! bordered system (u(0) + u(T) = 0 instead of u(0) - u(T) = 0).
 
-use super::{collocation_profile_is_acceptable, explicit_profile_palc_weights, LCBorders};
+use super::{
+    collocation_profile_is_acceptable, explicit_profile_palc_weights, FullProfilePhaseGauge,
+    LCBorders,
+};
 use crate::continuation::codim1_curves::Codim2TestFunctions;
 use crate::continuation::periodic::{
     cycle_tests_from_multipliers, extract_multipliers_collocation, CollocationCoefficients,
@@ -39,12 +42,8 @@ pub struct PDCurveProblem<'a> {
     ncol: usize,
     /// Collocation coefficients
     coeffs: CollocationCoefficients,
-    /// Phase condition: upoldp = T * f(u) for integral phase condition
-    /// Updated after each step (standard pattern)
-    upoldp: Vec<f64>,
-    /// Reference phase integral: ∫ <u_init, upoldp> dt computed at initialization
-    /// Subtracted from phase condition to ensure it's zero at starting point
-    phase_ref: f64,
+    /// Integral phase condition on the complete Gauss collocation profile.
+    phase_gauge: FullProfilePhaseGauge,
     /// Border vectors for antiperiodic singularity (for G computation only)
     borders: LCBorders,
     /// Work arrays for function evaluations
@@ -63,8 +62,8 @@ impl<'a> PDCurveProblem<'a> {
         period: f64,
         param1_index: usize,
         param2_index: usize,
-        _param1_value: f64,
-        _param2_value: f64,
+        param1_value: f64,
+        param2_value: f64,
         ntst: usize,
         ncol: usize,
     ) -> Result<Self> {
@@ -102,36 +101,17 @@ impl<'a> PDCurveProblem<'a> {
         let work_f = vec![0.0; stage_count * dim];
         let work_j = vec![0.0; stage_count * dim * dim];
 
-        // The PD runner uses the mesh-first layout
-        // [mesh_0, ..., mesh_ntst, stages...].  Compute the fixed phase
-        // reference from those explicit mesh states.
-        // This is used for the integral phase condition: ∫ <u, upoldp> dt = 0
-        let mut upoldp = vec![0.0; (ntst + 1) * dim];
-        for i in 0..=ntst {
-            let mesh_offset = i * dim;
-            if mesh_offset + dim <= lc_state.len() {
-                let mesh_pt = &lc_state[mesh_offset..mesh_offset + dim];
-                let mut deriv = vec![0.0; dim];
-                system.apply(0.0, mesh_pt, &mut deriv);
-                // upoldp[i] = T * f(u[i])
-                for d in 0..dim {
-                    upoldp[i * dim + d] = period * deriv[d];
-                }
-            }
-        }
-
-        // Compute initial phase reference: ∫ <u_init, upoldp> dt
-        // This ensures the phase condition is zero at the starting point
-        let h = period / ntst as f64;
-        let mut phase_ref = 0.0;
-        for i in 0..=ntst {
-            let mesh_i = &lc_state[i * dim..(i + 1) * dim];
-            let upoldp_start = i * dim;
-            for d in 0..dim {
-                phase_ref += mesh_i[d] * upoldp[upoldp_start + d];
-            }
-        }
-        phase_ref *= h / (ntst + 1) as f64;
+        let mut phase_gauge = FullProfilePhaseGauge::new(ntst, ncol, dim, &coeffs.b)?;
+        let stage_start = (ntst + 1) * dim;
+        phase_gauge.set_reference(
+            system,
+            param1_index,
+            param2_index,
+            param1_value,
+            param2_value,
+            period,
+            &lc_state[stage_start..],
+        )?;
 
         // Initialize borders for antiperiodic G computation
         // The flip singularity acts on state variations only: collocation
@@ -150,8 +130,7 @@ impl<'a> PDCurveProblem<'a> {
             ntst,
             ncol,
             coeffs,
-            upoldp,
-            phase_ref,
+            phase_gauge,
             borders,
             work_f,
             work_j,
@@ -231,6 +210,32 @@ impl<'a> PDCurveProblem<'a> {
         let actual = idx % (self.ntst + 1);
         let start = 1 + actual * self.dim;
         &aug[start..start + self.dim]
+    }
+
+    fn stage_profile<'b>(&self, aug: &'b DVector<f64>) -> &'b [f64] {
+        let start = self.stage_offset();
+        let end = start + self.ntst * self.ncol * self.dim;
+        &aug.as_slice()[start..end]
+    }
+
+    fn set_phase_reference(&mut self, aug: &DVector<f64>) -> Result<()> {
+        let stages = self.stage_profile(aug);
+        self.phase_gauge.set_reference(
+            self.system,
+            self.param1_index,
+            self.param2_index,
+            self.get_p1(aug),
+            self.get_p2(aug)?,
+            self.get_period(aug),
+            stages,
+        )
+    }
+
+    fn ensure_phase_reference(&mut self, aug: &DVector<f64>) -> Result<()> {
+        if !self.phase_gauge.is_initialized() {
+            self.set_phase_reference(aug)?;
+        }
+        Ok(())
     }
 
     fn eval_f(&mut self, state: &[f64], p1: f64, p2: f64) -> Vec<f64> {
@@ -466,6 +471,7 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
         if period <= 0.0 {
             bail!("Period must be positive");
         }
+        self.ensure_phase_reference(aug)?;
 
         let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
@@ -516,22 +522,9 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
             }
         }
 
-        // Integral phase condition: sum_i <u[i], upoldp[i]> * dt[i]
-        // This is a discretized version of ∫ <u(t), upoldp(t)> dt = 0
-        // where upoldp = T * f(u) from the previous step
+        // Integral phase condition on all Gauss stages.
         let phase_row = cont_row + self.ntst * self.dim;
-        let h = period / self.ntst as f64;
-        let mut phase = 0.0;
-        for i in 0..=self.ntst {
-            let mesh_i = self.mesh_slice(aug_slice, i);
-            // upoldp[i] stored as contiguous dim-vectors
-            let upoldp_start = i * self.dim;
-            for d in 0..self.dim {
-                phase += mesh_i[d] * self.upoldp[upoldp_start + d];
-            }
-        }
-        // Weight by h and normalize, then subtract reference to ensure zero at start
-        out[phase_row] = phase * h / (self.ntst + 1) as f64 - self.phase_ref;
+        out[phase_row] = self.phase_gauge.residual(self.stage_profile(aug))?;
 
         // G singularity - compute FRESH for each call
         // This is necessary for correct numerical Jacobian differentiation.
@@ -638,14 +631,7 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
     }
 
     fn update_after_step(&mut self, aug: &DVector<f64>) -> Result<()> {
-        // NOTE: We deliberately do NOT update upoldp here.
-        // The integral phase condition ∫ <u, upoldp> dt - phase_ref = 0 requires
-        // upoldp to remain FIXED from the initial solution. If we update upoldp,
-        // it invalidates phase_ref (which was computed with the initial upoldp)
-        // and causes the phase condition to become non-zero at converged points.
-        //
-        // This is how the integral phase condition is handled - keep the
-        // reference direction fixed throughout the continuation.
+        self.set_phase_reference(aug)?;
 
         // Adapt the border vectors to the current antiperiodic nullspaces.
         // Keeping the initial fixed borders indefinitely makes the scalar
@@ -710,6 +696,15 @@ mod tests {
         vec![0.0; (ntst + 1) * dim + ntst * ncol * dim]
     }
 
+    fn nonstationary_mesh_first_state(ntst: usize, ncol: usize, dim: usize) -> Vec<f64> {
+        let mut state = zero_mesh_first_state(ntst, ncol, dim);
+        let stage_start = (ntst + 1) * dim;
+        for stage in 0..ntst * ncol {
+            state[stage_start + stage * dim] = 1.0;
+        }
+        state
+    }
+
     fn sampled_primary_cycle_state(ntst: usize, ncol: usize) -> Vec<f64> {
         let dim = 4;
         let coeffs = CollocationCoefficients::new(ncol).expect("collocation coefficients");
@@ -742,7 +737,7 @@ mod tests {
             ops: vec![OpCode::LoadVar(0)],
         };
         let mut system = EquationSystem::new(vec![bytecode], vec![0.0, 0.0]);
-        let lc_state = vec![0.0; 5];
+        let lc_state = vec![0.0, 0.0, 0.0, 1.0, 1.0];
 
         let problem = PDCurveProblem::new(&mut system, lc_state, 1.0, 0, 1, 0.0, 0.0, 2, 1)
             .expect("failed to build PD curve problem");
@@ -837,18 +832,60 @@ mod tests {
         let ncol = 2;
         let dim = 4;
         let period = std::f64::consts::TAU;
-        let lc_state = zero_mesh_first_state(ntst, ncol, dim);
+        let lc_state = sampled_primary_cycle_state(ntst, ncol);
         let aug = augmented_state(&lc_state, period, 0.0, 0.0);
         let mut problem =
             PDCurveProblem::new(&mut system, lc_state, period, 0, 1, 0.0, 0.0, ntst, ncol)
                 .expect("PD problem");
+        problem
+            .ensure_phase_reference(&aug)
+            .expect("initial PD phase reference");
+        let derivative_index = problem
+            .phase_gauge
+            .reference_derivative()
+            .expect("PD reference derivative")
+            .iter()
+            .enumerate()
+            .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
+            .map(|(index, _)| index)
+            .expect("nonempty derivative");
+        let mut accepted = aug;
+        accepted[problem.stage_offset() + derivative_index] += 1e-3;
+        assert!(
+            problem
+                .phase_gauge
+                .residual(problem.stage_profile(&accepted))
+                .expect("shifted PD phase")
+                .abs()
+                > 1e-6
+        );
+        let phase_row = ntst * ncol * dim + ntst * dim;
+        let mut residual = DVector::zeros(problem.dimension());
+        problem
+            .residual(&accepted, &mut residual)
+            .expect("shifted PD residual");
+        assert!(residual[phase_row].abs() > 1e-6);
         let phi_before = problem.borders.phi.clone();
         let psi_before = problem.borders.psi.clone();
 
-        problem.update_after_step(&aug).expect("border update");
+        problem
+            .update_after_step(&accepted)
+            .expect("accepted PD reference and border update");
 
         assert!((&problem.borders.phi - phi_before).norm() > 1e-6);
         assert!((&problem.borders.psi - psi_before).norm() > 1e-6);
+        assert!(
+            problem
+                .phase_gauge
+                .residual(problem.stage_profile(&accepted))
+                .expect("updated PD phase")
+                .abs()
+                < 1e-14
+        );
+        problem
+            .residual(&accepted, &mut residual)
+            .expect("updated PD residual");
+        assert!(residual[phase_row].abs() < 1e-14);
     }
 
     #[test]
@@ -907,7 +944,7 @@ mod tests {
         let ntst = 1;
         let ncol = 1;
         let dim = 4;
-        let lc_state = zero_mesh_first_state(ntst, ncol, dim);
+        let lc_state = nonstationary_mesh_first_state(ntst, ncol, dim);
         let result = PDCurveProblem::new(&mut system, lc_state, 1.0, 0, 1, 0.0, 0.0, ntst, ncol);
         let error = result
             .err()
@@ -921,7 +958,7 @@ mod tests {
         let ntst = 3;
         let ncol = 2;
         let dim = 4;
-        let lc_state = zero_mesh_first_state(ntst, ncol, dim);
+        let lc_state = nonstationary_mesh_first_state(ntst, ncol, dim);
         let problem = PDCurveProblem::new(
             &mut system,
             lc_state.clone(),
@@ -956,7 +993,7 @@ mod tests {
         let ntst = 2;
         let ncol = 1;
         let dim = 4;
-        let lc_state = zero_mesh_first_state(ntst, ncol, dim);
+        let lc_state = nonstationary_mesh_first_state(ntst, ncol, dim);
         let mut problem = PDCurveProblem::new(
             &mut system,
             lc_state.clone(),
@@ -969,7 +1006,8 @@ mod tests {
             ncol,
         )
         .expect("PD problem");
-        let mut aug = augmented_state(&lc_state, 1.0, 0.0, 0.0);
+        let zero_state = zero_mesh_first_state(ntst, ncol, dim);
+        let mut aug = augmented_state(&zero_state, 1.0, 0.0, 0.0);
         assert!(problem.is_step_acceptable(&aug).expect("resolved profile"));
         aug[1] = 10.0;
         assert!(!problem

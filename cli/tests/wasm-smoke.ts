@@ -385,6 +385,180 @@ while (!generalizedHopfLpcRunner.get_progress().done) {
 }
 assert.ok(generalizedHopfLpcRunner.get_result().points.length > 1);
 
+// Nonlinear NS suspension benchmark.  The Stuart-Landau unit cycle has a
+// transverse pair exp((mu-beta^2 +/- i*(0.2+0.1*beta))*T), so the torus
+// bifurcation curve is exactly mu=beta^2 and k=cos((0.2+0.1*beta)*T).
+// First pass the analytically sampled cycle through the real WASM
+// fixed-parameter collocation corrector; the NS runner then receives the
+// corrected implicit profile and the discrete Floquet value of k.
+const nsNtst = 4;
+const nsNcol = 3;
+const nsDim = 4;
+const nsBeta = 0.3;
+const nsMu = nsBeta ** 2;
+const nsPeriod = Math.PI * 2;
+const nsEquations = [
+  '-y+x*(1-x^2-y^2)',
+  'x+y*(1-x^2-y^2)',
+  '(mu-beta^2)*u-(0.2+0.1*beta)*v-(u^2+v^2)*u',
+  '(0.2+0.1*beta)*u+(mu-beta^2)*v-(u^2+v^2)*v',
+];
+const nsParams = new Float64Array([nsMu, nsBeta]);
+const nsParamNames = ['mu', 'beta'];
+const nsVarNames = ['x', 'y', 'u', 'v'];
+const nsComplexParts = (value: { re: number; im: number } | [number, number]) =>
+  Array.isArray(value) ? { re: value[0], im: value[1] } : value;
+const nsGaussNodes = [
+  (1 - Math.sqrt(3 / 5)) / 2,
+  0.5,
+  (1 + Math.sqrt(3 / 5)) / 2,
+];
+const nsCycleState = (angle: number): number[] => [
+  Math.cos(angle),
+  Math.sin(angle),
+  0,
+  0,
+];
+const nsSetup = {
+  guess: {
+    param_value: nsMu,
+    period: nsPeriod,
+    mesh_states: Array.from({ length: nsNtst }, (_, mesh) =>
+      nsCycleState(nsPeriod * mesh / nsNtst)
+    ),
+    stage_states: Array.from({ length: nsNtst }, (_, interval) =>
+      nsGaussNodes.map((node) => nsCycleState(nsPeriod * (interval + node) / nsNtst))
+    ),
+    requires_fixed_parameter_correction: true,
+  },
+  phase_anchor: [1, 0, 0, 0],
+  phase_direction: [0, 1, 0, 0],
+  mesh_points: nsNtst,
+  collocation_degree: nsNcol,
+};
+const nsSeedRunner = new wasm.WasmLimitCycleRunner(
+  nsEquations,
+  nsParams,
+  nsParamNames,
+  nsVarNames,
+  'flow',
+  nsSetup,
+  'mu',
+  {
+    step_size: 2e-3,
+    min_step_size: 1e-7,
+    max_step_size: 5e-3,
+    max_steps: 0,
+    corrector_steps: 12,
+    corrector_tolerance: 1e-10,
+    step_tolerance: 1e-10,
+  },
+  true
+);
+assert.equal(nsSeedRunner.run_steps(1).done, true);
+const nsSeedBranch = nsSeedRunner.get_result();
+assert.equal(nsSeedBranch.points.length, 1);
+const nsCorrectedState = nsSeedBranch.points[0].state as number[];
+const nsImplicitCoordinateCount = nsNtst * (nsNcol + 1) * nsDim;
+assert.equal(nsCorrectedState.length, nsImplicitCoordinateCount + 1);
+const nsCorrectedPeriod = nsCorrectedState.at(-1) as number;
+assert.ok(
+  Math.abs(nsCorrectedPeriod - nsPeriod) < 2e-3,
+  `Corrected NS period mismatch: ${nsCorrectedPeriod}`
+);
+
+const nsFloquetSystem = new wasm.WasmSystem(
+  nsEquations,
+  nsParams,
+  nsParamNames,
+  nsVarNames,
+  'rk4',
+  'flow'
+);
+const nsSeedModes = nsFloquetSystem.compute_limit_cycle_floquet_modes(
+  new Float64Array(nsCorrectedState),
+  nsNtst,
+  nsNcol,
+  'mu'
+);
+const nsSeedCritical = (nsSeedModes.multipliers as Array<{ re: number; im: number }>)
+  .filter((value) => value.im > 0.05)
+  .sort(
+    (left, right) =>
+      Math.abs(Math.hypot(left.re, left.im) - 1) -
+      Math.abs(Math.hypot(right.re, right.im) - 1)
+  )[0];
+assert.ok(nsSeedCritical, 'Expected a nonreal Floquet multiplier in the corrected NS seed');
+assert.ok(Math.abs(Math.hypot(nsSeedCritical.re, nsSeedCritical.im) - 1) < 3e-3);
+
+const nsCurveRunner = new wasm.WasmNSCurveRunner(
+  nsEquations,
+  nsParams,
+  nsParamNames,
+  nsVarNames,
+  new Float64Array(nsCorrectedState.slice(0, -1)),
+  nsCorrectedPeriod,
+  'mu',
+  nsMu,
+  'beta',
+  nsBeta,
+  nsSeedCritical.re,
+  nsNtst,
+  nsNcol,
+  {
+    step_size: 2e-3,
+    min_step_size: 1e-7,
+    max_step_size: 5e-3,
+    max_steps: 3,
+    corrector_steps: 10,
+    corrector_tolerance: 1e-8,
+    step_tolerance: 1e-10,
+  },
+  true
+);
+while (!nsCurveRunner.get_progress().done) {
+  nsCurveRunner.run_steps(1);
+}
+const nsCurveProgress = nsCurveRunner.get_progress();
+assert.equal(nsCurveProgress.current_step, 3, 'Expected three accepted NS continuation steps');
+const nsCurve = nsCurveRunner.get_result();
+assert.equal(nsCurve.curve_type, 'NeimarkSacker');
+assert.equal(nsCurve.points.length, 4);
+const nsExplicitCoordinateCount = nsNtst * nsNcol * nsDim + (nsNtst + 1) * nsDim;
+for (const point of nsCurve.points) {
+  assert.ok(
+    Math.abs(point.param1_value - point.param2_value ** 2) < 4e-4,
+    `NS locus mismatch: mu=${point.param1_value}, beta=${point.param2_value}`
+  );
+  assert.equal(point.state.length, nsExplicitCoordinateCount + 1);
+  const period = point.state.at(-1) as number;
+  const expectedK = Math.cos((0.2 + 0.1 * point.param2_value) * period);
+  const multipliers = (point.eigenvalues as Array<
+    { re: number; im: number } | [number, number]
+  >).map(nsComplexParts);
+  const positive = multipliers
+    .filter((value) => value.im > 0.05)
+    .sort(
+      (left, right) =>
+        Math.abs(Math.hypot(left.re, left.im) - 1) -
+        Math.abs(Math.hypot(right.re, right.im) - 1)
+    )[0];
+  const negative = multipliers
+    .filter((value) => value.im < -0.05)
+    .sort(
+      (left, right) =>
+        Math.abs(Math.hypot(left.re, left.im) - 1) -
+        Math.abs(Math.hypot(right.re, right.im) - 1)
+    )[0];
+  assert.ok(positive && negative, `Expected a complex-conjugate Floquet pair: ${JSON.stringify(multipliers)}`);
+  assert.ok(Math.abs(Math.hypot(positive.re, positive.im) - 1) < 4e-3);
+  assert.ok(Math.abs(Math.hypot(negative.re, negative.im) - 1) < 4e-3);
+  assert.ok(Math.abs(positive.re - negative.re) < 4e-3);
+  assert.ok(Math.abs(positive.im + negative.im) < 4e-3);
+  assert.ok(Math.abs(point.auxiliary - positive.re) < 4e-3);
+  assert.ok(Math.abs(point.auxiliary - expectedK) < 4e-3);
+}
+
 const bogdanovTakensSystem = new wasm.WasmSystem(
   ['y', 'mu1+mu2*y+x^2+x*y'],
   new Float64Array([0, 0]),

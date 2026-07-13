@@ -5,7 +5,10 @@
 //! - Standard BVP for the limit cycle: F(u, T, p) = 0
 //! - Singularity condition: G = 0 where G detects μ = 1 multiplier
 
-use super::{collocation_profile_is_acceptable, explicit_profile_palc_weights, LCBorders};
+use super::{
+    collocation_profile_is_acceptable, explicit_profile_palc_weights, FullProfilePhaseGauge,
+    LCBorders,
+};
 use crate::continuation::codim1_curves::Codim2TestFunctions;
 use crate::continuation::periodic::{extract_multipliers_collocation, CollocationCoefficients};
 use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
@@ -41,10 +44,8 @@ pub struct LPCCurveProblem<'a> {
     ncol: usize,
     /// Collocation coefficients
     coeffs: CollocationCoefficients,
-    /// Phase condition anchor
-    phase_anchor: Vec<f64>,
-    /// Phase condition direction
-    phase_direction: Vec<f64>,
+    /// Integral phase condition on the complete Gauss collocation profile.
+    phase_gauge: FullProfilePhaseGauge,
     /// Border vectors for singularity
     borders: LCBorders,
     /// Cached BVP Jacobian for G computation
@@ -61,7 +62,7 @@ impl<'a> LPCCurveProblem<'a> {
     /// Create a new LPC curve problem from a detected LPC point.
     pub fn new(
         system: &'a mut EquationSystem,
-        lc_state: Vec<f64>,
+        _lc_state: Vec<f64>,
         _period: f64,
         param1_index: usize,
         param2_index: usize,
@@ -83,27 +84,7 @@ impl<'a> LPCCurveProblem<'a> {
         let work_f = vec![0.0; stage_count * dim];
         let work_j = vec![0.0; stage_count * dim * dim];
 
-        // Phase anchor and direction from first mesh state
-        let mesh_start = stage_count * dim;
-        let phase_anchor = if lc_state.len() >= mesh_start + dim {
-            lc_state[mesh_start..mesh_start + dim].to_vec()
-        } else if lc_state.len() >= dim {
-            lc_state[0..dim].to_vec()
-        } else {
-            vec![0.0; dim]
-        };
-
-        // Use f(anchor) as direction
-        let mut phase_direction = vec![0.0; dim];
-        system.apply(0.0, &phase_anchor, &mut phase_direction);
-        let norm: f64 = phase_direction.iter().map(|x| x * x).sum::<f64>().sqrt();
-        if norm > 1e-12 {
-            for x in &mut phase_direction {
-                *x /= norm;
-            }
-        } else {
-            phase_direction = vec![1.0; dim];
-        }
+        let phase_gauge = FullProfilePhaseGauge::new(ntst, ncol, dim, &coeffs.b)?;
 
         // Initialize borders with uniform vectors
         let phi = DVector::from_element(ncoords + 1, 1.0 / ((ncoords + 1) as f64).sqrt());
@@ -118,8 +99,7 @@ impl<'a> LPCCurveProblem<'a> {
             ntst,
             ncol,
             coeffs,
-            phase_anchor,
-            phase_direction,
+            phase_gauge,
             borders,
             cached_jac: None,
             work_f,
@@ -190,6 +170,31 @@ impl<'a> LPCCurveProblem<'a> {
         &aug[start..start + self.dim]
     }
 
+    fn stage_profile<'b>(&self, aug: &'b DVector<f64>) -> &'b [f64] {
+        let stage_len = self.ntst * self.ncol * self.dim;
+        &aug.as_slice()[1..1 + stage_len]
+    }
+
+    fn set_phase_reference(&mut self, aug: &DVector<f64>) -> Result<()> {
+        let stages = self.stage_profile(aug);
+        self.phase_gauge.set_reference(
+            self.system,
+            self.param1_index,
+            self.param2_index,
+            self.get_p1(aug),
+            self.get_p2(aug),
+            self.get_period(aug),
+            stages,
+        )
+    }
+
+    fn ensure_phase_reference(&mut self, aug: &DVector<f64>) -> Result<()> {
+        if !self.phase_gauge.is_initialized() {
+            self.set_phase_reference(aug)?;
+        }
+        Ok(())
+    }
+
     /// Set parameters and evaluate function
     fn eval_f(&mut self, state: &[f64], p1: f64, p2: f64) -> Vec<f64> {
         // Set parameters
@@ -252,6 +257,7 @@ impl<'a> LPCCurveProblem<'a> {
 
     /// Build the LC BVP Jacobian (for multiplier extraction)
     fn build_bvp_jac(&mut self, aug: &DVector<f64>) -> Result<DMatrix<f64>> {
+        self.ensure_phase_reference(aug)?;
         let p1 = self.get_p1(aug);
         let p2 = self.get_p2(aug);
         let period = self.get_period(aug);
@@ -359,11 +365,10 @@ impl<'a> LPCCurveProblem<'a> {
             jac[(periodic_row + d, mesh_end_col + d)] = 1.0;
         }
 
-        // Phase condition
+        // Integral phase condition on all Gauss stages.
         let phase_row = periodic_row + self.dim;
-        for d in 0..self.dim {
-            jac[(phase_row, mesh0_col + d)] = self.phase_direction[d];
-        }
+        self.phase_gauge
+            .write_jacobian_row(&mut jac, phase_row, 0)?;
 
         Ok(jac)
     }
@@ -444,6 +449,7 @@ impl<'a> ContinuationProblem for LPCCurveProblem<'a> {
         if period <= 0.0 {
             bail!("Period must be positive");
         }
+        self.ensure_phase_reference(aug)?;
 
         let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
@@ -502,14 +508,9 @@ impl<'a> ContinuationProblem for LPCCurveProblem<'a> {
             out[periodic_row + d] = mesh_end[d] - mesh0[d];
         }
 
-        // Phase condition
+        // Integral phase condition on all Gauss stages.
         let phase_row = periodic_row + self.dim;
-        let mesh0 = self.mesh_slice(aug_slice, 0);
-        let mut phase = 0.0;
-        for d in 0..self.dim {
-            phase += (mesh0[d] - self.phase_anchor[d]) * self.phase_direction[d];
-        }
-        out[phase_row] = phase;
+        out[phase_row] = self.phase_gauge.residual(self.stage_profile(aug))?;
 
         // Singularity G
         let jac = self.build_bvp_jac(aug)?;
@@ -529,6 +530,7 @@ impl<'a> ContinuationProblem for LPCCurveProblem<'a> {
         let mut jac = DMatrix::zeros(n, m);
         let mut res_base = DVector::zeros(n);
         self.residual(aug, &mut res_base)?;
+        let base_bvp_jac = self.cached_jac.clone();
 
         for j in 0..m {
             let mut aug_p = aug.clone();
@@ -540,6 +542,11 @@ impl<'a> ContinuationProblem for LPCCurveProblem<'a> {
                 jac[(i, j)] = (res_p[i] - res_base[i]) / eps;
             }
         }
+
+        // Every perturbed residual refreshes the Floquet cache. Diagnostics
+        // following tangent construction must see the accepted base point,
+        // not the final finite-difference perturbation.
+        self.cached_jac = base_bvp_jac;
 
         Ok(jac)
     }
@@ -595,10 +602,11 @@ impl<'a> ContinuationProblem for LPCCurveProblem<'a> {
         )
     }
 
-    fn update_after_step(&mut self, _aug: &DVector<f64>) -> Result<()> {
-        if let Some(ref jac) = self.cached_jac {
-            self.borders.update(jac)?;
-        }
+    fn update_after_step(&mut self, aug: &DVector<f64>) -> Result<()> {
+        self.set_phase_reference(aug)?;
+        let jac = self.build_bvp_jac(aug)?;
+        self.borders.update(&jac)?;
+        self.cached_jac = Some(jac);
         Ok(())
     }
 }
@@ -630,6 +638,32 @@ mod tests {
                 },
                 Bytecode {
                     ops: vec![OpCode::LoadVar(1)],
+                },
+            ],
+            vec![0.0, 0.0],
+        )
+    }
+
+    fn parameterized_growth_system() -> EquationSystem {
+        EquationSystem::new(
+            vec![
+                Bytecode {
+                    ops: vec![
+                        OpCode::LoadConst(1.0),
+                        OpCode::LoadParam(1),
+                        OpCode::Add,
+                        OpCode::LoadVar(0),
+                        OpCode::Mul,
+                    ],
+                },
+                Bytecode {
+                    ops: vec![
+                        OpCode::LoadConst(2.0),
+                        OpCode::LoadParam(1),
+                        OpCode::Add,
+                        OpCode::LoadVar(1),
+                        OpCode::Mul,
+                    ],
                 },
             ],
             vec![0.0, 0.0],
@@ -677,6 +711,9 @@ mod tests {
         )
         .expect("LPC problem");
         let mut aug = DVector::zeros(problem.dimension() + 1);
+        for index in 1..=ntst * ncol * 2 {
+            aug[index] = 1.0;
+        }
         aug[problem.period_index()] = 1.0;
 
         let diagnostics = problem
@@ -686,6 +723,57 @@ mod tests {
         for multiplier in diagnostics.eigenvalues {
             assert!(multiplier.im.abs() < 1e-12);
             assert!((multiplier.re - 25.0 / 9.0).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn diagnostics_at_base_point_are_unchanged_by_extended_jacobian_evaluation() {
+        let mut system = parameterized_growth_system();
+        let ntst = 2;
+        let ncol = 1;
+        let dim = 2;
+        let ncoords = ntst * ncol * dim + (ntst + 1) * dim;
+        let mut problem = LPCCurveProblem::new(
+            &mut system,
+            vec![0.0; ncoords],
+            1.0,
+            0,
+            1,
+            0.0,
+            0.2,
+            ntst,
+            ncol,
+        )
+        .expect("LPC problem");
+        let mut aug = DVector::zeros(problem.dimension() + 1);
+        for index in 1..=ntst * ncol * dim {
+            aug[index] = 1.0;
+        }
+        aug[problem.period_index()] = 1.0;
+        aug[problem.param2_idx()] = 0.2;
+
+        let before = problem
+            .diagnostics(&aug)
+            .expect("base-point LPC diagnostics")
+            .eigenvalues;
+        problem
+            .extended_jacobian(&aug)
+            .expect("finite-difference LPC Jacobian");
+        let after = problem
+            .diagnostics(&aug)
+            .expect("post-Jacobian LPC diagnostics")
+            .eigenvalues;
+
+        assert_eq!(before.len(), after.len());
+        for expected in before {
+            let error = after
+                .iter()
+                .map(|actual| (*actual - expected).norm())
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                error < 1.0e-12,
+                "LPC diagnostics reused a perturbed cached Jacobian: error={error:.3e}"
+            );
         }
     }
 
@@ -745,6 +833,53 @@ mod tests {
                 bvp_jac[(row, period_col)],
             );
         }
+    }
+
+    #[test]
+    fn lpc_phase_gauge_uses_all_stages_and_refreshes_after_acceptance() {
+        let mut system = linear_growth_system();
+        let ntst = 2;
+        let ncol = 1;
+        let dim = 2;
+        let ncoords = ntst * ncol * dim + (ntst + 1) * dim;
+        let mut problem = LPCCurveProblem::new(
+            &mut system,
+            vec![0.0; ncoords],
+            1.0,
+            0,
+            1,
+            0.0,
+            0.0,
+            ntst,
+            ncol,
+        )
+        .expect("LPC problem");
+        let mut aug = DVector::zeros(problem.dimension() + 1);
+        for stage in 0..ntst * ncol {
+            aug[1 + stage * dim] = 1.0;
+        }
+        aug[problem.period_index()] = 1.0;
+
+        let mut residual = DVector::zeros(problem.dimension());
+        problem.residual(&aug, &mut residual).expect("LPC residual");
+        let phase_row = ntst * ncol * dim + ntst * dim + dim;
+        assert!(residual[phase_row].abs() < 1e-14);
+
+        let last_stage_x = 1 + (ntst * ncol - 1) * dim;
+        let mut shifted = aug;
+        shifted[last_stage_x] += 1e-3;
+        problem
+            .residual(&shifted, &mut residual)
+            .expect("shifted LPC residual");
+        assert!(residual[phase_row].abs() > 1e-5);
+
+        problem
+            .update_after_step(&shifted)
+            .expect("accepted LPC reference update");
+        problem
+            .residual(&shifted, &mut residual)
+            .expect("updated LPC residual");
+        assert!(residual[phase_row].abs() < 1e-14);
     }
 
     #[test]

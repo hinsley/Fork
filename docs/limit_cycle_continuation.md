@@ -17,8 +17,9 @@ Note: This document has not been fully human-reviewed; treat it as guidance and 
 10. [Branch Extension](#branch-extension)
 11. [Floquet Multiplier Extraction](#floquet-multiplier-extraction)
 12. [Best Practices for Accurate Floquet Multipliers](#best-practices-for-accurate-floquet-multipliers)
-13. [Branching to Period-Doubled Limit Cycles](#branching-to-period-doubled-limit-cycles)
-14. [Related: Isoperiodic Curve Continuation](#related-isoperiodic-curve-continuation)
+13. [Validation Benchmarks](#validation-benchmarks)
+14. [Branching to Period-Doubled Limit Cycles](#branching-to-period-doubled-limit-cycles)
+15. [Related: Isoperiodic Curve Continuation](#related-isoperiodic-curve-continuation)
 
 ---
 
@@ -510,6 +511,33 @@ Periodic orbits have an arbitrary phase—we can shift t → t + Δt and get the
 
 This says the new orbit is orthogonal (in L²) to translations of the old orbit along itself.
 
+Fork evaluates this condition on the complete Gauss-stage profile. For a uniform mesh, its discrete
+form is
+
+$$
+\Phi(u;u_{\mathrm{ref}})=
+\sum_{i=0}^{N_{\mathrm{tst}}-1}\sum_{j=1}^{N_{\mathrm{col}}}
+\frac{b_j}{N_{\mathrm{tst}}}
+\left\langle
+u_{ij}-u_{\mathrm{ref},ij},
+T_{\mathrm{ref}}f(u_{\mathrm{ref},ij},p_{\mathrm{ref}})
+\right\rangle=0,
+$$
+
+where $b_j$ are the Gauss weights. The reference stages and normalized-time derivative
+$T_{\mathrm{ref}}f(u_{\mathrm{ref}},p_{\mathrm{ref}})$ remain fixed throughout one Newton correction,
+so the phase row is affine and its exact Jacobian has entries only in the Gauss-stage columns. A
+rejected trial cannot move the gauge. After a step passes the independent defect check, Fork replaces
+the reference with the accepted profile, refreshes cached defining-system data and borders where
+applicable, and only then computes the next PALC tangent.
+
+The same full-profile gauge is used by LPC, PD, NS, and isoperiodic cycle curves. A first-mesh-point
+or mesh-only gauge is not an acceptable substitute: it makes the chosen phase depend on storage order
+and ignores most of the collocation polynomial. This policy agrees with the integral previous-orbit
+phase conditions documented by
+[MATCONT](https://www.staff.science.uu.nl/~kouzn101/NBA/ManualMatcontAug2019.pdf#page=81)
+and [BifurcationKit.jl](https://bifurcationkit.github.io/BifurcationKitDocs.jl/stable/periodicOrbitCollocation/#Phase-condition).
+
 ### The Augmented System
 
 For pseudo-arclength continuation, the parameter is added as one extra unknown and the bordered
@@ -726,6 +754,13 @@ Neimark-Sacker tests. If no such multiplier exists, the orbit or variational dis
 credible enough for bifurcation flags, so the test values are returned as NaN. A second multiplier
 near +1 remains in the product and can therefore detect a limit point of cycles.
 
+For NS detection, Fork evaluates the bialternate product over all remaining multipliers,
+$\prod_{i<j}(\mu_i\mu_j-1)$. Products are accumulated with positive magnitude scaling so stiff
+Floquet spectra cannot overflow before the critical factor is inspected. An NS label additionally
+requires the same nonzero number of nonreal conjugate pairs on both sides and a change in how many
+of those pairs lie outside the unit circle. This keeps stable real-to-complex transitions and
+reciprocal real-pair crossings from being mislabeled as torus bifurcations.
+
 ### Neimark-Sacker Curve Conditions
 
 Neimark-Sacker curve continuation condenses the same collocation Jacobian into interval transfers
@@ -827,6 +862,183 @@ corrector_tol: 1e-6
 
 ---
 
+## Validation Benchmarks
+
+Limit-cycle bifurcation curves use two complementary test tiers. Fast analytic fixtures catch
+algebra, layout, phase-gauge, Floquet, and multi-step continuation regressions in regular CI. Published
+models then check the complete stable-Orbit-to-collocation workflow against independent reference
+calculations. Neither tier replaces the other.
+
+### Tier 1: Automated Analytic CI Fixtures
+
+These are autonomous realizations of canonical periodic normal forms. They are not physical models;
+their purpose is to provide orbit, bifurcation-locus, period, and Floquet oracles that are independent
+of shooting. Each test must take several accepted collocation-curve steps and check the defining
+residual, off-node defect, exact parameter locus, and critical multiplier at every point.
+
+For LPC, use the Bautin radial normal form, with $r^2=x^2+y^2$,
+
+$$
+\dot x=\mu x-y+\beta xr^2+xr^4,
+\qquad
+\dot y=x+\mu y+\beta yr^2+yr^4.
+$$
+
+For $\beta<0$, the exact fold-of-cycles locus is
+
+$$
+\mu=\frac{\beta^2}{4},
+\qquad r^2=-\frac{\beta}{2},
+\qquad T=2\pi.
+$$
+
+The critical spectrum has the trivial $+1$ multiplier and a second $+1$ multiplier at the fold.
+
+For PD, suspend a non-orientable transverse bundle over the unit Stuart–Landau cycle. Set
+$a=\mu-\beta^2$, $b=-0.2$, $m=(a+b)/2$, and $d=(a-b)/2$:
+
+$$
+\dot x=-y+x(1-x^2-y^2),
+\qquad
+\dot y=x+y(1-x^2-y^2),
+$$
+
+$$
+\begin{pmatrix}\dot u\\\dot v\end{pmatrix}=
+\begin{pmatrix}
+m+dx & dy-\tfrac12\\
+dy+\tfrac12 & m-dx
+\end{pmatrix}
+\begin{pmatrix}u\\v\end{pmatrix}.
+$$
+
+The transverse multipliers are exactly $-e^{2\pi a}$ and $-e^{2\pi b}$. Thus
+$\mu=\beta^2$ is a generic PD curve with one simple $-1$ multiplier; fixed $b<0$ avoids the
+double-$-1$ degeneracy of a constant half-frequency rotation.
+
+For NS, use the same unit cycle and a nonlinear transverse complex mode. With
+$a=\mu-\beta^2$, $\omega=0.2+0.1\beta$, and $\rho^2=u^2+v^2$,
+
+$$
+\dot u=au-\omega v-\rho^2u,
+\qquad
+\dot v=\omega u+av-\rho^2v.
+$$
+
+Its transverse multipliers are $e^{2\pi(a\pm i\omega)}$, so the exact nonresonant NS locus is
+$\mu=\beta^2$ and the real doubled-period auxiliary value is $k=\cos(2\pi\omega)$.
+
+### Tier 2: Published Stable-Orbit Validation Targets
+
+Published-model validation starts from a time-integrated attracting cycle, passes the resulting
+Orbit through Fork's minimal-period extraction and fixed-parameter collocation correction, continues
+the LC to the published bifurcation, and then takes multiple steps on the two-parameter curve. Compare
+phase-invariant quantities—parameters, period, critical multipliers, residual, and off-node defect—not
+raw profile coordinates. Repeat on a refined mesh and require convergence.
+
+The regular integration suite currently exercises this complete path on adaptx with a Fork-owned
+$8\times3$ mesh; the reference $20\times4$ MATCONT discretization remains the higher-resolution
+oracle. MLfast and Steinmetz–Larter below define the published targets for broader slow/refinement
+coverage rather than claiming unimplemented tests.
+
+#### MLfast: LPC
+
+The modified fast Morris–Lecar system is
+
+$$
+\dot v=y-0.5(v+0.5)-2w(v+0.7)-m_\infty(v-1),
+\qquad
+\dot w=1.15(w_\infty-w)\tau,
+$$
+
+$$
+m_\infty=\frac{1+\tanh((v+0.01)/0.15)}{2},
+\quad
+w_\infty=\frac{1+\tanh((v-z)/0.145)}{2},
+\quad
+\tau=\cosh((v-0.1)/0.29).
+$$
+
+At fixed $z=0.1$, MATCONT reports an LPC at $y=0.08456948$ with
+$T=4.222012$ and fold coefficient $-0.2334578$; the cycle gains stability at the fold. Its
+published LC and LPC runs use $N_{\mathrm{tst}}=30$, $N_{\mathrm{col}}=4$, with $y,z$ free on the
+LPC curve. Use an Orbit on the attracting branch adjacent to the fold rather than importing a
+MATCONT collocation state. See the official manual's
+[MLfast example](https://www.staff.science.uu.nl/~kouzn101/NBA/ManualMatcontAug2019.pdf#page=84).
+
+#### adaptx / Genesio–Tesi: PD
+
+The adaptive-control system used by Genesio and Tesi is
+
+$$
+\dot x=y,
+\qquad
+\dot y=z,
+\qquad
+\dot z=-\alpha z-\beta y-x+x^2.
+$$
+
+For $\beta=1$, MATCONT reports the first positive PD at $\alpha=0.6303020$ with
+$T=6.364071$ and normal-form coefficient $-0.04267675$. The LC and PD-curve calculations use
+$N_{\mathrm{tst}}=20$, $N_{\mathrm{col}}=4$. With $\alpha,\beta$ free, the published PD curve reaches
+strong 1:2 resonances near $(0,1.698711)$ with $T=4.841835$ and $(0,0.6782783)$ with
+$T=9.058318$. These are independent curve-level oracles beyond locating the seed PD. Start the
+Orbit on the attracting pre-PD side and verify its nontrivial multipliers before continuation. See the
+official manual's
+[adaptx LC and PD-curve example](https://www.staff.science.uu.nl/~kouzn101/NBA/ManualMatcontAug2019.pdf#page=79).
+The independent
+[BifurcationKit.jl PD tutorial](https://bifurcationkit.github.io/BifurcationKitDocs.jl/stable/tutorials/ode/tutorialsODE-PD/)
+uses orthogonal collocation on the same MatCont-library system and exercises the same PD workflow.
+
+#### Steinmetz–Larter: NS
+
+For the peroxidase–oxidase model,
+
+$$
+\begin{aligned}
+\dot A&=-k_1ABX-k_3ABY+k_7-k_{-7}A,\\
+\dot B&=-k_1ABX-k_3ABY+k_8,\\
+\dot X&=k_1ABX-2k_2X^2+2k_3ABY-k_4X+k_6,\\
+\dot Y&=-k_3ABY+2k_2X^2-k_5Y.
+\end{aligned}
+$$
+
+MATCONT gives a point on the NS cycle as
+
+$$
+(A,B,X,Y)=(1.8609653,25.678306,0.010838258,0.094707061)
+$$
+
+at
+
+$$
+(k_1,k_2,k_3,k_4,k_5,k_6,k_7,k_{-7},k_8)
+=(0.1631021,1250,0.046875,20,1.104,0.001,0.71643356,0.1175,0.5).
+$$
+
+The NS normal-form coefficient is $-1.406017\times10^{-6}$, and integration at $k_7=0.7167$
+produces the expected stable torus. The
+[2012 MATCONT manual's second NS point](https://venturi.soe.ucsc.edu/sites/default/files/ManualSep2012.pdf#page=32)
+has
+$(k_7,k_8)=(1.5163129,0.83200664)$ and phase state
+$(6.1231735,9.1855407,0.0054271408,0.024602951)$. Use $k_7,k_8$ as curve parameters and seed
+the LC from the attracting-cycle side, verified by its multipliers; do not use the $k_7=0.7167$
+torus trajectory as a limit-cycle Orbit.
+
+The [official manual](https://www.staff.science.uu.nl/~kouzn101/NBA/ManualMatcontAug2019.pdf#page=41)
+provides the equations, critical values, and an `ode45` run on $[0,3000]$ with relative tolerance
+$10^{-8}$, but it does **not** state an orthogonal-collocation mesh for this example. Therefore the
+fixture must label its baseline and refined meshes as Fork choices and demonstrate convergence; it
+must not attribute those meshes to MATCONT.
+
+The official
+[BifurcationKit.jl Steinmetz–Larter tutorial](https://bifurcationkit.github.io/BifurcationKitDocs.jl/stable/tutorials/ode/steinmetz/)
+independently demonstrates the trajectory-to-orthogonal-collocation workflow and NS continuation on
+this model.
+
+The maintained MATLAB definitions and testruns are distributed in the
+[official MATCONT release archive](https://sourceforge.net/projects/matcont/files/MatCont/MatCont7p6/MatCont7p6.zip/download).
+
 ## Branching to Period-Doubled Limit Cycles
 
 Period-doubling (PD) branching allows you to follow the cascaded route to chaos by switching from a limit cycle of period $T$ to a new family of period $2T$.
@@ -904,6 +1116,10 @@ See [`docs/isoperiodic_curve_continuation.md`](./isoperiodic_curve_continuation.
 
 ## References and Further Reading
 
+- [MATCONT / CL MATCONT manual (2019)](https://www.staff.science.uu.nl/~kouzn101/NBA/ManualMatcontAug2019.pdf)
+- [MATCONT / CL MATCONT manual (2012)](https://venturi.soe.ucsc.edu/sites/default/files/ManualSep2012.pdf)
+- [MATCONT official release archive](https://sourceforge.net/projects/matcont/files/MatCont/MatCont7p6/MatCont7p6.zip/download)
+- [BifurcationKit.jl: periodic orbits based on orthogonal collocation](https://bifurcationkit.github.io/BifurcationKitDocs.jl/stable/periodicOrbitCollocation/)
 - Doedel, E.J. "Lecture Notes on Numerical Analysis of Nonlinear Equations"
 - Kuznetsov, Y.A. "Elements of Applied Bifurcation Theory"
 - Keller, H.B. "Numerical Methods for Two-Point Boundary-Value Problems"

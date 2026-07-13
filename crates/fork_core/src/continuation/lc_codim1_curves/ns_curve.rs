@@ -10,7 +10,10 @@
 //! - Two border vector pairs (for 2D complex eigenspace)
 //! - Bordered Jacobian includes rotation by e^{iθ}
 
-use super::{collocation_profile_is_acceptable, explicit_profile_palc_weights, LCBorders};
+use super::{
+    collocation_profile_is_acceptable, explicit_profile_palc_weights, FullProfilePhaseGauge,
+    LCBorders,
+};
 use crate::continuation::codim1_curves::Codim2TestFunctions;
 use crate::continuation::periodic::{
     extract_collocation_transfers_from_jacobian, extract_multipliers_collocation,
@@ -109,10 +112,8 @@ pub struct NSCurveProblem<'a> {
     ncol: usize,
     /// Collocation coefficients
     coeffs: CollocationCoefficients,
-    /// Phase condition anchor
-    phase_anchor: Vec<f64>,
-    /// Phase condition direction
-    phase_direction: Vec<f64>,
+    /// Integral phase condition on the complete Gauss collocation profile.
+    phase_gauge: FullProfilePhaseGauge,
     /// Border vectors for first singularity (real part)
     borders1: LCBorders,
     /// Border vectors for second singularity (imaginary part)  
@@ -173,26 +174,7 @@ impl<'a> NSCurveProblem<'a> {
         let work_f = vec![0.0; stage_count * dim];
         let work_j = vec![0.0; stage_count * dim * dim];
 
-        // Phase anchor and direction
-        let mesh_start = stage_count * dim;
-        let phase_anchor = if lc_state.len() >= mesh_start + dim {
-            lc_state[mesh_start..mesh_start + dim].to_vec()
-        } else if lc_state.len() >= dim {
-            lc_state[0..dim].to_vec()
-        } else {
-            vec![0.0; dim]
-        };
-
-        let mut phase_direction = vec![0.0; dim];
-        system.apply(0.0, &phase_anchor, &mut phase_direction);
-        let norm: f64 = phase_direction.iter().map(|x| x * x).sum::<f64>().sqrt();
-        if norm > 1e-12 {
-            for x in &mut phase_direction {
-                *x /= norm;
-            }
-        } else {
-            phase_direction = vec![1.0; dim];
-        }
+        let phase_gauge = FullProfilePhaseGauge::new(ntst, ncol, dim, &coeffs.b)?;
 
         // The NS characteristic operator is defined on a doubled period after
         // eliminating collocation stages, hence 2 * ntst * dim unknowns.
@@ -222,8 +204,7 @@ impl<'a> NSCurveProblem<'a> {
             ntst,
             ncol,
             coeffs,
-            phase_anchor,
-            phase_direction,
+            phase_gauge,
             borders1,
             borders2,
             index1,
@@ -308,6 +289,31 @@ impl<'a> NSCurveProblem<'a> {
         let mesh_offset = 1 + self.ntst * self.ncol * self.dim;
         let start = mesh_offset + actual * self.dim;
         &aug[start..start + self.dim]
+    }
+
+    fn stage_profile<'b>(&self, aug: &'b DVector<f64>) -> &'b [f64] {
+        let stage_len = self.ntst * self.ncol * self.dim;
+        &aug.as_slice()[1..1 + stage_len]
+    }
+
+    fn set_phase_reference(&mut self, aug: &DVector<f64>) -> Result<()> {
+        let stages = self.stage_profile(aug);
+        self.phase_gauge.set_reference(
+            self.system,
+            self.param1_index,
+            self.param2_index,
+            self.get_p1(aug),
+            self.get_p2(aug),
+            self.get_period(aug),
+            stages,
+        )
+    }
+
+    fn ensure_phase_reference(&mut self, aug: &DVector<f64>) -> Result<()> {
+        if !self.phase_gauge.is_initialized() {
+            self.set_phase_reference(aug)?;
+        }
+        Ok(())
     }
 
     fn eval_f(&mut self, state: &[f64], p1: f64, p2: f64) -> Vec<f64> {
@@ -416,6 +422,7 @@ impl<'a> NSCurveProblem<'a> {
 
     /// Build the standard periodic BVP Jacobian for multiplier extraction.
     fn build_periodic_jac(&mut self, aug: &DVector<f64>) -> Result<DMatrix<f64>> {
+        self.ensure_phase_reference(aug)?;
         let p1 = self.get_p1(aug);
         let p2 = self.get_p2(aug);
         let period = self.get_period(aug);
@@ -519,11 +526,10 @@ impl<'a> NSCurveProblem<'a> {
             jac[(periodic_row + d, mesh_end_col + d)] = 1.0;
         }
 
-        // Phase condition
+        // Integral phase condition on all Gauss stages.
         let phase_row = periodic_row + self.dim;
-        for d in 0..self.dim {
-            jac[(phase_row, mesh0_col + d)] = self.phase_direction[d];
-        }
+        self.phase_gauge
+            .write_jacobian_row(&mut jac, phase_row, 0)?;
 
         Ok(jac)
     }
@@ -607,6 +613,7 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
         if !k.is_finite() || !(-1.0..=1.0).contains(&k) {
             bail!("NS rotation parameter k must be finite and lie in [-1, 1]");
         }
+        self.ensure_phase_reference(aug)?;
 
         let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
@@ -665,14 +672,9 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
             out[periodic_row + d] = mesh_end[d] - mesh0[d];
         }
 
-        // Phase condition
+        // Integral phase condition on all Gauss stages.
         let phase_row = periodic_row + self.dim;
-        let mesh0 = self.mesh_slice(aug_slice, 0);
-        let mut phase = 0.0;
-        for d in 0..self.dim {
-            phase += (mesh0[d] - self.phase_anchor[d]) * self.phase_direction[d];
-        }
-        out[phase_row] = phase;
+        out[phase_row] = self.phase_gauge.residual(self.stage_profile(aug))?;
 
         // Two NS singularity conditions
         let jac = self.build_periodic_jac(aug)?;
@@ -776,6 +778,7 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
     }
 
     fn update_after_step(&mut self, aug: &DVector<f64>) -> Result<()> {
+        self.set_phase_reference(aug)?;
         let k = self.get_k(aug);
         let jac = self.build_periodic_jac(aug)?;
         let ns_operator = self.ns_operator_from_bvp_jac(&jac, k)?;
@@ -822,6 +825,40 @@ mod tests {
         )
     }
 
+    fn parameterized_growth_system() -> EquationSystem {
+        EquationSystem::new(
+            vec![
+                Bytecode {
+                    ops: vec![
+                        OpCode::LoadConst(1.0),
+                        OpCode::LoadParam(1),
+                        OpCode::Add,
+                        OpCode::LoadVar(0),
+                        OpCode::Mul,
+                    ],
+                },
+                Bytecode {
+                    ops: vec![
+                        OpCode::LoadConst(2.0),
+                        OpCode::LoadParam(1),
+                        OpCode::Add,
+                        OpCode::LoadVar(1),
+                        OpCode::Mul,
+                    ],
+                },
+            ],
+            vec![0.0, 0.0],
+        )
+    }
+
+    fn nonstationary_stage_first_state(ntst: usize, ncol: usize, dim: usize) -> Vec<f64> {
+        let mut state = vec![0.0; ntst * ncol * dim + (ntst + 1) * dim];
+        for stage in 0..ntst * ncol {
+            state[stage * dim] = 1.0;
+        }
+        state
+    }
+
     #[test]
     fn doubled_period_ns_operator_detects_a_unit_complex_pair() {
         let theta = 0.7_f64;
@@ -850,10 +887,9 @@ mod tests {
         let mut system = linear_growth_system();
         let ntst = 2;
         let ncol = 1;
-        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
         let mut problem = NSCurveProblem::new(
             &mut system,
-            vec![0.0; ncoords],
+            nonstationary_stage_first_state(ntst, ncol, 2),
             1.0,
             0,
             1,
@@ -894,10 +930,9 @@ mod tests {
         let mut system = linear_growth_system();
         let ntst = 2;
         let ncol = 1;
-        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
         let mut problem = NSCurveProblem::new(
             &mut system,
-            vec![0.0; ncoords],
+            nonstationary_stage_first_state(ntst, ncol, 2),
             1.0,
             0,
             1,
@@ -964,10 +999,9 @@ mod tests {
         let period = 1.0;
         let interval_angle = 2.0 * (period / ntst as f64 / 2.0).atan();
         let k = (ntst as f64 * interval_angle).cos();
-        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
         let mut problem = NSCurveProblem::new(
             &mut system,
-            vec![0.0; ncoords],
+            nonstationary_stage_first_state(ntst, ncol, 2),
             period,
             0,
             1,
@@ -994,10 +1028,9 @@ mod tests {
         let mut system = linear_growth_system();
         let ntst = 2;
         let ncol = 1;
-        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
         let mut problem = NSCurveProblem::new(
             &mut system,
-            vec![0.0; ncoords],
+            nonstationary_stage_first_state(ntst, ncol, 2),
             1.0,
             0,
             1,
@@ -1046,14 +1079,68 @@ mod tests {
     }
 
     #[test]
+    fn ns_phase_gauge_uses_all_stages_and_refreshes_after_acceptance() {
+        let mut system = linear_growth_system();
+        let ntst = 2;
+        let ncol = 1;
+        let dim = 2;
+        let lc_state = nonstationary_stage_first_state(ntst, ncol, dim);
+        let mut problem = NSCurveProblem::new(
+            &mut system,
+            lc_state.clone(),
+            1.0,
+            0,
+            1,
+            0.0,
+            0.0,
+            0.5,
+            ntst,
+            ncol,
+        )
+        .expect("NS problem");
+        let mut aug = DVector::zeros(problem.dimension() + 1);
+        aug.as_mut_slice()[1..1 + lc_state.len()].copy_from_slice(&lc_state);
+        aug[problem.period_index()] = 1.0;
+        aug[problem.k_index()] = 0.5;
+
+        let mut residual = DVector::zeros(problem.dimension());
+        problem.residual(&aug, &mut residual).expect("NS residual");
+        let phase_row = ntst * ncol * dim + ntst * dim + dim;
+        assert!(residual[phase_row].abs() < 1e-14);
+
+        let derivative_index = problem
+            .phase_gauge
+            .reference_derivative()
+            .expect("NS reference derivative")
+            .iter()
+            .enumerate()
+            .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
+            .map(|(index, _)| index)
+            .expect("nonempty derivative");
+        let mut accepted = aug;
+        accepted[1 + derivative_index] += 1e-3;
+        problem
+            .residual(&accepted, &mut residual)
+            .expect("shifted NS residual");
+        assert!(residual[phase_row].abs() > 1e-6);
+
+        problem
+            .update_after_step(&accepted)
+            .expect("accepted NS reference update");
+        problem
+            .residual(&accepted, &mut residual)
+            .expect("updated NS residual");
+        assert!(residual[phase_row].abs() < 1e-14);
+    }
+
+    #[test]
     fn rejects_out_of_range_rotation_parameter() {
         let mut system = linear_growth_system();
         let ntst = 2;
         let ncol = 1;
-        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
         let result = NSCurveProblem::new(
             &mut system,
-            vec![0.0; ncoords],
+            nonstationary_stage_first_state(ntst, ncol, 2),
             1.0,
             0,
             1,
@@ -1110,10 +1197,9 @@ mod tests {
         let mut system = linear_growth_system();
         let ntst = 2;
         let ncol = 1;
-        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
         let mut problem = NSCurveProblem::new(
             &mut system,
-            vec![0.0; ncoords],
+            nonstationary_stage_first_state(ntst, ncol, 2),
             1.0,
             0,
             1,
@@ -1140,14 +1226,66 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_at_base_point_are_unchanged_by_extended_jacobian_evaluation() {
+        // The auxiliary k coordinate is differentiated last and does not enter
+        // the periodic BVP Jacobian. This regression protects that cache
+        // invariant if the augmented layout or NS operator is changed.
+        let mut system = parameterized_growth_system();
+        let ntst = 2;
+        let ncol = 1;
+        let lc_state = nonstationary_stage_first_state(ntst, ncol, 2);
+        let mut problem = NSCurveProblem::new(
+            &mut system,
+            lc_state.clone(),
+            1.0,
+            0,
+            1,
+            0.0,
+            0.2,
+            0.5,
+            ntst,
+            ncol,
+        )
+        .expect("NS problem");
+        let mut aug = DVector::zeros(problem.aug_dim());
+        aug.as_mut_slice()[1..1 + lc_state.len()].copy_from_slice(&lc_state);
+        aug[problem.period_index()] = 1.0;
+        aug[problem.param2_idx()] = 0.2;
+        aug[problem.k_index()] = 0.5;
+
+        let before = problem
+            .diagnostics(&aug)
+            .expect("base-point NS diagnostics")
+            .eigenvalues;
+        problem
+            .extended_jacobian(&aug)
+            .expect("finite-difference NS Jacobian");
+        let after = problem
+            .diagnostics(&aug)
+            .expect("post-Jacobian NS diagnostics")
+            .eigenvalues;
+
+        assert_eq!(before.len(), after.len());
+        for expected in before {
+            let error = after
+                .iter()
+                .map(|actual| (*actual - expected).norm())
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                error < 1.0e-12,
+                "NS diagnostics reused a perturbed cached Jacobian: error={error:.3e}"
+            );
+        }
+    }
+
+    #[test]
     fn dim_two_defining_system_is_square_and_runner_initializes() {
         let mut system = linear_growth_system();
         let ntst = 2;
         let ncol = 1;
-        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
         let mut problem = NSCurveProblem::new(
             &mut system,
-            vec![0.0; ncoords],
+            nonstationary_stage_first_state(ntst, ncol, 2),
             1.0,
             0,
             1,
@@ -1195,10 +1333,9 @@ mod tests {
         let mut system = linear_growth_system();
         let ntst = 1;
         let ncol = 1;
-        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
         let result = NSCurveProblem::new(
             &mut system,
-            vec![0.0; ncoords],
+            nonstationary_stage_first_state(ntst, ncol, 2),
             1.0,
             0,
             1,
@@ -1220,10 +1357,9 @@ mod tests {
         let ntst = 3;
         let ncol = 2;
         let dim = 2;
-        let ncoords = ntst * ncol * dim + (ntst + 1) * dim;
         let problem = NSCurveProblem::new(
             &mut system,
-            vec![0.0; ncoords],
+            nonstationary_stage_first_state(ntst, ncol, 2),
             1.0,
             0,
             1,
@@ -1257,10 +1393,9 @@ mod tests {
         let ntst = 2;
         let ncol = 1;
         let dim = 2;
-        let ncoords = ntst * ncol * dim + (ntst + 1) * dim;
         let mut problem = NSCurveProblem::new(
             &mut system,
-            vec![0.0; ncoords],
+            nonstationary_stage_first_state(ntst, ncol, 2),
             1.0,
             0,
             1,

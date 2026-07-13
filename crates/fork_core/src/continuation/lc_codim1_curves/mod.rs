@@ -8,6 +8,8 @@
 
 mod isoperiodic_curve;
 mod lpc_curve;
+#[cfg(test)]
+mod nonlinear_benchmarks;
 mod ns_curve;
 mod pd_curve;
 
@@ -22,6 +24,181 @@ use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
 
 const MAX_SCALED_COLLOCATION_DEFECT: f64 = 2.5e-2;
+
+/// Integral phase gauge evaluated on the complete Gauss collocation profile.
+///
+/// For a reference cycle `u_ref`, the gauge is
+///
+/// `integral_0^1 <u(tau) - u_ref(tau), u_ref'(tau)> d tau = 0`,
+///
+/// with `u_ref' = T_ref f(u_ref)`.  Storing the reference values and their
+/// normalized-time derivatives makes the gauge affine during every Newton
+/// correction.  The reference is replaced only by `update_after_step`, after a
+/// trial has passed the independent collocation-defect check.
+#[derive(Debug, Clone)]
+struct FullProfilePhaseGauge {
+    ntst: usize,
+    ncol: usize,
+    dim: usize,
+    stage_weights: Vec<f64>,
+    reference_stages: Option<Vec<f64>>,
+    reference_derivative: Option<Vec<f64>>,
+}
+
+impl FullProfilePhaseGauge {
+    fn new(ntst: usize, ncol: usize, dim: usize, gauss_weights: &[f64]) -> Result<Self> {
+        if ntst < 2 || ncol == 0 || dim == 0 || gauss_weights.len() != ncol {
+            bail!("Invalid collocation layout for the integral phase gauge");
+        }
+        let mut stage_weights = Vec::with_capacity(ncol);
+        for &weight in gauss_weights {
+            let normalized = weight / ntst as f64;
+            if !normalized.is_finite() || normalized <= 0.0 {
+                bail!("Integral phase gauge requires positive finite Gauss weights");
+            }
+            stage_weights.push(normalized);
+        }
+        Ok(Self {
+            ntst,
+            ncol,
+            dim,
+            stage_weights,
+            reference_stages: None,
+            reference_derivative: None,
+        })
+    }
+
+    fn stage_count(&self) -> usize {
+        self.ntst * self.ncol
+    }
+
+    fn is_initialized(&self) -> bool {
+        self.reference_stages.is_some() && self.reference_derivative.is_some()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn set_reference(
+        &mut self,
+        system: &mut EquationSystem,
+        param1_index: usize,
+        param2_index: usize,
+        param1: f64,
+        param2: f64,
+        period: f64,
+        stages: &[f64],
+    ) -> Result<()> {
+        if param1_index >= system.params.len() || param2_index >= system.params.len() {
+            bail!("Integral phase gauge parameter index is out of bounds");
+        }
+        if !param1.is_finite() || !param2.is_finite() {
+            bail!("Integral phase gauge parameters must be finite");
+        }
+        if !period.is_finite() || period <= 0.0 {
+            bail!("Integral phase gauge period must be positive and finite");
+        }
+        if stages.len() != self.stage_count() * self.dim
+            || stages.iter().any(|value| !value.is_finite())
+        {
+            bail!("Integral phase gauge stage profile has invalid dimensions or values");
+        }
+
+        system.params[param1_index] = param1;
+        system.params[param2_index] = param2;
+        let reference_stages = stages.to_vec();
+        let mut reference_derivative = vec![0.0; self.stage_count() * self.dim];
+        let mut flow = vec![0.0; self.dim];
+        for (stage_index, stage) in stages.chunks_exact(self.dim).enumerate() {
+            system.apply(0.0, stage, &mut flow);
+            if flow.iter().any(|value| !value.is_finite()) {
+                bail!("Integral phase gauge reference flow is non-finite");
+            }
+            for component in 0..self.dim {
+                reference_derivative[stage_index * self.dim + component] = period * flow[component];
+            }
+        }
+
+        let mut norm_squared = 0.0;
+        for interval in 0..self.ntst {
+            for stage in 0..self.ncol {
+                let stage_index = interval * self.ncol + stage;
+                for component in 0..self.dim {
+                    let value = reference_derivative[stage_index * self.dim + component];
+                    norm_squared += self.stage_weights[stage] * value * value;
+                }
+            }
+        }
+        if !norm_squared.is_finite() || norm_squared <= 1e-28 {
+            bail!("Integral phase condition is singular: reference profile has zero flow");
+        }
+
+        self.reference_stages = Some(reference_stages);
+        self.reference_derivative = Some(reference_derivative);
+        Ok(())
+    }
+
+    fn residual(&self, stages: &[f64]) -> Result<f64> {
+        let reference = self
+            .reference_stages
+            .as_ref()
+            .ok_or_else(|| anyhow!("Integral phase reference is not initialized"))?;
+        let derivative = self
+            .reference_derivative
+            .as_ref()
+            .ok_or_else(|| anyhow!("Integral phase derivative is not initialized"))?;
+        if stages.len() != self.stage_count() * self.dim {
+            bail!("Integral phase gauge stage profile has invalid dimensions");
+        }
+
+        let mut phase = 0.0;
+        for interval in 0..self.ntst {
+            for stage in 0..self.ncol {
+                let stage_index = interval * self.ncol + stage;
+                for component in 0..self.dim {
+                    let index = stage_index * self.dim + component;
+                    phase += self.stage_weights[stage]
+                        * (stages[index] - reference[index])
+                        * derivative[index];
+                }
+            }
+        }
+        if !phase.is_finite() {
+            bail!("Integral phase residual is non-finite");
+        }
+        Ok(phase)
+    }
+
+    fn write_jacobian_row(
+        &self,
+        jac: &mut DMatrix<f64>,
+        row: usize,
+        stage_col_start: usize,
+    ) -> Result<()> {
+        let derivative = self
+            .reference_derivative
+            .as_ref()
+            .ok_or_else(|| anyhow!("Integral phase derivative is not initialized"))?;
+        let stage_columns = self.stage_count() * self.dim;
+        if row >= jac.nrows() || stage_col_start + stage_columns > jac.ncols() {
+            bail!("Integral phase Jacobian row does not fit the collocation layout");
+        }
+        for interval in 0..self.ntst {
+            for stage in 0..self.ncol {
+                let stage_index = interval * self.ncol + stage;
+                for component in 0..self.dim {
+                    let index = stage_index * self.dim + component;
+                    jac[(row, stage_col_start + index)] =
+                        self.stage_weights[stage] * derivative[index];
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn reference_derivative(&self) -> Option<&[f64]> {
+        self.reference_derivative.as_deref()
+    }
+}
 
 /// Build mesh-independent diagonal PALC weights for an explicitly closed
 /// collocation profile. `mesh_0` and `mesh_ntst` represent the same periodic
@@ -401,6 +578,191 @@ fn rand_val(i: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::equation_engine::{Bytecode, OpCode};
+
+    fn rotation_system() -> EquationSystem {
+        EquationSystem::new(
+            vec![
+                Bytecode {
+                    ops: vec![OpCode::LoadVar(1), OpCode::Neg],
+                },
+                Bytecode {
+                    ops: vec![OpCode::LoadVar(0)],
+                },
+            ],
+            vec![0.0, 0.0],
+        )
+    }
+
+    #[test]
+    fn full_profile_phase_gauge_uses_gauss_quadrature_and_exact_jacobian() {
+        let mut system = rotation_system();
+        let mut gauge =
+            FullProfilePhaseGauge::new(2, 2, 2, &[0.5, 0.5]).expect("valid phase gauge");
+        let reference = vec![1.0, 0.0, 0.0, 1.0, -1.0, 0.0, 0.0, -1.0];
+        gauge
+            .set_reference(
+                &mut system,
+                0,
+                1,
+                0.0,
+                0.0,
+                std::f64::consts::TAU,
+                &reference,
+            )
+            .expect("phase reference");
+
+        assert!(gauge.residual(&reference).expect("seed phase").abs() < 1e-14);
+
+        let derivative = gauge
+            .reference_derivative()
+            .expect("reference derivative")
+            .to_vec();
+        let alpha = 0.125;
+        let mut shifted = reference.clone();
+        for (value, direction) in shifted.iter_mut().zip(&derivative) {
+            *value += alpha * direction;
+        }
+        let phase = gauge.residual(&shifted).expect("shifted phase");
+        assert!((phase - alpha * std::f64::consts::TAU.powi(2)).abs() < 1e-12);
+
+        let mut jac = DMatrix::zeros(1, 11);
+        gauge.write_jacobian_row(&mut jac, 0, 3).expect("phase row");
+        let eps = 1e-7;
+        for stage in 0..4 {
+            for component in 0..2 {
+                let mut perturbed = shifted.clone();
+                perturbed[stage * 2 + component] += eps;
+                let finite_difference = (gauge.residual(&perturbed).unwrap() - phase) / eps;
+                assert!(
+                    (jac[(0, 3 + stage * 2 + component)] - finite_difference).abs() < 1e-8,
+                    "stage {stage}, component {component}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn full_profile_phase_gauge_honors_nonuniform_three_point_gauss_weights() {
+        let ntst = 2;
+        let ncol = 3;
+        let dim = 2;
+        let alpha = 0.125;
+        let period = std::f64::consts::TAU;
+        let coeffs = crate::continuation::periodic::CollocationCoefficients::new(ncol)
+            .expect("three-point collocation coefficients");
+        let reference = (0..ntst)
+            .flat_map(|interval| {
+                coeffs.nodes.iter().flat_map(move |node| {
+                    let angle = period * (interval as f64 + node) / ntst as f64;
+                    [angle.cos(), angle.sin()]
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut system = rotation_system();
+        let mut gauge = FullProfilePhaseGauge::new(ntst, ncol, dim, &coeffs.b)
+            .expect("nonuniform three-point phase gauge");
+        gauge
+            .set_reference(&mut system, 0, 1, 0.0, 0.0, period, &reference)
+            .expect("phase reference");
+        let derivative = gauge
+            .reference_derivative()
+            .expect("reference derivative")
+            .to_vec();
+
+        for stage in 0..ncol {
+            let stage_index = stage;
+            let mut shifted = reference.clone();
+            for component in 0..dim {
+                let index = stage_index * dim + component;
+                shifted[index] += alpha * derivative[index];
+            }
+            let phase = gauge.residual(&shifted).expect("localized phase residual");
+            let expected = alpha * coeffs.b[stage] / ntst as f64 * period.powi(2);
+            assert!(
+                (phase - expected).abs() < 1.0e-13,
+                "stage {stage} used the wrong Gauss weight: phase={phase:.16e}, expected={expected:.16e}"
+            );
+        }
+    }
+
+    #[test]
+    fn full_profile_phase_gauge_moves_only_after_an_accepted_step() {
+        let mut system = rotation_system();
+        let mut gauge = FullProfilePhaseGauge::new(2, 1, 2, &[1.0]).expect("valid phase gauge");
+        let reference = vec![1.0, 0.0, 0.0, 1.0];
+        gauge
+            .set_reference(
+                &mut system,
+                0,
+                1,
+                0.0,
+                0.0,
+                std::f64::consts::TAU,
+                &reference,
+            )
+            .expect("phase reference");
+
+        let accepted = vec![1.0, 0.25, 0.0, 1.25];
+        assert!(gauge.residual(&accepted).unwrap().abs() > 1e-3);
+        gauge
+            .set_reference(
+                &mut system,
+                0,
+                1,
+                0.0,
+                0.0,
+                std::f64::consts::TAU,
+                &accepted,
+            )
+            .expect("accepted phase reference");
+        assert!(gauge.residual(&accepted).unwrap().abs() < 1e-14);
+    }
+
+    #[test]
+    fn full_profile_phase_gauge_is_invariant_under_collocation_refinement() {
+        let alpha = 0.075;
+        let mut residuals = Vec::new();
+        for (ntst, ncol) in [(4, 2), (9, 4)] {
+            let coeffs = crate::continuation::periodic::CollocationCoefficients::new(ncol)
+                .expect("collocation coefficients");
+            let reference = (0..ntst)
+                .flat_map(|interval| {
+                    coeffs.nodes.iter().flat_map(move |node| {
+                        let angle = std::f64::consts::TAU * (interval as f64 + node) / ntst as f64;
+                        [angle.cos(), angle.sin()]
+                    })
+                })
+                .collect::<Vec<_>>();
+            let mut system = rotation_system();
+            let mut gauge =
+                FullProfilePhaseGauge::new(ntst, ncol, 2, &coeffs.b).expect("refined phase gauge");
+            gauge
+                .set_reference(
+                    &mut system,
+                    0,
+                    1,
+                    0.0,
+                    0.0,
+                    std::f64::consts::TAU,
+                    &reference,
+                )
+                .expect("refined phase reference");
+            let derivative = gauge.reference_derivative().expect("reference derivative");
+            let shifted = reference
+                .iter()
+                .zip(derivative)
+                .map(|(value, direction)| value + alpha * direction)
+                .collect::<Vec<_>>();
+            residuals.push(gauge.residual(&shifted).expect("refined phase residual"));
+        }
+
+        let expected = alpha * std::f64::consts::TAU.powi(2);
+        for residual in &residuals {
+            assert!((residual - expected).abs() < 2e-13, "residual={residual}");
+        }
+        assert!((residuals[0] - residuals[1]).abs() < 2e-13);
+    }
 
     #[test]
     fn test_lc_borders_creation() {

@@ -21,6 +21,43 @@ References:
 
 ---
 
+### 2026-07-13: Gauge cycle curves on the full Gauss profile and split benchmark roles
+Context:
+LPC, PD, NS, and isoperiodic curves used incompatible pointwise or mesh-only phase gauges, and
+single-step synthetic tests could pass without validating a nonlinear curve, its Floquet condition,
+or the stable-Orbit initialization path.
+Decision:
+Use one Gauss-quadrature integral phase condition for every cycle curve, storing the complete
+reference stage profile and `T_ref f(u_ref, p_ref)`. Hold that reference fixed during a Newton trial;
+replace it only after an independently accepted step, then refresh defining-system data and compute
+the next PALC tangent. Test curve solvers in two tiers: automated analytic Bautin, non-orientable PD
+suspension, and transverse-pair NS suspension fixtures with exact loci and multipliers; then
+published secondary validation targets from MATCONT's stable-Orbit MLfast (LPC), adaptx/Genesio-Tesi
+(PD), and Steinmetz-Larter (NS) examples. Keep the adaptx Orbit-to-PD path in regular CI on a
+Fork-owned coarse mesh and compare it against MATCONT's higher-resolution values.
+Why:
+The full profile removes phase freedom without depending on one storage node, while exact normal
+forms localize numerical regressions and published models exercise the end-to-end workflow against
+independent results.
+Impact:
+Rejected corrector trials cannot drift the phase reference. Multi-step tests check defining
+residuals, off-node defects, and critical Floquet multipliers. Published mesh provenance is retained:
+MLfast uses 30x4 and adaptx 20x4 in MATCONT; the Steinmetz-Larter source supplies integration and NS
+data but no collocation mesh, so Fork-owned baseline/refinement meshes must be labeled and compared.
+The generic NS event scalar is a magnitude-scaled bialternate product over nontrivial multipliers.
+An NS label also requires an unchanged nonzero complex-pair count and a change in the number of
+complex pairs outside the unit circle; stable real-to-complex transitions and reciprocal real pairs
+therefore cannot masquerade as torus bifurcations.
+References:
+`crates/fork_core/src/continuation/lc_codim1_curves/mod.rs`,
+`crates/fork_core/src/continuation/lc_codim1_curves/nonlinear_benchmarks.rs`,
+`crates/fork_core/tests/adaptive_pd_reference.rs`,
+`docs/limit_cycle_continuation.md`,
+https://www.staff.science.uu.nl/~kouzn101/NBA/ManualMatcontAug2019.pdf,
+https://bifurcationkit.github.io/BifurcationKitDocs.jl/stable/periodicOrbitCollocation/
+
+---
+
 ### 2026-07-13: Continue flow limit cycles with collocation-native PALC and Floquet analysis
 Context:
 Orbit seeds could select a multiple of the minimal period, the pseudo-arclength metric changed with
