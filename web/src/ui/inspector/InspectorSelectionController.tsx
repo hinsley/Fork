@@ -6,6 +6,7 @@ import type {
   BifurcationDiagram,
   ClvRenderStyle,
   ComplexValue,
+  FloquetBackend,
   ContinuationObject,
   ContinuationPoint,
   EquilibriumEigenvectorRenderStyle,
@@ -2511,6 +2512,8 @@ function useInspectorSelectionController({
   const [limitCycleFloquetModesError, setLimitCycleFloquetModesError] = useState<string | null>(
     null
   )
+  const [limitCycleFloquetBackend, setLimitCycleFloquetBackend] =
+    useState<FloquetBackend>('auto')
   const equilibriumManifoldEligibleIndexOptions = useMemo(() => {
     const wantsUnstable = equilibriumManifoldDraft.stability === 'Unstable'
     const isMap = systemDraft.type === 'map'
@@ -7454,7 +7457,10 @@ function useInspectorSelectionController({
     if (!limitCycle || !selectedNodeId) return
     setLimitCycleFloquetModesError(null)
     try {
-      await onComputeLimitCycleFloquetModes({ limitCycleId: selectedNodeId })
+      await onComputeLimitCycleFloquetModes({
+        limitCycleId: selectedNodeId,
+        backend: limitCycleFloquetBackend,
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setLimitCycleFloquetModesError(message)
@@ -7709,6 +7715,7 @@ function useInspectorSelectionController({
     limitCycleDisplayParamValue,
     limitCycleDisplayParams,
     limitCycleFloquetColors,
+    limitCycleFloquetBackend,
     limitCycleFloquetIndices,
     limitCycleFloquetModePointCount,
     limitCycleFloquetModes,
@@ -7717,6 +7724,7 @@ function useInspectorSelectionController({
     limitCycleFloquetModesMatchMesh,
     limitCycleFloquetRender,
     limitCycleFloquetVisibleSet,
+    setLimitCycleFloquetBackend,
     limitCycleFromHopfBranchSuggestion,
     limitCycleFromHopfDraft,
     limitCycleFromHopfError,

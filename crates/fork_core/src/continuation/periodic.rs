@@ -1,6 +1,7 @@
 use super::periodic_normal_forms::{
     periodic_branch_point_normal_form, periodic_plus_one_bifurcation_type,
 };
+use super::periodic_schur::periodic_schur_floquet_spectrum;
 use super::problem::{
     ContinuationProblem, PointDiagnostics, StepRejectionAction, TestFunctionValues,
 };
@@ -348,8 +349,24 @@ pub struct FloquetModeVectors {
     pub ncol: usize,
     #[serde(default)]
     pub normalized_mesh: Vec<f64>,
+    #[serde(default)]
+    pub backend: FloquetBackend,
     pub multipliers: Vec<ComplexNumber>,
     pub vectors: Vec<Vec<Vec<ComplexNumber>>>,
+}
+
+/// Floquet eigensolver used for a collocation transfer sequence.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FloquetBackend {
+    /// Use the dense block-cyclic reference for small systems and periodic
+    /// Schur for large meshes, with a safe reference fallback when possible.
+    #[default]
+    Auto,
+    /// Product-free periodic Hessenberg/QR (periodic Schur) backend.
+    PeriodicSchur,
+    /// Dense `(ntst * dimension)` block-cyclic reference backend.
+    BlockCyclic,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -2254,15 +2271,26 @@ pub(crate) struct MonodromyData {
     pub transfers: Vec<DMatrix<f64>>,
     pub stage_sensitivities: Vec<DMatrix<f64>>,
     pub multipliers: Vec<Complex<f64>>,
-    floquet_roots: Vec<Complex<f64>>,
+    pub floquet_backend: FloquetBackend,
 }
 
 #[derive(Debug, Clone)]
 struct CyclicFloquetMode {
+    #[allow(dead_code)]
     multiplier: Complex<f64>,
     root: Complex<f64>,
     cyclic_vector: Vec<Complex<f64>>,
 }
+
+#[derive(Debug, Clone)]
+struct FloquetComputation {
+    multipliers: Vec<Complex<f64>>,
+    mesh_vectors: Vec<Vec<Vec<Complex<f64>>>>,
+    backend: FloquetBackend,
+}
+
+const MAX_DENSE_CYCLIC_DIMENSION: usize = 2048;
+const AUTO_PERIODIC_SCHUR_DIMENSION: usize = 96;
 
 fn complex_pow_usize(mut base: Complex<f64>, mut exponent: usize) -> Complex<f64> {
     let mut result = Complex::new(1.0, 0.0);
@@ -2310,7 +2338,6 @@ fn build_block_cyclic_transfer_operator(transfers: &[DMatrix<f64>]) -> Result<DM
     // nalgebra does not currently expose a periodic real-Schur decomposition.
     // Refuse pathological dense allocations instead of exhausting the process;
     // practical collocation profiles are far below this limit.
-    const MAX_DENSE_CYCLIC_DIMENSION: usize = 2048;
     if block_dim > MAX_DENSE_CYCLIC_DIMENSION {
         bail!(
             "Floquet block-cyclic operator dimension {} exceeds the supported dense limit {}.",
@@ -2633,12 +2660,109 @@ fn cyclic_mode_mesh_vector(
     Ok(block.iter().map(|value| *value * scale).collect())
 }
 
+fn block_cyclic_floquet_computation(
+    transfers: &[DMatrix<f64>],
+    compute_vectors: bool,
+) -> Result<FloquetComputation> {
+    let (cyclic, roots, multipliers) = cyclic_floquet_spectrum(transfers)?;
+    let mesh_vectors = if compute_vectors {
+        let dim = transfers[0].nrows();
+        let modes =
+            cyclic_floquet_modes_from_selected_roots(&cyclic, transfers, &roots, &multipliers)?;
+        (0..transfers.len())
+            .map(|mesh_index| {
+                modes
+                    .iter()
+                    .map(|mode| cyclic_mode_mesh_vector(mode, mesh_index, dim))
+                    .collect::<Result<Vec<_>>>()
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
+    Ok(FloquetComputation {
+        multipliers,
+        mesh_vectors,
+        backend: FloquetBackend::BlockCyclic,
+    })
+}
+
+fn periodic_schur_floquet_computation(
+    transfers: &[DMatrix<f64>],
+    compute_vectors: bool,
+) -> Result<FloquetComputation> {
+    let spectrum = periodic_schur_floquet_spectrum(transfers, compute_vectors)?;
+    Ok(FloquetComputation {
+        multipliers: spectrum.multipliers,
+        mesh_vectors: spectrum.mesh_vectors,
+        backend: FloquetBackend::PeriodicSchur,
+    })
+}
+
+fn floquet_computation(
+    transfers: &[DMatrix<f64>],
+    backend: FloquetBackend,
+    compute_vectors: bool,
+) -> Result<FloquetComputation> {
+    let dim = transfers
+        .first()
+        .ok_or_else(|| anyhow!("Floquet extraction requires transfer matrices."))?
+        .nrows();
+    let block_dimension = transfers
+        .len()
+        .checked_mul(dim)
+        .ok_or_else(|| anyhow!("Floquet operator dimension overflow."))?;
+    match backend {
+        FloquetBackend::PeriodicSchur => {
+            periodic_schur_floquet_computation(transfers, compute_vectors)
+        }
+        FloquetBackend::BlockCyclic => block_cyclic_floquet_computation(transfers, compute_vectors),
+        FloquetBackend::Auto if block_dimension <= AUTO_PERIODIC_SCHUR_DIMENSION => {
+            match block_cyclic_floquet_computation(transfers, compute_vectors) {
+                Ok(result) => Ok(result),
+                Err(reference_error) => {
+                    periodic_schur_floquet_computation(transfers, compute_vectors).map_err(
+                        |schur_error| {
+                            anyhow!(
+                        "Both Floquet backends failed (block-cyclic: {}; periodic Schur: {}).",
+                        reference_error,
+                        schur_error
+                    )
+                        },
+                    )
+                }
+            }
+        }
+        FloquetBackend::Auto => {
+            match periodic_schur_floquet_computation(transfers, compute_vectors) {
+                Ok(result) => Ok(result),
+                Err(schur_error) if block_dimension <= MAX_DENSE_CYCLIC_DIMENSION => {
+                    block_cyclic_floquet_computation(transfers, compute_vectors).map_err(
+                        |reference_error| {
+                            anyhow!(
+                                "Both Floquet backends failed (periodic Schur: {}; block-cyclic: {}).",
+                                schur_error,
+                                reference_error
+                            )
+                        },
+                    )
+                }
+                Err(schur_error) => Err(schur_error.context(format!(
+                    "Periodic Schur was required because the dense block dimension {} exceeds {}",
+                    block_dimension, MAX_DENSE_CYCLIC_DIMENSION
+                ))),
+            }
+        }
+    }
+}
+
 pub(crate) fn floquet_real_eigenvector_from_transfers(
     transfers: &[DMatrix<f64>],
     target_multiplier: Complex<f64>,
 ) -> Result<(Complex<f64>, Vec<f64>)> {
-    let (cyclic, roots, multipliers) = cyclic_floquet_spectrum(transfers)?;
-    let mode_index = multipliers
+    let computation = floquet_computation(transfers, FloquetBackend::Auto, true)?;
+    let mode_index = computation
+        .multipliers
         .iter()
         .enumerate()
         .min_by(|(_, a), (_, b)| {
@@ -2648,24 +2772,11 @@ pub(crate) fn floquet_real_eigenvector_from_transfers(
         })
         .map(|(index, _)| index)
         .ok_or_else(|| anyhow!("Floquet spectrum is empty."))?;
-    let root = roots[mode_index];
-    let dim = transfers[0].nrows();
-    let (mode_root, mut cyclic_vector) = if root.norm() == 0.0 {
-        let boundary = build_zero_multiplier_boundary_operator(transfers)?;
-        (
-            Complex::new(1.0, 0.0),
-            compute_complex_eigenvector(&boundary, Complex::new(0.0, 0.0))?,
-        )
-    } else {
-        (root, compute_complex_eigenvector(&cyclic, root)?)
-    };
-    normalize_cyclic_mode_at_first_mesh(&mut cyclic_vector, dim)?;
-    let mode = CyclicFloquetMode {
-        multiplier: multipliers[mode_index],
-        root: mode_root,
-        cyclic_vector,
-    };
-    let mesh_vector = cyclic_mode_mesh_vector(&mode, 0, dim)?;
+    let mesh_vector = computation
+        .mesh_vectors
+        .first()
+        .and_then(|vectors| vectors.get(mode_index))
+        .ok_or_else(|| anyhow!("Floquet backend did not return an anchor mode vector."))?;
     let imaginary_norm = mesh_vector
         .iter()
         .map(|value| value.im * value.im)
@@ -2685,7 +2796,7 @@ pub(crate) fn floquet_real_eigenvector_from_transfers(
     for value in &mut real {
         *value /= norm;
     }
-    Ok((mode.multiplier, real))
+    Ok((computation.multipliers[mode_index], real))
 }
 
 fn extract_collocation_transfer_data_from_jacobian(
@@ -2818,15 +2929,31 @@ pub(crate) fn extract_monodromy_data_from_collocation_jacobian(
     ntst: usize,
     ncol: usize,
 ) -> Result<MonodromyData> {
+    extract_monodromy_data_from_collocation_jacobian_with_backend(
+        jac,
+        dim,
+        ntst,
+        ncol,
+        FloquetBackend::Auto,
+    )
+}
+
+fn extract_monodromy_data_from_collocation_jacobian_with_backend(
+    jac: &DMatrix<f64>,
+    dim: usize,
+    ntst: usize,
+    ncol: usize,
+    backend: FloquetBackend,
+) -> Result<MonodromyData> {
     let (transfers, stage_sensitivities) =
         extract_collocation_transfer_data_from_jacobian(jac, dim, ntst, ncol)?;
-    let (_, floquet_roots, multipliers) = cyclic_floquet_spectrum(&transfers)?;
+    let spectrum = floquet_computation(&transfers, backend, false)?;
 
     Ok(MonodromyData {
         transfers,
         stage_sensitivities,
-        multipliers,
-        floquet_roots,
+        multipliers: spectrum.multipliers,
+        floquet_backend: spectrum.backend,
     })
 }
 
@@ -2836,9 +2963,10 @@ pub(crate) fn extract_monodromy_data_from_collocation_jacobian(
 /// mesh-to-mesh transfer from continuity:
 /// T_i = -C_{next}^{-1} * (C_x + C_s * ds_dx)
 ///
-/// The multipliers are then obtained from a block-cyclic eigenproblem rather than
-/// an explicitly chained transfer product.  This preserves strongly contracting
-/// modes when a cycle is long or stiff.
+/// `Auto` uses the dense block-cyclic reference for small discretizations and a
+/// product-free periodic Schur decomposition for large meshes.  Neither path
+/// explicitly chains a monodromy product, preserving strongly contracting modes
+/// when a cycle is long or stiff.
 pub fn extract_multipliers_collocation(
     jac: &DMatrix<f64>,
     dim: usize,
@@ -2847,6 +2975,23 @@ pub fn extract_multipliers_collocation(
 ) -> Result<Vec<Complex<f64>>> {
     let monodromy_data = extract_monodromy_data_from_collocation_jacobian(jac, dim, ntst, ncol)?;
     Ok(monodromy_data.multipliers)
+}
+
+/// Floquet multiplier extraction with an explicit backend selection.
+///
+/// The returned backend is concrete (`PeriodicSchur` or `BlockCyclic`) even
+/// when `Auto` was requested, so callers can surface the numerical provenance.
+pub fn extract_multipliers_collocation_with_backend(
+    jac: &DMatrix<f64>,
+    dim: usize,
+    ntst: usize,
+    ncol: usize,
+    backend: FloquetBackend,
+) -> Result<(Vec<Complex<f64>>, FloquetBackend)> {
+    let data = extract_monodromy_data_from_collocation_jacobian_with_backend(
+        jac, dim, ntst, ncol, backend,
+    )?;
+    Ok((data.multipliers, data.floquet_backend))
 }
 
 /// Backward-compatible name for collocation-based Floquet extraction.
@@ -3010,12 +3155,31 @@ pub fn compute_limit_cycle_floquet_modes(
     ntst: usize,
     ncol: usize,
 ) -> Result<FloquetModeVectors> {
-    compute_limit_cycle_floquet_modes_on_mesh(
+    compute_limit_cycle_floquet_modes_with_backend(
+        system,
+        param_index,
+        cycle_state,
+        ntst,
+        ncol,
+        FloquetBackend::Auto,
+    )
+}
+
+pub fn compute_limit_cycle_floquet_modes_with_backend(
+    system: &mut EquationSystem,
+    param_index: usize,
+    cycle_state: &[f64],
+    ntst: usize,
+    ncol: usize,
+    backend: FloquetBackend,
+) -> Result<FloquetModeVectors> {
+    compute_limit_cycle_floquet_modes_on_mesh_with_backend(
         system,
         param_index,
         cycle_state,
         ncol,
         uniform_normalized_mesh(ntst),
+        backend,
     )
 }
 
@@ -3025,6 +3189,24 @@ pub fn compute_limit_cycle_floquet_modes_on_mesh(
     cycle_state: &[f64],
     ncol: usize,
     normalized_mesh: Vec<f64>,
+) -> Result<FloquetModeVectors> {
+    compute_limit_cycle_floquet_modes_on_mesh_with_backend(
+        system,
+        param_index,
+        cycle_state,
+        ncol,
+        normalized_mesh,
+        FloquetBackend::Auto,
+    )
+}
+
+pub fn compute_limit_cycle_floquet_modes_on_mesh_with_backend(
+    system: &mut EquationSystem,
+    param_index: usize,
+    cycle_state: &[f64],
+    ncol: usize,
+    normalized_mesh: Vec<f64>,
+    backend: FloquetBackend,
 ) -> Result<FloquetModeVectors> {
     let ntst = normalized_mesh.len().saturating_sub(1);
     let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
@@ -3063,36 +3245,24 @@ pub fn compute_limit_cycle_floquet_modes_on_mesh(
         aug_state[index + 1] = *value;
     }
     let jac = problem.extended_jacobian(&aug_state)?;
-    let monodromy_data = extract_monodromy_data_from_collocation_jacobian(&jac, dim, ntst, ncol)?;
-    let cyclic = build_block_cyclic_transfer_operator(&monodromy_data.transfers)?;
-    let modes = cyclic_floquet_modes_from_selected_roots(
-        &cyclic,
-        &monodromy_data.transfers,
-        &monodromy_data.floquet_roots,
-        &monodromy_data.multipliers,
-    )?;
-    if modes.is_empty() {
+    let (transfers, stage_sensitivities) =
+        extract_collocation_transfer_data_from_jacobian(&jac, dim, ntst, ncol)?;
+    let computation = floquet_computation(&transfers, backend, true)?;
+    if computation.multipliers.is_empty() || computation.mesh_vectors.len() != ntst {
         bail!("Floquet mode computation failed: no multipliers returned.");
     }
 
     let mut vectors: Vec<Vec<Vec<ComplexNumber>>> = Vec::with_capacity(ntst * (ncol + 1) + 1);
-    let initial_vectors = modes
-        .iter()
-        .map(|mode| cyclic_mode_mesh_vector(mode, 0, dim))
-        .collect::<Result<Vec<_>>>()?;
     vectors.push(
-        initial_vectors
-            .into_iter()
-            .map(|mode| mode.into_iter().map(ComplexNumber::from).collect())
+        computation.mesh_vectors[0]
+            .iter()
+            .map(|mode| mode.iter().copied().map(ComplexNumber::from).collect())
             .collect(),
     );
 
     for interval in 0..ntst {
-        let ds_dx = &monodromy_data.stage_sensitivities[interval];
-        let mesh_mode_vectors = modes
-            .iter()
-            .map(|mode| cyclic_mode_mesh_vector(mode, interval, dim))
-            .collect::<Result<Vec<_>>>()?;
+        let ds_dx = &stage_sensitivities[interval];
+        let mesh_mode_vectors = &computation.mesh_vectors[interval];
 
         for stage in 0..ncol {
             let mode_vectors = mesh_mode_vectors
@@ -3110,21 +3280,18 @@ pub fn compute_limit_cycle_floquet_modes_on_mesh(
         }
 
         let next_mesh_vectors = if interval + 1 < ntst {
-            modes
-                .iter()
-                .map(|mode| cyclic_mode_mesh_vector(mode, interval + 1, dim))
-                .collect::<Result<Vec<_>>>()?
+            computation.mesh_vectors[interval + 1].clone()
         } else {
-            modes
+            computation.mesh_vectors[0]
                 .iter()
-                .map(|mode| {
-                    let first = cyclic_mode_mesh_vector(mode, 0, dim)?;
-                    Ok(first
+                .zip(&computation.multipliers)
+                .map(|(first, multiplier)| {
+                    first
                         .into_iter()
-                        .map(|value| value * mode.multiplier)
-                        .collect::<Vec<_>>())
+                        .map(|value| *value * *multiplier)
+                        .collect::<Vec<_>>()
                 })
-                .collect::<Result<Vec<_>>>()?
+                .collect()
         };
         vectors.push(
             next_mesh_vectors
@@ -3138,9 +3305,12 @@ pub fn compute_limit_cycle_floquet_modes_on_mesh(
         ntst,
         ncol,
         normalized_mesh,
-        multipliers: modes
+        backend: computation.backend,
+        multipliers: computation
+            .multipliers
             .iter()
-            .map(|mode| ComplexNumber::from(mode.multiplier))
+            .copied()
+            .map(ComplexNumber::from)
             .collect(),
         vectors,
     })
@@ -6356,6 +6526,100 @@ mod tests {
     }
 
     #[test]
+    fn auto_floquet_backend_switches_by_block_dimension() {
+        let small = vec![DMatrix::identity(2, 2); 8];
+        let small_result = floquet_computation(&small, FloquetBackend::Auto, false)
+            .expect("small automatic Floquet spectrum");
+        assert_eq!(small_result.backend, FloquetBackend::BlockCyclic);
+
+        let large = vec![DMatrix::identity(2, 2); 49];
+        let large_result = floquet_computation(&large, FloquetBackend::Auto, false)
+            .expect("large automatic Floquet spectrum");
+        assert_eq!(large_result.backend, FloquetBackend::PeriodicSchur);
+        assert_eq!(large_result.multipliers.len(), 2);
+    }
+
+    #[test]
+    fn periodic_schur_and_block_cyclic_match_on_nonuniform_cocycle() {
+        let interval_count = 23usize;
+        let mut expected_logs = [0.0f64, 0.0f64];
+        let mut transfers = Vec::with_capacity(interval_count);
+        for interval in 0..interval_count {
+            let fraction = interval as f64 / interval_count as f64;
+            let next_fraction = (interval + 1) as f64 / interval_count as f64;
+            let first_log = 0.12 * (1.0 + 0.35 * (2.0 * PI * fraction).sin());
+            let second_log = -0.09 * (1.0 + 0.25 * (4.0 * PI * fraction).cos());
+            expected_logs[0] += first_log;
+            expected_logs[1] += second_log;
+            let local =
+                DMatrix::from_diagonal(&DVector::from_vec(vec![first_log.exp(), second_log.exp()]));
+            transfers.push(
+                rotation_matrix(1.3 * (2.0 * PI * next_fraction).sin())
+                    * local
+                    * rotation_matrix(1.3 * (2.0 * PI * fraction).sin()).transpose(),
+            );
+        }
+
+        let reference = floquet_computation(&transfers, FloquetBackend::BlockCyclic, false)
+            .expect("block-cyclic nonuniform spectrum");
+        let schur = floquet_computation(&transfers, FloquetBackend::PeriodicSchur, true)
+            .expect("periodic-Schur nonuniform spectrum and modes");
+        assert_eq!(reference.multipliers.len(), 2);
+        assert_eq!(schur.multipliers.len(), 2);
+        let mut reference_logs = reference
+            .multipliers
+            .iter()
+            .map(|value| value.norm().ln())
+            .collect::<Vec<_>>();
+        let mut schur_logs = schur
+            .multipliers
+            .iter()
+            .map(|value| value.norm().ln())
+            .collect::<Vec<_>>();
+        reference_logs.sort_by(f64::total_cmp);
+        schur_logs.sort_by(f64::total_cmp);
+        expected_logs.sort_by(f64::total_cmp);
+        for index in 0..2 {
+            assert!((reference_logs[index] - schur_logs[index]).abs() < 2e-9);
+            assert!((schur_logs[index] - expected_logs[index]).abs() < 2e-9);
+        }
+
+        for interval in 0..interval_count {
+            for mode_index in 0..2 {
+                let current = DVector::from_vec(schur.mesh_vectors[interval][mode_index].clone());
+                let transported =
+                    transfers[interval].map(|value| Complex::new(value, 0.0)) * current;
+                let expected = if interval + 1 < interval_count {
+                    schur.mesh_vectors[interval + 1][mode_index].clone()
+                } else {
+                    schur.mesh_vectors[0][mode_index]
+                        .iter()
+                        .map(|value| *value * schur.multipliers[mode_index])
+                        .collect()
+                };
+                let residual = transported
+                    .iter()
+                    .zip(&expected)
+                    .map(|(actual, expected)| (*actual - *expected).norm_sqr())
+                    .sum::<f64>()
+                    .sqrt();
+                let scale = transported
+                    .iter()
+                    .chain(&expected)
+                    .map(|value| value.norm_sqr())
+                    .sum::<f64>()
+                    .sqrt()
+                    .max(f64::MIN_POSITIVE);
+                assert!(
+                    residual / scale < 2e-9,
+                    "relative cocycle residual={}",
+                    residual / scale
+                );
+            }
+        }
+    }
+
+    #[test]
     fn block_cyclic_spectrum_collapses_zero_root_families_once() {
         let transfers = vec![
             DMatrix::from_diagonal(&DVector::from_vec(vec![0.0, 2.0])),
@@ -6599,8 +6863,16 @@ mod tests {
         let mut system = stuart_landau_system();
         let (_corrected, cycle_state) = correct_limit_cycle_setup(&mut system, 0, setup, 1e-11, 12)
             .expect("corrected Stuart-Landau cycle");
-        let modes = compute_limit_cycle_floquet_modes(&mut system, 0, &cycle_state, ntst, ncol)
-            .expect("Stuart-Landau Floquet modes");
+        let modes = compute_limit_cycle_floquet_modes_with_backend(
+            &mut system,
+            0,
+            &cycle_state,
+            ntst,
+            ncol,
+            FloquetBackend::PeriodicSchur,
+        )
+        .expect("Stuart-Landau periodic-Schur Floquet modes");
+        assert_eq!(modes.backend, FloquetBackend::PeriodicSchur);
         assert_eq!(modes.multipliers.len(), 2);
         assert_eq!(modes.vectors.len(), ntst * (ncol + 1) + 1);
 

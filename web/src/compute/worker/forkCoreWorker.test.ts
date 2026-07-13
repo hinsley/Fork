@@ -23,6 +23,7 @@ const wasmState = {
   lastCycleCurveRunner: null as string | null,
   lastCycleCurveInitialK: null as number | null,
   lastFloquetMesh: null as number[] | null,
+  lastFloquetBackend: null as string | null,
   lastPdMesh: null as number[] | null,
   lastNsSeedState: null as number[] | null,
   lastEqManifoldPeriods: null as number[] | null,
@@ -167,6 +168,17 @@ beforeAll(async () => {
         return {
           ntst: 2,
           ncol: 2,
+          multipliers: [{ re: 1, im: 0 }],
+          vectors: [],
+        }
+      }
+      compute_limit_cycle_floquet_modes_on_mesh_with_backend(...args: unknown[]) {
+        wasmState.lastFloquetMesh = Array.from(args[2] as Float64Array)
+        wasmState.lastFloquetBackend = args[4] as string
+        return {
+          ntst: 2,
+          ncol: 2,
+          backend: args[4] === 'block_cyclic' ? 'block_cyclic' : 'periodic_schur',
           multipliers: [{ re: 1, im: 0 }],
           vectors: [],
         }
@@ -575,6 +587,7 @@ beforeEach(() => {
   wasmState.lastCycleCurveRunner = null
   wasmState.lastCycleCurveInitialK = null
   wasmState.lastFloquetMesh = null
+  wasmState.lastFloquetBackend = null
   wasmState.lastPdMesh = null
   wasmState.lastNsSeedState = null
   wasmState.lastEqManifoldPeriods = null
@@ -682,11 +695,13 @@ describe('forkCoreWorker', () => {
           ncol: 2,
           normalizedMesh,
           parameterName: 'mu',
+          backend: 'periodic_schur',
         },
       },
     } as unknown as MessageEvent<Record<string, unknown>>)
 
     expect(wasmState.lastFloquetMesh).toEqual(normalizedMesh)
+    expect(wasmState.lastFloquetBackend).toBe('periodic_schur')
     expect(workerScope.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({
       id: 'job-floquet-exact-mesh',
       ok: true,

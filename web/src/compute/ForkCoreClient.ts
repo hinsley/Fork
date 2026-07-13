@@ -320,11 +320,13 @@ export type LimitCycleFloquetModesRequest = {
   ncol: number
   normalizedMesh: number[]
   parameterName: string
+  backend?: import('../system/types').FloquetBackend
 }
 
 export type LimitCycleFloquetModesResult = {
   ntst: number
   ncol: number
+  backend: Exclude<import('../system/types').FloquetBackend, 'auto'>
   multipliers: Array<{ re: number; im: number }>
   vectors: Array<Array<Array<{ re: number; im: number }>>>
 }

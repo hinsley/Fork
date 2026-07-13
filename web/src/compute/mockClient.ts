@@ -970,9 +970,12 @@ export class MockForkCoreClient implements ForkCoreClient {
             })
           )
         )
+        const backend: 'block_cyclic' | 'periodic_schur' =
+          request.backend === 'block_cyclic' ? 'block_cyclic' : 'periodic_schur'
         return {
           ntst: request.ntst,
           ncol: request.ncol,
+          backend,
           multipliers,
           vectors,
         }

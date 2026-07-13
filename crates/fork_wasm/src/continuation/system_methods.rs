@@ -13,6 +13,8 @@ use fork_core::continuation::{
     bogdanov_takens_curve_seeds, bogdanov_takens_homoclinic_seed,
     compute_limit_cycle_floquet_modes as core_compute_limit_cycle_floquet_modes,
     compute_limit_cycle_floquet_modes_on_mesh as core_compute_limit_cycle_floquet_modes_on_mesh,
+    compute_limit_cycle_floquet_modes_on_mesh_with_backend as core_compute_limit_cycle_floquet_modes_on_mesh_with_backend,
+    compute_limit_cycle_floquet_modes_with_backend as core_compute_limit_cycle_floquet_modes_with_backend,
     continue_homoclinic_curve, continue_homotopy_saddle_curve, continue_limit_cycle_collocation,
     continue_limit_cycle_manifold_2d, continue_limit_cycle_manifold_2d_with_progress,
     continue_manifold_eq_1d_with_kind_and_periodicity, continue_manifold_eq_2d,
@@ -24,11 +26,11 @@ use fork_core::continuation::{
     limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, limit_cycle_setup_from_pd_on_mesh,
     uniform_normalized_mesh, BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType,
     Codim2Bifurcation, Codim2BifurcationType, CollocationConfig, ContinuationBranch,
-    ContinuationSettings, FoldCurveProblem, HomoclinicExtraFlags, HomoclinicFixedScalars,
-    HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem, IsoperiodicCurveProblem,
-    LPCCurveProblem, LimitCycleSetup, Manifold1DSettings, Manifold2DSettings,
-    ManifoldCycle2DSettings, ManifoldGeometry, ManifoldSurfaceResumeState, NSCurveProblem,
-    OrbitTimeMode, PDCurveProblem, StepResult,
+    ContinuationSettings, FloquetBackend, FoldCurveProblem, HomoclinicExtraFlags,
+    HomoclinicFixedScalars, HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem,
+    IsoperiodicCurveProblem, LPCCurveProblem, LimitCycleSetup, Manifold1DSettings,
+    Manifold2DSettings, ManifoldCycle2DSettings, ManifoldGeometry, ManifoldSurfaceResumeState,
+    NSCurveProblem, OrbitTimeMode, PDCurveProblem, StepResult,
 };
 use fork_core::equilibrium::{compute_jacobian, compute_system_jacobian, SystemKind};
 use fork_core::traits::DynamicalSystem;
@@ -38,6 +40,18 @@ use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::{from_value, to_value};
 use std::collections::BTreeMap;
+
+fn parse_floquet_backend(value: &str) -> Result<FloquetBackend, JsValue> {
+    match value {
+        "auto" => Ok(FloquetBackend::Auto),
+        "periodic_schur" => Ok(FloquetBackend::PeriodicSchur),
+        "block_cyclic" => Ok(FloquetBackend::BlockCyclic),
+        _ => Err(JsValue::from_str(&format!(
+            "Unknown Floquet backend '{}'; expected auto, periodic_schur, or block_cyclic.",
+            value
+        ))),
+    }
+}
 use wasm_bindgen::prelude::*;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -706,6 +720,35 @@ impl WasmSystem {
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
+    pub fn compute_limit_cycle_floquet_modes_with_backend(
+        &mut self,
+        cycle_state: Vec<f64>,
+        ntst: u32,
+        ncol: u32,
+        parameter_name: &str,
+        backend: &str,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "Floquet mode computation is currently available for flow systems only.",
+            ));
+        }
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+        let result = core_compute_limit_cycle_floquet_modes_with_backend(
+            &mut self.system,
+            param_index,
+            &cycle_state,
+            ntst as usize,
+            ncol as usize,
+            parse_floquet_backend(backend)?,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Floquet mode computation failed: {}", e)))?;
+        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
     pub fn compute_limit_cycle_floquet_modes_on_mesh(
         &mut self,
         cycle_state: Vec<f64>,
@@ -728,6 +771,35 @@ impl WasmSystem {
             &cycle_state,
             ncol as usize,
             normalized_mesh,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Floquet mode computation failed: {}", e)))?;
+        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn compute_limit_cycle_floquet_modes_on_mesh_with_backend(
+        &mut self,
+        cycle_state: Vec<f64>,
+        ncol: u32,
+        normalized_mesh: Vec<f64>,
+        parameter_name: &str,
+        backend: &str,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "Floquet mode computation is currently available for flow systems only.",
+            ));
+        }
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+        let result = core_compute_limit_cycle_floquet_modes_on_mesh_with_backend(
+            &mut self.system,
+            param_index,
+            &cycle_state,
+            ncol as usize,
+            normalized_mesh,
+            parse_floquet_backend(backend)?,
         )
         .map_err(|e| JsValue::from_str(&format!("Floquet mode computation failed: {}", e)))?;
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))

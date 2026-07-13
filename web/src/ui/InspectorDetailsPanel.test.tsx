@@ -4545,9 +4545,16 @@ describe('InspectorDetailsPanel', () => {
 
     const computeButton = screen.getByTestId('limit-cycle-floquet-modes-compute')
     expect(computeButton).toBeEnabled()
+    await user.selectOptions(
+      screen.getByTestId('limit-cycle-floquet-backend'),
+      'periodic_schur'
+    )
     await user.click(computeButton)
 
-    expect(onComputeLimitCycleFloquetModes).toHaveBeenCalledWith({ limitCycleId })
+    expect(onComputeLimitCycleFloquetModes).toHaveBeenCalledWith({
+      limitCycleId,
+      backend: 'periodic_schur',
+    })
   })
 
   it('shows a toggle for the trivial Floquet mode (index 0)', async () => {

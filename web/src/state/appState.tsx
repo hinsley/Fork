@@ -33,6 +33,7 @@ import type {
   EquilibriumManifold2DSettings,
   EquilibriumSolverParams,
   FrozenVariablesConfig,
+  FloquetBackend,
   IsoclineAxis,
   IsoclineObject,
   IsoclineSource,
@@ -1565,6 +1566,7 @@ export type LimitCycleManifold2DRequest = {
 
 export type LimitCycleFloquetModesRequest = {
   limitCycleId: string
+  backend?: FloquetBackend
 }
 
 
@@ -3038,6 +3040,7 @@ export function AppProvider({
           ncol: seedNcol,
           normalizedMesh: seedNormalizedMesh,
           parameterName: runtimeParameterName,
+          backend: request.backend ?? 'auto',
         }
         const result = await client.computeLimitCycleFloquetModes(payload)
 
@@ -3076,6 +3079,7 @@ export function AppProvider({
           floquetModes: {
             ntst: Math.max(1, Math.trunc(result.ntst ?? seedNtst)),
             ncol: Math.max(1, Math.trunc(result.ncol ?? seedNcol)),
+            backend: result.backend,
             multipliers,
             vectors,
             computedAt: new Date().toISOString(),

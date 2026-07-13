@@ -185,6 +185,38 @@ https://bifurcationkit.github.io/BifurcationKitDocs.jl/stable/periodicOrbitCollo
 
 ---
 
+### 2026-07-13: Use periodic Schur for large collocation Floquet problems
+Context:
+The block-cyclic Floquet formulation preserves stiff directions without forming a monodromy
+product, but its dense eigenproblem has dimension `NTST * state_dimension`. Large adaptive meshes
+therefore hit a memory and cubic-time ceiling even when the ODE state dimension is small.
+Decision:
+Add a pure-Rust complex periodic Hessenberg/QR backend. Scale and reverse the local transfer factors,
+accumulate the periodic Schur bases, recover diagonal products in log-polar form, and reconstruct raw
+mesh modes by solving the triangular periodic cocycle instead of repeatedly transporting one anchor
+vector. `Auto` retains the block-cyclic implementation as the reference for block dimensions through
+96 and selects periodic Schur above that; it may fall back only when the alternate dense problem is
+within the existing 2048 limit. Explicit selections never change backend silently. Expose the choice
+and the concrete backend used through core, WASM, and the web Floquet panel.
+Why:
+This reduces large-mesh Floquet work to `O(NTST * dimension^3)` arithmetic and
+`O(NTST * dimension^2)` storage while retaining the product-free stiff-spectrum behavior required by
+cycle bifurcation detection, normal forms, and invariant-manifold seeds.
+Impact:
+Large meshes no longer fail solely because the block-cyclic matrix exceeds the dense limit. The
+block-cyclic path remains independently testable for cross-backend regression checks, repeated or
+singular small cases, and explicit diagnostics. Native and browser builds use the same algorithm
+without a platform LAPACK dependency.
+References:
+`crates/fork_core/src/continuation/periodic_schur.rs`,
+`crates/fork_core/src/continuation/periodic.rs`,
+`crates/fork_wasm/src/continuation/system_methods.rs`,
+`web/src/compute/worker/forkCoreWorker.ts`,
+`web/src/ui/inspector/SelectionInspectorView.tsx`,
+`docs/limit_cycle_continuation.md`
+
+---
+
 ### 2026-07-13: Continue flow limit cycles with collocation-native PALC and Floquet analysis
 Context:
 Orbit seeds could select a multiple of the minimal period, the pseudo-arclength metric changed with

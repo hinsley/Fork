@@ -763,6 +763,15 @@ const nsSeedModes = nsFloquetSystem.compute_limit_cycle_floquet_modes(
   nsNcol,
   'mu'
 );
+const nsSeedSchurModes = nsFloquetSystem.compute_limit_cycle_floquet_modes_with_backend(
+  new Float64Array(nsCorrectedState),
+  nsNtst,
+  nsNcol,
+  'mu',
+  'periodic_schur'
+);
+assert.equal(nsSeedSchurModes.backend, 'periodic_schur');
+assert.equal(nsSeedSchurModes.multipliers.length, nsSeedModes.multipliers.length);
 const nsSeedCritical = (nsSeedModes.multipliers as Array<{ re: number; im: number }>)
   .filter((value) => value.im > 0.05)
   .sort(

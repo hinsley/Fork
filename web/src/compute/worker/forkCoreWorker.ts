@@ -605,6 +605,54 @@ async function runComputeLimitCycleFloquetModes(
   abortIfNeeded(signal)
   const computeModesOnMesh = system.compute_limit_cycle_floquet_modes_on_mesh
   const computeModes = system.compute_limit_cycle_floquet_modes
+  const computeModesOnMeshWithBackend =
+    system.compute_limit_cycle_floquet_modes_on_mesh_with_backend
+  const computeModesWithBackend = system.compute_limit_cycle_floquet_modes_with_backend
+  const backend = request.backend ?? 'auto'
+  if (typeof computeModesOnMeshWithBackend === 'function') {
+    return computeModesOnMeshWithBackend.call(
+      system,
+      new Float64Array(request.cycleState),
+      request.ncol,
+      new Float64Array(request.normalizedMesh),
+      request.parameterName,
+      backend
+    )
+  }
+  if (!isUniformCycleMesh(request.normalizedMesh)) {
+    if (backend !== 'auto') {
+      throw new Error(
+        'This WASM build cannot select a Floquet backend. Rebuild fork_wasm pkg-web.'
+      )
+    }
+    if (typeof computeModesOnMesh === 'function') {
+      return computeModesOnMesh.call(
+        system,
+        new Float64Array(request.cycleState),
+        request.ncol,
+        new Float64Array(request.normalizedMesh),
+        request.parameterName
+      )
+    }
+    throw new Error(
+      'This WASM build cannot compute Floquet modes on a nonuniform collocation mesh. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  if (typeof computeModesWithBackend === 'function') {
+    return computeModesWithBackend.call(
+      system,
+      new Float64Array(request.cycleState),
+      request.ntst,
+      request.ncol,
+      request.parameterName,
+      backend
+    )
+  }
+  if (backend !== 'auto') {
+    throw new Error(
+      'This WASM build cannot select a Floquet backend. Rebuild fork_wasm pkg-web.'
+    )
+  }
   if (typeof computeModesOnMesh === 'function') {
     return computeModesOnMesh.call(
       system,
@@ -612,11 +660,6 @@ async function runComputeLimitCycleFloquetModes(
       request.ncol,
       new Float64Array(request.normalizedMesh),
       request.parameterName
-    )
-  }
-  if (!isUniformCycleMesh(request.normalizedMesh)) {
-    throw new Error(
-      'This WASM build cannot compute Floquet modes on a nonuniform collocation mesh. Rebuild fork_wasm pkg-web.'
     )
   }
   if (typeof computeModes !== 'function') {

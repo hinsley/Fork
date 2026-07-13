@@ -711,10 +711,13 @@ export interface LimitCycleObject {
 export interface LimitCycleFloquetModeData {
   ntst: number
   ncol: number
+  backend?: FloquetBackend
   multipliers: ContinuationEigenvalue[]
   vectors: ComplexValue[][][]
   computedAt: string
 }
+
+export type FloquetBackend = 'auto' | 'periodic_schur' | 'block_cyclic'
 
 export type IsoclineSource =
   | {

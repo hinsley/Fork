@@ -48,6 +48,7 @@ export function SelectionInspectorView({
     limitCycleDisplayParamValue,
     limitCycleDisplayParams,
     limitCycleFloquetColors,
+    limitCycleFloquetBackend,
     limitCycleFloquetIndices,
     limitCycleFloquetModePointCount,
     limitCycleFloquetModes,
@@ -88,6 +89,7 @@ export function SelectionInspectorView({
     selectionNode,
     selectionPayloadPending,
     selectionTypeLabel,
+    setLimitCycleFloquetBackend,
     setLimitCyclePreviewError,
     setLimitCyclePreviewInput,
     setLimitCyclePreviewPageIndex,
@@ -663,6 +665,23 @@ export function SelectionInspectorView({
                   )}
                   {systemDraft.type === 'flow' ? (
                     <>
+                      <label>
+                        Floquet backend
+                        <select
+                          value={limitCycleFloquetBackend}
+                          onChange={(event) =>
+                            setLimitCycleFloquetBackend(
+                              event.target.value as typeof limitCycleFloquetBackend
+                            )
+                          }
+                          disabled={runDisabled}
+                          data-testid="limit-cycle-floquet-backend"
+                        >
+                          <option value="auto">Automatic</option>
+                          <option value="periodic_schur">Periodic Schur</option>
+                          <option value="block_cyclic">Block-cyclic reference</option>
+                        </select>
+                      </label>
                       <div className="inspector-inline-actions">
                         <button
                           type="button"
@@ -694,6 +713,15 @@ export function SelectionInspectorView({
                               {
                                 label: 'Computed',
                                 value: limitCycleFloquetModes.computedAt,
+                              },
+                              {
+                                label: 'Backend',
+                                value:
+                                  limitCycleFloquetModes.backend === 'periodic_schur'
+                                    ? 'Periodic Schur'
+                                    : limitCycleFloquetModes.backend === 'block_cyclic'
+                                      ? 'Block-cyclic reference'
+                                      : 'Legacy / unknown',
                               },
                             ]}
                           />

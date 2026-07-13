@@ -680,7 +680,7 @@ evolve after one period. For an autonomous n-dimensional flow:
   - All nontrivial |μ| < 1: stable limit cycle
   - Any nontrivial |μ| > 1: unstable limit cycle
 
-### Algorithm: Collocation Condensation and a Block-Cyclic Eigenproblem
+### Algorithm: Collocation Condensation and Product-Free Floquet Backends
 
 Fork extracts each local variational transfer from the same orthogonal-collocation Jacobian used by
 continuation. It does **not** multiply those transfers into a monodromy matrix.
@@ -703,18 +703,31 @@ For each interval i:
    T_i = -C_next^{-1} × effective_C_x
    ```
 
-The transfers are placed in one block-cyclic matrix `C` of size `(ntst × dim)`:
+Fork has two product-free eigensolvers for the resulting transfer sequence:
+
+- **Periodic Schur** reverses the transfers into physical monodromy order, scales each factor,
+  reduces the sequence to periodic Hessenberg/triangular form, and applies an implicit complex
+  single-shift periodic QR iteration, with controlled zero-shift recovery for nearly neutral
+  multiplier clusters. Multipliers are recovered from the diagonal factor products in scaled
+  log-polar form. Its storage is `O(ntst × dim²)` and its leading arithmetic cost is
+  `O(ntst × dim³)`; it never constructs an `(ntst × dim)` square matrix.
+- **Block-cyclic reference** places the transfers in one matrix `C` of size `(ntst × dim)`:
 
 ```
 C_(i+1,i) = T_i                 for i < ntst - 1
 C_(0,ntst-1) = T_(ntst-1)
 ```
 
-If `gamma` is an eigenvalue of `C`, the physical Floquet multiplier is
+  If `gamma` is an eigenvalue of `C`, the physical Floquet multiplier is
 `mu = gamma^ntst`. Fork chooses one deterministic root from each root family and reconstructs the
 physical mesh mode with `y_i = gamma^i z_i`. Stage modes come from the stored stage sensitivities,
 and the closing vector is exactly `mu y_0`. Zero multipliers use a direct boundary-nullspace solve,
 because the balanced `gamma^i` reconstruction is singular at zero.
+
+`Auto` uses the block-cyclic reference while `ntst × dim <= 96`, then selects periodic Schur. If the
+selected backend cannot reconstruct a raw mode, `Auto` tries the other backend when the dense block
+dimension is at most 2048. Explicit backend requests do not silently change algorithms. The web
+Floquet panel exposes all three choices and records the concrete backend in the stored result.
 
 This formulation avoids the overflow, underflow, and loss of strongly contracting directions caused
 by explicitly forming `T_(ntst-1) ... T_0`. Multiplier magnitudes are reconstructed in log-polar form,
@@ -727,16 +740,13 @@ BifurcationKit.jl (Julia) offers **multiple Floquet computation methods**:
 | Method | Description | Comparison to Fork |
 |--------|-------------|-------------------|
 | **FloquetQaD** | "Quick and Dirty" — sequential matrix products along orbit | Fork avoids this product |
-| **Periodic Schur** | Uses periodic Schur decomposition (via PeriodicSchurBifurcationKit.jl) | Product-free and better-scaled for large problems |
+| **Periodic Schur** | Uses periodic Schur decomposition (via PeriodicSchurBifurcationKit.jl) | Fork now provides the corresponding product-free periodic Hessenberg/QR path |
 
 BifurcationKit.jl's documentation notes that `FloquetQaD` can lose precision with many sections or
-large/small Floquet exponents. Fork's block-cyclic problem also avoids forming the product, but it is
-not a periodic-Schur implementation: its dense eigensolve scales with `ntst × dim` and can be more
-expensive for large meshes.
-
-**Future enhancement**: a periodic Schur backend would retain product-free scaling while reducing the
-dense block-cyclic cost. Reference implementations exist in SLICOT and
-PeriodicSchurBifurcationKit.jl.
+large/small Floquet exponents. Fork now has the same class of periodic-Schur protection for large
+meshes while retaining its independent block-cyclic formulation as a deterministic small-problem
+reference and fallback. The implementation is pure Rust, including the orthogonal transformations,
+so it is available in native, CLI WASM, and browser WASM builds without LAPACK or SLICOT binaries.
 
 ### Raw Floquet Eigenvectors
 
@@ -746,10 +756,12 @@ switching and invariant-manifold seeds. Rendering may normalize a mode for displ
 project away the flow direction. Reduced frozen-variable calculations are lifted back to the full
 coordinate space with zeros in frozen components.
 
-Eigenvectors are accepted only when the shifted block-cyclic operator has the requested geometric
-multiplicity. Nearby but distinct roots therefore keep eigenvectors computed at their own roots. If
-an algebraically repeated root is defective, Fork reports the multiplicity failure instead of
-duplicating or orthogonalizing one vector into nonexistent independent modes.
+The periodic-Schur path accumulates every periodic basis and solves the upper-triangular periodic
+cocycle component by component. It emits the mode at each mesh boundary directly from the
+corresponding Schur basis, rather than repeatedly multiplying an anchor vector and amplifying a
+stable mode's roundoff contamination. The block-cyclic path accepts eigenvectors only when the
+shifted operator has the requested geometric multiplicity. Both paths report defective or
+numerically inseparable multipliers instead of manufacturing nonexistent independent modes.
 
 Production invariant-manifold paths with stored parameter provenance rebuild their Floquet seed from
 the collocation transfers and propagate any extraction failure. The stored multiplier must match the
@@ -869,7 +881,7 @@ If the initial Newton correction fails, try a smaller amplitude.
 | Trivial multiplier ≠ 1.0 | Mesh too coarse | Increase ntst |
 | Multipliers are NaN | No credible trivial mode or non-finite spectrum | Check orbit validity, increase ntst/ncol |
 | False bifurcation detection | Step size too large | Reduce step size, re-extend |
-| Very large/small multipliers | Highly unstable/stable orbit | Refine the mesh; periodic Schur remains a future large-problem backend |
+| Very large/small multipliers | Highly unstable/stable orbit | Refine the mesh; use `Automatic` or `Periodic Schur` for large meshes |
 
 ### Example: High-Precision Configuration
 

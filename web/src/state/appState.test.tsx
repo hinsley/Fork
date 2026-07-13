@@ -1028,6 +1028,7 @@ describe('appState limit cycle render targets', () => {
       return {
         ntst: request.ntst,
         ncol: request.ncol,
+        backend: 'periodic_schur',
         multipliers: [
           { re: 1, im: 0 },
           { re: 2, im: 0 },
@@ -1067,6 +1068,10 @@ describe('appState limit cycle render targets', () => {
       expect(capturedRequest!.systemParams).toEqual([0.15, 1.3, 0.7])
       expect(capturedRequest!.parameterName).toBe(fixture.frozenRuntimeParameterName)
       expect(capturedRequest!.normalizedMesh).toEqual([0, 0.3, 1])
+      const object = getContext().state.system?.objects[fixture.limitCycleId]
+      expect(object?.type === 'limit_cycle' ? object.floquetModes?.backend : undefined).toBe(
+        'periodic_schur'
+      )
     })
   })
 
@@ -1092,6 +1097,7 @@ describe('appState limit cycle render targets', () => {
       return {
         ntst: request.ntst,
         ncol: request.ncol,
+        backend: 'periodic_schur',
         multipliers: computedMultipliers,
         vectors: [],
       }

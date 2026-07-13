@@ -7,6 +7,9 @@ pub mod problem;
 #[path = "continuation/periodic.rs"]
 pub mod periodic;
 
+#[path = "continuation/periodic_schur.rs"]
+mod periodic_schur;
+
 #[path = "continuation/equilibrium.rs"]
 pub mod equilibrium;
 
@@ -83,15 +86,17 @@ pub use map_normal_forms::{
 pub use packed_periodic_source::limit_cycle_setup_from_packed_state;
 pub use periodic::{
     compute_limit_cycle_floquet_modes, compute_limit_cycle_floquet_modes_on_mesh,
-    continue_limit_cycle_collocation, continue_limit_cycle_collocation_with_report,
-    correct_limit_cycle_setup_adaptive, extend_limit_cycle_collocation,
-    extend_limit_cycle_collocation_with_report, gauss_legendre_nodes, limit_cycle_setup_from_hopf,
-    limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, limit_cycle_setup_from_pd_on_mesh,
-    uniform_normalized_mesh, CollocationAdaptationReport, CollocationAdaptivitySettings,
-    CollocationConfig, CollocationDefectEstimate, CollocationDefectTermination,
-    CollocationDefectTerminationError, CollocationDefectTerminationReason,
-    CollocationMeshAdaptationKind, CollocationRefinementAttempt, FloquetModeVectors,
-    LimitCycleContinuationResult, LimitCycleGuess, LimitCycleSetup, OrbitTimeMode,
+    compute_limit_cycle_floquet_modes_on_mesh_with_backend,
+    compute_limit_cycle_floquet_modes_with_backend, continue_limit_cycle_collocation,
+    continue_limit_cycle_collocation_with_report, correct_limit_cycle_setup_adaptive,
+    extend_limit_cycle_collocation, extend_limit_cycle_collocation_with_report,
+    gauss_legendre_nodes, limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit,
+    limit_cycle_setup_from_pd, limit_cycle_setup_from_pd_on_mesh, uniform_normalized_mesh,
+    CollocationAdaptationReport, CollocationAdaptivitySettings, CollocationConfig,
+    CollocationDefectEstimate, CollocationDefectTermination, CollocationDefectTerminationError,
+    CollocationDefectTerminationReason, CollocationMeshAdaptationKind,
+    CollocationRefinementAttempt, FloquetBackend, FloquetModeVectors, LimitCycleContinuationResult,
+    LimitCycleGuess, LimitCycleSetup, OrbitTimeMode,
 };
 pub use periodic_normal_forms::{
     periodic_branch_point_normal_form, periodic_branch_point_normal_form_with_settings,
