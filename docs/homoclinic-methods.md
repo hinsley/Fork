@@ -211,8 +211,8 @@ Reproducible Method 1/2 settings and Method 4 CLI/WASM target settings:
 
 Expected diagnostics:
 
-- Method 1 produces the seed plus three accepted points.
-- Method 2, restarted from the first accepted Method 1 point, also produces the seed plus three accepted points.
+- The core Method 1 result produces the seed plus three accepted points; the CLI intentionally discards the large-cycle approximation seed and persists the three accepted points.
+- Method 2, restarted from the first accepted Method 1 point, produces the seed plus three accepted points.
 - Method 4, initialized from a homoclinic-ready StageD profile encoded with the staged workflow's source flags, produces the seed plus three accepted points.
 - The core StageD conversion helper, which retains the StageD `T`/`eps1` free flags, also accepts all three requested steps; the CLI/WASM regression additionally changes the target to the `T`-only layout above.
 - The accepted points remain on a line parallel to the analytic locus `mu = nu`: the spread in `mu - nu` is below `1e-8`. With the intentionally small `8 x 2` target mesh, the absolute offset from the analytic locus is below `5e-4`.
@@ -221,8 +221,15 @@ Run the core and CLI/WASM certifications with:
 
 ```bash
 cargo test -p fork_core --test homoclinic_reference
-cd cli && npm run test:wasm
+cd cli && npm run test:wasm && npm run test:homoclinic-menu
 ```
+
+The menu smoke drives the actual Method 1, 2, and 4 configuration menus, edits the certified
+settings above through `inquirer`, crosses the Node-WASM bridge, and verifies the resulting branches
+are persisted with more than one point. Method 1 requires a uniform source-cycle mesh. Method 2
+requires the source branch's packed layout and fixed-scalar context. Method 4 requires a corrected
+StageD-compatible profile encoded with its source free/fixed flags; changing the target flags happens
+only after decoding that source layout.
 
 The Method 4 fixture certifies StageD decoding, conversion, and continuation independently of StageD generation: it re-encodes an accepted homoclinic connection using the fixed StageD source layout (`T` and `eps1` free, `eps0` fixed). Conversion must decode that source layout before applying the target free/fixed choices. The heuristic Method 3 stage-generation path is not used as evidence that an arbitrary StageD profile is already a corrected homoclinic connection.
 

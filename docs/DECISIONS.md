@@ -21,6 +21,38 @@ References:
 
 ---
 
+### 2026-07-13: Split published Orbit references from regular CI and project Chenciner conditioning
+Context:
+The MLfast LPC and Steinmetz-Larter NS targets were documented but not executable, while the natural
+curve-corrected Chenciner locator spent minutes recomputing a full return-map normal form twice for
+every collocation unknown solely to form an ambient finite-difference conditioning row.
+Decision:
+Keep analytic cycle curves, adaptx PD, and the natural Chenciner locator in regular Rust CI. Put the
+two time-integrated published models in an ignored optimized slow tier with a five-minute scheduled
+workflow. For Chenciner conditioning, project the signed source-bracket derivative onto the corrected
+NS-curve tangent; retain the full curve correction, event coefficient, residual, and return-map
+conditioning. Preserve an adapted source cycle's exact normalized mesh when constructing its NS
+curve problem. Permit temporary Newton values of the NS cosine outside its physical interval, but
+reject any converged point outside that interval.
+Why:
+Only the event-gradient component along the one-dimensional curve nullspace supplies new rank to the
+augmented locator. Reintegrating the normal form in every ambient coordinate is redundant. Published
+model integrations remain valuable independent oracles but are too expensive for the regular test
+loop.
+Impact:
+The natural Chenciner fixture runs in seconds with explicit residual and conditioning assertions.
+Executable MLfast $20\times4$/$32\times4$ and Steinmetz-Larter $16\times3$/$16\times4$ comparisons
+start from attracting Orbits, locate the published bifurcations, and accept LPC/NS curve steps. The
+Steinmetz path also guards nonuniform mesh provenance and NS Newton-domain handling.
+References:
+`crates/fork_core/src/continuation/codim1_curves/refinement.rs`,
+`crates/fork_core/src/continuation/lc_codim1_curves/ns_curve.rs`,
+`crates/fork_core/tests/published_cycle_references.rs`,
+`.github/workflows/slow-cycle-references.yml`,
+`docs/limit_cycle_continuation.md`
+
+---
+
 ### 2026-07-13: Retain equilibrium codimension-two normal forms and correct branch predictors
 Context:
 Zero-Hopf and Hopf-Hopf markers were refined on Hopf curves, but Fork retained only a scalar test

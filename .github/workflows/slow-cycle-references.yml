@@ -1,0 +1,21 @@
+name: Slow cycle references
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
+
+jobs:
+  published-cycle-references:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup update stable
+
+      - name: Run published Orbit-to-curve references
+        run: >-
+          cargo test -p fork_core --test published_cycle_references --release --
+          --ignored --test-threads=1

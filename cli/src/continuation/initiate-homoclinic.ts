@@ -1222,7 +1222,7 @@ export async function initiateHomoclinicFromHomotopySaddle(
   }
 
   if (branch.branchType !== 'homotopy_saddle_curve') {
-    printError('Method 3 requires a homotopy-saddle branch.');
+    printError('Method 4 requires a homotopy-saddle branch.');
     return null;
   }
 
@@ -1233,7 +1233,7 @@ export async function initiateHomoclinicFromHomotopySaddle(
   }
 
   if (source.stage !== 'StageD') {
-    printError('Method 3 can only initialize from StageD points.');
+    printError('Method 4 can only initialize from StageD points.');
     return null;
   }
 
@@ -1476,7 +1476,7 @@ export async function initiateHomoclinicFromHomotopySaddle(
     }
   ];
 
-  const menuResult = await runConfigMenu('Method 3: Homoclinic from Homotopy-Saddle', entries);
+  const menuResult = await runConfigMenu('Method 4: Homoclinic from Homotopy-Saddle', entries);
   if (menuResult === 'back') {
     return null;
   }
@@ -1575,7 +1575,7 @@ export async function initiateHomoclinicFromHomotopySaddle(
 
     return newBranch;
   } catch (error) {
-    printError(`Method 3 failed: ${error}`);
+    printError(`Method 4 failed: ${error}`);
     return null;
   }
 }

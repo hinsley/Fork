@@ -971,10 +971,11 @@ the LC to the published bifurcation, and then takes multiple steps on the two-pa
 phase-invariant quantities—parameters, period, critical multipliers, residual, and off-node defect—not
 raw profile coordinates. Repeat on a refined mesh and require convergence.
 
-The regular integration suite currently exercises this complete path on adaptx with a Fork-owned
+The regular integration suite exercises this complete path on adaptx with a Fork-owned
 $8\times3$ mesh; the reference $20\times4$ MATCONT discretization remains the higher-resolution
-oracle. MLfast and Steinmetz–Larter below define the published targets for broader slow/refinement
-coverage rather than claiming unimplemented tests.
+oracle. The ignored release-mode slow tier in `published_cycle_references.rs` executes the MLfast
+and Steinmetz–Larter paths below, including their coarse/refined comparisons and accepted
+two-parameter curve steps.
 
 #### MLfast: LPC
 
@@ -1000,6 +1001,13 @@ published LC and LPC runs use $N_{\mathrm{tst}}=30$, $N_{\mathrm{col}}=4$, with 
 LPC curve. Use an Orbit on the attracting branch adjacent to the fold rather than importing a
 MATCONT collocation state. See the official manual's
 [MLfast example](https://www.staff.science.uu.nl/~kouzn101/NBA/ManualMatcontAug2019.pdf#page=84).
+
+Fork's executable benchmark integrates the attracting cycle at $(y,z)=(0.084,0.1)$, then uses
+Fork-owned $20\times4$ and $32\times4$ grids. The refined result must satisfy
+$|y-y_{\mathrm{MATCONT}}|<10^{-4}$ and $|T-T_{\mathrm{MATCONT}}|<2\times10^{-4}$; the two grids must
+agree in both quantities within $2\times10^{-4}$. Each grid then accepts two LPC-curve steps and
+retains two multipliers within $2\times10^{-3}$ of $+1$. MATCONT's published $30\times4$ grid is
+source provenance only; neither Fork grid imports its state.
 
 #### adaptx / Genesio–Tesi: PD
 
@@ -1074,6 +1082,25 @@ this model.
 The maintained MATLAB definitions and testruns are distributed in the
 [official MATCONT release archive](https://sourceforge.net/projects/matcont/files/MatCont/MatCont7p6/MatCont7p6.zip/download).
 
+Fork's benchmark integrates an attracting cycle at $(k_7,k_8)=(1.5,0.82)$. Its baseline and
+refinement are Fork-owned $16\times3$ and $16\times4$ requests; any defect-driven interval
+redistribution/refinement is retained in the branch metadata and reused by the NS defining system.
+The two runs must converge in the detected $k_8$, period, and critical-pair cosine. The baseline NS
+curve accepts 16 steps, keeps a nonreal pair within $3\times10^{-3}$ of unit modulus, and passes
+within $10^{-3}$ in $k_7$ and $5\times10^{-4}$ in $k_8$ of the published second NS point.
+
+Runtime policy:
+
+- Regular Rust CI runs the analytic multi-step cycle curves, the adaptx published PD benchmark,
+  and the full curve-corrected Chenciner locator.
+- MLfast and Steinmetz–Larter are ignored in ordinary `cargo test` because they integrate attracting
+  Orbits and repeat mesh-convergence paths. Run them serially in optimized mode with
+  `cargo test -p fork_core --test published_cycle_references --release -- --ignored --test-threads=1`.
+- `.github/workflows/slow-cycle-references.yml` runs that command with a five-minute job timeout.
+  On the 2026-07-13 developer machine the two tests complete in about 5 seconds and 65 seconds,
+  respectively, including both Steinmetz grids; the combined warm release run takes about 70 seconds
+  (about 84 seconds including a rebuild).
+
 ## Periodic-Orbit Normal Forms and Generic Branch Points
 
 Fork computes PD, NS, and nontrivial $+1$ Floquet normal forms from a local Poincare return map
@@ -1137,6 +1164,14 @@ Cycle-curve problems retain the normalized collocation mesh that produced the so
 same interval boundaries and widths are used by residuals, Jacobians, phase quadrature, PALC weights,
 defect checks, periodic normal-form profile reconstruction, refinement, WASM serialization, and
 extension. The legacy constructors remain uniform-mesh convenience wrappers.
+
+For Chenciner conditioning, the corrected NS-curve Jacobian has a one-dimensional nullspace, so
+event transversality depends only on the normal-form gradient component along the curve tangent.
+Fork uses the signed source bracket to estimate that component and appends its tangent-projected row
+to the curve Jacobian. This avoids recomputing the full return-map normal form twice per collocation
+unknown without changing the curve correction, cubic coefficient, residual, or defining event. The
+natural Chenciner regression now runs in ordinary debug CI (about 2.2 seconds on the 2026-07-13
+developer machine) and asserts both bordered and event-augmented conditioning.
 
 ## Branching to Period-Doubled Limit Cycles
 

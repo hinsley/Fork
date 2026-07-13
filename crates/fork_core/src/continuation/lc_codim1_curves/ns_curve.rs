@@ -49,8 +49,8 @@ use nalgebra::{DMatrix, DVector};
 /// `mu^2 - 2 k mu + 1 = 0`. This is the real polynomial form of the complex
 /// rotation boundary condition and remains regular at `k = +/-1`.
 fn build_ns_boundary_operator(transfers: &[DMatrix<f64>], k: f64) -> Result<DMatrix<f64>> {
-    if !k.is_finite() || !(-1.0..=1.0).contains(&k) {
-        bail!("NS rotation parameter k must be finite and lie in [-1, 1]");
+    if !k.is_finite() {
+        bail!("NS rotation parameter k must be finite");
     }
     let first = transfers
         .first()
@@ -878,8 +878,8 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
         if period <= 0.0 {
             bail!("Period must be positive");
         }
-        if !k.is_finite() || !(-1.0..=1.0).contains(&k) {
-            bail!("NS rotation parameter k must be finite and lie in [-1, 1]");
+        if !k.is_finite() {
+            bail!("NS rotation parameter k must be finite");
         }
         self.ensure_phase_reference(aug)?;
 
@@ -1038,6 +1038,13 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
     }
 
     fn is_step_acceptable(&mut self, aug: &DVector<f64>) -> Result<bool> {
+        // The real characteristic polynomial remains defined for temporary
+        // Newton iterates outside the cosine interval. Only a converged point
+        // must represent k = cos(theta), so reject it here without aborting
+        // the corrector path that may return to the physical domain.
+        if !(-1.0..=1.0).contains(&self.get_k(aug)) {
+            return Ok(false);
+        }
         Ok(self.defect_estimate(aug)?.max_scaled_defect
             <= self.adaptation.settings().defect_tolerance)
     }
@@ -1240,6 +1247,15 @@ mod tests {
         away_singular_values.sort_by(f64::total_cmp);
         assert!(away_singular_values[0] > 1e-2);
         assert!(away_singular_values[1] > 1e-2);
+    }
+
+    #[test]
+    fn doubled_period_ns_operator_allows_out_of_domain_newton_trials() {
+        let transfer = DMatrix::identity(2, 2);
+        let operator = build_ns_boundary_operator(&[transfer], 1.05)
+            .expect("the characteristic polynomial is defined outside the cosine interval");
+        assert_eq!(operator.shape(), (4, 4));
+        assert!(build_ns_boundary_operator(&[DMatrix::identity(2, 2)], f64::NAN).is_err());
     }
 
     #[test]

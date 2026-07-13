@@ -766,7 +766,6 @@ fn transverse_pair_ns_curve_accepts_multiple_collocation_steps() {
 }
 
 #[test]
-#[ignore = "the full NS curve-corrected CH locator is a slow validation target; the bounded locator matrix and periodic NS normal-form tests run in regular CI"]
 fn ns_curve_refines_chenciner_with_a_signed_cubic_bracket() {
     let mut system = compiled_system(
         &[
@@ -843,6 +842,19 @@ fn ns_curve_refines_chenciner_with_a_signed_cubic_bracket() {
     assert!(ch.data.source_test_values[0] * ch.data.source_test_values[1] < 0.0);
     assert!(ch.data.test_function_value.abs() < 3.0e-4);
     assert!(ch.data.residual_norm < 3.0e-3);
+    for (name, value) in [
+        ("bordered", ch.data.conditioning.bordered_condition_number),
+        (
+            "event-augmented",
+            ch.data.conditioning.jacobian_condition_number,
+        ),
+    ] {
+        let value = value.unwrap_or_else(|| panic!("missing {name} conditioning"));
+        assert!(
+            value.is_finite() && value < 1.0e16,
+            "invalid {name} conditioning={value}"
+        );
+    }
     assert!(coefficient(ch, "first_lyapunov_coefficient").abs() < 3.0e-4);
 }
 

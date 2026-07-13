@@ -720,7 +720,17 @@ fn refine_segment<P: Codim2CurveProblem>(
     let residual_norm = curve_residual_norm(problem, &best_aug)?;
     let diagnostics = problem.diagnostics(&best_aug)?;
     let tangent = normalized_secant(left_aug, right_aug)?;
-    let conditioning = refinement_conditioning(problem, &best_aug, &tangent, bifurcation_type)?;
+    let source_norm = (right_aug - left_aug).norm();
+    let source_directional_derivative = (bifurcation_type == Codim2BifurcationType::Chenciner
+        && source_norm > 1e-14)
+        .then_some((right_test - left_test) / source_norm);
+    let conditioning = refinement_conditioning(
+        problem,
+        &best_aug,
+        &tangent,
+        bifurcation_type,
+        source_directional_derivative,
+    )?;
     let coefficients = problem.codim2_coefficients_at(&best_aug, bifurcation_type, best_test)?;
     let candidate = problem.is_codim2_candidate(bifurcation_type, &coefficients);
     let refined = best_test.abs() <= tolerance && residual_norm <= tolerance * 10.0;
@@ -945,10 +955,24 @@ fn refinement_conditioning<P: Codim2CurveProblem>(
     aug: &DVector<f64>,
     tangent: &DVector<f64>,
     bifurcation_type: Codim2BifurcationType,
+    source_directional_derivative: Option<f64>,
 ) -> Result<Codim2Conditioning> {
     let curve_jacobian = problem.extended_jacobian(aug)?;
     let bordered = append_row(&curve_jacobian, tangent)?;
-    let gradient = codim2_test_gradient(problem, aug, bifurcation_type)?;
+    // A codimension-one curve Jacobian has a one-dimensional nullspace. For
+    // Chenciner localization, the only new rank information supplied by the
+    // expensive normal-form gradient is therefore its component along that
+    // tangent. The signed source bracket already measures this derivative.
+    // Using its projected row avoids two complete return-map normal-form
+    // evaluations per collocation unknown while preserving the transversality
+    // test and the natural curve-corrected defining system.
+    let gradient = if let Some(derivative) = source_directional_derivative
+        .filter(|value| value.is_finite() && value.abs() > f64::EPSILON)
+    {
+        tangent * derivative
+    } else {
+        codim2_test_gradient(problem, aug, bifurcation_type)?
+    };
     let augmented = append_row(&curve_jacobian, &gradient)?;
     Ok(Codim2Conditioning {
         bordered_condition_number: condition_number(&bordered),
