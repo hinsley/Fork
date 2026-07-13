@@ -418,7 +418,7 @@ export type Codim2BranchSwitchResult = {
   seed: Codim2BranchSeed | { setup: unknown; predictor_residual: number; corrected_residual: number }
 }
 
-export type IsochroneCurveContinuationRequest = {
+export type IsoperiodicCurveContinuationRequest = {
   system: SystemConfig
   lcState: number[]
   period: number
@@ -638,8 +638,8 @@ export interface ForkCoreClient {
     request: Codim2BranchSwitchRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<Codim2BranchSwitchResult>
-  runIsochroneCurveContinuation(
-    request: IsochroneCurveContinuationRequest,
+  runIsoperiodicCurveContinuation(
+    request: IsoperiodicCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<Codim1CurveBranch>
   runLimitCycleContinuationFromHopf(

@@ -27,7 +27,7 @@ import type {
   HomoclinicFromHomotopySaddleRequest,
   HomoclinicFromLargeCycleRequest,
   HopfCurveContinuationRequest,
-  IsochroneCurveContinuationRequest,
+  IsoperiodicCurveContinuationRequest,
   HomotopySaddleContinuationResult,
   HomotopySaddleFromEquilibriumRequest,
   LimitCycleContinuationFromHopfRequest,
@@ -341,15 +341,15 @@ export class WasmForkCoreClient implements ForkCoreClient {
     return await job.promise
   }
 
-  async runIsochroneCurveContinuation(
-    request: IsochroneCurveContinuationRequest,
+  async runIsoperiodicCurveContinuation(
+    request: IsoperiodicCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<Codim1CurveBranch> {
     const job = this.queue.enqueue(
-      'runIsochroneCurveContinuation',
+      'runIsoperiodicCurveContinuation',
       (signal) =>
         this.runWorker(
-          'runIsochroneCurveContinuation',
+          'runIsoperiodicCurveContinuation',
           request,
           signal,
           opts?.onProgress

@@ -1,6 +1,6 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 
-export function IsochroneCurveWorkflow({ scope }: { scope: InspectorSelectionController }) {
+export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
     InspectorDisclosure,
     branch,
@@ -10,27 +10,31 @@ export function IsochroneCurveWorkflow({ scope }: { scope: InspectorSelectionCon
     continuationParameterSet,
     existingBranchNames,
     formatNumber,
-    handleCreateIsochroneCurve,
-    isochroneCurveDraft,
-    isochroneCurveError,
-    isochroneParam1Options,
-    isochroneParam2Options,
+    handleCreateIsoperiodicCurve,
+    isoperiodicCurveDraft,
+    isoperiodicCurveError,
+    isoperiodicParam1Options,
+    isoperiodicParam2Options,
     parseNumber,
     runDisabled,
     selectedBranchPoint,
     selectionKey,
-    setIsochroneCurveDraft,
-    showIsochroneContinuation,
+    setIsoperiodicCurveDraft,
+    showIsoperiodicContinuation,
     suggestDefaultName,
     systemDraft,
   } = scope
   if (!branch) return null
   return <>
-{showIsochroneContinuation ? (
+{showIsoperiodicContinuation ? (
                   <InspectorDisclosure
-                    key={`${selectionKey}-isochrone-curve`}
-                    title={branch.branchType === 'isochrone_curve' ? 'Continue from Point' : 'Continue Isochrone'}
-                    testId="isochrone-curve-toggle"
+                    key={`${selectionKey}-isoperiodic-curve`}
+                    title={
+                      branch.branchType === 'isoperiodic_curve'
+                        ? 'Continue from Point'
+                        : 'Continue Isoperiodic Curve'
+                    }
+                    testId="isoperiodic-curve-toggle"
                     defaultOpen={false}
                     actionOnly
                   >
@@ -42,32 +46,32 @@ export function IsochroneCurveWorkflow({ scope }: { scope: InspectorSelectionCon
                       ) : null}
                       {continuationParameterCount < 2 ? (
                         <p className="empty-state">
-                          Add a second parameter to enable isochrone continuation.
+                          Add a second parameter to enable isoperiodic curve continuation.
                         </p>
                       ) : null}
                       <label>
                         Curve name
                         <input
-                          value={isochroneCurveDraft.name}
+                          value={isoperiodicCurveDraft.name}
                           onChange={(event) =>
-                            setIsochroneCurveDraft((prev) => ({
+                            setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
                               name: event.target.value,
                             }))
                           }
-                          placeholder={suggestDefaultName('isochroneCurve', {
+                          placeholder={suggestDefaultName('isoperiodicCurve', {
                             sourceName: branch.name,
                             existingNames: existingBranchNames,
                           })}
-                          data-testid="isochrone-curve-name"
+                          data-testid="isoperiodic-curve-name"
                         />
                       </label>
                       <label>
                         First parameter
                         <select
-                          value={isochroneCurveDraft.parameterName}
+                          value={isoperiodicCurveDraft.parameterName}
                           onChange={(event) =>
-                            setIsochroneCurveDraft((prev) => {
+                            setIsoperiodicCurveDraft((prev) => {
                               const parameterName = event.target.value
                               const fallbackParam2 =
                                 continuationParameterLabels.find((name) => name !== parameterName) ?? ''
@@ -79,10 +83,10 @@ export function IsochroneCurveWorkflow({ scope }: { scope: InspectorSelectionCon
                               return { ...prev, parameterName, param2Name }
                             })
                           }
-                          disabled={isochroneParam1Options.length === 0}
-                          data-testid="isochrone-curve-param1"
+                          disabled={isoperiodicParam1Options.length === 0}
+                          data-testid="isoperiodic-curve-param1"
                         >
-                          {isochroneParam1Options.map((name) => {
+                          {isoperiodicParam1Options.map((name) => {
                             const idx = systemDraft.paramNames.indexOf(name)
                             const branchValue =
                               branchParams.length === systemDraft.paramNames.length
@@ -105,17 +109,17 @@ export function IsochroneCurveWorkflow({ scope }: { scope: InspectorSelectionCon
                       <label>
                         Second parameter
                         <select
-                          value={isochroneCurveDraft.param2Name}
+                          value={isoperiodicCurveDraft.param2Name}
                           onChange={(event) =>
-                            setIsochroneCurveDraft((prev) => ({
+                            setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
                               param2Name: event.target.value,
                             }))
                           }
-                          disabled={isochroneParam2Options.length === 0}
-                          data-testid="isochrone-curve-param2"
+                          disabled={isoperiodicParam2Options.length === 0}
+                          data-testid="isoperiodic-curve-param2"
                         >
-                          {isochroneParam2Options.map((name) => {
+                          {isoperiodicParam2Options.map((name) => {
                             const idx = systemDraft.paramNames.indexOf(name)
                             const branchValue =
                               branchParams.length === systemDraft.paramNames.length
@@ -138,14 +142,14 @@ export function IsochroneCurveWorkflow({ scope }: { scope: InspectorSelectionCon
                       <label>
                         Direction
                         <select
-                          value={isochroneCurveDraft.forward ? 'forward' : 'backward'}
+                          value={isoperiodicCurveDraft.forward ? 'forward' : 'backward'}
                           onChange={(event) =>
-                            setIsochroneCurveDraft((prev) => ({
+                            setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
                               forward: event.target.value === 'forward',
                             }))
                           }
-                          data-testid="isochrone-curve-direction"
+                          data-testid="isoperiodic-curve-direction"
                         >
                           <option value="forward">Forward</option>
                           <option value="backward">Backward</option>
@@ -155,116 +159,116 @@ export function IsochroneCurveWorkflow({ scope }: { scope: InspectorSelectionCon
                         Initial step size
                         <input
                           type="number"
-                          value={isochroneCurveDraft.stepSize}
+                          value={isoperiodicCurveDraft.stepSize}
                           onChange={(event) =>
-                            setIsochroneCurveDraft((prev) => ({
+                            setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
                               stepSize: event.target.value,
                             }))
                           }
-                          data-testid="isochrone-curve-step-size"
+                          data-testid="isoperiodic-curve-step-size"
                         />
                       </label>
                       <label>
                         Min step size
                         <input
                           type="number"
-                          value={isochroneCurveDraft.minStepSize}
+                          value={isoperiodicCurveDraft.minStepSize}
                           onChange={(event) =>
-                            setIsochroneCurveDraft((prev) => ({
+                            setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
                               minStepSize: event.target.value,
                             }))
                           }
-                          data-testid="isochrone-curve-min-step-size"
+                          data-testid="isoperiodic-curve-min-step-size"
                         />
                       </label>
                       <label>
                         Max step size
                         <input
                           type="number"
-                          value={isochroneCurveDraft.maxStepSize}
+                          value={isoperiodicCurveDraft.maxStepSize}
                           onChange={(event) =>
-                            setIsochroneCurveDraft((prev) => ({
+                            setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
                               maxStepSize: event.target.value,
                             }))
                           }
-                          data-testid="isochrone-curve-max-step-size"
+                          data-testid="isoperiodic-curve-max-step-size"
                         />
                       </label>
                       <label>
                         Max points
                         <input
                           type="number"
-                          value={isochroneCurveDraft.maxSteps}
+                          value={isoperiodicCurveDraft.maxSteps}
                           onChange={(event) =>
-                            setIsochroneCurveDraft((prev) => ({
+                            setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
                               maxSteps: event.target.value,
                             }))
                           }
-                          data-testid="isochrone-curve-max-steps"
+                          data-testid="isoperiodic-curve-max-steps"
                         />
                       </label>
                       <label>
                         Corrector steps
                         <input
                           type="number"
-                          value={isochroneCurveDraft.correctorSteps}
+                          value={isoperiodicCurveDraft.correctorSteps}
                           onChange={(event) =>
-                            setIsochroneCurveDraft((prev) => ({
+                            setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
                               correctorSteps: event.target.value,
                             }))
                           }
-                          data-testid="isochrone-curve-corrector-steps"
+                          data-testid="isoperiodic-curve-corrector-steps"
                         />
                       </label>
                       <label>
                         Corrector tolerance
                         <input
                           type="number"
-                          value={isochroneCurveDraft.correctorTolerance}
+                          value={isoperiodicCurveDraft.correctorTolerance}
                           onChange={(event) =>
-                            setIsochroneCurveDraft((prev) => ({
+                            setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
                               correctorTolerance: event.target.value,
                             }))
                           }
-                          data-testid="isochrone-curve-corrector-tolerance"
+                          data-testid="isoperiodic-curve-corrector-tolerance"
                         />
                       </label>
                       <label>
                         Step tolerance
                         <input
                           type="number"
-                          value={isochroneCurveDraft.stepTolerance}
+                          value={isoperiodicCurveDraft.stepTolerance}
                           onChange={(event) =>
-                            setIsochroneCurveDraft((prev) => ({
+                            setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
                               stepTolerance: event.target.value,
                             }))
                           }
-                          data-testid="isochrone-curve-step-tolerance"
+                          data-testid="isoperiodic-curve-step-tolerance"
                         />
                       </label>
-                      {isochroneCurveError ? (
-                        <div className="field-error">{isochroneCurveError}</div>
+                      {isoperiodicCurveError ? (
+                        <div className="field-error">{isoperiodicCurveError}</div>
                       ) : null}
                       <button
-                        onClick={handleCreateIsochroneCurve}
+                        onClick={handleCreateIsoperiodicCurve}
                         disabled={
                           runDisabled ||
                           !selectedBranchPoint ||
                           (branch.branchType !== 'limit_cycle' &&
-                            branch.branchType !== 'isochrone_curve')
+                            branch.branchType !== 'isoperiodic_curve')
                         }
-                        data-testid="isochrone-curve-submit"
+                        data-testid="isoperiodic-curve-submit"
                       >
-                        {branch.branchType === 'isochrone_curve'
+                        {branch.branchType === 'isoperiodic_curve'
                           ? 'Continue from Point'
-                          : 'Continue Isochrone'}
+                          : 'Continue Isoperiodic Curve'}
                       </button>
                     </div>
                   </InspectorDisclosure>

@@ -162,7 +162,7 @@ behavior.
   - persisted limit-cycle Floquet mode vectors (when manually computed from the
     inspector) reuse the equilibrium eigenline/eigendisc trace pipeline and are
     sampled along the cycle with a configurable integer stride;
-  - cycle-like continuation branches (limit cycle, isochrone, homoclinic
+  - cycle-like continuation branches (limit cycle, isoperiodic, homoclinic
     related) use envelope rendering (min/max traces) for one-free-variable
     projections, rather than plotting every cycle profile point.
 - `web/src/App.css`: `.viewport-tile--diagram` overrides Plotly legend cursor

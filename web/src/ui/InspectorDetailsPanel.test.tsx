@@ -2642,12 +2642,12 @@ describe('InspectorDetailsPanel', () => {
     )
   })
 
-  it('shows and submits "Continue Isochrone" for limit-cycle branches', async () => {
+  it('shows and submits "Continue Isoperiodic Curve" for limit-cycle branches', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({
-      name: 'Isochrone_Menu_System',
+      name: 'Isoperiodic_Menu_System',
       config: {
-        name: 'Isochrone_Menu_System',
+        name: 'Isoperiodic_Menu_System',
         equations: ['y', '-x + mu + nu'],
         params: [0.2, 0.1],
         paramNames: ['mu', 'nu'],
@@ -2658,9 +2658,9 @@ describe('InspectorDetailsPanel', () => {
     })
     const limitCycle: LimitCycleObject = {
       type: 'limit_cycle',
-      name: 'LC_Isochrone',
+      name: 'LC_Isoperiodic',
       systemName: baseSystem.config.name,
-      origin: { type: 'orbit', orbitName: 'Orbit_Isochrone' },
+      origin: { type: 'orbit', orbitName: 'Orbit_Isoperiodic' },
       ntst: 4,
       ncol: 2,
       period: 6,
@@ -2673,7 +2673,7 @@ describe('InspectorDetailsPanel', () => {
     const added = addObject(baseSystem, limitCycle)
     const branch: ContinuationObject = {
       type: 'continuation',
-      name: 'lc_isochrone_seed_mu',
+      name: 'lc_isoperiodic_seed_mu',
       systemName: baseSystem.config.name,
       parameterName: 'mu',
       parentObject: limitCycle.name,
@@ -2697,7 +2697,7 @@ describe('InspectorDetailsPanel', () => {
       params: [...baseSystem.config.params],
     }
     const branchResult = addBranch(added.system, branch, added.nodeId)
-    const onCreateIsochroneCurveFromPoint = vi.fn().mockResolvedValue(undefined)
+    const onCreateIsoperiodicCurveFromPoint = vi.fn().mockResolvedValue(undefined)
 
     render(
       <InspectorDetailsPanel
@@ -2726,20 +2726,20 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
-        onCreateIsochroneCurveFromPoint={onCreateIsochroneCurveFromPoint}
+        onCreateIsoperiodicCurveFromPoint={onCreateIsoperiodicCurveFromPoint}
       />
     )
 
-    await user.click(screen.getByTestId('isochrone-curve-toggle'))
-    await user.clear(screen.getByTestId('isochrone-curve-name'))
-    await user.type(screen.getByTestId('isochrone-curve-name'), 'iso_curve_nu_mu')
-    expect(screen.getByTestId('isochrone-curve-param1')).toHaveValue('mu')
-    await user.selectOptions(screen.getByTestId('isochrone-curve-param1'), 'nu')
-    await user.selectOptions(screen.getByTestId('isochrone-curve-param2'), 'mu')
-    await user.selectOptions(screen.getByTestId('isochrone-curve-direction'), 'backward')
-    await user.click(screen.getByTestId('isochrone-curve-submit'))
+    await user.click(screen.getByTestId('isoperiodic-curve-toggle'))
+    await user.clear(screen.getByTestId('isoperiodic-curve-name'))
+    await user.type(screen.getByTestId('isoperiodic-curve-name'), 'iso_curve_nu_mu')
+    expect(screen.getByTestId('isoperiodic-curve-param1')).toHaveValue('mu')
+    await user.selectOptions(screen.getByTestId('isoperiodic-curve-param1'), 'nu')
+    await user.selectOptions(screen.getByTestId('isoperiodic-curve-param2'), 'mu')
+    await user.selectOptions(screen.getByTestId('isoperiodic-curve-direction'), 'backward')
+    await user.click(screen.getByTestId('isoperiodic-curve-submit'))
 
-    expect(onCreateIsochroneCurveFromPoint).toHaveBeenCalledWith(
+    expect(onCreateIsoperiodicCurveFromPoint).toHaveBeenCalledWith(
       expect.objectContaining({
         branchId: branchResult.nodeId,
         pointIndex: 0,
@@ -2751,12 +2751,12 @@ describe('InspectorDetailsPanel', () => {
     )
   })
 
-  it('shows "Continue from Point" for isochrone branches and submits continuation', async () => {
+  it('shows "Continue from Point" for isoperiodic curve branches and submits continuation', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({
-      name: 'Isochrone_From_Isochrone_Menu_System',
+      name: 'Isoperiodic_From_Isoperiodic_Menu_System',
       config: {
-        name: 'Isochrone_From_Isochrone_Menu_System',
+        name: 'Isoperiodic_From_Isoperiodic_Menu_System',
         equations: ['y', '-x + mu + nu + kappa'],
         params: [0.2, 0.1, 0.3],
         paramNames: ['mu', 'nu', 'kappa'],
@@ -2767,9 +2767,9 @@ describe('InspectorDetailsPanel', () => {
     })
     const limitCycle: LimitCycleObject = {
       type: 'limit_cycle',
-      name: 'LC_Isochrone_Source',
+      name: 'LC_Isoperiodic_Source',
       systemName: baseSystem.config.name,
-      origin: { type: 'orbit', orbitName: 'Orbit_Isochrone_Source' },
+      origin: { type: 'orbit', orbitName: 'Orbit_Isoperiodic_Source' },
       ntst: 1,
       ncol: 1,
       period: 6,
@@ -2782,12 +2782,12 @@ describe('InspectorDetailsPanel', () => {
     const added = addObject(baseSystem, limitCycle)
     const branch: ContinuationObject = {
       type: 'continuation',
-      name: 'isochrone_seed_mu_nu',
+      name: 'isoperiodic_seed_mu_nu',
       systemName: baseSystem.config.name,
       parameterName: 'mu, nu',
       parentObject: limitCycle.name,
       startObject: 'lc_iso_seed',
-      branchType: 'isochrone_curve',
+      branchType: 'isoperiodic_curve',
       data: {
         points: [
           {
@@ -2801,7 +2801,7 @@ describe('InspectorDetailsPanel', () => {
         bifurcations: [],
         indices: [0],
         branch_type: {
-          type: 'IsochroneCurve',
+          type: 'IsoperiodicCurve',
           param1_name: 'mu',
           param2_name: 'nu',
           ntst: 1,
@@ -2813,7 +2813,7 @@ describe('InspectorDetailsPanel', () => {
       params: [...baseSystem.config.params],
     }
     const branchResult = addBranch(added.system, branch, added.nodeId)
-    const onCreateIsochroneCurveFromPoint = vi.fn().mockResolvedValue(undefined)
+    const onCreateIsoperiodicCurveFromPoint = vi.fn().mockResolvedValue(undefined)
 
     render(
       <InspectorDetailsPanel
@@ -2842,20 +2842,20 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
-        onCreateIsochroneCurveFromPoint={onCreateIsochroneCurveFromPoint}
+        onCreateIsoperiodicCurveFromPoint={onCreateIsoperiodicCurveFromPoint}
       />
     )
 
-    expect(screen.getByTestId('isochrone-curve-toggle')).toHaveTextContent('Continue from Point')
-    await user.click(screen.getByTestId('isochrone-curve-toggle'))
-    await user.clear(screen.getByTestId('isochrone-curve-name'))
-    await user.type(screen.getByTestId('isochrone-curve-name'), 'iso_curve_kappa_mu')
-    expect(screen.getByTestId('isochrone-curve-param1')).toHaveValue('mu')
-    await user.selectOptions(screen.getByTestId('isochrone-curve-param1'), 'kappa')
-    await user.selectOptions(screen.getByTestId('isochrone-curve-param2'), 'mu')
-    await user.click(screen.getByTestId('isochrone-curve-submit'))
+    expect(screen.getByTestId('isoperiodic-curve-toggle')).toHaveTextContent('Continue from Point')
+    await user.click(screen.getByTestId('isoperiodic-curve-toggle'))
+    await user.clear(screen.getByTestId('isoperiodic-curve-name'))
+    await user.type(screen.getByTestId('isoperiodic-curve-name'), 'iso_curve_kappa_mu')
+    expect(screen.getByTestId('isoperiodic-curve-param1')).toHaveValue('mu')
+    await user.selectOptions(screen.getByTestId('isoperiodic-curve-param1'), 'kappa')
+    await user.selectOptions(screen.getByTestId('isoperiodic-curve-param2'), 'mu')
+    await user.click(screen.getByTestId('isoperiodic-curve-submit'))
 
-    expect(onCreateIsochroneCurveFromPoint).toHaveBeenCalledWith(
+    expect(onCreateIsoperiodicCurveFromPoint).toHaveBeenCalledWith(
       expect.objectContaining({
         branchId: branchResult.nodeId,
         pointIndex: 0,
@@ -2866,11 +2866,11 @@ describe('InspectorDetailsPanel', () => {
     )
   })
 
-  it('hides "Continue Isochrone" outside limit-cycle branch context', () => {
-    const baseSystem = createSystem({ name: 'Isochrone_Hidden_System' })
+  it('hides "Continue Isoperiodic Curve" outside limit-cycle branch context', () => {
+    const baseSystem = createSystem({ name: 'Isoperiodic_Hidden_System' })
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
-      name: 'Eq_Isochrone_Hidden',
+      name: 'Eq_Isoperiodic_Hidden',
       systemName: baseSystem.config.name,
       solution: {
         state: [0, 0],
@@ -2935,11 +2935,11 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
-        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsoperiodicCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
-    expect(screen.queryByTestId('isochrone-curve-toggle')).toBeNull()
+    expect(screen.queryByTestId('isoperiodic-curve-toggle')).toBeNull()
   })
 
   it('labels limit cycle point details as Floquet Multipliers', async () => {
@@ -5506,7 +5506,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
-        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsoperiodicCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
@@ -5607,7 +5607,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
-        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsoperiodicCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
@@ -5708,7 +5708,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
-        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsoperiodicCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
@@ -5790,7 +5790,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
-        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsoperiodicCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
@@ -5874,7 +5874,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
-        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsoperiodicCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
@@ -5964,7 +5964,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
-        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsoperiodicCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
@@ -6060,7 +6060,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
-        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsoperiodicCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}

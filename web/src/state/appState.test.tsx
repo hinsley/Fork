@@ -1076,11 +1076,11 @@ describe('appState limit cycle render targets', () => {
     })
   })
 
-  it('creates an isochrone branch from a selected limit-cycle point', async () => {
+  it('creates an isoperiodic curve branch from a selected limit-cycle point', async () => {
     const base = createSystem({
-      name: 'Isochrone_From_Point',
+      name: 'Isoperiodic_From_Point',
       config: {
-        name: 'Isochrone_From_Point',
+        name: 'Isoperiodic_From_Point',
         equations: ['y', '-x + mu'],
         params: [0.2, 0.1],
         paramNames: ['mu', 'nu'],
@@ -1132,7 +1132,7 @@ describe('appState limit cycle render targets', () => {
     const withBranch = addBranch(withObject.system, sourceBranch, withObject.nodeId)
     const client = new MockForkCoreClient(0)
     let capturedPeriod: number | null = null
-    client.runIsochroneCurveContinuation = async (request) => {
+    client.runIsoperiodicCurveContinuation = async (request) => {
       capturedPeriod = request.period
       return {
         points: [
@@ -1158,7 +1158,7 @@ describe('appState limit cycle render targets', () => {
     const { getContext } = setupApp(withBranch.system, client)
 
     await act(async () => {
-      await getContext().actions.createIsochroneCurveFromPoint({
+      await getContext().actions.createIsoperiodicCurveFromPoint({
         branchId: withBranch.nodeId,
         pointIndex: 0,
         name: 'iso_curve_nu_mu',
@@ -1176,10 +1176,10 @@ describe('appState limit cycle render targets', () => {
       expect(capturedPeriod).toBeCloseTo(6, 12)
       const branchId = findBranchIdByName(next!, 'iso_curve_nu_mu')
       const created = next!.branches[branchId]
-      expect(created.branchType).toBe('isochrone_curve')
+      expect(created.branchType).toBe('isoperiodic_curve')
       expect(created.parentObject).toBe('LC_Iso')
       expect(created.data.branch_type).toMatchObject({
-        type: 'IsochroneCurve',
+        type: 'IsoperiodicCurve',
         param1_name: 'nu',
         param2_name: 'mu',
       })
@@ -1187,11 +1187,11 @@ describe('appState limit cycle render targets', () => {
     })
   })
 
-  it('creates an isochrone branch from a selected isochrone point', async () => {
+  it('creates an isoperiodic curve branch from a selected isoperiodic curve point', async () => {
     const base = createSystem({
-      name: 'Isochrone_From_Isochrone_Point',
+      name: 'Isoperiodic_From_Isoperiodic_Point',
       config: {
-        name: 'Isochrone_From_Isochrone_Point',
+        name: 'Isoperiodic_From_Isoperiodic_Point',
         equations: ['y', '-x + mu + nu + kappa'],
         params: [0.2, 0.1, 0.3],
         paramNames: ['mu', 'nu', 'kappa'],
@@ -1222,7 +1222,7 @@ describe('appState limit cycle render targets', () => {
       parameterName: 'mu, nu',
       parentObject: limitCycle.name,
       startObject: limitCycle.name,
-      branchType: 'isochrone_curve',
+      branchType: 'isoperiodic_curve',
       data: {
         points: [
           {
@@ -1236,7 +1236,7 @@ describe('appState limit cycle render targets', () => {
         bifurcations: [],
         indices: [0],
         branch_type: {
-          type: 'IsochroneCurve',
+          type: 'IsoperiodicCurve',
           param1_name: 'mu',
           param2_name: 'nu',
           ntst: 1,
@@ -1250,9 +1250,9 @@ describe('appState limit cycle render targets', () => {
     const withBranch = addBranch(withObject.system, sourceBranch, withObject.nodeId)
     const client = new MockForkCoreClient(0)
     let capturedRequest:
-      | Parameters<NonNullable<MockForkCoreClient['runIsochroneCurveContinuation']>>[0]
+      | Parameters<NonNullable<MockForkCoreClient['runIsoperiodicCurveContinuation']>>[0]
       | null = null
-    client.runIsochroneCurveContinuation = async (request) => {
+    client.runIsoperiodicCurveContinuation = async (request) => {
       capturedRequest = request
       return {
         points: [
@@ -1278,7 +1278,7 @@ describe('appState limit cycle render targets', () => {
     const { getContext } = setupApp(withBranch.system, client)
 
     await act(async () => {
-      await getContext().actions.createIsochroneCurveFromPoint({
+      await getContext().actions.createIsoperiodicCurveFromPoint({
         branchId: withBranch.nodeId,
         pointIndex: 0,
         name: 'iso_curve_kappa_mu',
@@ -1301,20 +1301,20 @@ describe('appState limit cycle render targets', () => {
       expect(capturedRequest?.system.params[1]).toBeCloseTo(0.35, 12)
       const branchId = findBranchIdByName(next!, 'iso_curve_kappa_mu')
       const created = next!.branches[branchId]
-      expect(created.branchType).toBe('isochrone_curve')
+      expect(created.branchType).toBe('isoperiodic_curve')
       expect(created.data.branch_type).toMatchObject({
-        type: 'IsochroneCurve',
+        type: 'IsoperiodicCurve',
         param1_name: 'kappa',
         param2_name: 'mu',
       })
     })
   })
 
-  it('uses negative logical indices for backward isochrone continuation', async () => {
+  it('uses negative logical indices for backward isoperiodic curve continuation', async () => {
     const base = createSystem({
-      name: 'Isochrone_Backward_Indices',
+      name: 'Isoperiodic_Backward_Indices',
       config: {
-        name: 'Isochrone_Backward_Indices',
+        name: 'Isoperiodic_Backward_Indices',
         equations: ['y', '-x + mu + nu'],
         params: [0.2, 0.1],
         paramNames: ['mu', 'nu'],
@@ -1365,7 +1365,7 @@ describe('appState limit cycle render targets', () => {
     }
     const withBranch = addBranch(withObject.system, sourceBranch, withObject.nodeId)
     const client = new MockForkCoreClient(0)
-    client.runIsochroneCurveContinuation = async (request) => ({
+    client.runIsoperiodicCurveContinuation = async (request) => ({
       points: [
         {
           state: [...request.lcState, request.period],
@@ -1394,7 +1394,7 @@ describe('appState limit cycle render targets', () => {
     const { getContext } = setupApp(withBranch.system, client)
 
     await act(async () => {
-      await getContext().actions.createIsochroneCurveFromPoint({
+      await getContext().actions.createIsoperiodicCurveFromPoint({
         branchId: withBranch.nodeId,
         pointIndex: 0,
         name: 'iso_curve_backward_indices',
@@ -1411,7 +1411,7 @@ describe('appState limit cycle render targets', () => {
       expect(getContext().state.error).toBeNull()
       const branchId = findBranchIdByName(next!, 'iso_curve_backward_indices')
       const created = next!.branches[branchId]
-      expect(created.branchType).toBe('isochrone_curve')
+      expect(created.branchType).toBe('isoperiodic_curve')
       expect(created.data.indices).toEqual([0, -1, -2])
     })
   })

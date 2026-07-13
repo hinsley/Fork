@@ -1,8 +1,8 @@
-//! Isochrone curve continuation for limit cycles.
+//! Isoperiodic curve continuation for limit cycles.
 //!
 //! Continues a limit cycle in two-parameter space with fixed period:
 //! - Standard periodic collocation BVP for the cycle
-//! - Isochrone condition: T - T_seed = 0
+//! - Isoperiodic condition: T - T_seed = 0
 
 use crate::continuation::periodic::{extract_multipliers_shooting, CollocationCoefficients};
 use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
@@ -12,11 +12,11 @@ use crate::traits::DynamicalSystem;
 use anyhow::{bail, Result};
 use nalgebra::{DMatrix, DVector};
 
-/// Isochrone continuation problem.
+/// Isoperiodic curve continuation problem.
 ///
 /// Augmented state layout: [p1, stages..., meshes..., T, p2]
 /// with stage-first LC storage.
-pub struct IsochroneCurveProblem<'a> {
+pub struct IsoperiodicCurveProblem<'a> {
     /// The dynamical system
     system: &'a mut EquationSystem,
     /// Index of first active parameter
@@ -45,8 +45,8 @@ pub struct IsochroneCurveProblem<'a> {
     work_j: Vec<f64>,
 }
 
-impl<'a> IsochroneCurveProblem<'a> {
-    /// Create a new isochrone continuation problem from a seed LC point.
+impl<'a> IsoperiodicCurveProblem<'a> {
+    /// Create a new isoperiodic curve continuation problem from a seed LC point.
     pub fn new(
         system: &'a mut EquationSystem,
         lc_state: Vec<f64>,
@@ -63,7 +63,7 @@ impl<'a> IsochroneCurveProblem<'a> {
         }
 
         if param1_index == param2_index {
-            bail!("Isochrone continuation requires two distinct parameters");
+            bail!("Isoperiodic curve continuation requires two distinct parameters");
         }
 
         if param1_index >= system.params.len() || param2_index >= system.params.len() {
@@ -138,7 +138,7 @@ impl<'a> IsochroneCurveProblem<'a> {
         self.ntst * self.ncol * self.dim + self.ntst * self.dim + 1 + 1 + self.dim
     }
 
-    /// Row index of the fixed-period isochrone constraint.
+    /// Row index of the fixed-period isoperiodic constraint.
     #[cfg(test)]
     fn fixed_period_row(&self) -> usize {
         let n_stages = self.ntst * self.ncol;
@@ -342,7 +342,7 @@ impl<'a> IsochroneCurveProblem<'a> {
     }
 }
 
-impl<'a> ContinuationProblem for IsochroneCurveProblem<'a> {
+impl<'a> ContinuationProblem for IsoperiodicCurveProblem<'a> {
     fn dimension(&self) -> usize {
         self.n_eqs()
     }
@@ -461,7 +461,7 @@ impl<'a> ContinuationProblem for IsochroneCurveProblem<'a> {
         };
 
         // Multiplier extraction expects mesh-first implicit Jacobian ordering.
-        // Isochrone stores stage-first explicit, so remap before extraction.
+        // Isoperiodic stores stage-first explicit, so remap before extraction.
         // Keep this non-fatal so continuation can still proceed on poor points.
         let remapped_jac = self.remap_jac_for_multiplier_extraction(&jac);
         let multipliers =
@@ -482,7 +482,7 @@ impl<'a> ContinuationProblem for IsochroneCurveProblem<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::IsochroneCurveProblem;
+    use super::IsoperiodicCurveProblem;
     use crate::continuation::ContinuationProblem;
     use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
     use nalgebra::{DMatrix, DVector};
@@ -503,7 +503,7 @@ mod tests {
         let mut system = make_two_dim_flow_system();
         let lc_state = vec![0.1; 6];
 
-        let err = IsochroneCurveProblem::new(&mut system, lc_state, 0.0, 0, 1, 0.0, 0.0, 1, 1)
+        let err = IsoperiodicCurveProblem::new(&mut system, lc_state, 0.0, 0, 1, 0.0, 0.0, 1, 1)
             .err()
             .expect("expected invalid period to fail");
 
@@ -520,13 +520,13 @@ mod tests {
         let mut system = make_two_dim_flow_system();
         let lc_state = vec![0.1; 6];
 
-        let err = IsochroneCurveProblem::new(&mut system, lc_state, 1.0, 0, 0, 0.0, 0.0, 1, 1)
+        let err = IsoperiodicCurveProblem::new(&mut system, lc_state, 1.0, 0, 0, 0.0, 0.0, 1, 1)
             .err()
             .expect("expected identical parameters to fail");
 
         assert!(
             err.to_string()
-                .contains("Isochrone continuation requires two distinct parameters"),
+                .contains("Isoperiodic curve continuation requires two distinct parameters"),
             "unexpected error: {}",
             err
         );
@@ -537,7 +537,7 @@ mod tests {
         let mut system = make_two_dim_flow_system();
         let lc_state = vec![0.1; 6];
 
-        let err = IsochroneCurveProblem::new(&mut system, lc_state, 1.0, 0, 2, 0.0, 0.0, 1, 1)
+        let err = IsoperiodicCurveProblem::new(&mut system, lc_state, 1.0, 0, 2, 0.0, 0.0, 1, 1)
             .err()
             .expect("expected unknown parameter index to fail");
 
@@ -555,8 +555,8 @@ mod tests {
         let lc_state = vec![0.1, 0.2, 0.1, 0.2, 0.1, 0.2];
 
         let mut problem =
-            IsochroneCurveProblem::new(&mut system, lc_state, 2.0, 0, 1, 0.0, 0.0, 1, 1)
-                .expect("create isochrone problem");
+            IsoperiodicCurveProblem::new(&mut system, lc_state, 2.0, 0, 1, 0.0, 0.0, 1, 1)
+                .expect("create isoperiodic problem");
 
         // Build [p1, lc_state..., T, p2] with T != T_seed.
         let mut aug = DVector::zeros(problem.dimension() + 1);
@@ -572,8 +572,8 @@ mod tests {
             .residual(&aug, &mut out)
             .expect("residual should evaluate");
 
-        let isochrone_row = problem.fixed_period_row();
-        assert!((out[isochrone_row] - 0.5).abs() < 1e-9);
+        let isoperiodic_row = problem.fixed_period_row();
+        assert!((out[isoperiodic_row] - 0.5).abs() < 1e-9);
     }
 
     #[test]
@@ -582,8 +582,8 @@ mod tests {
         let lc_state = vec![0.1, 0.2, 0.1, 0.2, 0.1, 0.2];
 
         let mut problem =
-            IsochroneCurveProblem::new(&mut system, lc_state, 2.0, 0, 1, 0.0, 0.0, 1, 1)
-                .expect("create isochrone problem");
+            IsoperiodicCurveProblem::new(&mut system, lc_state, 2.0, 0, 1, 0.0, 0.0, 1, 1)
+                .expect("create isoperiodic problem");
 
         let n_stages = 1usize;
         let n_eqs = n_stages * 2 + 1 * 2 + 1 + 2;
@@ -608,8 +608,8 @@ mod tests {
         let lc_state = vec![0.1; 10];
 
         let mut problem =
-            IsochroneCurveProblem::new(&mut system, lc_state, 1.0, 0, 1, 0.0, 0.0, 2, 1)
-                .expect("create isochrone problem");
+            IsoperiodicCurveProblem::new(&mut system, lc_state, 1.0, 0, 1, 0.0, 0.0, 2, 1)
+                .expect("create isoperiodic problem");
 
         // Augmented state layout: [p1, lc_state..., T, p2]
         let mut aug = DVector::zeros(problem.dimension() + 1);

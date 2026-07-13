@@ -51,7 +51,7 @@ pub use homoclinic_init::{
 };
 pub use homotopy_saddle::{continue_homotopy_saddle_curve, homotopy_stage_d_to_homoclinic};
 pub use lc_codim1_curves::{
-    IsochroneCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
+    IsoperiodicCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
 };
 pub use manifold::{
     continue_limit_cycle_manifold_2d, continue_limit_cycle_manifold_2d_with_progress,

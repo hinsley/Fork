@@ -15,8 +15,8 @@ const wasmState = {
   throwMode: 'none' as 'none' | 'validate' | 'abort',
   useCamelCaseIsoclineMethod: false,
   disableHomoclinicLargeCycleInit: false,
-  disableIsochroneRunner: false,
-  isochroneFallbackCalls: 0,
+  disableIsoperiodicRunner: false,
+  isoperiodicFallbackCalls: 0,
   lastRunStepsArg: null as number | null,
   lastSystemType: null as string | null,
   lastLimitCycleRunnerSystemType: null as string | null,
@@ -165,10 +165,10 @@ beforeAll(async () => {
       init_homoclinic_from_homotopy_saddle() {
         return {}
       }
-      continue_isochrone_curve() {
-        wasmState.isochroneFallbackCalls += 1
+      continue_isoperiodic_curve() {
+        wasmState.isoperiodicFallbackCalls += 1
         return {
-          curve_type: 'Isochrone',
+          curve_type: 'Isoperiodic',
           param1_index: 0,
           param2_index: 1,
           points: [],
@@ -469,8 +469,8 @@ beforeAll(async () => {
       WasmManifold2DExtensionRunner: MockManifold2DExtensionRunner,
       WasmFoldCurveRunner: MockContinuationRunner,
       WasmHopfCurveRunner: MockContinuationRunner,
-      get WasmIsochroneCurveRunner() {
-        return wasmState.disableIsochroneRunner ? undefined : MockContinuationRunner
+      get WasmIsoperiodicCurveRunner() {
+        return wasmState.disableIsoperiodicRunner ? undefined : MockContinuationRunner
       },
       WasmLimitCycleRunner: MockLimitCycleRunner,
       WasmHomoclinicRunner: MockHomoclinicRunner,
@@ -492,8 +492,8 @@ beforeEach(() => {
   wasmState.throwMode = 'none'
   wasmState.useCamelCaseIsoclineMethod = false
   wasmState.disableHomoclinicLargeCycleInit = false
-  wasmState.disableIsochroneRunner = false
-  wasmState.isochroneFallbackCalls = 0
+  wasmState.disableIsoperiodicRunner = false
+  wasmState.isoperiodicFallbackCalls = 0
   wasmState.lastRunStepsArg = null
   wasmState.lastSystemType = null
   wasmState.lastLimitCycleRunnerSystemType = null
@@ -1258,13 +1258,13 @@ describe('forkCoreWorker', () => {
     )
   })
 
-  it('posts progress and results for isochrone continuation runners', async () => {
+  it('posts progress and results for isoperiodic curve continuation runners', async () => {
     const handler = requireHandler()
 
     await handler({
       data: {
-        id: 'job-isochrone',
-        kind: 'runIsochroneCurveContinuation',
+        id: 'job-isoperiodic',
+        kind: 'runIsoperiodicCurveContinuation',
         payload: {
           system: {
             ...baseSystem,
@@ -1287,24 +1287,24 @@ describe('forkCoreWorker', () => {
 
     expect(workerScope.postMessage).toHaveBeenCalledTimes(2)
     expect(workerScope.postMessage.mock.calls[0][0]).toMatchObject({
-      id: 'job-isochrone',
+      id: 'job-isoperiodic',
       kind: 'progress',
     })
     expect(workerScope.postMessage.mock.calls[1][0]).toMatchObject({
-      id: 'job-isochrone',
+      id: 'job-isoperiodic',
       ok: true,
       result: { points: [] },
     })
   })
 
-  it('falls back to WasmSystem isochrone continuation when runner constructor is unavailable', async () => {
+  it('falls back to WasmSystem isoperiodic curve continuation when runner constructor is unavailable', async () => {
     const handler = requireHandler()
-    wasmState.disableIsochroneRunner = true
+    wasmState.disableIsoperiodicRunner = true
 
     await handler({
       data: {
-        id: 'job-isochrone-fallback',
-        kind: 'runIsochroneCurveContinuation',
+        id: 'job-isoperiodic-fallback',
+        kind: 'runIsoperiodicCurveContinuation',
         payload: {
           system: {
             ...baseSystem,
@@ -1325,20 +1325,20 @@ describe('forkCoreWorker', () => {
       },
     } as unknown as MessageEvent<Record<string, unknown>>)
 
-    expect(wasmState.isochroneFallbackCalls).toBe(1)
+    expect(wasmState.isoperiodicFallbackCalls).toBe(1)
     expect(workerScope.postMessage).toHaveBeenCalledTimes(3)
     expect(workerScope.postMessage.mock.calls[0][0]).toMatchObject({
-      id: 'job-isochrone-fallback',
+      id: 'job-isoperiodic-fallback',
       kind: 'progress',
       progress: { done: false },
     })
     expect(workerScope.postMessage.mock.calls[1][0]).toMatchObject({
-      id: 'job-isochrone-fallback',
+      id: 'job-isoperiodic-fallback',
       kind: 'progress',
       progress: { done: true },
     })
     expect(workerScope.postMessage.mock.calls[2][0]).toMatchObject({
-      id: 'job-isochrone-fallback',
+      id: 'job-isoperiodic-fallback',
       ok: true,
       result: { points: [] },
     })

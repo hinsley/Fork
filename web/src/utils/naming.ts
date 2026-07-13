@@ -19,7 +19,7 @@ export type DefaultNameKind =
   | 'periodDoubledCycle'
   | 'foldCurve'
   | 'hopfCurve'
-  | 'isochroneCurve'
+  | 'isoperiodicCurve'
   | 'nsCurve'
   | 'homoclinic'
   | 'homoclinicRestart'
@@ -49,7 +49,7 @@ const INDEXED_LABELS: Partial<Record<DefaultNameKind, string>> = {
 // supplies its own semantic prefix.
 const INHERITED_OPERATION_PREFIXES = [
   'homotopy_saddle',
-  'isochrone_curve',
+  'isoperiodic_curve',
   'fold_curve',
   'hopf_curve',
   'ns_curve',
@@ -57,7 +57,7 @@ const INHERITED_OPERATION_PREFIXES = [
   'lc_pd',
   'manifold',
   'homotopy',
-  'isochrone',
+  'isoperiodic',
   'homoc',
   'fold',
   'hopf',
@@ -217,8 +217,8 @@ export function suggestDefaultName(
     case 'hopfCurve':
       baseName = composeDerivedName(['hopf'], source || 'branch')
       break
-    case 'isochroneCurve':
-      baseName = composeDerivedName(['isochrone'], source || 'branch')
+    case 'isoperiodicCurve':
+      baseName = composeDerivedName(['isoperiodic'], source || 'branch')
       break
     case 'nsCurve':
       baseName = composeDerivedName(['ns'], source || 'branch')

@@ -31,7 +31,7 @@ const requiredExports = [
   'WasmEqManifold2DRunner',
   'WasmCycleManifold2DRunner',
   'WasmManifold2DExtensionRunner',
-  'WasmIsochroneCurveRunner',
+  'WasmIsoperiodicCurveRunner',
   'WasmLyapunovRunner',
   'WasmCovariantLyapunovRunner',
   'WasmEquilibriumSolverRunner',

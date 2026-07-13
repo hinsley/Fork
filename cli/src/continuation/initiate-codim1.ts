@@ -23,7 +23,7 @@ import { isValidName, getBranchParams } from './utils';
 import {
   runFoldCurveWithProgress,
   runHopfCurveWithProgress,
-  runIsochroneCurveWithProgress,
+  runIsoperiodicCurveWithProgress,
   runLPCCurveWithProgress,
   runPDCurveWithProgress,
   runNSCurveWithProgress
@@ -973,9 +973,9 @@ export async function initiateLPCCurve(
 }
 
 /**
- * Initiates isochrone continuation from a limit-cycle or isochrone point.
+ * Initiates isoperiodic curve continuation from a limit-cycle or isoperiodic curve point.
  */
-export async function initiateIsochroneCurve(
+export async function initiateIsoperiodicCurve(
   sysName: string,
   branch: ContinuationObject,
   point: ContinuationPoint,
@@ -992,20 +992,20 @@ export async function initiateIsochroneCurve(
   const branchParams = getBranchParams(sysName, branch, sysConfig);
 
   const bt = branch.branchType;
-  if ((bt !== 'limit_cycle' && bt !== 'isochrone_curve') || !branch.data?.branch_type) {
-    printError("Isochrone continuation requires a limit cycle or isochrone branch");
+  if ((bt !== 'limit_cycle' && bt !== 'isoperiodic_curve') || !branch.data?.branch_type) {
+    printError("Isoperiodic curve continuation requires a limit cycle or isoperiodic curve branch");
     return null;
   }
   const lcBranchType = branch.data.branch_type as
     | { type: 'LimitCycle'; ntst: number; ncol: number }
     | {
-        type: 'IsochroneCurve';
+        type: 'IsoperiodicCurve';
         param1_name: string;
         param2_name: string;
         ntst: number;
         ncol: number;
       };
-  if (lcBranchType.type !== 'LimitCycle' && lcBranchType.type !== 'IsochroneCurve') {
+  if (lcBranchType.type !== 'LimitCycle' && lcBranchType.type !== 'IsoperiodicCurve') {
     printError('Limit cycle mesh metadata is missing for this branch');
     return null;
   }
@@ -1013,7 +1013,7 @@ export async function initiateIsochroneCurve(
   const ncol = lcBranchType.ncol || 4;
 
   const sourceParam1Name =
-    lcBranchType.type === 'IsochroneCurve' ? lcBranchType.param1_name : branch.parameterName;
+    lcBranchType.type === 'IsoperiodicCurve' ? lcBranchType.param1_name : branch.parameterName;
   if (!paramNames.includes(sourceParam1Name)) {
     printError('Source continuation parameter is not defined in this system.');
     return null;
@@ -1023,7 +1023,7 @@ export async function initiateIsochroneCurve(
   if (sourceParam1Idx >= 0) {
     branchParams[sourceParam1Idx] = point.param_value;
   }
-  if (lcBranchType.type === 'IsochroneCurve' && Number.isFinite(point.param2_value)) {
+  if (lcBranchType.type === 'IsoperiodicCurve' && Number.isFinite(point.param2_value)) {
     const sourceParam2Idx = paramNames.indexOf(lcBranchType.param2_name);
     if (sourceParam2Idx >= 0) {
       branchParams[sourceParam2Idx] = point.param2_value as number;
@@ -1045,7 +1045,7 @@ export async function initiateIsochroneCurve(
   }
 
   // Configuration variables
-  let curveName = `isochrone_curve_${branch.name}`;
+  let curveName = `isoperiodic_curve_${branch.name}`;
   let stepSizeInput = '0.01';
   let maxStepsInput = '300';
   let minStepSizeInput = '1e-5';
@@ -1119,7 +1119,7 @@ export async function initiateIsochroneCurve(
       edit: async () => {
         const { value } = await inquirer.prompt({
           name: 'value',
-          message: 'Name for the isochrone curve:',
+          message: 'Name for the isoperiodic curve:',
           default: curveName,
           validate: (val: string) => isValidName(val)
         });
@@ -1206,13 +1206,13 @@ export async function initiateIsochroneCurve(
 
   // Show info header
   console.log('');
-  console.log(chalk.yellow('Isochrone Continuation (Two-Parameter)'));
+  console.log(chalk.yellow('Isoperiodic Curve Continuation (Two-Parameter)'));
   console.log(chalk.gray(`Tracking fixed-period curve in (${param1Name}, ${param2Name}) space`));
   console.log(chalk.gray(`Starting point: ${param1Name}=${param1Value}, period=${period}`));
   console.log('');
 
   while (true) {
-    const result = await runConfigMenu('Configure Isochrone Continuation', entries);
+    const result = await runConfigMenu('Configure Isoperiodic Curve Continuation', entries);
     if (result === 'back') {
       return null;
     }
@@ -1248,7 +1248,7 @@ export async function initiateIsochroneCurve(
     step_tolerance: 1e-8
   };
 
-  printInfo(`Running isochrone continuation (max ${continuationSettings.max_steps} steps)...`);
+  printInfo(`Running isoperiodic curve continuation (max ${continuationSettings.max_steps} steps)...`);
 
   try {
     const runConfig = { ...sysConfig };
@@ -1259,7 +1259,7 @@ export async function initiateIsochroneCurve(
     const bridge = new WasmBridge(runConfig);
     const lcCoords = point.state.slice(0, -1);
 
-    const curveData = runIsochroneCurveWithProgress(
+    const curveData = runIsoperiodicCurveWithProgress(
       bridge,
       lcCoords,
       period,
@@ -1271,15 +1271,15 @@ export async function initiateIsochroneCurve(
       ncol,
       continuationSettings,
       directionForward,
-      'Isochrone'
+      'Isoperiodic curve'
     );
 
     if (!curveData || !curveData.points || curveData.points.length === 0) {
-      printError('Isochrone continuation returned no points');
+      printError('Isoperiodic curve continuation returned no points');
       return null;
     }
 
-    printSuccess(`Isochrone computed: ${curveData.points.length} points`);
+    printSuccess(`Isoperiodic curve computed: ${curveData.points.length} points`);
 
     const branchData = {
       points: curveData.points.map((pt: any) => ({
@@ -1302,7 +1302,7 @@ export async function initiateIsochroneCurve(
           ? curveData.indices
           : curveData.points.map((_: any, i: number) => (directionForward || i === 0 ? i : -i)),
       branch_type: {
-        type: 'IsochroneCurve' as const,
+        type: 'IsoperiodicCurve' as const,
         param1_name: param1Name,
         param2_name: param2Name,
         ntst,
@@ -1317,7 +1317,7 @@ export async function initiateIsochroneCurve(
       parameterName: `${param1Name}, ${param2Name}`,
       parentObject: branch.parentObject,
       startObject: branch.name,
-      branchType: 'isochrone_curve',
+      branchType: 'isoperiodic_curve',
       data: branchData,
       settings: continuationSettings,
       timestamp: new Date().toISOString(),
@@ -1325,11 +1325,11 @@ export async function initiateIsochroneCurve(
     };
 
     Storage.saveBranch(sysName, branch.parentObject, newBranch);
-    printSuccess(`Saved isochrone curve branch: ${curveName}`);
+    printSuccess(`Saved isoperiodic curve branch: ${curveName}`);
     return newBranch;
 
   } catch (e) {
-    printError(`Isochrone Continuation Failed: ${e}`);
+    printError(`Isoperiodic Curve Continuation Failed: ${e}`);
     return null;
   }
 }

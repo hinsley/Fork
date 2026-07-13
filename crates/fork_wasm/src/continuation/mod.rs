@@ -21,7 +21,7 @@ mod system_methods;
 
 pub use codim1_extension_runner::WasmCodim1CurveExtensionRunner;
 pub use curve_runners::{
-    WasmFoldCurveRunner, WasmHopfCurveRunner, WasmIsochroneCurveRunner, WasmLPCCurveRunner,
+    WasmFoldCurveRunner, WasmHopfCurveRunner, WasmIsoperiodicCurveRunner, WasmLPCCurveRunner,
     WasmNSCurveRunner, WasmPDCurveRunner,
 };
 pub use cycle_manifold_2d_runner::WasmCycleManifold2DRunner;
@@ -41,7 +41,7 @@ mod tests {
         WasmCodim1CurveExtensionRunner, WasmContinuationExtensionRunner, WasmCycleManifold2DRunner,
         WasmEqManifold1DExtensionRunner, WasmEqManifold1DRunner, WasmEqManifold2DRunner,
         WasmEquilibriumRunner, WasmFoldCurveRunner, WasmHomoclinicRunner, WasmHomotopySaddleRunner,
-        WasmHopfCurveRunner, WasmIsochroneCurveRunner, WasmLPCCurveRunner, WasmLimitCycleRunner,
+        WasmHopfCurveRunner, WasmIsoperiodicCurveRunner, WasmLPCCurveRunner, WasmLimitCycleRunner,
         WasmManifold2DExtensionRunner, WasmNSCurveRunner, WasmPDCurveRunner,
     };
 
@@ -49,9 +49,8 @@ mod tests {
     fn continuation_reexports_are_wired() {
         assert!(std::any::type_name::<WasmFoldCurveRunner>().ends_with("WasmFoldCurveRunner"));
         assert!(std::any::type_name::<WasmHopfCurveRunner>().ends_with("WasmHopfCurveRunner"));
-        assert!(
-            std::any::type_name::<WasmIsochroneCurveRunner>().ends_with("WasmIsochroneCurveRunner")
-        );
+        assert!(std::any::type_name::<WasmIsoperiodicCurveRunner>()
+            .ends_with("WasmIsoperiodicCurveRunner"));
         assert!(std::any::type_name::<WasmLPCCurveRunner>().ends_with("WasmLPCCurveRunner"));
         assert!(std::any::type_name::<WasmNSCurveRunner>().ends_with("WasmNSCurveRunner"));
         assert!(std::any::type_name::<WasmPDCurveRunner>().ends_with("WasmPDCurveRunner"));

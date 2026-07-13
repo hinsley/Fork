@@ -24,7 +24,7 @@ use fork_core::continuation::{
     Codim1CurvePoint, Codim1CurveType, Codim2Bifurcation, Codim2BifurcationType, CollocationConfig,
     ContinuationBranch, ContinuationSettings, FoldCurveProblem, HomoclinicExtraFlags,
     HomoclinicFixedScalars, HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem,
-    IsochroneCurveProblem, LPCCurveProblem, LimitCycleSetup, Manifold1DSettings,
+    IsoperiodicCurveProblem, LPCCurveProblem, LimitCycleSetup, Manifold1DSettings,
     Manifold2DSettings, ManifoldCycle2DSettings, ManifoldGeometry, ManifoldSurfaceResumeState,
     NSCurveProblem, OrbitTimeMode, PDCurveProblem, StepResult,
 };
@@ -1623,7 +1623,7 @@ impl WasmSystem {
     /// * `ncol` - Collocation degree
     /// * `settings_val` - Continuation settings as JsValue
     /// * `forward` - Direction of continuation
-    pub fn continue_isochrone_curve(
+    pub fn continue_isoperiodic_curve(
         &mut self,
         lc_state: Vec<f64>,
         period: f64,
@@ -1660,7 +1660,7 @@ impl WasmSystem {
         let full_lc_state = if lc_state.len() == implicit_ncoords {
             // Limit-cycle branches store mesh-first implicit periodic data:
             // [mesh_0 .. mesh_(ntst-1), stages...].
-            // Isochrone expects stage-first explicit periodic data:
+            // Isoperiodic expects stage-first explicit periodic data:
             // [stages..., mesh_0 .. mesh_ntst], where mesh_ntst = mesh_0.
             let mesh_len = ntst * dim;
             let mesh = &lc_state[..mesh_len];
@@ -1684,7 +1684,7 @@ impl WasmSystem {
             )));
         };
 
-        let mut problem = IsochroneCurveProblem::new(
+        let mut problem = IsoperiodicCurveProblem::new(
             &mut self.system,
             full_lc_state.clone(),
             period,
@@ -1695,7 +1695,7 @@ impl WasmSystem {
             ntst,
             ncol,
         )
-        .map_err(|e| JsValue::from_str(&format!("Failed to create isochrone problem: {}", e)))?;
+        .map_err(|e| JsValue::from_str(&format!("Failed to create isoperiodic problem: {}", e)))?;
 
         // Build initial augmented state: [lc_state, T, p2]
         // When continue_with_problem prepends p1, we get [p1, lc_state, T, p2]
@@ -1713,7 +1713,9 @@ impl WasmSystem {
         };
 
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
-            .map_err(|e| JsValue::from_str(&format!("Isochrone continuation failed: {}", e)))?;
+            .map_err(|e| {
+                JsValue::from_str(&format!("Isoperiodic curve continuation failed: {}", e))
+            })?;
 
         let n_lc = full_lc_state.len();
         let codim1_points: Vec<Codim1CurvePoint> = branch
@@ -1744,7 +1746,7 @@ impl WasmSystem {
             .collect();
 
         let codim1_branch = Codim1CurveBranch {
-            curve_type: Codim1CurveType::Isochrone,
+            curve_type: Codim1CurveType::Isoperiodic,
             param1_index,
             param2_index,
             points: codim1_points,

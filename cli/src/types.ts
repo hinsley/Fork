@@ -393,7 +393,7 @@ export type BranchType =
   | { type: 'FoldCurve'; param1_name: string; param2_name: string }
   | { type: 'HopfCurve'; param1_name: string; param2_name: string }
   | { type: 'LPCCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
-  | { type: 'IsochroneCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
+  | { type: 'IsoperiodicCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
   | { type: 'PDCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
   | { type: 'NSCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
   | {
@@ -472,7 +472,7 @@ export interface ContinuationObject {
     | 'fold_curve'
     | 'hopf_curve'
     | 'lpc_curve'
-    | 'isochrone_curve'
+    | 'isoperiodic_curve'
     | 'pd_curve'
     | 'ns_curve'
     | 'eq_manifold_1d'

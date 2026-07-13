@@ -307,7 +307,7 @@ describe('WasmForkCoreClient', () => {
     await expect(p4).resolves.toEqual({ points: [], bifurcations: [], indices: [] })
   })
 
-  it('sends isochrone continuation worker request kind', async () => {
+  it('sends isoperiodic curve continuation worker request kind', async () => {
     const client = new WasmForkCoreClient()
     const request = {
       system: {
@@ -327,12 +327,12 @@ describe('WasmForkCoreClient', () => {
       forward: true,
     }
 
-    const promise = client.runIsochroneCurveContinuation(request)
+    const promise = client.runIsoperiodicCurveContinuation(request)
     await flushQueue()
 
     const worker = MockWorker.instances[0]
     const message = worker.posted.at(-1) as { id: string; kind: string; payload: unknown }
-    expect(message.kind).toBe('runIsochroneCurveContinuation')
+    expect(message.kind).toBe('runIsoperiodicCurveContinuation')
     expect(message.payload).toEqual(request)
     worker.emit({ id: message.id, ok: true, result: { points: [], bifurcations: [], indices: [] } })
     await expect(promise).resolves.toEqual({ points: [], bifurcations: [], indices: [] })

@@ -1072,7 +1072,7 @@ export type Codim2BranchCreationRequest = {
   forward: boolean
 }
 
-export type IsochroneCurveContinuationRequest = {
+export type IsoperiodicCurveContinuationRequest = {
   branchId: string
   pointIndex: number
   name: string
@@ -1529,7 +1529,7 @@ export type AppActions = {
   createFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   createHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
   createCodim2BranchFromPoint: (request: Codim2BranchCreationRequest) => Promise<void>
-  createIsochroneCurveFromPoint: (request: IsochroneCurveContinuationRequest) => Promise<void>
+  createIsoperiodicCurveFromPoint: (request: IsoperiodicCurveContinuationRequest) => Promise<void>
   createNSCurveFromPoint: (request: MapNSCurveContinuationRequest) => Promise<void>
   createLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
   createLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
@@ -4129,7 +4129,7 @@ export function AppProvider({
               (branch) =>
                 branch.parentObject === limitCycle.name &&
                 branch.data.points.length > 0 &&
-                (branch.branchType === 'limit_cycle' || branch.branchType === 'isochrone_curve')
+                (branch.branchType === 'limit_cycle' || branch.branchType === 'isoperiodic_curve')
             )
             .sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0]
           if (fallbackBranch) {
@@ -4460,7 +4460,7 @@ export function AppProvider({
             'fold_curve',
             'hopf_curve',
             'lpc_curve',
-            'isochrone_curve',
+            'isoperiodic_curve',
             'pd_curve',
             'ns_curve',
           ].includes(sourceBranch.branchType)
@@ -5187,8 +5187,8 @@ export function AppProvider({
     [client, state.system, store]
   )
 
-  const createIsochroneCurveFromPoint = useCallback(
-    async (request: IsochroneCurveContinuationRequest) => {
+  const createIsoperiodicCurveFromPoint = useCallback(
+    async (request: IsoperiodicCurveContinuationRequest) => {
       if (!state.system) return
       dispatch({ type: 'SET_BUSY', busy: true })
       dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -5199,7 +5199,7 @@ export function AppProvider({
           throw new Error('System settings are invalid.')
         }
         if (system.type !== 'flow') {
-          throw new Error('Isochrone continuation is only available for flow systems.')
+          throw new Error('Isoperiodic curve continuation is only available for flow systems.')
         }
 
         const sourceBranch = state.system.branches[request.branchId]
@@ -5208,10 +5208,10 @@ export function AppProvider({
         }
         if (
           sourceBranch.branchType !== 'limit_cycle' &&
-          sourceBranch.branchType !== 'isochrone_curve'
+          sourceBranch.branchType !== 'isoperiodic_curve'
         ) {
           throw new Error(
-            'Isochrone continuation is only available for limit cycle or isochrone branches.'
+            'Isoperiodic curve continuation is only available for limit cycle or isoperiodic curve branches.'
           )
         }
 
@@ -5228,7 +5228,7 @@ export function AppProvider({
         const branchType = sourceBranch.data.branch_type
         if (
           !branchType ||
-          (branchType.type !== 'LimitCycle' && branchType.type !== 'IsochroneCurve')
+          (branchType.type !== 'LimitCycle' && branchType.type !== 'IsoperiodicCurve')
         ) {
           throw new Error('Limit cycle mesh metadata is missing for this branch.')
         }
@@ -5261,7 +5261,7 @@ export function AppProvider({
         const baseParams = getBranchParams(state.system, sourceBranch)
         let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
 
-        if (sourceBranch.branchType === 'isochrone_curve' && branchType.type === 'IsochroneCurve') {
+        if (sourceBranch.branchType === 'isoperiodic_curve' && branchType.type === 'IsoperiodicCurve') {
           const sourceParam1Ref =
             branchType.param1_ref ??
             sourceBranch.parameterRef ??
@@ -5309,7 +5309,7 @@ export function AppProvider({
           throw new Error('Selected second continuation parameter has no valid value.')
         }
 
-        const curveData = await client.runIsochroneCurveContinuation(
+        const curveData = await client.runIsoperiodicCurveContinuation(
           {
             system: runConfig,
             lcState: point.state.slice(0, -1),
@@ -5327,13 +5327,13 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Isochrone Curve', progress },
+                progress: { label: 'Isoperiodic Curve', progress },
               }),
           }
         )
         if (curveData.points.length <= 1) {
           throw new Error(
-            'Isochrone continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
+            'Isoperiodic curve continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
           )
         }
 
@@ -5353,7 +5353,7 @@ export function AppProvider({
               ? curveData.indices
               : curveData.points.map((_, i) => (request.forward || i === 0 ? i : -i)),
           branch_type: {
-            type: 'IsochroneCurve' as const,
+            type: 'IsoperiodicCurve' as const,
             param1_name: param1DisplayName,
             param2_name: param2DisplayName,
             param1_ref: param1Ref,
@@ -5374,7 +5374,7 @@ export function AppProvider({
           startObjectId: request.branchId,
           parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
           startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
-          branchType: 'isochrone_curve',
+          branchType: 'isoperiodic_curve',
           data: branchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
@@ -7382,7 +7382,7 @@ export function AppProvider({
       createFoldCurveFromPoint,
       createHopfCurveFromPoint,
       createCodim2BranchFromPoint,
-      createIsochroneCurveFromPoint,
+      createIsoperiodicCurveFromPoint,
       createNSCurveFromPoint,
       createLimitCycleFromOrbit,
       createLimitCycleFromHopf,
@@ -7426,7 +7426,7 @@ export function AppProvider({
       createFoldCurveFromPoint,
       createHopfCurveFromPoint,
       createCodim2BranchFromPoint,
-      createIsochroneCurveFromPoint,
+      createIsoperiodicCurveFromPoint,
       createNSCurveFromPoint,
       createLimitCycleFromHopf,
       createLimitCycleFromOrbit,

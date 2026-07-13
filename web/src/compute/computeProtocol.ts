@@ -60,7 +60,7 @@ export const computeOperationMetadata = {
   runFoldCurveContinuation: { reportsProgress: true },
   runHopfCurveContinuation: { reportsProgress: true },
   runCodim2BranchSwitch: { reportsProgress: true },
-  runIsochroneCurveContinuation: { reportsProgress: true },
+  runIsoperiodicCurveContinuation: { reportsProgress: true },
   runLimitCycleContinuationFromHopf: { reportsProgress: true },
   runLimitCycleContinuationFromOrbit: { reportsProgress: true },
   runLimitCycleContinuationFromPD: { reportsProgress: true },

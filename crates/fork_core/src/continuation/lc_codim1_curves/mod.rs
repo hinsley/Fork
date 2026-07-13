@@ -6,12 +6,12 @@
 //! - PD (Period Doubling) - flip bifurcation curve
 //! - NS (Neimark-Sacker) - torus bifurcation curve
 
-mod isochrone_curve;
+mod isoperiodic_curve;
 mod lpc_curve;
 mod ns_curve;
 mod pd_curve;
 
-pub use isochrone_curve::IsochroneCurveProblem;
+pub use isoperiodic_curve::IsoperiodicCurveProblem;
 pub use lpc_curve::LPCCurveProblem;
 pub use ns_curve::NSCurveProblem;
 pub use pd_curve::PDCurveProblem;

@@ -19,7 +19,7 @@ export const WORKFLOW_IDS = [
   'branch-extend-toggle',
   'branch-continue-toggle',
   'codim1-curve-toggle',
-  'isochrone-curve-toggle',
+  'isoperiodic-curve-toggle',
   'limit-cycle-from-hopf-toggle',
   'limit-cycle-from-pd-toggle',
   'homoclinic-from-large-cycle-toggle',

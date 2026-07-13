@@ -29,7 +29,7 @@ import type {
   HomoclinicFromHomotopySaddleRequest,
   HomoclinicFromLargeCycleRequest,
   HopfCurveContinuationRequest,
-  IsochroneCurveContinuationRequest,
+  IsoperiodicCurveContinuationRequest,
   HomotopySaddleContinuationResult,
   HomotopySaddleFromEquilibriumRequest,
   LimitCycleContinuationFromHopfRequest,
@@ -1141,12 +1141,12 @@ export class MockForkCoreClient implements ForkCoreClient {
     return await job.promise
   }
 
-  async runIsochroneCurveContinuation(
-    request: IsochroneCurveContinuationRequest,
+  async runIsoperiodicCurveContinuation(
+    request: IsoperiodicCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<Codim1CurveBranch> {
     const job = this.queue.enqueue(
-      'runIsochroneCurveContinuation',
+      'runIsoperiodicCurveContinuation',
       async (signal) => {
         if (this.delayMs > 0) await delay(this.delayMs)
         if (signal.aborted) {

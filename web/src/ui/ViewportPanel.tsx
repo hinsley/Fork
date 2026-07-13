@@ -1263,7 +1263,7 @@ function resolveAxisValue(
 
 const LIMIT_CYCLE_BRANCH_TYPES = new Set([
   'limit_cycle',
-  'isochrone_curve',
+  'isoperiodic_curve',
   'homoclinic_curve',
   'homotopy_saddle_curve',
   'pd_curve',
@@ -1303,7 +1303,7 @@ function resolveLimitCycleMesh(
         'LimitCycle',
         'HomoclinicCurve',
         'HomotopySaddleCurve',
-        'IsochroneCurve',
+        'IsoperiodicCurve',
         'PDCurve',
         'LPCCurve',
         'NSCurve',
@@ -1456,7 +1456,7 @@ function resolveLimitCycleLayout(
   if (
     branchType === 'lpc_curve' ||
     branchType === 'ns_curve' ||
-    branchType === 'isochrone_curve'
+    branchType === 'isoperiodic_curve'
   ) {
     return 'stage-first'
   }

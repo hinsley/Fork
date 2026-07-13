@@ -8,7 +8,7 @@ use fork_core::continuation::codim1_curves::{
 use fork_core::continuation::{
     Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType, Codim2Bifurcation, Codim2BifurcationType,
     ContinuationPoint, ContinuationSettings, FoldCurveProblem, HopfCurveProblem,
-    IsochroneCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
+    IsoperiodicCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
 };
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
 use nalgebra::DMatrix;
@@ -28,7 +28,7 @@ pub(crate) fn normalize_lc_seed_for_stage_first_explicit(
     if lc_state.len() == implicit_ncoords {
         // Limit-cycle branches store mesh-first implicit periodic data:
         // [mesh_0 .. mesh_(ntst-1), stages...].
-        // Isochrone expects stage-first explicit periodic data:
+        // Isoperiodic expects stage-first explicit periodic data:
         // [stages..., mesh_0 .. mesh_ntst], where mesh_ntst = mesh_0.
         let mesh_len = ntst * dim;
         let mesh = &lc_state[..mesh_len];
@@ -60,7 +60,7 @@ mod layout_tests {
     use super::normalize_lc_seed_for_stage_first_explicit;
 
     #[test]
-    fn normalizes_mesh_first_implicit_state_for_isochrone_seed() {
+    fn normalizes_mesh_first_implicit_state_for_isoperiodic_seed() {
         let normalized =
             normalize_lc_seed_for_stage_first_explicit(&[10.0, 20.0, 30.0, 40.0], 2, 1, 1)
                 .expect("normalize state");
@@ -248,7 +248,7 @@ impl WasmFoldCurveRunner {
 #[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use super::{
-        WasmFoldCurveRunner, WasmHopfCurveRunner, WasmIsochroneCurveRunner, WasmLPCCurveRunner,
+        WasmFoldCurveRunner, WasmHopfCurveRunner, WasmIsoperiodicCurveRunner, WasmLPCCurveRunner,
         WasmNSCurveRunner, WasmPDCurveRunner,
     };
     use fork_core::continuation::{
@@ -298,9 +298,9 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    fn isochrone_curve_runner_emits_expected_initial_point() {
+    fn isoperiodic_curve_runner_emits_expected_initial_point() {
         let period = 2.0;
-        let mut runner = WasmIsochroneCurveRunner::new(
+        let mut runner = WasmIsoperiodicCurveRunner::new(
             vec!["a * x + b".to_string()],
             vec![1.0, 2.0],
             vec!["a".to_string(), "b".to_string()],
@@ -322,7 +322,7 @@ mod tests {
         let branch_val = runner.get_result().expect("result");
         let branch: Codim1CurveBranch = from_value(branch_val).expect("branch");
 
-        assert_eq!(branch.curve_type, Codim1CurveType::Isochrone);
+        assert_eq!(branch.curve_type, Codim1CurveType::Isoperiodic);
         assert_eq!(branch.points.len(), 1);
         let point = &branch.points[0];
         assert_eq!(point.param1_value, 1.0);
@@ -333,13 +333,13 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    fn isochrone_curve_runner_reorders_mesh_first_lc_state_to_stage_first() {
+    fn isoperiodic_curve_runner_reorders_mesh_first_lc_state_to_stage_first() {
         // ntst=2, ncol=1, dim=1
         // Input layout (mesh-first implicit): [mesh0, mesh1, stage0, stage1]
         // Expected internal/output layout (stage-first explicit):
         // [stage0, stage1, mesh0, mesh1, mesh0]
         let period = 3.0;
-        let mut runner = WasmIsochroneCurveRunner::new(
+        let mut runner = WasmIsoperiodicCurveRunner::new(
             vec!["a * x + b".to_string()],
             vec![1.0, 2.0],
             vec!["a".to_string(), "b".to_string()],
@@ -361,7 +361,7 @@ mod tests {
         let branch_val = runner.get_result().expect("result");
         let branch: Codim1CurveBranch = from_value(branch_val).expect("branch");
 
-        assert_eq!(branch.curve_type, Codim1CurveType::Isochrone);
+        assert_eq!(branch.curve_type, Codim1CurveType::Isoperiodic);
         assert_eq!(branch.points.len(), 1);
         let point = &branch.points[0];
         assert_eq!(point.state, vec![30.0, 40.0, 10.0, 20.0, 10.0, period]);
@@ -746,7 +746,7 @@ impl WasmLPCCurveRunner {
         let full_lc_state = if lc_state.len() == implicit_ncoords {
             // Limit-cycle branches store mesh-first implicit periodic data:
             // [mesh_0 .. mesh_(ntst-1), stages...].
-            // Isochrone expects stage-first explicit periodic data:
+            // Isoperiodic expects stage-first explicit periodic data:
             // [stages..., mesh_0 .. mesh_ntst], where mesh_ntst = mesh_0.
             let mesh_len = ntst * dim;
             let mesh = &lc_state[..mesh_len];
@@ -871,8 +871,8 @@ impl WasmLPCCurveRunner {
 }
 
 #[wasm_bindgen]
-pub struct WasmIsochroneCurveRunner {
-    runner: OwnedContinuationRunner<IsochroneCurveProblem<'static>>,
+pub struct WasmIsoperiodicCurveRunner {
+    runner: OwnedContinuationRunner<IsoperiodicCurveProblem<'static>>,
     param1_index: usize,
     param2_index: usize,
     lc_state: Vec<f64>,
@@ -881,7 +881,7 @@ pub struct WasmIsochroneCurveRunner {
 }
 
 #[wasm_bindgen]
-impl WasmIsochroneCurveRunner {
+impl WasmIsoperiodicCurveRunner {
     #[wasm_bindgen(constructor)]
     pub fn new(
         equations: Vec<String>,
@@ -898,7 +898,7 @@ impl WasmIsochroneCurveRunner {
         ncol: usize,
         settings_val: JsValue,
         forward: bool,
-    ) -> Result<WasmIsochroneCurveRunner, JsValue> {
+    ) -> Result<WasmIsoperiodicCurveRunner, JsValue> {
         console_error_panic_hook::set_once();
 
         let settings: ContinuationSettings = from_value(settings_val)
@@ -937,7 +937,7 @@ impl WasmIsochroneCurveRunner {
         let runner = OwnedContinuationRunner::new(
             system,
             |system| {
-                IsochroneCurveProblem::new(
+                IsoperiodicCurveProblem::new(
                     system,
                     full_lc_state.clone(),
                     period,
@@ -952,10 +952,10 @@ impl WasmIsochroneCurveRunner {
             initial_point,
             settings,
             forward,
-            "isochrone",
+            "isoperiodic",
         )?;
 
-        Ok(WasmIsochroneCurveRunner {
+        Ok(WasmIsoperiodicCurveRunner {
             runner,
             param1_index,
             param2_index,
@@ -1009,7 +1009,7 @@ impl WasmIsochroneCurveRunner {
             .collect();
 
         let codim1_branch = Codim1CurveBranch {
-            curve_type: Codim1CurveType::Isochrone,
+            curve_type: Codim1CurveType::Isoperiodic,
             param1_index: self.param1_index,
             param2_index: self.param2_index,
             points: codim1_points,

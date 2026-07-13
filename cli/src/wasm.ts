@@ -517,7 +517,7 @@ export class WasmBridge {
         ) as Codim1CurveRunner;
     }
 
-    createIsochroneCurveRunner(
+    createIsoperiodicCurveRunner(
         lcState: number[],
         period: number,
         param1Name: string,
@@ -530,13 +530,13 @@ export class WasmBridge {
         forward: boolean
     ): Codim1CurveRunner {
         if (!wasmModule) throw new Error("WASM module not loaded");
-        if (typeof wasmModule.WasmIsochroneCurveRunner !== 'function') {
+        if (typeof wasmModule.WasmIsoperiodicCurveRunner !== 'function') {
             throw new Error(
-                "Isochrone continuation runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+                "Isoperiodic curve continuation runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
             );
         }
 
-        return new wasmModule.WasmIsochroneCurveRunner(
+        return new wasmModule.WasmIsoperiodicCurveRunner(
             this.config.equations,
             new Float64Array(this.config.params),
             this.config.paramNames,
@@ -1326,9 +1326,9 @@ export class WasmBridge {
     }
 
     /**
-     * Continues an isochrone curve in two-parameter space.
+     * Continues an isoperiodic curve in two-parameter space.
      */
-    continueIsochroneCurve(
+    continueIsoperiodicCurve(
         lcState: number[],
         period: number,
         param1Name: string,
@@ -1340,12 +1340,12 @@ export class WasmBridge {
         settings: any,
         forward: boolean
     ): any {
-        if (typeof this.instance.continue_isochrone_curve !== 'function') {
+        if (typeof this.instance.continue_isoperiodic_curve !== 'function') {
             throw new Error(
-                "Isochrone continuation is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+                "Isoperiodic curve continuation is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
             );
         }
-        return this.instance.continue_isochrone_curve(
+        return this.instance.continue_isoperiodic_curve(
             new Float64Array(lcState),
             period,
             param1Name,
@@ -1429,7 +1429,7 @@ function isCodim1BranchType(branchType: any): boolean {
         type === 'FoldCurve' ||
         type === 'HopfCurve' ||
         type === 'LPCCurve' ||
-        type === 'IsochroneCurve' ||
+        type === 'IsoperiodicCurve' ||
         type === 'PDCurve' ||
         type === 'NSCurve'
     );

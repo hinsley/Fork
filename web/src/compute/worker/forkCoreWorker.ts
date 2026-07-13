@@ -31,7 +31,7 @@ import type {
   HomotopySaddleContinuationResult,
   HomotopySaddleFromEquilibriumRequest,
   HopfCurveContinuationRequest,
-  IsochroneCurveContinuationRequest,
+  IsoperiodicCurveContinuationRequest,
   LimitCycleContinuationFromHopfRequest,
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
@@ -373,7 +373,7 @@ function isCodim1BranchType(branchType: unknown): boolean {
     type === 'FoldCurve' ||
     type === 'HopfCurve' ||
     type === 'LPCCurve' ||
-    type === 'IsochroneCurve' ||
+    type === 'IsoperiodicCurve' ||
     type === 'PDCurve' ||
     type === 'NSCurve'
   )
@@ -812,21 +812,21 @@ async function runCodim2BranchSwitch(
   return { target: request.target, branch, seed }
 }
 
-async function runIsochroneCurveContinuation(
-  request: IsochroneCurveContinuationRequest,
+async function runIsoperiodicCurveContinuation(
+  request: IsoperiodicCurveContinuationRequest,
   signal: AbortSignal,
   onProgress: (progress: ContinuationProgress) => void
 ): Promise<Codim1CurveBranch> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
   const settings: Record<string, number> = { ...request.settings }
-  const runnerCtor = (wasm as { WasmIsochroneCurveRunner?: WasmModule['WasmIsochroneCurveRunner'] })
-    .WasmIsochroneCurveRunner
+  const runnerCtor = (wasm as { WasmIsoperiodicCurveRunner?: WasmModule['WasmIsoperiodicCurveRunner'] })
+    .WasmIsoperiodicCurveRunner
   if (typeof runnerCtor !== 'function') {
     const system = createWasmSystem(wasm, request.system)
-    const continueIsochrone = (
+    const continueIsoperiodic = (
       system as unknown as {
-        continue_isochrone_curve?: (
+        continue_isoperiodic_curve?: (
           lcState: Float64Array,
           period: number,
           param1Name: string,
@@ -839,10 +839,10 @@ async function runIsochroneCurveContinuation(
           forward: boolean
         ) => Codim1CurveBranch
       }
-    ).continue_isochrone_curve
-    if (typeof continueIsochrone !== 'function') {
+    ).continue_isoperiodic_curve
+    if (typeof continueIsoperiodic !== 'function') {
       throw new Error(
-        'Isochrone continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+        'Isoperiodic curve continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
       )
     }
 
@@ -859,7 +859,7 @@ async function runIsochroneCurveContinuation(
       current_param: request.param1Value,
     })
     abortIfNeeded(signal)
-    const result = continueIsochrone.call(
+    const result = continueIsoperiodic.call(
       system as unknown as object,
       new Float64Array(request.lcState),
       request.period,
@@ -1326,7 +1326,7 @@ const handlers = {
   runFoldCurveContinuation,
   runHopfCurveContinuation,
   runCodim2BranchSwitch,
-  runIsochroneCurveContinuation,
+  runIsoperiodicCurveContinuation,
   runLimitCycleContinuationFromHopf,
   runLimitCycleContinuationFromOrbit,
   runLimitCycleContinuationFromPD,

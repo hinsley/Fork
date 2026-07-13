@@ -60,10 +60,10 @@ describe('naming utils', () => {
     ).toBe('LC_Equilibrium_1_mu_beta')
     expect(
       suggestDefaultName('branchContinuation', {
-        sourceName: 'isochrone_LC_Equilibrium_1_mu',
+        sourceName: 'isoperiodic_LC_Equilibrium_1_mu',
         parameterName: 'beta',
       })
-    ).toBe('isochrone_LC_Equilibrium_1_mu_beta')
+    ).toBe('isoperiodic_LC_Equilibrium_1_mu_beta')
   })
 
   it('removes inherited operation noise from derived branch names', () => {
@@ -80,22 +80,22 @@ describe('naming utils', () => {
   })
 
   it('keeps generated names bounded, CLI-safe, and deterministically unique', () => {
-    const first = suggestDefaultName('isochroneCurve', {
+    const first = suggestDefaultName('isoperiodicCurve', {
       sourceName:
         'hopf_curve_an_extremely_long_but_still_descriptive_equilibrium_name_with_context_mu',
     })
-    const second = suggestDefaultName('isochroneCurve', {
+    const second = suggestDefaultName('isoperiodicCurve', {
       sourceName:
         'hopf_curve_an_extremely_long_but_still_descriptive_equilibrium_name_with_context_mu',
       existingNames: [first],
     })
 
     expect(first.length).toBeLessThanOrEqual(DEFAULT_NAME_MAX_LENGTH)
-    expect(first).toMatch(/^isochrone_/)
+    expect(first).toMatch(/^isoperiodic_/)
     expect(first).toMatch(/context_mu$/)
     expect(isCliSafeName(first)).toBe(true)
     expect(second).not.toBe(first)
-    expect(second).toMatch(/^isochrone_.*_2$/)
+    expect(second).toMatch(/^isoperiodic_.*_2$/)
     expect(isCliSafeName(second)).toBe(true)
     expect(second.length).toBeLessThanOrEqual(DEFAULT_NAME_MAX_LENGTH)
   })

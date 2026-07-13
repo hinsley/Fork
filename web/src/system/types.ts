@@ -472,7 +472,7 @@ export type BranchType =
       ncol: number
     }
   | {
-      type: 'IsochroneCurve'
+      type: 'IsoperiodicCurve'
       param1_name: string
       param2_name: string
       param1_ref?: ParameterRef
@@ -569,7 +569,7 @@ export interface ContinuationObject {
     | 'fold_curve'
     | 'hopf_curve'
     | 'lpc_curve'
-    | 'isochrone_curve'
+    | 'isoperiodic_curve'
     | 'pd_curve'
     | 'ns_curve'
     | 'eq_manifold_1d'

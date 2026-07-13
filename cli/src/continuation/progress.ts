@@ -251,9 +251,9 @@ export function runLPCCurveWithProgress(
 }
 
 /**
- * Continue an isochrone curve with stepped progress updates.
+ * Continue an isoperiodic curve with stepped progress updates.
  */
-export function runIsochroneCurveWithProgress(
+export function runIsoperiodicCurveWithProgress(
   bridge: WasmBridge,
   lcState: number[],
   period: number,
@@ -268,7 +268,7 @@ export function runIsochroneCurveWithProgress(
   label: string
 ): any {
   try {
-    const runner = bridge.createIsochroneCurveRunner(
+    const runner = bridge.createIsoperiodicCurveRunner(
       lcState,
       period,
       param1Name,
@@ -285,8 +285,8 @@ export function runIsochroneCurveWithProgress(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const shouldFallback =
-      message.includes('Isochrone continuation runner is unavailable') ||
-      message.includes('WasmIsochroneCurveRunner');
+      message.includes('Isoperiodic curve continuation runner is unavailable') ||
+      message.includes('WasmIsoperiodicCurveRunner');
 
     if (!shouldFallback) {
       throw error;
@@ -297,7 +297,7 @@ export function runIsochroneCurveWithProgress(
         ? settings.max_steps
         : 0;
     printProgress(0, maxSteps, label);
-    const result = bridge.continueIsochroneCurve(
+    const result = bridge.continueIsoperiodicCurve(
       lcState,
       period,
       param1Name,

@@ -53,7 +53,7 @@ import type {
   HomoclinicFromLargeCycleRequest,
   HopfCurveContinuationRequest,
   HomotopySaddleFromEquilibriumRequest,
-  IsochroneCurveContinuationRequest,
+  IsoperiodicCurveContinuationRequest,
   IsoclineComputeRequest,
   LimitCycleFloquetModesRequest,
   MapNSCurveContinuationRequest,
@@ -201,8 +201,8 @@ type InspectorDetailsPanelProps = {
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
   onCreateCodim2BranchFromPoint?: (request: Codim2BranchCreationRequest) => Promise<void>
-  onCreateIsochroneCurveFromPoint?: (
-    request: IsochroneCurveContinuationRequest
+  onCreateIsoperiodicCurveFromPoint?: (
+    request: IsoperiodicCurveContinuationRequest
   ) => Promise<void>
   onCreateNSCurveFromPoint: (request: MapNSCurveContinuationRequest) => Promise<void>
   onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
@@ -231,7 +231,7 @@ type InspectorDetailsPanelProps = {
 
 const STATE_SPACE_STRIDE_BRANCH_TYPES: ReadonlySet<ContinuationObject['branchType']> = new Set([
   'limit_cycle',
-  'isochrone_curve',
+  'isoperiodic_curve',
   'homoclinic_curve',
   'homotopy_saddle_curve',
   'pd_curve',
@@ -486,7 +486,7 @@ type Codim1CurveDraft = {
   forward: boolean
 }
 
-type IsochroneCurveDraft = {
+type IsoperiodicCurveDraft = {
   name: string
   parameterName: string
   param2Name: string
@@ -1501,7 +1501,7 @@ function makeCodim1CurveDraft(system: SystemConfig): Codim1CurveDraft {
   }
 }
 
-function makeIsochroneCurveDraft(system: SystemConfig): IsochroneCurveDraft {
+function makeIsoperiodicCurveDraft(system: SystemConfig): IsoperiodicCurveDraft {
   const parameterName = system.paramNames[0] ?? ''
   const param2Name =
     system.paramNames.find((name) => name !== parameterName) ?? system.paramNames[0] ?? ''
@@ -1915,7 +1915,7 @@ function useInspectorSelectionController({
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
   onCreateCodim2BranchFromPoint = async () => {},
-  onCreateIsochroneCurveFromPoint = async () => {},
+  onCreateIsoperiodicCurveFromPoint = async () => {},
   onCreateNSCurveFromPoint,
   onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
@@ -2030,7 +2030,7 @@ function useInspectorSelectionController({
         'fold_curve',
         'hopf_curve',
         'lpc_curve',
-        'isochrone_curve',
+        'isoperiodic_curve',
         'pd_curve',
         'ns_curve',
       ].includes(branch.branchType)
@@ -2043,7 +2043,7 @@ function useInspectorSelectionController({
     branch?.branchType === 'eq_manifold_2d' || branch?.branchType === 'cycle_manifold_2d'
   const hasBranch = Boolean(branch)
   const isLimitCycleBranch =
-    branch?.branchType === 'limit_cycle' || branch?.branchType === 'isochrone_curve'
+    branch?.branchType === 'limit_cycle' || branch?.branchType === 'isoperiodic_curve'
   const manifoldSurfaceGeometry = useMemo(
     () => resolveManifoldSurfaceGeometryForInspector(branch?.data.manifold_geometry),
     [branch?.data.manifold_geometry]
@@ -2519,10 +2519,10 @@ function useInspectorSelectionController({
     makeCodim1CurveDraft(system.config)
   )
   const [hopfCurveError, setHopfCurveError] = useState<string | null>(null)
-  const [isochroneCurveDraft, setIsochroneCurveDraft] = useState<IsochroneCurveDraft>(() =>
-    makeIsochroneCurveDraft(system.config)
+  const [isoperiodicCurveDraft, setIsoperiodicCurveDraft] = useState<IsoperiodicCurveDraft>(() =>
+    makeIsoperiodicCurveDraft(system.config)
   )
-  const [isochroneCurveError, setIsochroneCurveError] = useState<string | null>(null)
+  const [isoperiodicCurveError, setIsoperiodicCurveError] = useState<string | null>(null)
   const [nsCurveDraft, setNSCurveDraft] = useState<Codim1CurveDraft>(() =>
     makeCodim1CurveDraft(system.config)
   )
@@ -2713,12 +2713,12 @@ function useInspectorSelectionController({
   const limitCycleMesh = useMemo(() => {
     if (
       !branch ||
-      (branch.branchType !== 'limit_cycle' && branch.branchType !== 'isochrone_curve')
+      (branch.branchType !== 'limit_cycle' && branch.branchType !== 'isoperiodic_curve')
     ) {
       return { ntst: 20, ncol: 4 }
     }
     const branchType = branch.data.branch_type
-    if (branchType?.type === 'LimitCycle' || branchType?.type === 'IsochroneCurve') {
+    if (branchType?.type === 'LimitCycle' || branchType?.type === 'IsoperiodicCurve') {
       return { ntst: branchType.ntst, ncol: branchType.ncol }
     }
     return { ntst: 20, ncol: 4 }
@@ -2727,7 +2727,7 @@ function useInspectorSelectionController({
   const limitCyclePointMetrics = useMemo(() => {
     if (
       !branch ||
-      (branch.branchType !== 'limit_cycle' && branch.branchType !== 'isochrone_curve') ||
+      (branch.branchType !== 'limit_cycle' && branch.branchType !== 'isoperiodic_curve') ||
       !selectedBranchPoint
     ) {
       return null
@@ -2775,7 +2775,7 @@ function useInspectorSelectionController({
       stateDimension,
       limitCycleMesh.ntst,
       limitCycleMesh.ncol,
-      { layout: branch.branchType === 'isochrone_curve' ? 'stage-first' : 'mesh-first' }
+      { layout: branch.branchType === 'isoperiodic_curve' ? 'stage-first' : 'mesh-first' }
     )
     if (profilePoints.length === 0) return null
     const displayProfilePoints = snapshot
@@ -3034,7 +3034,7 @@ function useInspectorSelectionController({
       }
       return { ...prev, param2Name: firstParam }
     })
-    setIsochroneCurveDraft((prev) => {
+    setIsoperiodicCurveDraft((prev) => {
       if (continuationParameterLabels.length === 0) {
         if (!prev.parameterName && !prev.param2Name) return prev
         return { ...prev, parameterName: '', param2Name: '' }
@@ -3403,9 +3403,9 @@ function useInspectorSelectionController({
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, param2Name, name: nextName }
     })
-    setIsochroneCurveDraft((prev) => {
+    setIsoperiodicCurveDraft((prev) => {
       const sourceParam1Name =
-        branch?.branchType === 'isochrone_curve' &&
+        branch?.branchType === 'isoperiodic_curve' &&
         hopfCodim1Params &&
         continuationParameterSet.has(hopfCodim1Params.param1)
           ? hopfCodim1Params.param1
@@ -3425,7 +3425,7 @@ function useInspectorSelectionController({
         prev.param2Name !== parameterName
           ? prev.param2Name
           : fallbackParam2
-      const suggestedName = suggestDefaultName('isochroneCurve', {
+      const suggestedName = suggestDefaultName('isoperiodicCurve', {
         sourceName: branchName,
         existingNames: existingBranchNames,
       })
@@ -4044,29 +4044,29 @@ function useInspectorSelectionController({
     () => (branch ? branch.data.bifurcations ?? [] : []),
     [branch]
   )
-  const isochroneSourceParam1Name = useMemo(() => {
-    if (branch?.branchType !== 'isochrone_curve') {
+  const isoperiodicSourceParam1Name = useMemo(() => {
+    if (branch?.branchType !== 'isoperiodic_curve') {
       return branchParameterName
     }
     return codim1ParamNames?.param1 ?? ''
   }, [branch?.branchType, branchParameterName, codim1ParamNames])
   const codim1ParamOptions = useMemo(() => {
     const sourceParam1Name =
-      branch?.branchType === 'isochrone_curve'
-        ? isochroneSourceParam1Name
+      branch?.branchType === 'isoperiodic_curve'
+        ? isoperiodicSourceParam1Name
         : branchParameterName
     return continuationParameterLabels.filter((name) => name !== sourceParam1Name)
   }, [
     branch?.branchType,
     branchParameterName,
     continuationParameterLabels,
-    isochroneSourceParam1Name,
+    isoperiodicSourceParam1Name,
   ])
-  const isochroneParam1Options = continuationParameterLabels
-  const isochroneParam2Options = useMemo(
+  const isoperiodicParam1Options = continuationParameterLabels
+  const isoperiodicParam2Options = useMemo(
     () =>
-      continuationParameterLabels.filter((name) => name !== isochroneCurveDraft.parameterName),
-    [continuationParameterLabels, isochroneCurveDraft.parameterName]
+      continuationParameterLabels.filter((name) => name !== isoperiodicCurveDraft.parameterName),
+    [continuationParameterLabels, isoperiodicCurveDraft.parameterName]
   )
   const branchStartIndex = branchSortedOrder[0]
   const branchEndIndex = branchSortedOrder[branchSortedOrder.length - 1]
@@ -4110,8 +4110,8 @@ function useInspectorSelectionController({
     showCodim1CurveContinuations && !isDiscreteMap && isHopfCurvePointSelected
   const showNSCurveContinuation =
     showCodim1CurveContinuations && isDiscreteMap && isNSCurvePointSelected
-  const showIsochroneContinuation =
-    (branch?.branchType === 'limit_cycle' || branch?.branchType === 'isochrone_curve') &&
+  const showIsoperiodicContinuation =
+    (branch?.branchType === 'limit_cycle' || branch?.branchType === 'isoperiodic_curve') &&
     hasSelectedBranchPoint
   const homotopyBranchStage =
     branch?.data.branch_type &&
@@ -4179,13 +4179,13 @@ function useInspectorSelectionController({
   }, [branch, branchParams, branchStateDimension, selectedBranchPoint, systemDraft])
   const selectedBranchPointState = useMemo(() => {
     if (!branch || !selectedBranchPoint) return []
-    if (branch.branchType === 'limit_cycle' || branch.branchType === 'isochrone_curve') {
+    if (branch.branchType === 'limit_cycle' || branch.branchType === 'isoperiodic_curve') {
       const { profilePoints } = extractLimitCycleProfile(
         selectedBranchPoint.state,
         branchStateDimension,
         limitCycleMesh.ntst,
         limitCycleMesh.ncol,
-        { layout: branch.branchType === 'isochrone_curve' ? 'stage-first' : 'mesh-first' }
+        { layout: branch.branchType === 'isoperiodic_curve' ? 'stage-first' : 'mesh-first' }
       )
       const representativeState = profilePoints[0] ?? selectedBranchPoint.state
       if (!branchSnapshot) return representativeState
@@ -4509,12 +4509,15 @@ function useInspectorSelectionController({
       description: 'Continue an eligible fold, Hopf, or Neimark-Sacker point.',
     })
   }
-  if (showIsochroneContinuation) {
+  if (showIsoperiodicContinuation) {
     workflowActions.push({
-      id: 'isochrone-curve-toggle',
+      id: 'isoperiodic-curve-toggle',
       group: 'Bifurcations',
-      label: branch?.branchType === 'isochrone_curve' ? 'Continue isochrone' : 'Create isochrone',
-      description: 'Continue an isochrone curve from the selected cycle point.',
+      label:
+        branch?.branchType === 'isoperiodic_curve'
+          ? 'Continue isoperiodic curve'
+          : 'Create isoperiodic curve',
+      description: 'Continue an isoperiodic curve from the selected cycle point.',
     })
   }
   if (showLimitCycleFromHopf) {
@@ -6006,88 +6009,88 @@ function useInspectorSelectionController({
     })
   }
 
-  const handleCreateIsochroneCurve = async () => {
+  const handleCreateIsoperiodicCurve = async () => {
     if (runDisabled) {
-      setIsochroneCurveError('Apply valid system settings before continuing.')
+      setIsoperiodicCurveError('Apply valid system settings before continuing.')
       return
     }
     if (isDiscreteMap) {
-      setIsochroneCurveError('Isochrone continuation is only available for flow systems.')
+      setIsoperiodicCurveError('Isoperiodic curve continuation is only available for flow systems.')
       return
     }
     if (!branch || !selectedNodeId) {
-      setIsochroneCurveError('Select a branch to continue.')
+      setIsoperiodicCurveError('Select a branch to continue.')
       return
     }
-    if (branch.branchType !== 'limit_cycle' && branch.branchType !== 'isochrone_curve') {
-      setIsochroneCurveError(
-        'Isochrone continuation is only available for limit cycle or isochrone branches.'
+    if (branch.branchType !== 'limit_cycle' && branch.branchType !== 'isoperiodic_curve') {
+      setIsoperiodicCurveError(
+        'Isoperiodic curve continuation is only available for limit cycle or isoperiodic curve branches.'
       )
       return
     }
     if (!selectedBranchPoint || branchPointIndex === null) {
-      setIsochroneCurveError('Select a branch point to continue from.')
+      setIsoperiodicCurveError('Select a branch point to continue from.')
       return
     }
     const pointPeriod = selectedBranchPoint.state[selectedBranchPoint.state.length - 1]
     if (!Number.isFinite(pointPeriod) || pointPeriod <= 0) {
-      setIsochroneCurveError('Selected point has no valid period.')
+      setIsoperiodicCurveError('Selected point has no valid period.')
       return
     }
     if (continuationParameterCount < 2) {
-      setIsochroneCurveError('Add another parameter before continuing.')
+      setIsoperiodicCurveError('Add another parameter before continuing.')
       return
     }
-    if (!isochroneCurveDraft.parameterName) {
-      setIsochroneCurveError('Select a first continuation parameter.')
+    if (!isoperiodicCurveDraft.parameterName) {
+      setIsoperiodicCurveError('Select a first continuation parameter.')
       return
     }
-    if (!continuationParameterSet.has(isochroneCurveDraft.parameterName)) {
-      setIsochroneCurveError('Select a valid first continuation parameter.')
+    if (!continuationParameterSet.has(isoperiodicCurveDraft.parameterName)) {
+      setIsoperiodicCurveError('Select a valid first continuation parameter.')
       return
     }
-    if (!isochroneCurveDraft.param2Name) {
-      setIsochroneCurveError('Select a second continuation parameter.')
+    if (!isoperiodicCurveDraft.param2Name) {
+      setIsoperiodicCurveError('Select a second continuation parameter.')
       return
     }
-    if (!continuationParameterSet.has(isochroneCurveDraft.param2Name)) {
-      setIsochroneCurveError('Select a valid second continuation parameter.')
+    if (!continuationParameterSet.has(isoperiodicCurveDraft.param2Name)) {
+      setIsoperiodicCurveError('Select a valid second continuation parameter.')
       return
     }
-    if (isochroneCurveDraft.param2Name === isochroneCurveDraft.parameterName) {
-      setIsochroneCurveError('Second parameter must be different from the first continuation parameter.')
+    if (isoperiodicCurveDraft.param2Name === isoperiodicCurveDraft.parameterName) {
+      setIsoperiodicCurveError('Second parameter must be different from the first continuation parameter.')
       return
     }
 
-    const suggestedName = suggestDefaultName('isochroneCurve', {
+    const suggestedName = suggestDefaultName('isoperiodicCurve', {
       sourceName: branch.name,
       existingNames: existingBranchNames,
     })
-    const name = isochroneCurveDraft.name.trim() || suggestedName
+    const name = isoperiodicCurveDraft.name.trim() || suggestedName
     if (!name.trim()) {
-      setIsochroneCurveError('Curve name is required.')
+      setIsoperiodicCurveError('Curve name is required.')
       return
     }
     if (!isCliSafeName(name)) {
-      setIsochroneCurveError('Curve names must be alphanumeric with underscores only.')
+      setIsoperiodicCurveError('Curve names must be alphanumeric with underscores only.')
       return
     }
 
-    const { settings, error } = buildCodim1ContinuationSettings(isochroneCurveDraft)
+    const { settings, error } = buildCodim1ContinuationSettings(isoperiodicCurveDraft)
     if (!settings) {
-      setIsochroneCurveError(error ?? 'Invalid continuation settings.')
+      setIsoperiodicCurveError(error ?? 'Invalid continuation settings.')
       return
     }
 
-    setIsochroneCurveError(null)
-    await onCreateIsochroneCurveFromPoint({
+    setIsoperiodicCurveError(null)
+    await onCreateIsoperiodicCurveFromPoint({
       branchId: selectedNodeId,
       pointIndex: branchPointIndex,
       name,
-      parameterName: isochroneCurveDraft.parameterName,
-      param2Name: isochroneCurveDraft.param2Name,
+      parameterName: isoperiodicCurveDraft.parameterName,
+      param2Name: isoperiodicCurveDraft.param2Name,
       settings,
-      forward: isochroneCurveDraft.forward,
+      forward: isoperiodicCurveDraft.forward,
     })
   }
 
@@ -7296,7 +7299,7 @@ function useInspectorSelectionController({
     handleCreateHomoclinicFromLargeCycle,
     handleCreateHomotopySaddleFromEquilibrium,
     handleCreateHopfCurve,
-    handleCreateIsochroneCurve,
+    handleCreateIsoperiodicCurve,
     handleCreateLimitCycleFromHopf,
     handleCreateLimitCycleFromOrbit,
     handleCreateLimitCycleFromPD,
@@ -7348,10 +7351,10 @@ function useInspectorSelectionController({
     isRealEigenvalue,
     isStoredCycleTarget,
     isSurfaceManifoldBranch,
-    isochroneCurveDraft,
-    isochroneCurveError,
-    isochroneParam1Options,
-    isochroneParam2Options,
+    isoperiodicCurveDraft,
+    isoperiodicCurveError,
+    isoperiodicParam1Options,
+    isoperiodicParam2Options,
     isocline,
     isoclineActiveAxes,
     isoclineActiveSet,
@@ -7498,7 +7501,7 @@ function useInspectorSelectionController({
     setHomoclinicFromLargeCycleDraft,
     setHomotopySaddleFromEquilibriumDraft,
     setHopfCurveDraft,
-    setIsochroneCurveDraft,
+    setIsoperiodicCurveDraft,
     setIsoclineError,
     setIsoclineLevelDraft,
     setLimitCycleFromHopfDraft,
@@ -7525,7 +7528,7 @@ function useInspectorSelectionController({
     showHomoclinicFromLargeCycle,
     showHomotopySaddleFromEquilibrium,
     showHopfCurveContinuation,
-    showIsochroneContinuation,
+    showIsoperiodicContinuation,
     showLimitCycleFromHopf,
     showLimitCycleFromPD,
     showNSCurveContinuation,

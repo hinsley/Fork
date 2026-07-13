@@ -173,7 +173,7 @@ export function summarizeEigenvalues(point: ContinuationPoint, branchType?: stri
   const eigenvalues = point.eigenvalues || [];
   const label = (
     branchType === 'limit_cycle' ||
-    branchType === 'isochrone_curve' ||
+    branchType === 'isoperiodic_curve' ||
     branchType === 'lpc_curve' ||
     branchType === 'pd_curve' ||
     branchType === 'ns_curve'

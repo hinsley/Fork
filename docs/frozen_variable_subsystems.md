@@ -77,7 +77,7 @@ Runtime naming note:
 Computed states are reduced-canonical.
 
 - Non-cycle states (for example equilibrium continuation points): reduced vector length equals `freeVariableNames.length`.
-- Cycle-like continuation points (limit cycle, isochrone, homoclinic-related packed states): packed collocation vectors are stored in reduced coordinates.
+- Cycle-like continuation points (limit cycle, isoperiodic, homoclinic-related packed states): packed collocation vectors are stored in reduced coordinates.
 
 For a limit-cycle branch point with mesh `(ntst, ncol)` and reduced dimension `d_free`, packed state payloads are interpreted with `d_free`, not full system dimension.
 
@@ -112,7 +112,7 @@ If full-system dimension is used to decode reduced-packed cycle states, branch s
 When a cycle-like continuation branch is plotted with exactly one free state variable on the chosen
 axes (with remaining plotted axes frozen/continuation variables), Fork renders branch envelopes
 (min/max curves) in both state-space scenes and bifurcation diagrams.
-This envelope policy applies to continuation branches (limit cycle, isochrone, homoclinic-related branches),
+This envelope policy applies to continuation branches (limit cycle, isoperiodic, homoclinic-related branches),
 not standalone limit-cycle objects.
 
 ## Extension Semantics for Frozen Continuations

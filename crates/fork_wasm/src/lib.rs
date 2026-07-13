@@ -17,7 +17,7 @@ pub use continuation::{
     WasmCodim1CurveExtensionRunner, WasmContinuationExtensionRunner, WasmCycleManifold2DRunner,
     WasmEqManifold1DExtensionRunner, WasmEqManifold1DRunner, WasmEqManifold2DRunner,
     WasmEquilibriumRunner, WasmFoldCurveRunner, WasmHomoclinicRunner, WasmHomotopySaddleRunner,
-    WasmHopfCurveRunner, WasmIsochroneCurveRunner, WasmLPCCurveRunner, WasmLimitCycleRunner,
+    WasmHopfCurveRunner, WasmIsoperiodicCurveRunner, WasmLPCCurveRunner, WasmLimitCycleRunner,
     WasmManifold2DExtensionRunner, WasmNSCurveRunner, WasmPDCurveRunner,
 };
 pub use equilibrium::WasmEquilibriumSolverRunner;
