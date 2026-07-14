@@ -2606,6 +2606,10 @@ function useInspectorSelectionController({
         .sort((left, right) => left.name.localeCompare(right.name)),
     [system.objects]
   )
+  const heteroclinicEquilibriumIdsKey = useMemo(
+    () => JSON.stringify(heteroclinicEquilibriumOptions.map((option) => option.id)),
+    [heteroclinicEquilibriumOptions]
+  )
   const [heteroclinicFromOrbitDraft, setHeteroclinicFromOrbitDraft] =
     useState<HeteroclinicFromOrbitDraft>(() =>
       makeHeteroclinicFromOrbitDraft(
@@ -3354,31 +3358,6 @@ function useInspectorSelectionController({
       setLyapunovError(null)
       setCovariantError(null)
       setLimitCycleFromOrbitError(null)
-      setHeteroclinicFromOrbitDraft((prev) => {
-        const availableIds = heteroclinicEquilibriumOptions.map((option) => option.id)
-        const fresh = makeHeteroclinicFromOrbitDraft(stableSystemConfig, availableIds)
-        return {
-          ...fresh,
-          name: prev.name,
-          sourceEquilibriumId: availableIds.includes(prev.sourceEquilibriumId)
-            ? prev.sourceEquilibriumId
-            : fresh.sourceEquilibriumId,
-          targetEquilibriumId:
-            availableIds.includes(prev.targetEquilibriumId) &&
-            prev.targetEquilibriumId !== prev.sourceEquilibriumId
-              ? prev.targetEquilibriumId
-              : fresh.targetEquilibriumId,
-          parameterName: continuationParameterSet.has(prev.parameterName)
-            ? prev.parameterName
-            : fresh.parameterName,
-          param2Name:
-            continuationParameterSet.has(prev.param2Name) &&
-            prev.param2Name !== prev.parameterName
-              ? prev.param2Name
-              : fresh.param2Name,
-        }
-      })
-      setHeteroclinicFromOrbitError(null)
     }
     if (current.type === 'equilibrium') {
       setEquilibriumDraft(makeEquilibriumSolveDraft(stableSystemConfig, current))
@@ -3413,9 +3392,40 @@ function useInspectorSelectionController({
       )
       isoclineSelectionIdRef.current = selectedNodeId
     }
+  }, [object?.type, selectedNodeId, systemConfigKey])
+
+  useEffect(() => {
+    const current = objectRef.current
+    if (current?.type !== 'orbit') return
+    const stableSystemConfig = stableSystemConfigRef.current
+    const availableIds = JSON.parse(heteroclinicEquilibriumIdsKey) as string[]
+    setHeteroclinicFromOrbitDraft((prev) => {
+      const fresh = makeHeteroclinicFromOrbitDraft(stableSystemConfig, availableIds)
+      return {
+        ...fresh,
+        name: prev.name,
+        sourceEquilibriumId: availableIds.includes(prev.sourceEquilibriumId)
+          ? prev.sourceEquilibriumId
+          : fresh.sourceEquilibriumId,
+        targetEquilibriumId:
+          availableIds.includes(prev.targetEquilibriumId) &&
+          prev.targetEquilibriumId !== prev.sourceEquilibriumId
+            ? prev.targetEquilibriumId
+            : fresh.targetEquilibriumId,
+        parameterName: continuationParameterSet.has(prev.parameterName)
+          ? prev.parameterName
+          : fresh.parameterName,
+        param2Name:
+          continuationParameterSet.has(prev.param2Name) &&
+          prev.param2Name !== prev.parameterName
+            ? prev.param2Name
+            : fresh.param2Name,
+      }
+    })
+    setHeteroclinicFromOrbitError(null)
   }, [
     continuationParameterSet,
-    heteroclinicEquilibriumOptions,
+    heteroclinicEquilibriumIdsKey,
     object?.type,
     selectedNodeId,
     systemConfigKey,
