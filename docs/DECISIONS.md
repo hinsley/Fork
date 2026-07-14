@@ -121,6 +121,39 @@ References:
 
 ---
 
+### 2026-07-14: Localize one-sided HomHS events with tracked spectral identities
+Context:
+HBK and Fork expose raw `TLS`, `TLU`, `NCH`, `SH`, and `BT` test values whose ordered formulas do
+not provide ordinary two-point sign brackets. The three-leading gaps touch zero and reopen, while a
+stable or unstable center eigenvalue disappears from the corresponding partition at the imaginary
+axis. Applying generic sign-change detection either missed these events or misclassified the same
+spectral transition as `DRS`/`DRU` or a neutral-saddle event.
+Decision:
+Represent real eigenvalues and complex-conjugate pairs as deterministic spectral modes and match
+them between consecutive corrected points. Detect `NCH` and `SH` only when the same real mode or
+complex-pair representative crosses the imaginary axis. For `TLS` and `TLU`, compare the tracked
+leading real branch with the leading complex pair to obtain a signed bracket, then bisect on the
+corrected continuation branch; retain the ordered HBK gap as the serialized diagnostic. Promote a
+refined center crossing to `BT` only when at least two eigenvalues are co-localized at zero. Treat
+near-zero modes as center modes when persisting the refined diagnostic payload.
+Why:
+The signed tracking scalar supplies a refinement coordinate without changing the HBK-facing raw
+test value. Matching identities prevents a nearest-eigenvalue reorder from fabricating a center
+crossing, and post-refinement multiplicity verification prevents every zero eigenvalue from being
+labeled Bogdanov-Takens.
+Impact:
+All five formerly diagnostic-only HBK channels now produce corrected, bidirectionally localized
+markers through batch continuation, stepped runners, initial-tangent runners, restart, and
+extension. Their raw diagnostics and marker labels survive serialization and remain visible in CLI
+and web inspectors. Inclination flips remain unsupported.
+References:
+`crates/fork_core/src/continuation.rs`,
+`crates/fork_core/src/continuation/homoclinic_events.rs`,
+`docs/hclinic-parity.md`,
+`docs/homoclinic-methods.md`
+
+---
+
 ### 2026-07-14: Match HBK's HomHS formulations and keep true heteroclinics separate
 Context:
 HclinicBifurcationKit 0.2.1 follows a truncated orbit whose two endpoints approach the same
@@ -150,7 +183,8 @@ or shooting, adaptive collocation restarts/extensions, localized signed-bracket 
 raw one-sided HBK diagnostics, and exact discretization metadata. A two-saddle heteroclinic schema
 remains an explicit beyond-parity task. Continuation-aware eigenvalue tracking and touching-root
 localization are required before `TLS`, `TLU`, `NCH`, `SH`, or `BT` can be promoted from diagnostics
-to robust automatic markers.
+to robust automatic markers. The tracked-spectral-identity decision above implements and supersedes
+this original limitation.
 Fork's heuristic equilibrium-to-Stage-D Method 3 is also tracked independently and is not counted as
 HBK parity evidence.
 References:

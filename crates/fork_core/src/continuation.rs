@@ -354,7 +354,8 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             };
 
             let bifurcation_type = if detected_type != BifurcationType::None {
-                problem.classify_bifurcation(&final_aug, detected_type)?
+                let classified = problem.classify_bifurcation(&final_aug, detected_type)?;
+                promote_verified_homoclinic_bt(&final_diag, classified)
             } else {
                 BifurcationType::None
             };
@@ -1174,8 +1175,10 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             };
 
             let bifurcation_type = if detected_type != BifurcationType::None {
-                self.problem
-                    .classify_bifurcation(&final_aug, detected_type)?
+                let classified = self
+                    .problem
+                    .classify_bifurcation(&final_aug, detected_type)?;
+                promote_verified_homoclinic_bt(&final_diag, classified)
             } else {
                 BifurcationType::None
             };
@@ -1988,7 +1991,8 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             };
 
             let bifurcation_type = if detected_type != BifurcationType::None {
-                problem.classify_bifurcation(&final_aug, detected_type)?
+                let classified = problem.classify_bifurcation(&final_aug, detected_type)?;
+                promote_verified_homoclinic_bt(&final_diag, classified)
             } else {
                 BifurcationType::None
             };
@@ -2081,10 +2085,25 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
     let mut hi_aug = new_aug.clone();
     let mut lo_diag = prev_diag.clone();
     let mut hi_diag = new_diag.clone();
-    let mut lo_test = bifurcation_test_value(prev_diag, prev_homoclinic, bif_type)
-        .ok_or_else(|| anyhow!("Previous bifurcation test value is unavailable"))?;
-    let mut hi_test = bifurcation_test_value(new_diag, new_homoclinic, bif_type)
-        .ok_or_else(|| anyhow!("Current bifurcation test value is unavailable"))?;
+    let localization = homoclinic_localization_bracket(prev_diag, new_diag, bif_type);
+    let mut lo_position = 0.0;
+    let mut hi_position = 1.0;
+    let mut lo_test = homoclinic_aware_bifurcation_test_value(
+        prev_diag,
+        prev_homoclinic,
+        bif_type,
+        localization,
+        lo_position,
+    )
+    .ok_or_else(|| anyhow!("Previous bifurcation test value is unavailable"))?;
+    let mut hi_test = homoclinic_aware_bifurcation_test_value(
+        new_diag,
+        new_homoclinic,
+        bif_type,
+        localization,
+        hi_position,
+    )
+    .ok_or_else(|| anyhow!("Current bifurcation test value is unavailable"))?;
 
     if lo_test.abs() < TEST_TOLERANCE {
         return Ok((lo_aug, lo_diag));
@@ -2101,6 +2120,7 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
         std::mem::swap(&mut lo_aug, &mut hi_aug);
         std::mem::swap(&mut lo_diag, &mut hi_diag);
         std::mem::swap(&mut lo_test, &mut hi_test);
+        std::mem::swap(&mut lo_position, &mut hi_position);
     }
 
     let (mut best_aug, mut best_diag, mut best_abs) = if lo_test.abs() < hi_test.abs() {
@@ -2117,6 +2137,7 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
         } else {
             0.5
         };
+        let mid_position = lo_position + (hi_position - lo_position) * s;
 
         let mid_aug = &lo_aug + (&hi_aug - &lo_aug) * s;
 
@@ -2142,10 +2163,14 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
         // Compute diagnostics at corrected point
         let diag = problem.diagnostics(&corrected_aug)?;
         let homoclinic = problem.homoclinic_event_diagnostics(&corrected_aug)?;
-        let mid_test =
-            bifurcation_test_value(&diag, homoclinic.as_ref(), bif_type).ok_or_else(|| {
-                anyhow!("Bifurcation test value became unavailable during refinement")
-            })?;
+        let mid_test = homoclinic_aware_bifurcation_test_value(
+            &diag,
+            homoclinic.as_ref(),
+            bif_type,
+            localization,
+            mid_position,
+        )
+        .ok_or_else(|| anyhow!("Bifurcation test value became unavailable during refinement"))?;
 
         // Check convergence
         if mid_test.abs() < TEST_TOLERANCE {
@@ -2156,9 +2181,11 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
         if mid_test < 0.0 {
             lo_aug = corrected_aug.clone();
             lo_test = mid_test;
+            lo_position = mid_position;
         } else {
             hi_aug = corrected_aug.clone();
             hi_test = mid_test;
+            hi_position = mid_position;
         }
 
         // Track best (closest to zero)
@@ -3066,6 +3093,297 @@ fn scalar_test_crossed_or_reached(prev: f64, new: f64) -> bool {
     prev.is_finite() && new.is_finite() && (prev * new < 0.0 || scalar_test_reached(prev, new))
 }
 
+const HOMOCLINIC_SPECTRAL_IMAG_TOLERANCE: f64 = homoclinic_events::DEFAULT_FOCUS_TOLERANCE;
+const HOMOCLINIC_BT_CENTER_TOLERANCE: f64 = 1.0e-5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrackedSpectralModeKind {
+    Real,
+    ComplexPair,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TrackedSpectralMode {
+    kind: TrackedSpectralModeKind,
+    value: Complex<f64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TrackedCenterCrossing {
+    kind: TrackedSpectralModeKind,
+    previous: Complex<f64>,
+    current: Complex<f64>,
+    fraction: f64,
+}
+
+fn tracked_spectral_modes(eigenvalues: &[Complex<f64>]) -> Vec<TrackedSpectralMode> {
+    let mut modes = eigenvalues
+        .iter()
+        .copied()
+        .filter(|value| value.re.is_finite() && value.im.is_finite())
+        .filter_map(|value| {
+            if value.im.abs() < HOMOCLINIC_SPECTRAL_IMAG_TOLERANCE {
+                return Some(TrackedSpectralMode {
+                    kind: TrackedSpectralModeKind::Real,
+                    value: Complex::new(value.re, 0.0),
+                });
+            }
+            if value.im <= 0.0 {
+                return None;
+            }
+            let partner = eigenvalues.iter().copied().find(|candidate| {
+                let scale = 1.0_f64.max(value.norm()).max(candidate.norm());
+                candidate.im < -HOMOCLINIC_SPECTRAL_IMAG_TOLERANCE
+                    && (candidate.re - value.re).abs() <= 1.0e-7 * scale
+                    && (candidate.im + value.im).abs() <= 1.0e-7 * scale
+            })?;
+            Some(TrackedSpectralMode {
+                kind: TrackedSpectralModeKind::ComplexPair,
+                value: Complex::new(
+                    0.5 * (value.re + partner.re),
+                    0.5 * (value.im.abs() + partner.im.abs()),
+                ),
+            })
+        })
+        .collect::<Vec<_>>();
+    modes.sort_by(|left, right| {
+        (left.kind as u8)
+            .cmp(&(right.kind as u8))
+            .then_with(|| left.value.re.total_cmp(&right.value.re))
+            .then_with(|| left.value.im.total_cmp(&right.value.im))
+    });
+    modes
+}
+
+fn normalized_spectral_distance(left: Complex<f64>, right: Complex<f64>) -> f64 {
+    (left - right).norm() / (1.0 + left.norm() + right.norm())
+}
+
+fn tracked_center_crossings(
+    previous: &[Complex<f64>],
+    current: &[Complex<f64>],
+) -> Vec<TrackedCenterCrossing> {
+    let previous_modes = tracked_spectral_modes(previous);
+    let current_modes = tracked_spectral_modes(current);
+    let mut candidates = Vec::new();
+    for (previous_index, previous_mode) in previous_modes.iter().enumerate() {
+        for (current_index, current_mode) in current_modes.iter().enumerate() {
+            if previous_mode.kind == current_mode.kind {
+                candidates.push((
+                    normalized_spectral_distance(previous_mode.value, current_mode.value),
+                    previous_index,
+                    current_index,
+                ));
+            }
+        }
+    }
+    candidates.sort_by(|left, right| {
+        left.0
+            .total_cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+
+    let mut used_previous = vec![false; previous_modes.len()];
+    let mut used_current = vec![false; current_modes.len()];
+    let mut crossings = Vec::new();
+    for (_, previous_index, current_index) in candidates {
+        if used_previous[previous_index] || used_current[current_index] {
+            continue;
+        }
+        used_previous[previous_index] = true;
+        used_current[current_index] = true;
+        let previous_mode = previous_modes[previous_index];
+        let current_mode = current_modes[current_index];
+        if !scalar_test_crossed_or_reached(previous_mode.value.re, current_mode.value.re) {
+            continue;
+        }
+        let denominator = current_mode.value.re - previous_mode.value.re;
+        let fraction = if denominator.abs() > f64::EPSILON {
+            (-previous_mode.value.re / denominator).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        crossings.push(TrackedCenterCrossing {
+            kind: previous_mode.kind,
+            previous: previous_mode.value,
+            current: current_mode.value,
+            fraction,
+        });
+    }
+    crossings.sort_by(|left, right| left.fraction.total_cmp(&right.fraction));
+    crossings
+}
+
+fn three_leading_signed_value(eigenvalues: &[Complex<f64>], stable: bool) -> Option<f64> {
+    let modes = tracked_spectral_modes(eigenvalues);
+    let on_side = |value: Complex<f64>| {
+        if stable {
+            value.re < 0.0
+        } else {
+            value.re > 0.0
+        }
+    };
+    let choose_leading = |kind: TrackedSpectralModeKind| {
+        let candidates = modes
+            .iter()
+            .filter(|mode| mode.kind == kind && on_side(mode.value))
+            .map(|mode| mode.value);
+        if stable {
+            candidates.max_by(|left, right| left.re.total_cmp(&right.re))
+        } else {
+            candidates.min_by(|left, right| left.re.total_cmp(&right.re))
+        }
+    };
+    let real = choose_leading(TrackedSpectralModeKind::Real)?;
+    let pair = choose_leading(TrackedSpectralModeKind::ComplexPair)?;
+    Some(real.re - pair.re)
+}
+
+fn tracked_homoclinic_event_crossing(
+    previous: &PointDiagnostics,
+    current: &PointDiagnostics,
+) -> Option<BifurcationType> {
+    if let Some(crossing) = tracked_center_crossings(&previous.eigenvalues, &current.eigenvalues)
+        .into_iter()
+        .next()
+    {
+        return Some(match crossing.kind {
+            TrackedSpectralModeKind::Real => BifurcationType::HomoclinicNonCentral,
+            TrackedSpectralModeKind::ComplexPair => BifurcationType::HomoclinicShilnikovHopf,
+        });
+    }
+
+    for (stable, bifurcation) in [
+        (true, BifurcationType::HomoclinicThreeLeadingStable),
+        (false, BifurcationType::HomoclinicThreeLeadingUnstable),
+    ] {
+        if let (Some(previous_value), Some(current_value)) = (
+            three_leading_signed_value(&previous.eigenvalues, stable),
+            three_leading_signed_value(&current.eigenvalues, stable),
+        ) {
+            if scalar_test_crossed_or_reached(previous_value, current_value) {
+                return Some(bifurcation);
+            }
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone, Copy)]
+enum HomoclinicLocalizationBracket {
+    ThreeLeading {
+        stable: bool,
+    },
+    CenterMode {
+        kind: TrackedSpectralModeKind,
+        previous: Complex<f64>,
+        current: Complex<f64>,
+    },
+}
+
+impl HomoclinicLocalizationBracket {
+    fn value(self, diagnostics: &PointDiagnostics, position: f64) -> Option<f64> {
+        match self {
+            Self::ThreeLeading { stable } => {
+                three_leading_signed_value(&diagnostics.eigenvalues, stable)
+            }
+            Self::CenterMode {
+                kind,
+                previous,
+                current,
+            } => {
+                let position = position.clamp(0.0, 1.0);
+                let expected = previous + (current - previous) * position;
+                tracked_spectral_modes(&diagnostics.eigenvalues)
+                    .into_iter()
+                    .filter(|mode| mode.kind == kind)
+                    .min_by(|left, right| {
+                        normalized_spectral_distance(left.value, expected)
+                            .total_cmp(&normalized_spectral_distance(right.value, expected))
+                    })
+                    .map(|mode| mode.value.re)
+            }
+        }
+    }
+}
+
+fn homoclinic_localization_bracket(
+    previous: &PointDiagnostics,
+    current: &PointDiagnostics,
+    bifurcation: BifurcationType,
+) -> Option<HomoclinicLocalizationBracket> {
+    match bifurcation {
+        BifurcationType::HomoclinicThreeLeadingStable => {
+            Some(HomoclinicLocalizationBracket::ThreeLeading { stable: true })
+        }
+        BifurcationType::HomoclinicThreeLeadingUnstable => {
+            Some(HomoclinicLocalizationBracket::ThreeLeading { stable: false })
+        }
+        BifurcationType::HomoclinicNonCentral | BifurcationType::HomoclinicBogdanovTakens => {
+            tracked_center_crossings(&previous.eigenvalues, &current.eigenvalues)
+                .into_iter()
+                .find(|crossing| crossing.kind == TrackedSpectralModeKind::Real)
+                .map(|crossing| HomoclinicLocalizationBracket::CenterMode {
+                    kind: crossing.kind,
+                    previous: crossing.previous,
+                    current: crossing.current,
+                })
+        }
+        BifurcationType::HomoclinicShilnikovHopf => {
+            tracked_center_crossings(&previous.eigenvalues, &current.eigenvalues)
+                .into_iter()
+                .find(|crossing| crossing.kind == TrackedSpectralModeKind::ComplexPair)
+                .map(|crossing| HomoclinicLocalizationBracket::CenterMode {
+                    kind: crossing.kind,
+                    previous: crossing.previous,
+                    current: crossing.current,
+                })
+        }
+        _ => None,
+    }
+}
+
+fn homoclinic_aware_bifurcation_test_value(
+    diagnostics: &PointDiagnostics,
+    homoclinic: Option<&HomoclinicEventDiagnostics>,
+    bifurcation: BifurcationType,
+    localization: Option<HomoclinicLocalizationBracket>,
+    position: f64,
+) -> Option<f64> {
+    localization
+        .and_then(|bracket| bracket.value(diagnostics, position))
+        .or_else(|| bifurcation_test_value(diagnostics, homoclinic, bifurcation))
+}
+
+fn promote_verified_homoclinic_bt(
+    diagnostics: &PointDiagnostics,
+    bifurcation: BifurcationType,
+) -> BifurcationType {
+    if !matches!(
+        bifurcation,
+        BifurcationType::HomoclinicNonCentral
+            | BifurcationType::HomoclinicShilnikovHopf
+            | BifurcationType::HomoclinicBogdanovTakens
+    ) {
+        return bifurcation;
+    }
+    let center_multiplicity = diagnostics
+        .eigenvalues
+        .iter()
+        .filter(|value| {
+            value.re.is_finite()
+                && value.im.is_finite()
+                && value.norm() <= HOMOCLINIC_BT_CENTER_TOLERANCE
+        })
+        .count();
+    if center_multiplicity >= 2 {
+        BifurcationType::HomoclinicBogdanovTakens
+    } else {
+        bifurcation
+    }
+}
+
 fn map_homoclinic_event_to_bifurcation(event: HomoclinicEventKind) -> Option<BifurcationType> {
     match event {
         HomoclinicEventKind::NeutralSaddle => Some(BifurcationType::HomoclinicNeutralSaddle),
@@ -3083,17 +3401,15 @@ fn map_homoclinic_event_to_bifurcation(event: HomoclinicEventKind) -> Option<Bif
         HomoclinicEventKind::NeutrallyDivergentUnstable => {
             Some(BifurcationType::HomoclinicNeutrallyDivergentUnstable)
         }
-        // HBK exposes these five ordered spectral scalars, but they are
-        // one-sided (or disappear when hyperbolicity is lost). Its continuous
-        // event handler, like Fork's, requires a sign bracket or an exact zero,
-        // so mapping them to automatic markers would advertise localization
-        // that the scalar cannot normally provide. Keep the raw diagnostics;
-        // localization needs continuation-aware eigenvalue identity tracking.
-        HomoclinicEventKind::ThreeLeadingStable
-        | HomoclinicEventKind::ThreeLeadingUnstable
-        | HomoclinicEventKind::NonCentralHomoclinic
-        | HomoclinicEventKind::ShilnikovHopf
-        | HomoclinicEventKind::BogdanovTakens => None,
+        HomoclinicEventKind::ThreeLeadingStable => {
+            Some(BifurcationType::HomoclinicThreeLeadingStable)
+        }
+        HomoclinicEventKind::ThreeLeadingUnstable => {
+            Some(BifurcationType::HomoclinicThreeLeadingUnstable)
+        }
+        HomoclinicEventKind::NonCentralHomoclinic => Some(BifurcationType::HomoclinicNonCentral),
+        HomoclinicEventKind::ShilnikovHopf => Some(BifurcationType::HomoclinicShilnikovHopf),
+        HomoclinicEventKind::BogdanovTakens => Some(BifurcationType::HomoclinicBogdanovTakens),
         HomoclinicEventKind::OrbitFlipUnstable => {
             Some(BifurcationType::HomoclinicOrbitFlipUnstable)
         }
@@ -3157,13 +3473,32 @@ fn available_homoclinic_event_value(
 }
 
 fn homoclinic_event_crossing(
+    previous_diagnostics: &PointDiagnostics,
+    current_diagnostics: &PointDiagnostics,
     previous: Option<&HomoclinicEventDiagnostics>,
     current: Option<&HomoclinicEventDiagnostics>,
 ) -> Option<BifurcationType> {
+    if let Some(tracked) =
+        tracked_homoclinic_event_crossing(previous_diagnostics, current_diagnostics)
+    {
+        return Some(tracked);
+    }
     let (Some(previous), Some(current)) = (previous, current) else {
         return None;
     };
-    HomoclinicEventKind::ALL.into_iter().find_map(|kind| {
+    [
+        HomoclinicEventKind::NeutralSaddle,
+        HomoclinicEventKind::NeutralSaddleFocus,
+        HomoclinicEventKind::NeutralBiFocus,
+        HomoclinicEventKind::DoubleRealStable,
+        HomoclinicEventKind::DoubleRealUnstable,
+        HomoclinicEventKind::NeutrallyDivergentStable,
+        HomoclinicEventKind::NeutrallyDivergentUnstable,
+        HomoclinicEventKind::OrbitFlipUnstable,
+        HomoclinicEventKind::OrbitFlipStable,
+    ]
+    .into_iter()
+    .find_map(|kind| {
         let bifurcation = map_homoclinic_event_to_bifurcation(kind)?;
         let previous = available_homoclinic_event_value(previous, kind)?;
         let current = available_homoclinic_event_value(current, kind)?;
@@ -3201,7 +3536,7 @@ fn detect_bifurcation_type(
     } else if neutral_saddle_crossed_with_real_pairs(previous, current) {
         BifurcationType::NeutralSaddle
     } else {
-        homoclinic_event_crossing(previous_homoclinic, current_homoclinic)
+        homoclinic_event_crossing(previous, current, previous_homoclinic, current_homoclinic)
             .unwrap_or(BifurcationType::None)
     }
 }
@@ -4136,6 +4471,89 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy)]
+    enum TrackedHomoclinicSpectrum {
+        ThreeLeadingStable,
+        ThreeLeadingUnstable,
+        NonCentral,
+        ShilnikovHopf,
+        BogdanovTakens,
+    }
+
+    impl TrackedHomoclinicSpectrum {
+        fn eigenvalues(self, parameter: f64) -> Vec<Complex<f64>> {
+            match self {
+                Self::ThreeLeadingStable => vec![
+                    Complex::new(-1.0 + parameter, 0.0),
+                    Complex::new(-1.0 - parameter, 1.0),
+                    Complex::new(-1.0 - parameter, -1.0),
+                    Complex::new(2.0, 0.0),
+                ],
+                Self::ThreeLeadingUnstable => vec![
+                    Complex::new(-2.0, 0.0),
+                    Complex::new(1.0 + parameter, 0.0),
+                    Complex::new(1.0 - parameter, 1.0),
+                    Complex::new(1.0 - parameter, -1.0),
+                ],
+                Self::NonCentral => vec![
+                    Complex::new(-2.0, 0.0),
+                    Complex::new(parameter, 0.0),
+                    Complex::new(2.0, 0.0),
+                ],
+                Self::ShilnikovHopf => vec![
+                    Complex::new(-2.0, 0.0),
+                    Complex::new(parameter, 1.0),
+                    Complex::new(parameter, -1.0),
+                    Complex::new(2.0, 0.0),
+                ],
+                Self::BogdanovTakens => vec![
+                    Complex::new(-2.0, 0.0),
+                    Complex::new(parameter, 0.0),
+                    Complex::new(2.0 * parameter, 0.0),
+                    Complex::new(2.0, 0.0),
+                ],
+            }
+        }
+    }
+
+    struct SyntheticTrackedHomoclinicEventProblem {
+        spectrum: TrackedHomoclinicSpectrum,
+    }
+
+    impl ContinuationProblem for SyntheticTrackedHomoclinicEventProblem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            out[0] = aug_state[1] - aug_state[0];
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            Ok(DMatrix::from_row_slice(1, 2, &[-1.0, 1.0]))
+        }
+
+        fn diagnostics(&mut self, aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: self.spectrum.eigenvalues(aug_state[0]),
+                cycle_points: None,
+            })
+        }
+
+        fn homoclinic_event_diagnostics(
+            &mut self,
+            aug_state: &DVector<f64>,
+        ) -> Result<Option<HomoclinicEventDiagnostics>> {
+            Ok(Some(compute_homoclinic_event_diagnostics(
+                &self.spectrum.eigenvalues(aug_state[0]),
+                None,
+                DEFAULT_FOCUS_TOLERANCE,
+            )))
+        }
+    }
+
     fn homoclinic_event_initial_point() -> ContinuationPoint {
         ContinuationPoint {
             state: vec![-0.1],
@@ -4235,7 +4653,7 @@ mod tests {
     }
 
     #[test]
-    fn homoclinic_event_mappings_only_localize_signed_crossing_channels() {
+    fn homoclinic_event_mappings_cover_tracked_and_direct_crossing_channels() {
         let mappings = [
             (
                 HomoclinicEventKind::NeutralSaddle,
@@ -4266,6 +4684,26 @@ mod tests {
                 BifurcationType::HomoclinicNeutrallyDivergentUnstable,
             ),
             (
+                HomoclinicEventKind::ThreeLeadingStable,
+                BifurcationType::HomoclinicThreeLeadingStable,
+            ),
+            (
+                HomoclinicEventKind::ThreeLeadingUnstable,
+                BifurcationType::HomoclinicThreeLeadingUnstable,
+            ),
+            (
+                HomoclinicEventKind::NonCentralHomoclinic,
+                BifurcationType::HomoclinicNonCentral,
+            ),
+            (
+                HomoclinicEventKind::ShilnikovHopf,
+                BifurcationType::HomoclinicShilnikovHopf,
+            ),
+            (
+                HomoclinicEventKind::BogdanovTakens,
+                BifurcationType::HomoclinicBogdanovTakens,
+            ),
+            (
                 HomoclinicEventKind::OrbitFlipUnstable,
                 BifurcationType::HomoclinicOrbitFlipUnstable,
             ),
@@ -4279,47 +4717,28 @@ mod tests {
             assert_eq!(map_homoclinic_event_to_bifurcation(event), Some(stability));
             assert_eq!(homoclinic_event_for_bifurcation(stability), Some(event));
 
-            let point = PointDiagnostics {
-                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
-                eigenvalues: Vec::new(),
-                cycle_points: None,
-            };
-            let before = diagnostics_with_single_homoclinic_event(event, -1.0);
-            let after = diagnostics_with_single_homoclinic_event(event, 1.0);
-            assert_eq!(
-                detect_bifurcation_type(&point, &point, Some(&before), Some(&after)),
-                stability,
-                "failed to detect the {} channel",
-                event.code()
-            );
-        }
-
-        // These are useful HBK-compatible raw diagnostics, but their ordered
-        // formulas are one-sided (or become unavailable at loss of
-        // hyperbolicity). A two-point sign bracket cannot honestly localize
-        // them. Keep them out of automatic marker creation until continuation-
-        // aware eigenvalue tracking supplies a signed scalar.
-        for event in [
-            HomoclinicEventKind::ThreeLeadingStable,
-            HomoclinicEventKind::ThreeLeadingUnstable,
-            HomoclinicEventKind::NonCentralHomoclinic,
-            HomoclinicEventKind::ShilnikovHopf,
-            HomoclinicEventKind::BogdanovTakens,
-        ] {
-            assert_eq!(map_homoclinic_event_to_bifurcation(event), None);
-            let point = PointDiagnostics {
-                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
-                eigenvalues: Vec::new(),
-                cycle_points: None,
-            };
-            let before = diagnostics_with_single_homoclinic_event(event, -1.0);
-            let after = diagnostics_with_single_homoclinic_event(event, 1.0);
-            assert_eq!(
-                detect_bifurcation_type(&point, &point, Some(&before), Some(&after)),
-                BifurcationType::None,
-                "diagnostic-only {} must not create a false localized marker",
-                event.code()
-            );
+            if !matches!(
+                event,
+                HomoclinicEventKind::ThreeLeadingStable
+                    | HomoclinicEventKind::ThreeLeadingUnstable
+                    | HomoclinicEventKind::NonCentralHomoclinic
+                    | HomoclinicEventKind::ShilnikovHopf
+                    | HomoclinicEventKind::BogdanovTakens
+            ) {
+                let point = PointDiagnostics {
+                    test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                };
+                let before = diagnostics_with_single_homoclinic_event(event, -1.0);
+                let after = diagnostics_with_single_homoclinic_event(event, 1.0);
+                assert_eq!(
+                    detect_bifurcation_type(&point, &point, Some(&before), Some(&after)),
+                    stability,
+                    "failed to detect the {} channel",
+                    event.code()
+                );
+            }
         }
         assert_eq!(
             map_homoclinic_event_to_bifurcation(HomoclinicEventKind::InclinationFlipUnstable),
@@ -4332,6 +4751,223 @@ mod tests {
         assert_eq!(
             homoclinic_event_for_bifurcation(BifurcationType::Fold),
             None
+        );
+    }
+
+    fn assert_tracked_homoclinic_event_localizes(
+        spectrum: TrackedHomoclinicSpectrum,
+        expected: BifurcationType,
+        raw_kind: HomoclinicEventKind,
+    ) {
+        let mut problem = SyntheticTrackedHomoclinicEventProblem { spectrum };
+        let branch = continue_with_problem(
+            &mut problem,
+            homoclinic_event_initial_point(),
+            homoclinic_event_settings(),
+            true,
+        )
+        .expect("tracked homoclinic event continuation");
+        assert_eq!(branch.bifurcations, vec![1]);
+        let point = &branch.points[1];
+        assert_eq!(point.stability, expected);
+        assert!(
+            point.param_value.abs() < 1.0e-6,
+            "tracked event was not localized: {}",
+            point.param_value
+        );
+        let raw = point
+            .homoclinic_events
+            .as_ref()
+            .expect("localized tracked diagnostics")
+            .event(raw_kind);
+        assert_eq!(raw.status, HomoclinicEventStatus::Available);
+        assert!(raw.value.expect("localized raw value").abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn tracked_three_leading_events_localize_the_touching_raw_gap() {
+        assert_tracked_homoclinic_event_localizes(
+            TrackedHomoclinicSpectrum::ThreeLeadingStable,
+            BifurcationType::HomoclinicThreeLeadingStable,
+            HomoclinicEventKind::ThreeLeadingStable,
+        );
+        assert_tracked_homoclinic_event_localizes(
+            TrackedHomoclinicSpectrum::ThreeLeadingUnstable,
+            BifurcationType::HomoclinicThreeLeadingUnstable,
+            HomoclinicEventKind::ThreeLeadingUnstable,
+        );
+    }
+
+    #[test]
+    fn tracked_center_modes_localize_nch_sh_and_verify_bt() {
+        assert_tracked_homoclinic_event_localizes(
+            TrackedHomoclinicSpectrum::NonCentral,
+            BifurcationType::HomoclinicNonCentral,
+            HomoclinicEventKind::NonCentralHomoclinic,
+        );
+        assert_tracked_homoclinic_event_localizes(
+            TrackedHomoclinicSpectrum::ShilnikovHopf,
+            BifurcationType::HomoclinicShilnikovHopf,
+            HomoclinicEventKind::ShilnikovHopf,
+        );
+        assert_tracked_homoclinic_event_localizes(
+            TrackedHomoclinicSpectrum::BogdanovTakens,
+            BifurcationType::HomoclinicBogdanovTakens,
+            HomoclinicEventKind::BogdanovTakens,
+        );
+    }
+
+    #[test]
+    fn center_mode_identity_tracking_rejects_a_nearest_mode_swap() {
+        let point = |eigenvalues| PointDiagnostics {
+            test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+            eigenvalues,
+            cycle_points: None,
+        };
+        let previous = point(vec![Complex::new(-0.1, 0.0), Complex::new(0.2, 0.0)]);
+        let current = point(vec![Complex::new(-0.2, 0.0), Complex::new(0.1, 0.0)]);
+        assert_eq!(
+            tracked_homoclinic_event_crossing(&previous, &current),
+            None,
+            "switching which side is closest to zero is not an eigenvalue crossing"
+        );
+    }
+
+    #[test]
+    fn stepped_and_initial_tangent_runners_localize_tracked_spectral_events() {
+        let mut runner = ContinuationRunner::new(
+            SyntheticTrackedHomoclinicEventProblem {
+                spectrum: TrackedHomoclinicSpectrum::ThreeLeadingUnstable,
+            },
+            homoclinic_event_initial_point(),
+            homoclinic_event_settings(),
+            true,
+        )
+        .expect("tracked stepped runner");
+        runner.run_steps(1).expect("tracked stepped event");
+        let stepped = runner.take_result();
+        assert_eq!(
+            stepped.points[1].stability,
+            BifurcationType::HomoclinicThreeLeadingUnstable
+        );
+        assert!(stepped.points[1].param_value.abs() < 1.0e-6);
+
+        let mut problem = SyntheticTrackedHomoclinicEventProblem {
+            spectrum: TrackedHomoclinicSpectrum::ShilnikovHopf,
+        };
+        let initialized = continue_with_initial_tangent(
+            &mut problem,
+            homoclinic_event_initial_point(),
+            DVector::from_vec(vec![1.0, 1.0]),
+            homoclinic_event_settings(),
+        )
+        .expect("tracked initial-tangent event");
+        assert_eq!(
+            initialized.points[1].stability,
+            BifurcationType::HomoclinicShilnikovHopf
+        );
+        assert!(initialized.points[1].param_value.abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn localized_tracked_event_marker_and_raw_diagnostics_survive_json() {
+        let mut problem = SyntheticTrackedHomoclinicEventProblem {
+            spectrum: TrackedHomoclinicSpectrum::BogdanovTakens,
+        };
+        let branch = continue_with_problem(
+            &mut problem,
+            homoclinic_event_initial_point(),
+            homoclinic_event_settings(),
+            true,
+        )
+        .expect("tracked BT branch");
+        let encoded = serde_json::to_string(&branch).expect("serialize tracked BT branch");
+        let decoded: ContinuationBranch =
+            serde_json::from_str(&encoded).expect("deserialize tracked BT branch");
+        assert_eq!(
+            decoded.points[1].stability,
+            BifurcationType::HomoclinicBogdanovTakens
+        );
+        let bt = decoded.points[1]
+            .homoclinic_events
+            .as_ref()
+            .expect("persisted tracked diagnostics")
+            .event(HomoclinicEventKind::BogdanovTakens);
+        assert_eq!(bt.status, HomoclinicEventStatus::Available);
+        assert!(bt.value.expect("persisted BT value").abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn tracked_spectral_events_localize_in_reverse_continuation() {
+        let initial = ContinuationPoint {
+            state: vec![0.1],
+            param_value: 0.1,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+            homoclinic_events: None,
+        };
+        for (spectrum, expected) in [
+            (
+                TrackedHomoclinicSpectrum::ThreeLeadingStable,
+                BifurcationType::HomoclinicThreeLeadingStable,
+            ),
+            (
+                TrackedHomoclinicSpectrum::NonCentral,
+                BifurcationType::HomoclinicNonCentral,
+            ),
+        ] {
+            let mut problem = SyntheticTrackedHomoclinicEventProblem { spectrum };
+            let branch = continue_with_problem(
+                &mut problem,
+                initial.clone(),
+                homoclinic_event_settings(),
+                false,
+            )
+            .expect("reverse tracked event continuation");
+            assert_eq!(branch.points[1].stability, expected);
+            assert!(branch.points[1].param_value.abs() < 1.0e-6);
+        }
+    }
+
+    #[test]
+    fn tracked_spectral_events_are_not_duplicated_after_localization() {
+        for spectrum in [
+            TrackedHomoclinicSpectrum::ThreeLeadingStable,
+            TrackedHomoclinicSpectrum::NonCentral,
+        ] {
+            let mut settings = homoclinic_event_settings();
+            settings.max_steps = 2;
+            let mut problem = SyntheticTrackedHomoclinicEventProblem { spectrum };
+            let branch = continue_with_problem(
+                &mut problem,
+                homoclinic_event_initial_point(),
+                settings,
+                true,
+            )
+            .expect("tracked event continuation past the localized point");
+
+            assert_eq!(branch.points.len(), 3);
+            assert_eq!(branch.bifurcations, vec![1]);
+            assert_eq!(branch.points[2].stability, BifurcationType::None);
+        }
+    }
+
+    #[test]
+    fn bt_promotion_requires_two_co_localized_zero_modes() {
+        let diagnostics = PointDiagnostics {
+            test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+            eigenvalues: vec![
+                Complex::new(0.0, 0.0),
+                Complex::new(1.0e-3, 0.0),
+                Complex::new(2.0, 0.0),
+            ],
+            cycle_points: None,
+        };
+
+        assert_eq!(
+            promote_verified_homoclinic_bt(&diagnostics, BifurcationType::HomoclinicNonCentral,),
+            BifurcationType::HomoclinicNonCentral
         );
     }
 

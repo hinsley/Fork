@@ -38,7 +38,7 @@ versioned connection schema; it must not be represented as an HBK feature.
 | Bogdanov-Takens switch | Fourth-order BT predictor followed by correction/continuation | Supported; a collocation predictor can be sampled onto shooting nodes |
 | Two-parameter PALC | Continue a HomHS curve in a parameter plane | Supported in both directions |
 | Sign-bracketed spectral special points | `NNS`, `NSF`, `NFF`, `DRS`, `DRU`, `NDS`, and `NDU` | Supported with named, localized markers and per-point serialized test values |
-| One-sided spectral diagnostics | HBK exposes raw `TLS`, `TLU`, `NCH`, `SH`, and `BT` scalars, but its event handler cannot normally bracket their ordered one-sided formulas | Supported as named, serialized diagnostics; deliberately not emitted as false localized markers |
+| One-sided spectral events | HBK exposes raw `TLS`, `TLU`, `NCH`, `SH`, and `BT` scalars, but its event handler cannot normally bracket their ordered one-sided formulas | Supported and localized with continuation-aware spectral identities; raw values remain serialized at the corrected marker |
 | Orbit flip | Optional `OFS`/`OFU` tests | Exposed only when the required adjoint data are available |
 | Inclination flip | `IFS`/`IFU` are constant placeholders, not implemented | Explicitly reported as unsupported |
 | Genuine two-saddle heteroclinic | Not implemented | Beyond strict parity; tracked separately |
@@ -49,10 +49,13 @@ which cannot vanish while both eigenvalues remain unstable. Even with that
 correction, ordered `TLS`/`TLU` gaps only touch zero, while `NCH`, `SH`, and
 `BT` lose their selected stable/unstable eigenvalue at zero. HBK registers all
 five with a sign-crossing event handler, but the audited implementation cannot
-normally localize them. Fork keeps their raw values visible without creating a
-misleading marker. Robust localization is tracked separately and requires
-continuation-aware eigenvalue identities (plus touching-root localization for
-the three-leading cases).
+normally localize them. Fork matches real modes and conjugate-pair
+representatives between corrected steps. `TLS`/`TLU` use the signed separation
+between the tracked leading real branch and leading complex pair, then refine
+the zero on the corrected branch while retaining the raw touching gap.
+`NCH`/`SH` follow the same real mode or complex pair through the imaginary
+axis. A marker is promoted to `BT` only when the refined spectrum verifies at
+least two co-localized center eigenvalues.
 
 ## Numerical acceptance
 
@@ -65,8 +68,8 @@ advance on that locus from the same long-cycle seed.  Additional tests cover:
 - rejection of nonhyperbolic saddles and singular three-free-quantity setups;
 - nonuniform-mesh residual scaling, PALC quadrature, defect estimation, and
   mesh transfer;
-- every implemented homoclinic special-point scalar and every sign-bracketed
-  homoclinic event localization path;
+- every implemented homoclinic special-point scalar, direct sign-bracketed
+  event, tracked center crossing, and three-leading touching-root path;
 - real Node-WASM, CLI, and browser creation/rendering workflows.
 
 The four-dimensional saddle-focus fixture appends a stable complex pair to the

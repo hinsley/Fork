@@ -177,19 +177,22 @@ Important behavior:
 ## Special-Point Diagnostics
 
 Every corrected homoclinic point records the HBK-style test channels that are mathematically
-available for its saddle spectrum. The channels with genuine signed brackets are localized and
-labeled with the standard codes:
+available for its saddle spectrum. All implemented channels are localized and labeled with the
+standard codes:
 
 - neutral types: `NNS`, `NSF`, `NFF`;
-- leading-spectrum interactions: `DRS`, `DRU`, `NDS`, `NDU`;
+- leading-spectrum interactions: `DRS`, `DRU`, `NDS`, `NDU`, `TLS`, `TLU`;
+- center-boundary interactions: `NCH`, `SH`, `BT`;
 - orbit flips: `OFS`, `OFU` when the required normalized adjoint data are available.
 
-`TLS`, `TLU`, `NCH`, `SH`, and `BT` remain visible as raw diagnostics, matching HBK's numerical
-surface, but are not automatically labeled as localized points. In the audited HBK 0.2.1 source,
-the ordered `TLS`/`TLU` gaps are one-sided and the `NCH`/`SH`/`BT` values are one-sided until the
-selected eigenvalue disappears at loss of hyperbolicity; its sign-crossing event handler therefore
-cannot normally bracket them either. Robust markers require eigenvalue-identity tracking and, for
-`TLS`/`TLU`, a touching-root localizer.
+In the audited HBK 0.2.1 source, the ordered `TLS`/`TLU` gaps are one-sided and the
+`NCH`/`SH`/`BT` values are one-sided until the selected eigenvalue disappears at loss of
+hyperbolicity; its sign-crossing event handler therefore cannot normally bracket them. Fork tracks
+real eigenvalues and conjugate-pair representatives between corrected steps. It localizes
+`TLS`/`TLU` using a signed real-branch/pair separation while preserving the raw touching gap,
+tracks the same center mode through zero for `NCH`/`SH`, and emits `BT` only after two center modes
+are verified at the refined point. Identity tracking prevents a mere nearest-mode reorder from
+creating a false center marker.
 
 The point inspector in web and CLI shows each test value together with availability and a reason when
 a channel does not apply to the current real/focus configuration. `IFS` and `IFU` are reported as

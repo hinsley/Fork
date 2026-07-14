@@ -693,6 +693,26 @@ async function run() {
       labels.formatBifurcationType('HomoclinicOrbitFlipStable'),
       'OFS - Orbit Flip Stable'
     );
+    assert.equal(
+      labels.formatBifurcationType('HomoclinicThreeLeadingStable'),
+      'TLS - Three Leading Stable'
+    );
+    assert.equal(
+      labels.formatBifurcationType('HomoclinicThreeLeadingUnstable'),
+      'TLU - Three Leading Unstable'
+    );
+    assert.equal(
+      labels.formatBifurcationType('HomoclinicNonCentral'),
+      'NCH - Non-Central Homoclinic'
+    );
+    assert.equal(
+      labels.formatBifurcationType('HomoclinicShilnikovHopf'),
+      'SH - Shilnikov-Hopf'
+    );
+    assert.equal(
+      labels.formatBifurcationType('HomoclinicBogdanovTakens'),
+      'BT - Bogdanov-Takens'
+    );
     assert.equal(labels.formatBifurcationType('None'), 'Unknown');
   });
 

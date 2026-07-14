@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_FOCUS_TOLERANCE: f64 = 1.0e-5;
 const MIN_ADJOINT_VECTOR_NORM: f64 = 1.0e-13;
 const MIN_ADJOINT_PAIRING: f64 = 1.0e-10;
+const LOCALIZED_CENTER_TOLERANCE: f64 = 1.0e-5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HomoclinicEventKind {
@@ -305,8 +306,9 @@ fn hermitian_inner(left: &DVector<Complex<f64>>, right: &DVector<Complex<f64>>) 
 /// `real(lambda1) + real(lambda3)`. Both terms are positive on a hyperbolic
 /// saddle, so that expression cannot even reach the documented three-leading
 /// unstable collision. Fork uses the stable-side-symmetric separation
-/// `real(lambda1) - real(lambda3)` instead. The ordered gap is still one-sided,
-/// so it is exposed as a raw diagnostic rather than a sign-localized marker.
+/// `real(lambda1) - real(lambda3)` instead. The ordered gap remains the raw
+/// serialized diagnostic; the continuation layer localizes its touching zero
+/// with a signed separation between tracked real and complex spectral branches.
 pub fn compute_homoclinic_event_diagnostics(
     eigenvalues: &[Complex<f64>],
     orbit_flip: Option<&HomoclinicOrbitFlipData>,
@@ -320,10 +322,13 @@ pub fn compute_homoclinic_event_diagnostics(
 
     let mut stable = Vec::new();
     let mut unstable = Vec::new();
+    let mut center = Vec::new();
     let mut discarded_eigenvalues = 0;
     for &eigenvalue in eigenvalues {
         if !complex_is_finite(eigenvalue) {
             discarded_eigenvalues += 1;
+        } else if eigenvalue.re.abs() <= LOCALIZED_CENTER_TOLERANCE {
+            center.push(eigenvalue);
         } else if eigenvalue.re < 0.0 {
             stable.push(eigenvalue);
         } else if eigenvalue.re > 0.0 {
@@ -341,6 +346,11 @@ pub fn compute_homoclinic_event_diagnostics(
             .total_cmp(&right.re)
             .then_with(|| right.im.total_cmp(&left.im))
     });
+    center.sort_by(|left, right| {
+        left.norm()
+            .total_cmp(&right.norm())
+            .then_with(|| right.im.total_cmp(&left.im))
+    });
 
     let mu1 = stable.first().copied();
     let mu2 = stable.get(1).copied();
@@ -348,6 +358,19 @@ pub fn compute_homoclinic_event_diagnostics(
     let lambda1 = unstable.first().copied();
     let lambda2 = unstable.get(1).copied();
     let lambda3 = unstable.get(2).copied();
+    let center_real = center
+        .iter()
+        .copied()
+        .find(|value| !is_focus(*value, focus_tolerance));
+    let center_focus = center
+        .iter()
+        .copied()
+        .find(|value| value.im > 0.0 && is_focus(*value, focus_tolerance));
+    let center_real_values = center
+        .iter()
+        .copied()
+        .filter(|value| !is_focus(*value, focus_tolerance))
+        .collect::<Vec<_>>();
 
     let mut events = Vec::with_capacity(HomoclinicEventKind::ALL.len());
     let neutral_value = mu1
@@ -443,7 +466,7 @@ pub fn compute_homoclinic_event_diagnostics(
             "requires at least three unstable eigenvalues",
         ),
     });
-    events.push(match mu1 {
+    events.push(match center_real.or(mu1) {
         Some(leading) => {
             HomoclinicEventValue::available(HomoclinicEventKind::NonCentralHomoclinic, leading.re)
         }
@@ -452,7 +475,7 @@ pub fn compute_homoclinic_event_diagnostics(
             "requires at least one stable eigenvalue",
         ),
     });
-    events.push(match lambda1 {
+    events.push(match center_focus.or(lambda1) {
         Some(leading) => {
             HomoclinicEventValue::available(HomoclinicEventKind::ShilnikovHopf, leading.re)
         }
@@ -461,15 +484,21 @@ pub fn compute_homoclinic_event_diagnostics(
             "requires at least one unstable eigenvalue",
         ),
     });
-    events.push(match mu1.zip(lambda1) {
-        Some((stable, unstable)) => HomoclinicEventValue::available(
+    events.push(match center_real_values.as_slice() {
+        [first, second, ..] => HomoclinicEventValue::available(
             HomoclinicEventKind::BogdanovTakens,
-            stable.re * unstable.re,
+            first.re * second.re,
         ),
-        None => HomoclinicEventValue::unavailable(
-            HomoclinicEventKind::BogdanovTakens,
-            "requires at least one stable and one unstable eigenvalue",
-        ),
+        _ => match mu1.zip(lambda1) {
+            Some((stable, unstable)) => HomoclinicEventValue::available(
+                HomoclinicEventKind::BogdanovTakens,
+                stable.re * unstable.re,
+            ),
+            None => HomoclinicEventValue::unavailable(
+                HomoclinicEventKind::BogdanovTakens,
+                "requires two center eigenvalues or at least one stable and one unstable eigenvalue",
+            ),
+        },
     });
 
     let unstable_flip_data = orbit_flip.and_then(|data| data.unstable.as_ref());
@@ -782,6 +811,30 @@ mod tests {
 
         assert_available(&diagnostics, HomoclinicEventKind::OrbitFlipStable, 6.0);
         assert_available(&diagnostics, HomoclinicEventKind::OrbitFlipUnstable, -2.0);
+    }
+
+    #[test]
+    fn center_modes_keep_nch_sh_and_bt_available_at_the_localized_boundary() {
+        let nch = compute_homoclinic_event_diagnostics(
+            &[c(-2.0, 0.0), c(0.0, 0.0), c(2.0, 0.0)],
+            None,
+            DEFAULT_FOCUS_TOLERANCE,
+        );
+        assert_available(&nch, HomoclinicEventKind::NonCentralHomoclinic, 0.0);
+
+        let sh = compute_homoclinic_event_diagnostics(
+            &[c(-2.0, 0.0), c(0.0, 1.0), c(0.0, -1.0), c(2.0, 0.0)],
+            None,
+            DEFAULT_FOCUS_TOLERANCE,
+        );
+        assert_available(&sh, HomoclinicEventKind::ShilnikovHopf, 0.0);
+
+        let bt = compute_homoclinic_event_diagnostics(
+            &[c(-2.0, 0.0), c(0.0, 0.0), c(0.0, 0.0), c(2.0, 0.0)],
+            None,
+            DEFAULT_FOCUS_TOLERANCE,
+        );
+        assert_available(&bt, HomoclinicEventKind::BogdanovTakens, 0.0);
     }
 
     #[test]

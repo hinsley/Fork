@@ -67,6 +67,24 @@ const baseBranch: ContinuationObject = {
 }
 
 describe('continuation helpers', () => {
+  it('labels every tracked homoclinic spectral marker with its HBK code', () => {
+    expect(formatBifurcationType('HomoclinicThreeLeadingStable')).toBe(
+      'TLS - Three Leading Stable'
+    )
+    expect(formatBifurcationType('HomoclinicThreeLeadingUnstable')).toBe(
+      'TLU - Three Leading Unstable'
+    )
+    expect(formatBifurcationType('HomoclinicNonCentral')).toBe(
+      'NCH - Non-Central Homoclinic'
+    )
+    expect(formatBifurcationType('HomoclinicShilnikovHopf')).toBe(
+      'SH - Shilnikov-Hopf'
+    )
+    expect(formatBifurcationType('HomoclinicBogdanovTakens')).toBe(
+      'BT - Bogdanov-Takens'
+    )
+  })
+
   it('normalizes eigenvalue inputs', () => {
     const normalized = normalizeEigenvalueArray([
       [1, -2],
