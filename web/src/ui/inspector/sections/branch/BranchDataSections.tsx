@@ -488,8 +488,26 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                                             value: `v${branch.data.branch_type.schema.schema_version}`,
                                           },
                                           {
-                                            label: 'Mesh',
-                                            value: `${branch.data.branch_type.ntst} x ${branch.data.branch_type.ncol}`,
+                                            label: 'Method',
+                                            value:
+                                              branch.data.branch_type.discretization?.type ===
+                                              'shooting'
+                                                ? branch.data.branch_type.ntst === 1
+                                                  ? 'Single shooting'
+                                                  : 'Multiple shooting'
+                                                : 'Orthogonal collocation',
+                                          },
+                                          {
+                                            label:
+                                              branch.data.branch_type.discretization?.type ===
+                                              'shooting'
+                                                ? 'Shooting intervals'
+                                                : 'Mesh',
+                                            value:
+                                              branch.data.branch_type.discretization?.type ===
+                                              'shooting'
+                                                ? branch.data.branch_type.ntst
+                                                : `${branch.data.branch_type.ntst} x ${branch.data.branch_type.ncol}`,
                                           },
                                           {
                                             label: 'Source unstable dimension',

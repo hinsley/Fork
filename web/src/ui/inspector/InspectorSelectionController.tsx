@@ -417,6 +417,9 @@ type HeteroclinicFromOrbitDraft = CollocationAdaptivityDraft & {
   param2Name: string
   ntst: string
   ncol: string
+  discretization: HomoclinicDiscretization
+  shootingIntervals: string
+  integrationStepsPerSegment: string
   freeTime: boolean
   freeEps0: boolean
   freeEps1: boolean
@@ -1374,6 +1377,11 @@ function makeHeteroclinicFromOrbitDraft(
     param2Name,
     ntst: '40',
     ncol: '4',
+    discretization: 'collocation',
+    shootingIntervals: String(DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS),
+    integrationStepsPerSegment: String(
+      DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+    ),
     freeTime: false,
     freeEps0: true,
     freeEps1: true,
@@ -7744,6 +7752,10 @@ function useInspectorSelectionController({
     }
     const ntst = parseInteger(heteroclinicFromOrbitDraft.ntst)
     const ncol = parseInteger(heteroclinicFromOrbitDraft.ncol)
+    const shootingIntervals = parseInteger(heteroclinicFromOrbitDraft.shootingIntervals)
+    const integrationStepsPerSegment = parseInteger(
+      heteroclinicFromOrbitDraft.integrationStepsPerSegment
+    )
     const projectorRefreshInterval = parseInteger(
       heteroclinicFromOrbitDraft.projectorRefreshInterval
     )
@@ -7753,6 +7765,15 @@ function useInspectorSelectionController({
     }
     if (ncol === null || ncol < 1) {
       setHeteroclinicFromOrbitError('NCOL must be a positive integer.')
+      return
+    }
+    const shootingError = homoclinicShootingSettingsError(
+      heteroclinicFromOrbitDraft.discretization,
+      shootingIntervals ?? Number.NaN,
+      integrationStepsPerSegment ?? Number.NaN
+    )
+    if (shootingError) {
+      setHeteroclinicFromOrbitError(shootingError)
       return
     }
     if (projectorRefreshInterval === null || projectorRefreshInterval < 1) {
@@ -7786,6 +7807,9 @@ function useInspectorSelectionController({
       param2Name: heteroclinicFromOrbitDraft.param2Name,
       ntst,
       ncol,
+      discretization: heteroclinicFromOrbitDraft.discretization,
+      shootingIntervals: shootingIntervals ?? undefined,
+      integrationStepsPerSegment: integrationStepsPerSegment ?? undefined,
       freeTime: heteroclinicFromOrbitDraft.freeTime,
       freeEps0: heteroclinicFromOrbitDraft.freeEps0,
       freeEps1: heteroclinicFromOrbitDraft.freeEps1,

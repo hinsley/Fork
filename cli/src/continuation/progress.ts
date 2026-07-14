@@ -151,13 +151,12 @@ export function runHeteroclinicContinuationWithProgress(
   setup: any,
   settings: any,
   forward: boolean,
-  label: string
+  label: string,
+  discretization: 'collocation' | 'shooting' = 'collocation'
 ): ContinuationBranchData {
-  const runner = bridge.createHeteroclinicContinuationRunner(
-    setup,
-    settings,
-    forward
-  );
+  const runner = discretization === 'shooting'
+    ? bridge.createHeteroclinicShootingContinuationRunner(setup, settings, forward)
+    : bridge.createHeteroclinicContinuationRunner(setup, settings, forward);
   return runContinuationRunnerWithProgress(runner, label);
 }
 

@@ -93,6 +93,7 @@ type GeneratedForkWasmModule = typeof import("../../crates/fork_wasm/pkg/fork_wa
 export type ForkWasmModule = GeneratedForkWasmModule & {
     WasmHomoclinicShootingRunner?: HomoclinicShootingRunnerConstructor;
     WasmHeteroclinicRunner?: HeteroclinicRunnerConstructor;
+    WasmHeteroclinicShootingRunner?: HeteroclinicRunnerConstructor;
 };
 export type GeneratedWasmSystem = InstanceType<GeneratedForkWasmModule["WasmSystem"]>;
 type WasmSystem = GeneratedWasmSystem & {
@@ -113,6 +114,11 @@ type WasmSystem = GeneratedWasmSystem & {
         forward: boolean
     ) => unknown;
     init_homoclinic_shooting_from_collocation?: (
+        setup: unknown,
+        intervals: number,
+        integrationStepsPerSegment: number
+    ) => unknown;
+    init_heteroclinic_shooting_from_collocation?: (
         setup: unknown,
         intervals: number,
         integrationStepsPerSegment: number
@@ -456,6 +462,29 @@ export class WasmBridge {
         if (typeof Runner !== 'function') {
             throw new Error(
                 "Heteroclinic continuation runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+        return new Runner(
+            this.config.equations,
+            new Float64Array(this.config.params),
+            this.config.paramNames,
+            this.config.varNames,
+            setup,
+            settings,
+            forward
+        );
+    }
+
+    createHeteroclinicShootingContinuationRunner(
+        setup: any,
+        settings: any,
+        forward: boolean
+    ): ContinuationRunner {
+        if (!wasmModule) throw new Error("WASM module not loaded");
+        const Runner = wasmModule.WasmHeteroclinicShootingRunner;
+        if (typeof Runner !== 'function') {
+            throw new Error(
+                "Heteroclinic standard-shooting runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
             );
         }
         return new Runner(
@@ -1249,6 +1278,20 @@ export class WasmBridge {
             freeEps0,
             freeEps1
         );
+    }
+
+    initHeteroclinicShootingFromCollocation(
+        setup: unknown,
+        intervals: number,
+        integrationStepsPerSegment: number
+    ): unknown {
+        const init = this.instance.init_heteroclinic_shooting_from_collocation;
+        if (typeof init !== 'function') {
+            throw new Error(
+                "Heteroclinic standard-shooting initialization is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+        return init.call(this.instance, setup, intervals, integrationStepsPerSegment);
     }
 
     initHomoclinicFromLargeCycleOnMesh(

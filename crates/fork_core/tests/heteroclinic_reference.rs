@@ -1,8 +1,10 @@
 use fork_core::continuation::periodic::CollocationAdaptivitySettings;
 use fork_core::continuation::{
-    continue_heteroclinic_curve, decode_heteroclinic_state, extend_heteroclinic_curve,
-    heteroclinic_setup_from_orbit, BranchType, ContinuationBranch, ContinuationSettings,
-    HeteroclinicOrbitSeed, HomoclinicExtraFlags, HETEROCLINIC_SCHEMA_VERSION,
+    continue_heteroclinic_curve, continue_heteroclinic_shooting_curve,
+    decode_heteroclinic_shooting_state, decode_heteroclinic_state, extend_heteroclinic_curve,
+    heteroclinic_setup_from_orbit, heteroclinic_shooting_setup_from_collocation, BranchType,
+    ContinuationBranch, ContinuationSettings, HeteroclinicOrbitSeed, HeteroclinicShootingSettings,
+    HomoclinicDiscretization, HomoclinicExtraFlags, HETEROCLINIC_SCHEMA_VERSION,
 };
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 
@@ -21,6 +23,100 @@ fn analytic_system(params: Vec<f64>) -> EquationSystem {
     let mut system = EquationSystem::new(bytecode, params);
     system.set_maps(compiler.param_map, compiler.var_map);
     system
+}
+
+#[test]
+fn analytic_connection_continues_and_extends_with_single_and_multiple_shooting() {
+    for intervals in [1usize, 6] {
+        let mut system = analytic_system(vec![0.0, 0.0]);
+        let collocation = heteroclinic_setup_from_orbit(
+            &mut system,
+            &analytic_seed(),
+            20,
+            3,
+            &[0.0, 0.0],
+            0,
+            1,
+            "mu",
+            "nu",
+            HomoclinicExtraFlags {
+                free_time: true,
+                free_eps0: false,
+                free_eps1: false,
+            },
+        )
+        .expect("analytic heteroclinic collocation seed");
+        let shooting = heteroclinic_shooting_setup_from_collocation(
+            &collocation,
+            HeteroclinicShootingSettings {
+                intervals,
+                integration_steps_per_segment: 96,
+            },
+        )
+        .expect("sample heteroclinic shooting nodes");
+        assert_ne!(
+            shooting.guess.source_equilibrium, shooting.guess.target_equilibrium,
+            "shooting must retain two distinct endpoint equilibria"
+        );
+
+        let branch =
+            continue_heteroclinic_shooting_curve(&mut system, shooting.clone(), settings(), true)
+                .expect("analytic heteroclinic shooting continuation");
+        assert_eq!(branch.points.len(), 4, "M={intervals}");
+        let BranchType::HeteroclinicCurve {
+            schema,
+            ntst,
+            ncol,
+            discretization,
+            ..
+        } = &branch.branch_type
+        else {
+            panic!("expected a genuine heteroclinic shooting branch")
+        };
+        assert_eq!(schema.schema_version, HETEROCLINIC_SCHEMA_VERSION);
+        assert_eq!(*ntst, intervals);
+        assert_eq!(*ncol, 0);
+        assert_eq!(
+            *discretization,
+            HomoclinicDiscretization::Shooting {
+                integration_steps_per_segment: 96
+            }
+        );
+
+        for point in &branch.points[1..] {
+            let decoded = decode_heteroclinic_shooting_state(&point.state, &shooting)
+                .expect("decode heteroclinic shooting point");
+            assert!((point.param_value - decoded.param2_value).abs() < 3.0e-6);
+            assert!((decoded.source_equilibrium[0] + 1.0).abs() < 1.0e-7);
+            assert!((decoded.target_equilibrium[0] - 1.0).abs() < 1.0e-7);
+            assert!(decoded.nodes.first().expect("source node")[0] < -0.9);
+            assert!(decoded.nodes.last().expect("target node")[0] > 0.9);
+        }
+
+        let persisted: ContinuationBranch = serde_json::from_str(
+            &serde_json::to_string(&branch).expect("serialize shooting branch"),
+        )
+        .expect("deserialize shooting branch");
+        let original_len = persisted.points.len();
+        let extended = extend_heteroclinic_curve(
+            &mut system,
+            persisted,
+            ContinuationSettings {
+                max_steps: 2,
+                ..settings()
+            },
+            true,
+        )
+        .expect("extend persisted heteroclinic shooting branch");
+        assert_eq!(extended.points.len(), original_len + 2, "M={intervals}");
+        let BranchType::HeteroclinicCurve { discretization, .. } = extended.branch_type else {
+            panic!("extension must remain a heteroclinic branch")
+        };
+        assert!(matches!(
+            discretization,
+            HomoclinicDiscretization::Shooting { .. }
+        ));
+    }
 }
 
 fn analytic_seed() -> HeteroclinicOrbitSeed {

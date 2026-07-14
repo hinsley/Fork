@@ -134,8 +134,33 @@ export async function initiateHeteroclinicFromOrbit(
           : true;
       },
     },
+    {
+      type: 'rawlist',
+      name: 'discretization',
+      message: 'Connection method:',
+      choices: [
+        { name: 'Orthogonal Collocation (default)', value: 'collocation' },
+        { name: 'Standard Shooting', value: 'shooting' },
+      ],
+      default: 'collocation',
+      pageSize: MENU_PAGE_SIZE,
+    },
     { type: 'number', name: 'ntst', message: 'Mesh intervals (NTST):', default: 40 },
     { type: 'number', name: 'ncol', message: 'Collocation degree (NCOL):', default: 4 },
+    {
+      type: 'number',
+      name: 'shootingIntervals',
+      message: 'Shooting intervals (1 = single shooting):',
+      default: 8,
+      when: (current: { discretization?: string }) => current.discretization === 'shooting',
+    },
+    {
+      type: 'number',
+      name: 'integrationStepsPerSegment',
+      message: 'Integration steps per shooting segment:',
+      default: 64,
+      when: (current: { discretization?: string }) => current.discretization === 'shooting',
+    },
     { type: 'confirm', name: 'freeTime', message: 'Free flight time T?', default: false },
     { type: 'confirm', name: 'freeEps0', message: 'Free source radius eps0?', default: true },
     { type: 'confirm', name: 'freeEps1', message: 'Free target radius eps1?', default: true },
@@ -162,38 +187,39 @@ export async function initiateHeteroclinicFromOrbit(
       name: 'adaptiveCollocationEnabled',
       message: 'Enable adaptive collocation mesh?',
       default: true,
+      when: (current: { discretization?: string }) => current.discretization !== 'shooting',
     },
     {
       type: 'confirm',
       name: 'adaptiveRedistributionEnabled',
       message: 'Allow mesh redistribution?',
       default: true,
-      when: (current: { adaptiveCollocationEnabled?: boolean }) =>
-        current.adaptiveCollocationEnabled,
+      when: (current: { adaptiveCollocationEnabled?: boolean; discretization?: string }) =>
+        current.discretization !== 'shooting' && current.adaptiveCollocationEnabled,
     },
     {
       type: 'number',
       name: 'adaptiveDefectTolerance',
       message: 'Collocation defect tolerance:',
       default: 0.025,
-      when: (current: { adaptiveCollocationEnabled?: boolean }) =>
-        current.adaptiveCollocationEnabled,
+      when: (current: { adaptiveCollocationEnabled?: boolean; discretization?: string }) =>
+        current.discretization !== 'shooting' && current.adaptiveCollocationEnabled,
     },
     {
       type: 'number',
       name: 'adaptiveMaxRefinements',
       message: 'Maximum mesh adaptations:',
       default: 3,
-      when: (current: { adaptiveCollocationEnabled?: boolean }) =>
-        current.adaptiveCollocationEnabled,
+      when: (current: { adaptiveCollocationEnabled?: boolean; discretization?: string }) =>
+        current.discretization !== 'shooting' && current.adaptiveCollocationEnabled,
     },
     {
       type: 'number',
       name: 'adaptiveMaxMeshPoints',
       message: 'Maximum mesh intervals:',
       default: 512,
-      when: (current: { adaptiveCollocationEnabled?: boolean }) =>
-        current.adaptiveCollocationEnabled,
+      when: (current: { adaptiveCollocationEnabled?: boolean; discretization?: string }) =>
+        current.discretization !== 'shooting' && current.adaptiveCollocationEnabled,
     },
     {
       type: 'rawlist',
@@ -219,6 +245,21 @@ export async function initiateHeteroclinicFromOrbit(
   }
   if (!Number.isInteger(answers.ncol) || answers.ncol < 1) {
     printError('NCOL must be a positive integer.');
+    return null;
+  }
+  if (
+    answers.discretization === 'shooting' &&
+    (!Number.isInteger(answers.shootingIntervals) || answers.shootingIntervals < 1)
+  ) {
+    printError('Shooting intervals must be a positive integer (1 selects single shooting).');
+    return null;
+  }
+  if (
+    answers.discretization === 'shooting' &&
+    (!Number.isInteger(answers.integrationStepsPerSegment) ||
+      answers.integrationStepsPerSegment < 1)
+  ) {
+    printError('Integration steps per shooting segment must be a positive integer.');
     return null;
   }
   if (!Number.isInteger(answers.projectorRefreshInterval) || answers.projectorRefreshInterval < 1) {
@@ -254,7 +295,7 @@ export async function initiateHeteroclinicFromOrbit(
   try {
     printInfo('Initializing independent source and target projector charts...');
     const bridge = new WasmBridge({ ...system, params: orbitParams });
-    const setup = bridge.initHeteroclinicFromOrbit(
+    const collocationSetup = bridge.initHeteroclinicFromOrbit(
       orbit.data.map((row) => row[0]),
       orbit.data.map((row) => row.slice(1)),
       source.solution.state,
@@ -267,13 +308,21 @@ export async function initiateHeteroclinicFromOrbit(
       answers.freeEps0,
       answers.freeEps1
     );
+    const setup = answers.discretization === 'shooting'
+      ? bridge.initHeteroclinicShootingFromCollocation(
+          collocationSetup,
+          answers.shootingIntervals,
+          answers.integrationStepsPerSegment
+        )
+      : collocationSetup;
     const data = normalizeBranchEigenvalues(
       runHeteroclinicContinuationWithProgress(
         bridge,
         setup,
         settings,
         answers.forward,
-        'Heteroclinic continuation'
+        'Heteroclinic continuation',
+        answers.discretization
       )
     );
     if (data.points.length <= 1) {

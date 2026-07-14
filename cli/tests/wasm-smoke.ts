@@ -1324,4 +1324,45 @@ assert.equal(heteroclinicBranch.branch_type.schema.schema_version, 1);
 assert.equal(heteroclinicBranch.branch_type.schema.source_basis.npos, 1);
 assert.equal(heteroclinicBranch.branch_type.schema.target_basis.nneg, 1);
 
+for (const intervals of [1, 6]) {
+  const shootingSetup = heteroclinicSystem.init_heteroclinic_shooting_from_collocation(
+    heteroclinicSetup,
+    intervals,
+    96
+  );
+  assert.notDeepEqual(
+    shootingSetup.guess.source_equilibrium,
+    shootingSetup.guess.target_equilibrium
+  );
+  const shootingRunner = new wasm.WasmHeteroclinicShootingRunner(
+    ['1-x^2', 'x*y+(mu-nu)*(1-x^2)'],
+    new Float64Array([0, 0]),
+    ['mu', 'nu'],
+    ['x', 'y'],
+    shootingSetup,
+    {
+      step_size: 1e-3,
+      min_step_size: 1e-7,
+      max_step_size: 2e-3,
+      max_steps: 2,
+      corrector_steps: 24,
+      corrector_tolerance: 1e-9,
+      step_tolerance: 1e-9,
+      projector_refresh_interval: 1,
+    },
+    true
+  );
+  while (!shootingRunner.get_progress().done) shootingRunner.run_steps(1);
+  const shootingBranch = shootingRunner.get_result();
+  assert.equal(shootingBranch.points.length, 3);
+  assert.equal(shootingBranch.branch_type.type, 'HeteroclinicCurve');
+  assert.equal(shootingBranch.branch_type.ntst, intervals);
+  assert.equal(shootingBranch.branch_type.ncol, 0);
+  assert.equal(shootingBranch.branch_type.discretization.type, 'shooting');
+  assert.equal(
+    shootingBranch.branch_type.discretization.integration_steps_per_segment,
+    96
+  );
+}
+
 console.log('PASS real WASM node boundary smoke');

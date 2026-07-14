@@ -93,6 +93,15 @@ type WasmModule = GeneratedWasmModule & {
     settings: unknown,
     forward: boolean
   ) => GeneratedHomoclinicRunner
+  WasmHeteroclinicShootingRunner?: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    setup: unknown,
+    settings: unknown,
+    forward: boolean
+  ) => GeneratedHomoclinicRunner
 }
 type GeneratedWasmSystem = InstanceType<GeneratedWasmModule['WasmSystem']>
 type WasmSystem = Omit<
@@ -108,6 +117,11 @@ type WasmSystem = Omit<
   compute_isocline?: GeneratedWasmSystem['compute_isocline']
   computeIsocline?: GeneratedWasmSystem['compute_isocline']
   init_homoclinic_shooting_from_collocation?: (
+    setup: unknown,
+    intervals: number,
+    integrationStepsPerSegment: number
+  ) => unknown
+  init_heteroclinic_shooting_from_collocation?: (
     setup: unknown,
     intervals: number,
     integrationStepsPerSegment: number
@@ -1979,7 +1993,7 @@ async function runHeteroclinicFromOrbit(
       'Heteroclinic continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
     )
   }
-  const setup = initHeteroclinic.call(
+  let setup = initHeteroclinic.call(
     system,
     {
       times: request.orbitTimes,
@@ -1995,10 +2009,34 @@ async function runHeteroclinicFromOrbit(
     request.freeEps0,
     request.freeEps1
   )
-  const HeteroclinicRunner = wasm.WasmHeteroclinicRunner
+  const discretization = request.discretization ?? 'collocation'
+  if (discretization === 'shooting') {
+    const shootingIntervals =
+      request.shootingIntervals ?? DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS
+    const integrationSteps =
+      request.integrationStepsPerSegment ??
+      DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+    const settingsError = homoclinicShootingSettingsError(
+      discretization,
+      shootingIntervals,
+      integrationSteps
+    )
+    if (settingsError) throw new Error(settingsError)
+    const initShooting = system.init_heteroclinic_shooting_from_collocation
+    if (typeof initShooting !== 'function') {
+      throw new Error(
+        'Heteroclinic standard-shooting initialization is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+      )
+    }
+    setup = initShooting.call(system, setup, shootingIntervals, integrationSteps)
+  }
+  const HeteroclinicRunner =
+    discretization === 'shooting'
+      ? wasm.WasmHeteroclinicShootingRunner
+      : wasm.WasmHeteroclinicRunner
   if (typeof HeteroclinicRunner !== 'function') {
     throw new Error(
-      'Heteroclinic continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+      `Heteroclinic ${discretization === 'shooting' ? 'standard-shooting ' : ''}continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.`
     )
   }
   const runner = new HeteroclinicRunner(

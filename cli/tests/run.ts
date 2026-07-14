@@ -179,6 +179,14 @@ async function run() {
       typeof wasmBridge.WasmBridge.prototype.createHeteroclinicContinuationRunner,
       'function'
     );
+    assert.equal(
+      typeof wasmBridge.WasmBridge.prototype.initHeteroclinicShootingFromCollocation,
+      'function'
+    );
+    assert.equal(
+      typeof wasmBridge.WasmBridge.prototype.createHeteroclinicShootingContinuationRunner,
+      'function'
+    );
     const config: SystemConfig = {
       name: 'heteroclinic_reference',
       equations: ['1-x*x', 'x*y+(mu-nu)*(1-x*x)'],

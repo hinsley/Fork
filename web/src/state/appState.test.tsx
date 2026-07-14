@@ -2045,9 +2045,12 @@ describe('appState heteroclinic continuation', () => {
             fixed_eps1: 0.01,
             projector_refresh_interval: 1,
           },
-          ntst: 2,
-          ncol: 1,
-          normalized_mesh: [0, 0.5, 1],
+          ntst: 1,
+          ncol: 0,
+          discretization: {
+            type: 'shooting',
+            integration_steps_per_segment: 96,
+          },
           param1_name: 'mu',
           param2_name: 'nu',
           free_time: false,
@@ -2068,6 +2071,9 @@ describe('appState heteroclinic continuation', () => {
         param2Name: 'nu',
         ntst: 2,
         ncol: 1,
+        discretization: 'shooting',
+        shootingIntervals: 1,
+        integrationStepsPerSegment: 96,
         freeTime: false,
         freeEps0: true,
         freeEps1: true,
@@ -2084,6 +2090,9 @@ describe('appState heteroclinic continuation', () => {
       targetEquilibrium: [1, 0],
       parameterName: 'mu',
       param2Name: 'nu',
+      discretization: 'shooting',
+      shootingIntervals: 1,
+      integrationStepsPerSegment: 96,
     })
     const created = Object.values(getContext().state.system!.branches).find(
       (branch) => branch.name === 'heteroc_Source_to_Target'
@@ -2100,6 +2109,10 @@ describe('appState heteroclinic continuation', () => {
         branch_type: {
           type: 'HeteroclinicCurve',
           schema: { schema_version: 1 },
+          discretization: {
+            type: 'shooting',
+            integration_steps_per_segment: 96,
+          },
         },
       },
     })
@@ -2133,6 +2146,7 @@ describe('appState heteroclinic continuation', () => {
     expect(extensionBranchType).toMatchObject({
       type: 'HeteroclinicCurve',
       schema: { schema_version: 1 },
+      discretization: { type: 'shooting' },
     })
     expect(getContext().state.system!.branches[createdId].data.points).toHaveLength(3)
   })
