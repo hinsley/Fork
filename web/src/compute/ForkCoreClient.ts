@@ -685,6 +685,9 @@ export type HeteroclinicFromOrbitRequest = {
   param2Name: string
   ntst: number
   ncol: number
+  discretization?: 'collocation' | 'shooting'
+  shootingIntervals?: number
+  integrationStepsPerSegment?: number
   freeTime: boolean
   freeEps0: boolean
   freeEps1: boolean

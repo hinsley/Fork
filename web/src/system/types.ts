@@ -583,6 +583,7 @@ export type BranchType =
       free_time: boolean
       free_eps0: boolean
       free_eps1: boolean
+      discretization?: HomoclinicBranchDiscretization
       normalized_mesh?: number[]
       collocation_adaptivity?: CollocationAdaptivitySettings
       collocation_adaptation?: CollocationAdaptationReport

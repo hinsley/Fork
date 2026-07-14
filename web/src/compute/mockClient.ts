@@ -1855,6 +1855,11 @@ export class MockForkCoreClient implements ForkCoreClient {
         const param1Index = request.system.paramNames.indexOf(request.parameterName)
         const param2Index = request.system.paramNames.indexOf(request.param2Name)
         const paramValue = request.system.params[param1Index] ?? 0
+        const shooting = request.discretization === 'shooting'
+        const outputNtst = shooting
+          ? request.shootingIntervals ?? DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS
+          : request.ntst
+        const outputNcol = shooting ? 0 : request.ncol
         opts?.onProgress?.({
           done: true,
           current_step: request.settings.max_steps,
@@ -1903,8 +1908,16 @@ export class MockForkCoreClient implements ForkCoreClient {
               fixed_eps1: 0.01,
               projector_refresh_interval: request.projectorRefreshInterval ?? 2,
             },
-            ntst: request.ntst,
-            ncol: request.ncol,
+            ntst: outputNtst,
+            ncol: outputNcol,
+            discretization: shooting
+              ? {
+                  type: 'shooting',
+                  integration_steps_per_segment:
+                    request.integrationStepsPerSegment ??
+                    DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT,
+                }
+              : { type: 'collocation' },
             param1_name: request.parameterName,
             param2_name: request.param2Name,
             free_time: request.freeTime,

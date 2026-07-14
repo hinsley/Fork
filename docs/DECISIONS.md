@@ -185,6 +185,32 @@ References:
 
 ---
 
+### 2026-07-14: Add shooting without collapsing the two-equilibrium schema
+Context:
+Long or sensitive connections can benefit from shooting, but the existing shooting implementation
+belongs to the one-saddle homoclinic defining system. Routing a genuine heteroclinic through it
+would lose the independent target equilibrium and target invariant-subspace chart.
+Decision:
+Add a separate `HeteroclinicShootingSetupV1` and `HeteroclinicShootingProblem`. Store `M + 1`
+shooting nodes, two equilibria, two Riccati charts, and the same version-one connection schema.
+Interpret `M = 1` as single shooting and `M > 1` as multiple shooting. Serialize shooting branches
+with an explicit discretization tag, `NTST = M`, `NCOL = 0`, and fixed integration steps per
+segment. Keep adaptive orthogonal collocation as the default UI and CLI choice.
+Why:
+The numerical representation may change without changing endpoint ownership or the mathematical
+defining system. A dedicated setup makes that distinction enforceable in decoding, restart, and
+extension.
+Impact:
+The analytic two-saddle connection continues and extends with collocation, single shooting, and
+multiple shooting through core, WASM, CLI, and web. Projector refresh remains atomic across the
+source and target charts. Heteroclinic shooting never uses the one-saddle homoclinic schema.
+References:
+`crates/fork_core/src/continuation/heteroclinic_shooting.rs`,
+`crates/fork_wasm/src/continuation/heteroclinic_shooting_runner.rs`,
+`docs/heteroclinic-methods.md`
+
+---
+
 ### 2026-07-14: Match HBK's HomHS formulations and keep true heteroclinics separate
 Context:
 HclinicBifurcationKit 0.2.1 follows a truncated orbit whose two endpoints approach the same

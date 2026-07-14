@@ -21,7 +21,7 @@ use super::problem::{
 use super::{
     continue_with_problem, extend_branch_with_problem, BifurcationType, BranchType,
     ContinuationBranch, ContinuationPoint, ContinuationSettings, HeteroclinicConnectionSchemaV1,
-    HomoclinicBasisSnapshot,
+    HomoclinicBasisSnapshot, HomoclinicDiscretization,
 };
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{compute_jacobian, SystemKind};
@@ -427,6 +427,7 @@ pub fn heteroclinic_setup_from_point(
         schema,
         ntst,
         ncol,
+        discretization,
         normalized_mesh,
         collocation_adaptivity,
         collocation_adaptation,
@@ -439,6 +440,9 @@ pub fn heteroclinic_setup_from_point(
     else {
         bail!("Heteroclinic restart requires HeteroclinicCurve metadata");
     };
+    if *discretization != HomoclinicDiscretization::Collocation {
+        bail!("Heteroclinic collocation restart requires collocation metadata");
+    }
     if schema.schema_version != HETEROCLINIC_SCHEMA_VERSION {
         bail!(
             "Unsupported heteroclinic schema version {}",
@@ -503,6 +507,20 @@ pub fn extend_heteroclinic_curve(
     settings: ContinuationSettings,
     extend_forward: bool,
 ) -> Result<ContinuationBranch> {
+    if matches!(
+        branch.branch_type,
+        BranchType::HeteroclinicCurve {
+            discretization: HomoclinicDiscretization::Shooting { .. },
+            ..
+        }
+    ) {
+        return super::heteroclinic_shooting::extend_heteroclinic_shooting_curve(
+            system,
+            branch,
+            settings,
+            extend_forward,
+        );
+    }
     let endpoint = if extend_forward {
         branch
             .indices
@@ -916,6 +934,7 @@ impl<'a> HeteroclinicProblem<'a> {
             schema,
             ntst: self.setup.ntst,
             ncol: self.setup.ncol,
+            discretization: HomoclinicDiscretization::Collocation,
             normalized_mesh: self.normalized_mesh.clone(),
             collocation_adaptivity: self.setup.collocation_adaptivity,
             collocation_adaptation: Some(self.adaptation_report.clone()),
@@ -1466,7 +1485,7 @@ impl ContinuationProblem for HeteroclinicProblem<'_> {
 }
 
 #[derive(Debug, Clone)]
-struct HeteroclinicChartTransform {
+pub(crate) struct HeteroclinicChartTransform {
     old_source: HomoclinicBasis,
     new_source: HomoclinicBasis,
     old_target: HomoclinicBasis,
@@ -1474,7 +1493,7 @@ struct HeteroclinicChartTransform {
 }
 
 impl HeteroclinicChartTransform {
-    fn new(
+    pub(crate) fn new(
         old_source: &HomoclinicBasis,
         new_source: &HomoclinicBasis,
         old_target: &HomoclinicBasis,
@@ -1501,7 +1520,7 @@ impl HeteroclinicChartTransform {
         })
     }
 
-    fn transform_values(&self, values: &[f64]) -> Result<Vec<f64>> {
+    pub(crate) fn transform_values(&self, values: &[f64]) -> Result<Vec<f64>> {
         let source_size = self.old_source.nneg * self.old_source.npos;
         let target_size = self.old_target.nneg * self.old_target.npos;
         if values.len() < source_size + target_size {
@@ -1549,7 +1568,7 @@ impl HeteroclinicChartTransform {
         Ok(transformed)
     }
 
-    fn transform_tangent(
+    pub(crate) fn transform_tangent(
         &self,
         augmented: &DVector<f64>,
         tangent: &DVector<f64>,
@@ -1634,21 +1653,21 @@ fn transform_graph_coordinates(
     Ok(-solved.transpose())
 }
 
-struct RiccatiCoefficients {
-    t11: DMatrix<f64>,
-    t12: DMatrix<f64>,
-    e21: DMatrix<f64>,
-    t22: DMatrix<f64>,
+pub(crate) struct RiccatiCoefficients {
+    pub(crate) t11: DMatrix<f64>,
+    pub(crate) t12: DMatrix<f64>,
+    pub(crate) e21: DMatrix<f64>,
+    pub(crate) t22: DMatrix<f64>,
 }
 
-fn basis_matrix(values: &[f64], dim: usize) -> Result<DMatrix<f64>> {
+pub(crate) fn basis_matrix(values: &[f64], dim: usize) -> Result<DMatrix<f64>> {
     if values.len() != dim * dim {
         bail!("Heteroclinic basis matrix has invalid dimensions");
     }
     Ok(DMatrix::from_column_slice(dim, dim, values))
 }
 
-fn riccati_coeff(
+pub(crate) fn riccati_coeff(
     basis: &DMatrix<f64>,
     jacobian: &DMatrix<f64>,
     invariant_dim: usize,
@@ -1685,7 +1704,10 @@ fn riccati_coeff(
     })
 }
 
-fn build_unstable_normals(basis: &DMatrix<f64>, yu: &DMatrix<f64>) -> Result<DMatrix<f64>> {
+pub(crate) fn build_unstable_normals(
+    basis: &DMatrix<f64>,
+    yu: &DMatrix<f64>,
+) -> Result<DMatrix<f64>> {
     let stable_dim = yu.nrows();
     let unstable_dim = yu.ncols();
     if basis.shape() != (stable_dim + unstable_dim, stable_dim + unstable_dim) {
@@ -1703,7 +1725,10 @@ fn build_unstable_normals(basis: &DMatrix<f64>, yu: &DMatrix<f64>) -> Result<DMa
     Ok(basis * graph)
 }
 
-fn build_stable_normals(basis: &DMatrix<f64>, ys: &DMatrix<f64>) -> Result<DMatrix<f64>> {
+pub(crate) fn build_stable_normals(
+    basis: &DMatrix<f64>,
+    ys: &DMatrix<f64>,
+) -> Result<DMatrix<f64>> {
     let unstable_dim = ys.nrows();
     let stable_dim = ys.ncols();
     if basis.shape() != (stable_dim + unstable_dim, stable_dim + unstable_dim) {

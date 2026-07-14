@@ -13,6 +13,8 @@ mod eq_runner;
 mod equilibrium_codim2;
 mod extension_runner;
 mod heteroclinic_runner;
+mod heteroclinic_shooting_methods;
+mod heteroclinic_shooting_runner;
 mod homoc_runner;
 mod homoc_shooting_methods;
 mod homoc_shooting_runner;
@@ -38,6 +40,7 @@ pub use eq_manifold_2d_runner::WasmEqManifold2DRunner;
 pub use eq_runner::WasmEquilibriumRunner;
 pub use extension_runner::WasmContinuationExtensionRunner;
 pub use heteroclinic_runner::WasmHeteroclinicRunner;
+pub use heteroclinic_shooting_runner::WasmHeteroclinicShootingRunner;
 pub use homoc_runner::WasmHomoclinicRunner;
 pub use homoc_shooting_runner::WasmHomoclinicShootingRunner;
 pub use homotopy_saddle_runner::WasmHomotopySaddleRunner;
@@ -49,10 +52,11 @@ mod tests {
     use super::{
         WasmCodim1CurveExtensionRunner, WasmContinuationExtensionRunner, WasmCycleManifold2DRunner,
         WasmEqManifold1DExtensionRunner, WasmEqManifold1DRunner, WasmEqManifold2DRunner,
-        WasmEquilibriumRunner, WasmFoldCurveRunner, WasmHeteroclinicRunner, WasmHomoclinicRunner,
-        WasmHomoclinicShootingRunner, WasmHomotopySaddleRunner, WasmHopfCurveRunner,
-        WasmIsoperiodicCurveRunner, WasmLPCCurveRunner, WasmLimitCycleRunner,
-        WasmManifold2DExtensionRunner, WasmNSCurveRunner, WasmPDCurveRunner,
+        WasmEquilibriumRunner, WasmFoldCurveRunner, WasmHeteroclinicRunner,
+        WasmHeteroclinicShootingRunner, WasmHomoclinicRunner, WasmHomoclinicShootingRunner,
+        WasmHomotopySaddleRunner, WasmHopfCurveRunner, WasmIsoperiodicCurveRunner,
+        WasmLPCCurveRunner, WasmLimitCycleRunner, WasmManifold2DExtensionRunner, WasmNSCurveRunner,
+        WasmPDCurveRunner,
     };
 
     #[test]
@@ -80,6 +84,8 @@ mod tests {
         assert!(std::any::type_name::<WasmLimitCycleRunner>().ends_with("WasmLimitCycleRunner"));
         assert!(std::any::type_name::<WasmHomoclinicRunner>().ends_with("WasmHomoclinicRunner"));
         assert!(std::any::type_name::<WasmHeteroclinicRunner>().ends_with("WasmHeteroclinicRunner"));
+        assert!(std::any::type_name::<WasmHeteroclinicShootingRunner>()
+            .ends_with("WasmHeteroclinicShootingRunner"));
         assert!(std::any::type_name::<WasmHomoclinicShootingRunner>()
             .ends_with("WasmHomoclinicShootingRunner"));
         assert!(

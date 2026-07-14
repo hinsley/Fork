@@ -31,6 +31,9 @@ pub mod homoclinic;
 #[path = "continuation/heteroclinic.rs"]
 pub mod heteroclinic;
 
+#[path = "continuation/heteroclinic_shooting.rs"]
+pub mod heteroclinic_shooting;
+
 #[path = "continuation/homoclinic_events.rs"]
 pub mod homoclinic_events;
 
@@ -70,6 +73,13 @@ pub use heteroclinic::{
     heteroclinic_setup_from_orbit, heteroclinic_setup_from_point, pack_heteroclinic_state,
     DecodedHeteroclinicState, HeteroclinicGuess, HeteroclinicOrbitSeed, HeteroclinicProblem,
     HeteroclinicSetupV1, HETEROCLINIC_SCHEMA_VERSION,
+};
+pub use heteroclinic_shooting::{
+    continue_heteroclinic_shooting_curve, decode_heteroclinic_shooting_state,
+    extend_heteroclinic_shooting_curve, heteroclinic_shooting_setup_from_collocation,
+    heteroclinic_shooting_setup_from_point, pack_heteroclinic_shooting_state,
+    DecodedHeteroclinicShootingState, HeteroclinicShootingGuess, HeteroclinicShootingProblem,
+    HeteroclinicShootingSettings, HeteroclinicShootingSetupV1,
 };
 pub use homoclinic::continue_homoclinic_curve;
 pub use homoclinic_events::{

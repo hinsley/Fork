@@ -1063,6 +1063,22 @@ export function OrbitInspectorSections({
                           </select>
                         </label>
                         <label>
+                          Method
+                          <select
+                            value={heteroclinicFromOrbitDraft.discretization}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                discretization: event.target.value as 'collocation' | 'shooting',
+                              }))
+                            }
+                            data-testid="heteroclinic-method"
+                          >
+                            <option value="collocation">Orthogonal Collocation</option>
+                            <option value="shooting">Standard Shooting</option>
+                          </select>
+                        </label>
+                        <label>
                           NTST
                           <input
                             type="number"
@@ -1077,6 +1093,43 @@ export function OrbitInspectorSections({
                             data-testid="heteroclinic-ntst"
                           />
                         </label>
+                        {heteroclinicFromOrbitDraft.discretization === 'shooting' ? (
+                          <>
+                            <label>
+                              Shooting intervals
+                              <input
+                                type="number"
+                                min="1"
+                                value={heteroclinicFromOrbitDraft.shootingIntervals}
+                                onChange={(event) =>
+                                  setHeteroclinicFromOrbitDraft((prev) => ({
+                                    ...prev,
+                                    shootingIntervals: event.target.value,
+                                  }))
+                                }
+                                data-testid="heteroclinic-shooting-intervals"
+                              />
+                              <span className="field-hint">
+                                1 selects single shooting; larger values use multiple shooting.
+                              </span>
+                            </label>
+                            <label>
+                              Integration steps per segment
+                              <input
+                                type="number"
+                                min="1"
+                                value={heteroclinicFromOrbitDraft.integrationStepsPerSegment}
+                                onChange={(event) =>
+                                  setHeteroclinicFromOrbitDraft((prev) => ({
+                                    ...prev,
+                                    integrationStepsPerSegment: event.target.value,
+                                  }))
+                                }
+                                data-testid="heteroclinic-integration-steps"
+                              />
+                            </label>
+                          </>
+                        ) : null}
                         <label>
                           NCOL
                           <input
@@ -1259,13 +1312,15 @@ export function OrbitInspectorSections({
                             data-testid="heteroclinic-step-tolerance"
                           />
                         </label>
-                        <CollocationAdaptivityFields
-                          draft={heteroclinicFromOrbitDraft}
-                          onChange={(patch) =>
-                            setHeteroclinicFromOrbitDraft((prev) => ({ ...prev, ...patch }))
-                          }
-                          testIdPrefix="heteroclinic-from-orbit"
-                        />
+                        {heteroclinicFromOrbitDraft.discretization === 'collocation' ? (
+                          <CollocationAdaptivityFields
+                            draft={heteroclinicFromOrbitDraft}
+                            onChange={(patch) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({ ...prev, ...patch }))
+                            }
+                            testIdPrefix="heteroclinic-from-orbit"
+                          />
+                        ) : null}
                         {heteroclinicFromOrbitError ? (
                           <div className="field-error">{heteroclinicFromOrbitError}</div>
                         ) : null}

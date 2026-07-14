@@ -1491,6 +1491,9 @@ export type HeteroclinicFromOrbitRequest = {
   param2Name: string
   ntst: number
   ncol: number
+  discretization?: 'collocation' | 'shooting'
+  shootingIntervals?: number
+  integrationStepsPerSegment?: number
   freeTime: boolean
   freeEps0: boolean
   freeEps1: boolean
@@ -7078,6 +7081,18 @@ export function AppProvider({
         if (!Number.isInteger(request.ncol) || request.ncol < 1) {
           throw new Error('NCOL must be a positive integer.')
         }
+        const discretization = request.discretization ?? 'collocation'
+        const shootingIntervals =
+          request.shootingIntervals ?? DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS
+        const integrationStepsPerSegment =
+          request.integrationStepsPerSegment ??
+          DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+        const shootingSettingsError = homoclinicShootingSettingsError(
+          discretization,
+          shootingIntervals,
+          integrationStepsPerSegment
+        )
+        if (shootingSettingsError) throw new Error(shootingSettingsError)
         if (
           request.projectorRefreshInterval !== undefined &&
           (!Number.isInteger(request.projectorRefreshInterval) ||
@@ -7156,6 +7171,9 @@ export function AppProvider({
             param2Name,
             ntst: request.ntst,
             ncol: request.ncol,
+            discretization,
+            shootingIntervals,
+            integrationStepsPerSegment,
             freeTime: request.freeTime,
             freeEps0: request.freeEps0,
             freeEps1: request.freeEps1,

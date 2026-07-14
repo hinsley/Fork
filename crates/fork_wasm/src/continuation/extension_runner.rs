@@ -11,14 +11,14 @@ use fork_core::continuation::periodic::{
 };
 use fork_core::continuation::{
     decode_homoclinic_shooting_state, heteroclinic_setup_from_point,
-    homoclinic_setup_from_homoclinic_point,
+    heteroclinic_shooting_setup_from_point, homoclinic_setup_from_homoclinic_point,
     homoclinic_setup_from_homoclinic_point_with_source_extras_on_mesh,
     homoclinic_shooting_setup_from_point, orient_problem_tangent, pack_homoclinic_shooting_state,
     pack_homoclinic_state, palc_norm, BranchType, ContinuationBranch, ContinuationEndpointSeed,
     ContinuationPoint, ContinuationProblem, ContinuationResumeState, ContinuationRunner,
-    ContinuationSettings, HeteroclinicProblem, HomoclinicBasis, HomoclinicBasisSnapshot,
-    HomoclinicDiscretization, HomoclinicExtraFlags, HomoclinicFixedScalars,
-    HomoclinicResumeContext, HomoclinicSetup, HomoclinicShootingProblem,
+    ContinuationSettings, HeteroclinicProblem, HeteroclinicShootingProblem, HomoclinicBasis,
+    HomoclinicBasisSnapshot, HomoclinicDiscretization, HomoclinicExtraFlags,
+    HomoclinicFixedScalars, HomoclinicResumeContext, HomoclinicSetup, HomoclinicShootingProblem,
     HomoclinicShootingSettings, HomoclinicShootingSetup, ReparameterizationSeed,
 };
 use fork_core::equation_engine::EquationSystem;
@@ -136,6 +136,11 @@ enum ExtensionRunnerKind {
     Heteroclinic {
         _system: Box<EquationSystem>,
         runner: ContinuationRunner<HeteroclinicProblem<'static>>,
+        merge: ExtensionMergeContext,
+    },
+    HeteroclinicShooting {
+        _system: Box<EquationSystem>,
+        runner: ContinuationRunner<HeteroclinicShootingProblem<'static>>,
         merge: ExtensionMergeContext,
     },
     HomoclinicShooting {
@@ -1127,6 +1132,114 @@ fn build_homoclinic_shooting_extension(
     })
 }
 
+fn build_heteroclinic_shooting_extension(
+    system: EquationSystem,
+    merge: ExtensionMergeContext,
+    endpoint: ContinuationPoint,
+    neighbor_idx: Option<usize>,
+    last_index: i32,
+    forward: bool,
+    settings: ContinuationSettings,
+) -> Result<ExtensionRunnerKind, JsValue> {
+    let setup = heteroclinic_shooting_setup_from_point(&endpoint, &merge.branch.branch_type)
+        .map_err(|error| {
+            JsValue::from_str(&format!(
+                "Failed to restore heteroclinic shooting endpoint: {error}"
+            ))
+        })?;
+    let mut boxed_system = Box::new(system);
+    let mut problem = HeteroclinicShootingProblem::new(static_system_ref(&mut boxed_system), setup)
+        .map_err(|error| {
+            JsValue::from_str(&format!(
+                "Failed to create heteroclinic shooting extension problem: {error}"
+            ))
+        })?;
+    let dim = problem.dimension();
+    if endpoint.state.len() != dim {
+        return Err(JsValue::from_str(&format!(
+            "Dimension mismatch: heteroclinic shooting endpoint has length {}, problem expects {}",
+            endpoint.state.len(),
+            dim
+        )));
+    }
+    let mut end_aug = DVector::zeros(dim + 1);
+    end_aug[0] = endpoint.param_value;
+    end_aug.as_mut_slice()[1..].copy_from_slice(&endpoint.state);
+    let resume_seed = select_resume_seed(&merge.branch, forward, last_index, &end_aug);
+    let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
+        let neighbor = &merge.branch.points[neighbor_pos];
+        let mut neighbor_aug = DVector::zeros(dim + 1);
+        neighbor_aug[0] = neighbor.param_value;
+        neighbor_aug.as_mut_slice()[1..].copy_from_slice(&neighbor.state);
+        normalized_problem_secant(&problem, &end_aug, &end_aug - neighbor_aug).map_err(|error| {
+            JsValue::from_str(&format!(
+                "Failed to measure heteroclinic shooting extension secant: {error}"
+            ))
+        })?
+    } else {
+        (None, None)
+    };
+    let mut settings = settings;
+    cap_extension_step_size(&mut settings, secant_norm);
+    let mut runner = if let Some(seed) = resume_seed {
+        let resume_step_size = bounded_resume_step_size(&seed, settings);
+        let (resume_aug, resume_tangent) =
+            prepare_resume_seed_for_extension(seed, &end_aug, secant_direction.as_ref(), forward);
+        ContinuationRunner::new_from_seed(
+            problem,
+            resume_aug,
+            resume_tangent,
+            resume_step_size,
+            settings,
+        )
+        .map_err(|error| {
+            JsValue::from_str(&format!(
+                "Heteroclinic shooting extension initialization failed: {error}"
+            ))
+        })?
+    } else {
+        let mut tangent = if let Some(secant) = secant_direction.as_ref() {
+            secant.clone()
+        } else {
+            compute_tangent_from_problem(&mut problem, &end_aug)
+                .map_err(|error| JsValue::from_str(&format!("{error}")))?
+        };
+        orient_problem_tangent(
+            &problem,
+            &end_aug,
+            &mut tangent,
+            secant_direction.as_ref(),
+            forward,
+        )
+        .map_err(|error| {
+            JsValue::from_str(&format!(
+                "Failed to orient heteroclinic shooting extension tangent: {error}"
+            ))
+        })?;
+        let initial_point = ContinuationPoint {
+            state: endpoint.state,
+            param_value: endpoint.param_value,
+            stability: endpoint.stability,
+            eigenvalues: Vec::new(),
+            cycle_points: endpoint.cycle_points,
+            homoclinic_events: None,
+        };
+        ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings).map_err(
+            |error| {
+                JsValue::from_str(&format!(
+                    "Heteroclinic shooting extension initialization failed: {error}"
+                ))
+            },
+        )?
+    };
+    runner.set_branch_type(merge.branch.branch_type.clone());
+    Ok(ExtensionRunnerKind::HeteroclinicShooting {
+        _system: boxed_system,
+        runner,
+        merge,
+    })
+}
+
 #[wasm_bindgen]
 pub struct WasmContinuationExtensionRunner {
     runner: Option<ExtensionRunnerKind>,
@@ -1493,7 +1606,29 @@ impl WasmContinuationExtensionRunner {
                     merge,
                 }
             }
-            BranchType::HeteroclinicCurve { .. } => {
+            BranchType::HeteroclinicCurve {
+                discretization: HomoclinicDiscretization::Shooting { .. },
+                ..
+            } => {
+                if system_type != "flow" {
+                    return Err(JsValue::from_str(
+                        "Heteroclinic continuation is available only for flows",
+                    ));
+                }
+                build_heteroclinic_shooting_extension(
+                    system,
+                    merge,
+                    endpoint,
+                    neighbor_idx,
+                    last_index,
+                    forward,
+                    settings,
+                )?
+            }
+            BranchType::HeteroclinicCurve {
+                discretization: HomoclinicDiscretization::Collocation,
+                ..
+            } => {
                 if system_type != "flow" {
                     return Err(JsValue::from_str(
                         "Heteroclinic continuation is available only for flows",
@@ -1982,6 +2117,7 @@ impl WasmContinuationExtensionRunner {
             Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => runner.is_done(),
             Some(ExtensionRunnerKind::Homoclinic { runner, .. }) => runner.is_done(),
             Some(ExtensionRunnerKind::Heteroclinic { runner, .. }) => runner.is_done(),
+            Some(ExtensionRunnerKind::HeteroclinicShooting { runner, .. }) => runner.is_done(),
             Some(ExtensionRunnerKind::HomoclinicShooting { runner, .. }) => runner.is_done(),
             None => true,
         }
@@ -2001,6 +2137,9 @@ impl WasmContinuationExtensionRunner {
             Some(ExtensionRunnerKind::Heteroclinic { runner, .. }) => runner
                 .run_steps(batch_size as usize)
                 .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+            Some(ExtensionRunnerKind::HeteroclinicShooting { runner, .. }) => runner
+                .run_steps(batch_size as usize)
+                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
             Some(ExtensionRunnerKind::HomoclinicShooting { runner, .. }) => runner
                 .run_steps(batch_size as usize)
                 .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
@@ -2016,6 +2155,7 @@ impl WasmContinuationExtensionRunner {
             Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => runner.step_result(),
             Some(ExtensionRunnerKind::Homoclinic { runner, .. }) => runner.step_result(),
             Some(ExtensionRunnerKind::Heteroclinic { runner, .. }) => runner.step_result(),
+            Some(ExtensionRunnerKind::HeteroclinicShooting { runner, .. }) => runner.step_result(),
             Some(ExtensionRunnerKind::HomoclinicShooting { runner, .. }) => runner.step_result(),
             None => return Err(JsValue::from_str("Runner not initialized")),
         };
@@ -2037,6 +2177,7 @@ impl WasmContinuationExtensionRunner {
                 to_value(runner.problem().adaptation_report())
                     .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
             }
+            Some(ExtensionRunnerKind::HeteroclinicShooting { .. }) => Ok(JsValue::NULL),
             Some(ExtensionRunnerKind::HomoclinicShooting { .. }) => Ok(JsValue::NULL),
             _ => Ok(JsValue::NULL),
         }
@@ -2162,6 +2303,40 @@ impl WasmContinuationExtensionRunner {
                 merge.branch.branch_type = final_branch_type;
                 let report = problem.adaptation_report().clone();
                 merge.collocation_adaptation = Some(report);
+                (extension, merge)
+            }
+            ExtensionRunnerKind::HeteroclinicShooting {
+                runner, mut merge, ..
+            } => {
+                let (mut extension, problem) = runner.take_result_with_problem();
+                let external_states = merge
+                    .branch
+                    .points
+                    .iter()
+                    .map(|point| point.state.clone())
+                    .collect::<Vec<_>>();
+                let transferred = problem
+                    .transfer_branch_states_to_current_discretization(&external_states)
+                    .map_err(|error| {
+                        JsValue::from_str(&format!(
+                            "Failed to transfer existing heteroclinic shooting history: {error}"
+                        ))
+                    })?;
+                fork_core::continuation::apply_transferred_branch_states(
+                    &problem,
+                    &mut merge.branch.points,
+                    transferred,
+                )
+                .map_err(|error| {
+                    JsValue::from_str(&format!(
+                        "Failed to refresh existing heteroclinic shooting history: {error}"
+                    ))
+                })?;
+                transfer_external_resume_state(&problem, &mut merge.branch.resume_state)?;
+                let final_branch_type = problem.branch_type_metadata();
+                extension.branch_type = final_branch_type.clone();
+                merge.branch.branch_type = final_branch_type;
+                merge.collocation_adaptation = None;
                 (extension, merge)
             }
             ExtensionRunnerKind::Homoclinic {

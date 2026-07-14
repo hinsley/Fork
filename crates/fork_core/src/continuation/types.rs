@@ -680,6 +680,10 @@ pub enum BranchType {
         schema: HeteroclinicConnectionSchemaV1,
         ntst: usize,
         ncol: usize,
+        /// Numerical representation of the open connection. The serde
+        /// default preserves pre-shooting branches as collocation.
+        #[serde(default)]
+        discretization: HomoclinicDiscretization,
         #[serde(default)]
         normalized_mesh: Vec<f64>,
         #[serde(default)]
