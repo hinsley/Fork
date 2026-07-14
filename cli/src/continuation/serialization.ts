@@ -5,9 +5,35 @@
  * for WASM interop.
  */
 
-import { ContinuationBranchData, ContinuationEigenvalue } from '../types';
+import {
+  ContinuationBranchData,
+  ContinuationEigenvalue,
+  HeteroclinicInclinationFrame,
+  HeteroclinicInclinationTransport,
+} from '../types';
 
 type EigenvalueWire = [number, number];
+
+function copyInclinationFrame(
+  frame: HeteroclinicInclinationFrame | null | undefined
+): HeteroclinicInclinationFrame | null | undefined {
+  if (!frame) return frame;
+  return {
+    ...frame,
+    transported_frame: [...frame.transported_frame],
+    reference_frame: [...frame.reference_frame],
+  };
+}
+
+function copyInclinationTransport(
+  transport: HeteroclinicInclinationTransport | null | undefined
+): HeteroclinicInclinationTransport | null | undefined {
+  if (!transport) return transport;
+  const copy = { ...transport };
+  if ('source' in transport) copy.source = copyInclinationFrame(transport.source);
+  if ('target' in transport) copy.target = copyInclinationFrame(transport.target);
+  return copy;
+}
 
 /**
  * Serialize branch data for WASM consumption.
@@ -29,6 +55,9 @@ export function serializeBranchDataForWasm(data: ContinuationBranchData): any {
             ...pt.heteroclinic_events,
             source_eigenvalues: pt.heteroclinic_events.source_eigenvalues.map(ev => [ev.re, ev.im]),
             target_eigenvalues: pt.heteroclinic_events.target_eigenvalues.map(ev => [ev.re, ev.im]),
+            inclination_transport: copyInclinationTransport(
+              pt.heteroclinic_events.inclination_transport
+            ),
           }
         : undefined,
     })) as any
@@ -72,6 +101,9 @@ export function normalizeBranchEigenvalues(data: ContinuationBranchData): Contin
             ),
             target_eigenvalues: normalizeEigenvalueArray(
               pt.heteroclinic_events.target_eigenvalues as any
+            ),
+            inclination_transport: copyInclinationTransport(
+              pt.heteroclinic_events.inclination_transport
             ),
           }
         : undefined,

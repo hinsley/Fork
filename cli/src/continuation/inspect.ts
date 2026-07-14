@@ -778,6 +778,18 @@ export function formatHeteroclinicEventDiagnosticLines(
     `source spectrum: ${formatSpectrum(diagnostics.source_eigenvalues)}`,
     `target spectrum: ${formatSpectrum(diagnostics.target_eigenvalues)}`,
   ];
+  if (diagnostics.inclination_transport) {
+    for (const [side, frame] of [
+      ['source', diagnostics.inclination_transport.source],
+      ['target', diagnostics.inclination_transport.target],
+    ] as const) {
+      lines.push(
+        frame
+          ? `${side} inclination transport: ambient=${frame.ambient_dimension}, frame=${frame.frame_dimension}; minimum physical overlap=${formatNumberFullPrecision(frame.minimum_overlap_singular_value)}; relative residual=${formatNumberFullPrecision(frame.relative_transport_residual)}`
+          : `${side} inclination transport: unavailable`
+      );
+    }
+  }
   for (const event of diagnostics.events) {
     const value =
       event.value === null ? 'unavailable' : formatNumberFullPrecision(event.value);

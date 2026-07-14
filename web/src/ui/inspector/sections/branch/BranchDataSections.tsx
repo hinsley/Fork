@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import type { HeteroclinicInclinationFrame } from '../../../../system/types'
 import { InspectorSubDisclosure } from '../../selectionSession'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 import {
@@ -9,6 +10,14 @@ import {
 
 function formatAdaptationTermination(reason: string): string {
   return reason.replaceAll('_', ' ')
+}
+
+function formatInclinationFrame(
+  frame: HeteroclinicInclinationFrame | null | undefined,
+  formatScientific: (value: number, digits?: number) => string
+): string {
+  if (!frame) return 'unavailable'
+  return `${frame.ambient_dimension} x ${frame.frame_dimension} frame · minimum physical overlap ${formatScientific(frame.minimum_overlap_singular_value, 6)} · relative residual ${formatScientific(frame.relative_transport_residual, 6)}`
 }
 
 export function BranchDataSections({ scope }: { scope: InspectorSelectionController }) {
@@ -1029,6 +1038,29 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                                     })
                                   )}
                                 />
+                                {selectedBranchPoint.heteroclinic_events
+                                  .inclination_transport ? (
+                                  <InspectorMetrics
+                                    rows={[
+                                      {
+                                        label: 'Source inclination transport',
+                                        value: formatInclinationFrame(
+                                          selectedBranchPoint.heteroclinic_events
+                                            .inclination_transport.source,
+                                          formatScientific
+                                        ),
+                                      },
+                                      {
+                                        label: 'Target inclination transport',
+                                        value: formatInclinationFrame(
+                                          selectedBranchPoint.heteroclinic_events
+                                            .inclination_transport.target,
+                                          formatScientific
+                                        ),
+                                      },
+                                    ]}
+                                  />
+                                ) : null}
                               </div>
                             ) : null}
                             {selectedBranchPoint.codim2 ? (

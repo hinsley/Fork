@@ -13,11 +13,13 @@ one-saddle homoclinic workflow and uses its own versioned restart schema.
 - serialized restart and generic branch extension with exact mesh, fixed-scalar,
   endpoint, and projector context;
 - independent source/target spectral diagnostics, sign-bracketed localization,
-  and simple-real endpoint orbit-flip tests;
+  simple-real endpoint orbit-flip tests, and transported source/target
+  inclination-flip tests when eligible tangent frames are available;
 - creation, inspection, plotting, and extension in both the web UI and CLI.
 
-Source/target inclination flips remain explicitly unsupported. Fork deliberately does not
-attach one-saddle homoclinic event labels to a two-equilibrium connection.
+Fork deliberately does not attach one-saddle homoclinic event labels to a
+two-equilibrium connection. Older branches without tangent-transport data remain
+readable; their source/target inclination-flip channels are reported as unavailable.
 
 ## Connection event definitions
 
@@ -69,6 +71,51 @@ $$
   [Doedel et al. (2007)](https://arxiv.org/abs/0706.1688). Flip terminology
   and its geometric scope are reviewed by
   [Homburg and Sandstede (2010)](https://doi.org/10.1016/S1874-575X(10)00316-4).
+- `SIF` and `TIF` measure loss of orientation in endpoint-local tangent bundles,
+  not a relation between the two endpoint spectra. Along the corrected orbit,
+  Fork directly transports a source frame forward and a target frame backward
+  with the tangent variational equation
+
+$$
+\dot V(t) = D_x f(u(t), \alpha)V(t).
+$$
+
+  Let `R_-` and `R_+` be orientation-continuous orthonormal reference frames
+  for the source and target principal bundles, and let `T_-` and `T_+` be the
+  corresponding transported frames. Before evaluating a new continuation
+  point, Fork independently aligns the current transported frame to the
+  preceding accepted transported frame and the current reference frame to the
+  preceding accepted reference frame using full `O(k)` Procrustes transforms.
+  It never aligns the transported frame directly to the reference frame. The
+  alignment is accepted only when the minimum singular value of each
+  current-to-previous overlap is at least `cos(pi / 9)`; otherwise only that
+  endpoint channel becomes unavailable. This removes arbitrary eigensolver
+  basis signs and reflections while preserving the physical relative
+  orientation. The signed tests are then
+
+$$
+\psi_{\mathrm{SIF}} = \det(R_-^\mathsf{T}T_-), \qquad
+\psi_{\mathrm{TIF}} = \det(R_+^\mathsf{T}T_+).
+$$
+
+  For a one-dimensional frame these determinants reduce to signed dot
+  products. Automatic construction currently requires the relevant principal
+  source-unstable or target-stable mode to be real and simple; a complex or
+  repeated principal mode makes that endpoint channel unavailable. Frames must
+  have the declared ambient-by-frame size, full column rank, and an acceptable
+  relative tangent-transport residual. The physical transported-to-reference
+  overlap is allowed to become singular because its determinant zero is the
+  event being detected; the separate current-to-previous gauge overlaps must
+  still pass the continuity threshold.
+
+The forward/backward construction follows the strong-inclination geometry and
+principal-direction distinctions described by
+[Deng](https://www.math.unl.edu/~bdeng1/Papers/DengTwistedLoop.pdf) and
+[Liu, Ruan, and Zhu (2011)](https://www.math.miami.edu/~ruan/MyPapers/LiuRuanZhu-DCDSS2011.pdf).
+[De Witte et al. (2012)](https://doi.org/10.1145/2168773.2168776) motivates the
+use of tangent transport and continuously updated invariant subspaces in
+connecting-orbit numerics; it does not define Fork's exact endpoint-separated
+determinant scalar.
 
 Each available scalar is localized only across a finite sign-changing bracket.
 The corrected marker serializes the exact event value and both endpoint
@@ -82,9 +129,15 @@ homoclinic analogues:
 - `XRS`: no neutral-saddle-style cross-endpoint resonance is assigned to one
   open connection. Such stability indices require additional global-return or
   closed-cycle data.
-- `SIF` and `TIF`: inclination flips require transported tangent-space or
-  adjoint-variational orientation data along the connection; endpoint spectra
-  alone are insufficient.
+
+`SIF` and `TIF` are available only when their corresponding transport frame is
+present and eligible. The serialized `inclination_transport` payload records
+the flattened column-major transported and reference frames, ambient and frame
+dimensions, minimum overlap singular value, and relative transport residual
+for independent source and target inspection. The reported minimum singular
+value measures conditioning and event proximity of the same-point physical
+transported-to-reference overlap. The transient current-to-previous overlaps
+used by the gauge-continuity gate are not serialized.
 
 ## Required objects
 
@@ -117,7 +170,8 @@ at least one and at most two of them as free quantities.
    integration steps per segment. Then configure the free extras, continuation
    direction, and projector refresh cadence.
 5. Create the branch. Select it to inspect endpoint names, schema version,
-   source/target spectra and event statuses, Morse dimensions, and mesh report.
+   source/target spectra and event statuses, inclination-transport quality,
+   Morse dimensions, and mesh report.
 6. Use **Extend branch** to continue from either end.
 
 Fork rejects stale or incompatible equilibrium objects instead of projecting
@@ -138,6 +192,8 @@ Every `HeteroclinicCurve` stores schema version 1 with:
 - independent source and target basis snapshots and Morse dimensions;
 - fixed values for any non-free `T`, `eps0`, or `eps1`;
 - projector refresh cadence;
+- optional source and target inclination-transport frames and their overlap and
+  residual quality diagnostics at each continuation point;
 - an explicit discretization tag: collocation stores `NTST`, `NCOL`, the exact
   normalized mesh, adaptivity settings, and adaptation report; shooting stores
   its segment count in `NTST`, sets `NCOL = 0`, and stores integration steps per

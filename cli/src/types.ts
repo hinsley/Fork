@@ -168,6 +168,23 @@ export interface HeteroclinicEventValue {
   reason: string | null;
 }
 
+export interface HeteroclinicInclinationFrame {
+  ambient_dimension: number;
+  frame_dimension: number;
+  /** Flattened ambient-by-frame matrix in column-major order. */
+  transported_frame: number[];
+  /** Flattened ambient-by-frame matrix in column-major order. */
+  reference_frame: number[];
+  /** Minimum singular value of the same-point physical reference/transport overlap. */
+  minimum_overlap_singular_value: number;
+  relative_transport_residual: number;
+}
+
+export interface HeteroclinicInclinationTransport {
+  source?: HeteroclinicInclinationFrame | null;
+  target?: HeteroclinicInclinationFrame | null;
+}
+
 export interface HeteroclinicEventDiagnostics {
   events: HeteroclinicEventValue[];
   source_eigenvalues: ContinuationEigenvalue[];
@@ -178,6 +195,7 @@ export interface HeteroclinicEventDiagnostics {
   target_unstable_dimension: number;
   source_discarded_eigenvalues: number;
   target_discarded_eigenvalues: number;
+  inclination_transport?: HeteroclinicInclinationTransport | null;
 }
 
 export interface ContinuationPoint {

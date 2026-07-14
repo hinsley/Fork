@@ -92,6 +92,8 @@ const BIFURCATION_TYPE_LABELS: Record<string, string> = {
   HeteroclinicTargetLeadingCollision: 'TLC - Target Leading-Spectrum Collision',
   HeteroclinicSourceOrbitFlip: 'SOF - Source Orbit Flip',
   HeteroclinicTargetOrbitFlip: 'TOF - Target Orbit Flip',
+  HeteroclinicSourceInclinationFlip: 'SIF - Source Inclination Flip',
+  HeteroclinicTargetInclinationFlip: 'TIF - Target Inclination Flip',
 }
 
 export function formatBifurcationType(value?: string): string {
