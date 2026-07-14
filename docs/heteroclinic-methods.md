@@ -216,8 +216,26 @@ It has the exact connection `(x, y) = (tanh(t), 0)` from `(-1, 0)` to
 continuation steps with collocation, single shooting, and multiple shooting;
 endpoint ownership; independent invariant splittings; adaptive mesh
 persistence; independent event serialization; and extension.
+
+The inclination references lift the same connection to `(x,w,y,z)` and use
+the source system
+
+```text
+x' = 1 - x^2
+w' = x w + (mu - nu)(1 - x^2) + mu (1 - x^2) y
+y' = 0.5 y
+z' = -3 z
+```
+
+and the target system obtained with
+`w' = x w - (mu - nu)(1 - x^2) - mu (1 - x^2) y`,
+`y' = -0.5 y`, and `z' = 3 z`. Their SIF and TIF tests change sign at the
+analytic zero `mu = 0`. Fork verifies both continuation directions, both
+collocation and shooting, marker localization, cross-discretization agreement,
+column-major frame persistence, and serialized restart.
+
 The core runner also has a signed `SLC` reference that brackets and localizes
-the exact zero to tolerance:
+its exact zero to tolerance:
 
 ```bash
 cargo test -p fork_core --test heteroclinic_reference

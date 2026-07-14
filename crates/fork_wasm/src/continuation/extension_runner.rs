@@ -1142,6 +1142,7 @@ fn build_heteroclinic_shooting_extension(
     forward: bool,
     settings: ContinuationSettings,
 ) -> Result<ExtensionRunnerKind, JsValue> {
+    let endpoint_heteroclinic_events = endpoint.heteroclinic_events.clone();
     let setup = heteroclinic_shooting_setup_from_point(&endpoint, &merge.branch.branch_type)
         .map_err(|error| {
             JsValue::from_str(&format!(
@@ -1186,11 +1187,12 @@ fn build_heteroclinic_shooting_extension(
         let resume_step_size = bounded_resume_step_size(&seed, settings);
         let (resume_aug, resume_tangent) =
             prepare_resume_seed_for_extension(seed, &end_aug, secant_direction.as_ref(), forward);
-        ContinuationRunner::new_from_seed(
+        ContinuationRunner::new_from_seed_with_heteroclinic_events(
             problem,
             resume_aug,
             resume_tangent,
             resume_step_size,
+            endpoint_heteroclinic_events.clone(),
             settings,
         )
         .map_err(|error| {
@@ -1224,7 +1226,7 @@ fn build_heteroclinic_shooting_extension(
             eigenvalues: Vec::new(),
             cycle_points: endpoint.cycle_points,
             homoclinic_events: None,
-            heteroclinic_events: None,
+            heteroclinic_events: endpoint_heteroclinic_events,
         };
         ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings).map_err(
             |error| {
@@ -1691,11 +1693,12 @@ impl WasmContinuationExtensionRunner {
                         secant_direction.as_ref(),
                         forward,
                     );
-                    ContinuationRunner::new_from_seed(
+                    ContinuationRunner::new_from_seed_with_heteroclinic_events(
                         problem,
                         resume_aug,
                         resume_tangent,
                         resume_step_size,
+                        endpoint.heteroclinic_events.clone(),
                         settings,
                     )
                     .map_err(|error| {
@@ -1729,7 +1732,7 @@ impl WasmContinuationExtensionRunner {
                         eigenvalues: Vec::new(),
                         cycle_points: endpoint.cycle_points.clone(),
                         homoclinic_events: None,
-                        heteroclinic_events: None,
+                        heteroclinic_events: endpoint.heteroclinic_events.clone(),
                     };
                     ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
                         .map_err(|error| {

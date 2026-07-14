@@ -1,6 +1,8 @@
 use super::heteroclinic_events::{
-    build_heteroclinic_orbit_flip_data, compute_heteroclinic_event_diagnostics,
-    HeteroclinicEventDiagnostics, DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+    build_heteroclinic_orbit_flip_data,
+    compute_heteroclinic_event_diagnostics_with_inclination_transport,
+    heteroclinic_inclination_frame_from_matrices, HeteroclinicEventDiagnostics,
+    HeteroclinicInclinationTransportDiagnostics, DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
 };
 use super::heteroclinic_transport::{
     transport_source_inclination, transport_target_inclination, InclinationFrameData,
@@ -749,10 +751,7 @@ impl<'a> HeteroclinicProblem<'a> {
             let h = duration * self.interval_width(interval);
             let mut jacobians = Vec::with_capacity(stages);
             for stage in 0..stages {
-                jacobians.push(self.jacobian_at(
-                    &decoded.stage_states[interval][stage],
-                    params,
-                )?);
+                jacobians.push(self.jacobian_at(&decoded.stage_states[interval][stage], params)?);
             }
 
             // Linearize the converged implicit Runge--Kutta stage equations:
@@ -775,11 +774,10 @@ impl<'a> HeteroclinicProblem<'a> {
                     }
                 }
             }
-            let stage_variations = system
-                .clone()
-                .lu()
-                .solve(&rhs)
-                .ok_or_else(|| anyhow!("Heteroclinic collocation tangent-stage solve failed"))?;
+            let stage_variations =
+                system.clone().lu().solve(&rhs).ok_or_else(|| {
+                    anyhow!("Heteroclinic collocation tangent-stage solve failed")
+                })?;
             let residual = (&system * &stage_variations - &rhs).norm()
                 / (system.norm() * stage_variations.norm() + rhs.norm()).max(1.0);
             if !residual.is_finite() {
@@ -806,31 +804,40 @@ impl<'a> HeteroclinicProblem<'a> {
         params: &[f64],
     ) -> Result<(Option<InclinationFrameData>, Option<InclinationFrameData>)> {
         let dim = self.dim();
+        let source_eligible = self.setup.source_basis.npos >= 2
+            && self.setup.target_basis.npos == self.setup.source_basis.npos;
+        let target_eligible = self.setup.target_basis.nneg >= 2
+            && self.setup.source_basis.nneg == self.setup.target_basis.nneg;
+        if !source_eligible && !target_eligible {
+            return Ok((None, None));
+        }
         let source_unstable_q = basis_matrix(&self.setup.source_basis.unstable_q, dim)?;
         let source_yu = DMatrix::from_row_slice(
             self.setup.source_basis.nneg,
             self.setup.source_basis.npos,
             &decoded.source_yu,
         );
-        let source_unstable = invariant_graph_frame(
-            &source_unstable_q,
-            self.setup.source_basis.npos,
-            &source_yu,
-        )?;
+        let source_unstable =
+            invariant_graph_frame(&source_unstable_q, self.setup.source_basis.npos, &source_yu)?;
         let target_stable_q = basis_matrix(&self.setup.target_basis.stable_q, dim)?;
         let target_ys = DMatrix::from_row_slice(
             self.setup.target_basis.npos,
             self.setup.target_basis.nneg,
             &decoded.target_ys,
         );
-        let target_stable = invariant_graph_frame(
-            &target_stable_q,
-            self.setup.target_basis.nneg,
-            &target_ys,
-        )?;
+        let target_stable =
+            invariant_graph_frame(&target_stable_q, self.setup.target_basis.nneg, &target_ys)?;
 
-        let target_unstable_q = basis_matrix(&self.setup.target_basis.unstable_q, dim)?;
-        let source_stable_q = basis_matrix(&self.setup.source_basis.stable_q, dim)?;
+        // The endpoint Riccati states carry only the boundary-condition
+        // subspaces (source unstable and target stable). Re-eigensolve the
+        // complementary strong reference spaces at the current corrected
+        // equilibria instead of reusing a stale projector-refresh basis.
+        let current_source_basis =
+            compute_homoclinic_basis(self.system, &decoded.source_equilibrium, params)?;
+        let current_target_basis =
+            compute_homoclinic_basis(self.system, &decoded.target_equilibrium, params)?;
+        let target_unstable_q = basis_matrix(&current_target_basis.unstable_q, dim)?;
+        let source_stable_q = basis_matrix(&current_source_basis.stable_q, dim)?;
 
         let source_endpoint = decoded
             .mesh_states
@@ -843,37 +850,33 @@ impl<'a> HeteroclinicProblem<'a> {
         let source_flow = DVector::from_vec(self.flow_at(source_endpoint, params)?);
         let target_flow = DVector::from_vec(self.flow_at(target_endpoint, params)?);
         let (maps, residuals) = self.collocation_interval_maps(decoded, params)?;
-        let source = if self.setup.source_basis.npos >= 2
-            && self.setup.target_basis.npos == self.setup.source_basis.npos
-        {
-                let reference = target_unstable_q
-                    .columns(1, self.setup.target_basis.npos - 1)
-                    .into_owned();
-                transport_source_inclination(
-                    &maps,
-                    &residuals,
-                    &source_unstable,
-                    &target_flow,
-                    &reference,
-                )
-                .ok()
+        let source = if source_eligible {
+            let reference = target_unstable_q
+                .columns(1, self.setup.target_basis.npos - 1)
+                .into_owned();
+            transport_source_inclination(
+                &maps,
+                &residuals,
+                &source_unstable,
+                &target_flow,
+                &reference,
+            )
+            .ok()
         } else {
             None
         };
-        let target = if self.setup.target_basis.nneg >= 2
-            && self.setup.source_basis.nneg == self.setup.target_basis.nneg
-        {
-                let reference = source_stable_q
-                    .columns(1, self.setup.source_basis.nneg - 1)
-                    .into_owned();
-                transport_target_inclination(
-                    &maps,
-                    &residuals,
-                    &target_stable,
-                    &source_flow,
-                    &reference,
-                )
-                .ok()
+        let target = if target_eligible {
+            let reference = source_stable_q
+                .columns(1, self.setup.source_basis.nneg - 1)
+                .into_owned();
+            transport_target_inclination(
+                &maps,
+                &residuals,
+                &target_stable,
+                &source_flow,
+                &reference,
+            )
+            .ok()
         } else {
             None
         };
@@ -1347,12 +1350,41 @@ impl ContinuationProblem for HeteroclinicProblem<'_> {
             &target_eigenvalues,
             vector_sub(target_endpoint, &decoded.target_equilibrium),
         );
-        Ok(Some(compute_heteroclinic_event_diagnostics(
-            &source_eigenvalues,
-            &target_eigenvalues,
-            Some(&orbit_flip),
-            DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
-        )))
+        let inclination_transport = self
+            .inclination_frames(&decoded, &params)
+            .ok()
+            .map(
+                |(source, target)| HeteroclinicInclinationTransportDiagnostics {
+                    source: source.and_then(|frame| {
+                        heteroclinic_inclination_frame_from_matrices(
+                            &frame.transported_frame,
+                            &frame.reference_frame,
+                            frame.minimum_overlap_singular_value,
+                            frame.relative_transport_residual,
+                        )
+                        .ok()
+                    }),
+                    target: target.and_then(|frame| {
+                        heteroclinic_inclination_frame_from_matrices(
+                            &frame.transported_frame,
+                            &frame.reference_frame,
+                            frame.minimum_overlap_singular_value,
+                            frame.relative_transport_residual,
+                        )
+                        .ok()
+                    }),
+                },
+            )
+            .filter(|transport| transport.source.is_some() || transport.target.is_some());
+        Ok(Some(
+            compute_heteroclinic_event_diagnostics_with_inclination_transport(
+                &source_eigenvalues,
+                &target_eigenvalues,
+                Some(&orbit_flip),
+                inclination_transport,
+                DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+            ),
+        ))
     }
 
     fn detect_heteroclinic_events_from_initial_seed(&self) -> bool {

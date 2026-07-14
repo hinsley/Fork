@@ -95,8 +95,29 @@ Fork's separate heteroclinic acceptance fixture uses
 `(x, y) = (tanh(t), 0)` runs from `(-1, 0)` to `(1, 0)` on `mu = nu`.
 The test certifies independent endpoint equilibria and splittings, the packed
 version-one schema, defect-driven mesh redistribution, serialization, restart,
-extension, transported inclination-frame persistence and diagnostics, and the
-real Node-WASM, CLI, and web boundaries. See
+extension, unavailable-channel behavior for one-dimensional endpoint bundles,
+and the real Node-WASM, CLI, and web boundaries.
+
+Transported inclination flips use two four-dimensional exact references with
+`q(t) = (tanh(t), 0, 0, 0)` on `mu = nu`. The source-flip model is
+
+$$
+x'=1-x^2,\quad
+w'=xw+(\mu-\nu)(1-x^2)+\mu(1-x^2)y,\quad
+y'=\tfrac12y,\quad z'=-3z,
+$$
+
+and the target-flip model changes the last three equations to
+
+$$
+w'=xw-(\mu-\nu)(1-x^2)-\mu(1-x^2)y,\quad
+y'=-\tfrac12y,\quad z'=3z.
+$$
+
+Their analytic SIF and TIF zeros are `mu = 0`. Core tests require collocation
+and shooting, in both continuation directions, to produce both signs, localize
+the correct marker near zero, agree on the localized parameter, preserve the
+column-major frame payload, and extend after a serialization round trip. See
 [`heteroclinic-methods.md`](heteroclinic-methods.md) for the user workflow and
 current limitations.
 

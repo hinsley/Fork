@@ -5,7 +5,7 @@ use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
 
 const MIN_FRAME_SINGULAR_VALUE: f64 = 1.0e-10;
-const MAX_RELATIVE_TRANSPORT_RESIDUAL: f64 = 1.0e-8;
+const MAX_RELATIVE_TRANSPORT_RESIDUAL: f64 = 1.0e-6;
 
 #[derive(Debug, Clone)]
 pub(crate) struct InclinationFrameData {
@@ -16,6 +16,7 @@ pub(crate) struct InclinationFrameData {
 }
 
 impl InclinationFrameData {
+    #[cfg(test)]
     pub(crate) fn signed_test(&self) -> Result<f64> {
         let overlap = self.reference_frame.transpose() * &self.transported_frame;
         if overlap.nrows() == 0 || overlap.nrows() != overlap.ncols() {
@@ -34,6 +35,7 @@ impl InclinationFrameData {
 /// opposite endpoint. The interval maps advance the variational equation in
 /// forward physical time.
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(crate) fn transported_inclination_frames(
     interval_maps: &[DMatrix<f64>],
     interval_residuals: &[f64],

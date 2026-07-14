@@ -26,6 +26,213 @@ fn analytic_system(params: Vec<f64>) -> EquationSystem {
     system
 }
 
+fn inclination_system(source_flip: bool, params: Vec<f64>) -> EquationSystem {
+    let variables = vec![
+        "x".to_string(),
+        "w".to_string(),
+        "y".to_string(),
+        "z".to_string(),
+    ];
+    let parameter_names = vec!["mu".to_string(), "nu".to_string()];
+    let compiler = Compiler::new(&variables, &parameter_names);
+    let equations = if source_flip {
+        ["1-x^2", "x*w+(mu-nu)*(1-x^2)+mu*(1-x^2)*y", "0.5*y", "-3*z"]
+    } else {
+        ["1-x^2", "x*w-(mu-nu)*(1-x^2)-mu*(1-x^2)*y", "-0.5*y", "3*z"]
+    };
+    let bytecode = equations
+        .iter()
+        .map(|equation| compiler.compile(&parse(equation).expect("parse inclination oracle")))
+        .collect();
+    let mut system = EquationSystem::new(bytecode, params);
+    system.set_maps(compiler.param_map, compiler.var_map);
+    system
+}
+
+fn inclination_seed() -> HeteroclinicOrbitSeed {
+    let sample_count = 161usize;
+    let times = (0..sample_count)
+        .map(|index| {
+            SOURCE_TIME + (TARGET_TIME - SOURCE_TIME) * index as f64 / (sample_count - 1) as f64
+        })
+        .collect::<Vec<_>>();
+    let states = times
+        .iter()
+        .map(|time| vec![time.tanh(), 0.0, 0.0, 0.0])
+        .collect::<Vec<_>>();
+    HeteroclinicOrbitSeed {
+        times,
+        states,
+        source_equilibrium: vec![-1.0, 0.0, 0.0, 0.0],
+        target_equilibrium: vec![1.0, 0.0, 0.0, 0.0],
+    }
+}
+
+#[test]
+fn transported_inclination_tests_cross_on_analytic_connections() {
+    for (source_flip, kind, bifurcation) in [
+        (
+            true,
+            HeteroclinicEventKind::SourceInclinationFlip,
+            fork_core::continuation::BifurcationType::HeteroclinicSourceInclinationFlip,
+        ),
+        (
+            false,
+            HeteroclinicEventKind::TargetInclinationFlip,
+            fork_core::continuation::BifurcationType::HeteroclinicTargetInclinationFlip,
+        ),
+    ] {
+        for forward in [true, false] {
+            let start = if forward { -3.0e-3 } else { 3.0e-3 };
+            let mut system = inclination_system(source_flip, vec![start, start]);
+            let mut setup = heteroclinic_setup_from_orbit(
+                &mut system,
+                &inclination_seed(),
+                20,
+                3,
+                &[start, start],
+                0,
+                1,
+                "mu",
+                "nu",
+                HomoclinicExtraFlags {
+                    free_time: true,
+                    free_eps0: false,
+                    free_eps1: false,
+                },
+            )
+            .expect("analytic inclination setup");
+            if source_flip && forward {
+                setup.projector_refresh_interval = 1;
+            }
+            let collocation = continue_heteroclinic_curve(
+                &mut system,
+                setup.clone(),
+                ContinuationSettings {
+                    step_size: 1.0e-3,
+                    min_step_size: 1.0e-7,
+                    max_step_size: 1.0e-3,
+                    max_steps: 8,
+                    corrector_steps: 24,
+                    corrector_tolerance: 1.0e-9,
+                    step_tolerance: 1.0e-9,
+                },
+                forward,
+            )
+            .expect("analytic inclination continuation");
+            let collocation_zero = assert_inclination_branch(&collocation, kind, bifurcation);
+            if source_flip && forward {
+                let persisted: ContinuationBranch = serde_json::from_str(
+                    &serde_json::to_string(&collocation)
+                        .expect("serialize analytic inclination branch"),
+                )
+                .expect("deserialize analytic inclination branch");
+                let original_len = persisted.points.len();
+                let extended = extend_heteroclinic_curve(
+                    &mut system,
+                    persisted,
+                    ContinuationSettings {
+                        max_steps: 2,
+                        ..settings()
+                    },
+                    forward,
+                )
+                .expect("extend serialized inclination branch");
+                assert_eq!(extended.points.len(), original_len + 2);
+                let endpoint = extended
+                    .points
+                    .last()
+                    .and_then(|point| point.heteroclinic_events.as_ref())
+                    .and_then(|diagnostics| diagnostics.inclination_transport.as_ref())
+                    .and_then(|transport| transport.source.as_ref());
+                assert!(endpoint.is_some(), "restart must preserve the SIF gauge");
+            }
+
+            let shooting_setup = heteroclinic_shooting_setup_from_collocation(
+                &setup,
+                HeteroclinicShootingSettings {
+                    intervals: 6,
+                    integration_steps_per_segment: 128,
+                },
+            )
+            .expect("analytic inclination shooting setup");
+            let shooting = continue_heteroclinic_shooting_curve(
+                &mut system,
+                shooting_setup,
+                ContinuationSettings {
+                    step_size: 1.0e-3,
+                    min_step_size: 1.0e-7,
+                    max_step_size: 1.0e-3,
+                    max_steps: 8,
+                    corrector_steps: 24,
+                    corrector_tolerance: 1.0e-9,
+                    step_tolerance: 1.0e-9,
+                },
+                forward,
+            )
+            .expect("analytic inclination shooting continuation");
+            let shooting_zero = assert_inclination_branch(&shooting, kind, bifurcation);
+            assert!(
+            collocation_zero.abs() < 1.0e-5 && shooting_zero.abs() < 1.0e-5,
+            "{kind:?} must localize the analytic zero: collocation={collocation_zero}, shooting={shooting_zero}"
+        );
+            assert!(
+                (collocation_zero - shooting_zero).abs() < 1.0e-5,
+                "{kind:?} discretizations disagree on the localized zero"
+            );
+        }
+    }
+}
+
+fn assert_inclination_branch(
+    branch: &ContinuationBranch,
+    kind: HeteroclinicEventKind,
+    bifurcation: fork_core::continuation::BifurcationType,
+) -> f64 {
+    let values = branch
+        .points
+        .iter()
+        .filter_map(|point| point.heteroclinic_events.as_ref())
+        .filter_map(|diagnostics| {
+            let event = diagnostics.event(kind);
+            (event.status == HeteroclinicEventStatus::Available)
+                .then_some(event.value)
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        values.iter().any(|value| *value < -1.0e-6),
+        "{kind:?} must be negative before the analytic flip: {values:?}"
+    );
+    assert!(
+        values.iter().any(|value| *value > 1.0e-6),
+        "{kind:?} must be positive after the analytic flip: {values:?}"
+    );
+    let localized = branch
+        .points
+        .iter()
+        .find(|point| point.stability == bifurcation)
+        .unwrap_or_else(|| panic!("{kind:?} must be localized and classified"));
+    let frames = branch
+        .points
+        .iter()
+        .filter_map(|point| point.heteroclinic_events.as_ref())
+        .filter_map(|diagnostics| diagnostics.inclination_transport.as_ref())
+        .filter_map(|transport| match kind {
+            HeteroclinicEventKind::SourceInclinationFlip => transport.source.as_ref(),
+            HeteroclinicEventKind::TargetInclinationFlip => transport.target.as_ref(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(!frames.is_empty(), "{kind:?} frame payload must persist");
+    assert!(frames.iter().all(|frame| {
+        frame.ambient_dimension == 4
+            && frame.frame_dimension == 1
+            && frame.relative_transport_residual < 1.0e-6
+    }));
+    localized.param_value
+}
+
 #[test]
 fn analytic_connection_continues_and_extends_with_single_and_multiple_shooting() {
     for intervals in [1usize, 6] {
