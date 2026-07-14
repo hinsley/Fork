@@ -81,9 +81,15 @@ pub use heteroclinic::{
     HeteroclinicSetupV1, HETEROCLINIC_SCHEMA_VERSION,
 };
 pub use heteroclinic_events::{
-    build_heteroclinic_orbit_flip_data, compute_heteroclinic_event_diagnostics,
+    align_heteroclinic_event_diagnostics_continuously,
+    align_heteroclinic_frame_orientation_continuously,
+    align_heteroclinic_inclination_transport_continuously, build_heteroclinic_orbit_flip_data,
+    compute_heteroclinic_event_diagnostics,
+    compute_heteroclinic_event_diagnostics_with_inclination_transport,
+    heteroclinic_inclination_frame_from_matrices, signed_heteroclinic_inclination_determinant,
     HeteroclinicEndpointFlipData, HeteroclinicEventDiagnostics, HeteroclinicEventKind,
-    HeteroclinicEventStatus, HeteroclinicEventValue, HeteroclinicOrbitFlipData,
+    HeteroclinicEventStatus, HeteroclinicEventValue, HeteroclinicInclinationFrame,
+    HeteroclinicInclinationTransportDiagnostics, HeteroclinicOrbitFlipData,
 };
 pub use heteroclinic_shooting::{
     continue_heteroclinic_shooting_curve, decode_heteroclinic_shooting_state,
@@ -191,6 +197,29 @@ pub use problem::ContinuationProblem;
 
 // Generic continuation functions using ContinuationProblem trait
 
+fn align_optional_heteroclinic_events(
+    previous: Option<&HeteroclinicEventDiagnostics>,
+    current: Option<HeteroclinicEventDiagnostics>,
+) -> Option<HeteroclinicEventDiagnostics> {
+    match (previous, current) {
+        (Some(previous), Some(current)) => Some(align_heteroclinic_event_diagnostics_continuously(
+            previous, current,
+        )),
+        (_, current) => current,
+    }
+}
+
+fn aligned_heteroclinic_event_diagnostics<P: ContinuationProblem>(
+    problem: &mut P,
+    aug_state: &DVector<f64>,
+    previous: Option<&HeteroclinicEventDiagnostics>,
+) -> Result<Option<HeteroclinicEventDiagnostics>> {
+    Ok(align_optional_heteroclinic_events(
+        previous,
+        problem.heteroclinic_event_diagnostics(aug_state)?,
+    ))
+}
+
 /// Continues from an initial point using pseudo-arclength continuation (PALC).
 pub fn continue_with_problem<P: ContinuationProblem>(
     problem: &mut P,
@@ -199,6 +228,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
     forward: bool,
 ) -> Result<ContinuationBranch> {
     let mut dim = problem.dimension();
+    let serialized_initial_heteroclinic_events = initial_point.heteroclinic_events.clone();
 
     // Build initial augmented state [p, x...]
     let mut prev_aug = DVector::zeros(dim + 1);
@@ -218,7 +248,11 @@ pub fn continue_with_problem<P: ContinuationProblem>(
         None
     };
     let initial_heteroclinic_events = if problem.detect_heteroclinic_events_from_initial_seed() {
-        problem.heteroclinic_event_diagnostics(&prev_aug)?
+        aligned_heteroclinic_event_diagnostics(
+            problem,
+            &prev_aug,
+            serialized_initial_heteroclinic_events.as_ref(),
+        )?
     } else {
         None
     };
@@ -360,7 +394,11 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             // Compute diagnostics for the new point
             let diagnostics = problem.diagnostics(&corrected_aug)?;
             let homoclinic_events = problem.homoclinic_event_diagnostics(&corrected_aug)?;
-            let heteroclinic_events = problem.heteroclinic_event_diagnostics(&corrected_aug)?;
+            let heteroclinic_events = aligned_heteroclinic_event_diagnostics(
+                problem,
+                &corrected_aug,
+                prev_heteroclinic_events.as_ref(),
+            )?;
 
             // Bifurcation detection via test function sign changes
             let detected_type = detect_bifurcation_type(
@@ -414,7 +452,11 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             let output_heteroclinic_events = if output_aug == corrected_aug {
                 heteroclinic_events.clone()
             } else {
-                problem.heteroclinic_event_diagnostics(&output_aug)?
+                aligned_heteroclinic_event_diagnostics(
+                    problem,
+                    &output_aug,
+                    prev_heteroclinic_events.as_ref(),
+                )?
             };
             let (continuation_aug, continuation_diag) = if bifurcation_type != BifurcationType::None
             {
@@ -587,7 +629,9 @@ fn handle_rejected_trial<P: ContinuationProblem>(
             if prev_heteroclinic_events.is_some()
                 || problem.detect_heteroclinic_events_from_initial_seed()
             {
-                *prev_heteroclinic_events = problem.heteroclinic_event_diagnostics(prev_aug)?;
+                let prior = prev_heteroclinic_events.clone();
+                *prev_heteroclinic_events =
+                    aligned_heteroclinic_event_diagnostics(problem, prev_aug, prior.as_ref())?;
             }
             Ok(RejectedTrialDisposition::RetryTransferredStep)
         }
@@ -702,7 +746,9 @@ fn apply_post_corrector_reparameterization<P: ContinuationProblem>(
     }
     if prev_heteroclinic_events.is_some() || problem.detect_heteroclinic_events_from_initial_seed()
     {
-        *prev_heteroclinic_events = problem.heteroclinic_event_diagnostics(prev_aug)?;
+        let prior = prev_heteroclinic_events.clone();
+        *prev_heteroclinic_events =
+            aligned_heteroclinic_event_diagnostics(problem, prev_aug, prior.as_ref())?;
     }
     Ok((change.corrected_aug, transformed_active))
 }
@@ -858,6 +904,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
         problem: &mut P,
         prev_aug: &DVector<f64>,
         dim: usize,
+        serialized_heteroclinic_events: Option<&HeteroclinicEventDiagnostics>,
     ) -> Result<(
         PointDiagnostics,
         Option<HomoclinicEventDiagnostics>,
@@ -872,7 +919,11 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
         };
         let initial_heteroclinic_events = if problem.detect_heteroclinic_events_from_initial_seed()
         {
-            problem.heteroclinic_event_diagnostics(prev_aug)?
+            aligned_heteroclinic_event_diagnostics(
+                problem,
+                prev_aug,
+                serialized_heteroclinic_events,
+            )?
         } else {
             None
         };
@@ -921,7 +972,12 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
         }
 
         let (prev_diag, prev_homoclinic_events, prev_heteroclinic_events, branch) =
-            Self::init_branch_from_aug(&mut problem, &prev_aug, dim)?;
+            Self::init_branch_from_aug(
+                &mut problem,
+                &prev_aug,
+                dim,
+                initial_point.heteroclinic_events.as_ref(),
+            )?;
 
         // Compute initial tangent and orient it based on requested parameter direction.
         let mut prev_tangent = compute_tangent_from_problem(&mut problem, &prev_aug)?;
@@ -980,7 +1036,12 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
         }
 
         let (prev_diag, prev_homoclinic_events, prev_heteroclinic_events, branch) =
-            Self::init_branch_from_aug(&mut problem, &prev_aug, dim)?;
+            Self::init_branch_from_aug(
+                &mut problem,
+                &prev_aug,
+                dim,
+                initial_point.heteroclinic_events.as_ref(),
+            )?;
         let prev_tangent = normalize_tangent_or_compute(&mut problem, &prev_aug, initial_tangent)?;
 
         let step_size = clamp_step_size(settings.step_size, settings);
@@ -1013,10 +1074,30 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
     /// This resumes from the accepted augmented state/tangent/step size
     /// captured at an endpoint of a previous run.
     pub fn new_from_seed(
+        problem: P,
+        aug_state: Vec<f64>,
+        tangent: Vec<f64>,
+        seed_step_size: f64,
+        settings: ContinuationSettings,
+    ) -> Result<Self> {
+        Self::new_from_seed_with_heteroclinic_events(
+            problem,
+            aug_state,
+            tangent,
+            seed_step_size,
+            None,
+            settings,
+        )
+    }
+
+    /// Resume a stepped runner while restoring the serialized heteroclinic
+    /// inclination-frame gauge at the saved endpoint.
+    pub fn new_from_seed_with_heteroclinic_events(
         mut problem: P,
         aug_state: Vec<f64>,
         tangent: Vec<f64>,
         seed_step_size: f64,
+        serialized_heteroclinic_events: Option<HeteroclinicEventDiagnostics>,
         settings: ContinuationSettings,
     ) -> Result<Self> {
         let dim = problem.dimension();
@@ -1039,7 +1120,12 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
         let seed_tangent = DVector::from_vec(tangent);
         let prev_tangent = normalize_tangent_or_compute(&mut problem, &prev_aug, seed_tangent)?;
         let (prev_diag, prev_homoclinic_events, prev_heteroclinic_events, branch) =
-            Self::init_branch_from_aug(&mut problem, &prev_aug, dim)?;
+            Self::init_branch_from_aug(
+                &mut problem,
+                &prev_aug,
+                dim,
+                serialized_heteroclinic_events.as_ref(),
+            )?;
 
         let step_size = clamp_step_size(seed_step_size, settings);
 
@@ -1223,9 +1309,11 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             // Compute diagnostics for the new point
             let diagnostics = self.problem.diagnostics(&corrected_aug)?;
             let homoclinic_events = self.problem.homoclinic_event_diagnostics(&corrected_aug)?;
-            let heteroclinic_events = self
-                .problem
-                .heteroclinic_event_diagnostics(&corrected_aug)?;
+            let heteroclinic_events = aligned_heteroclinic_event_diagnostics(
+                &mut self.problem,
+                &corrected_aug,
+                self.prev_heteroclinic_events.as_ref(),
+            )?;
 
             // Bifurcation detection via test function sign changes
             let detected_type = detect_bifurcation_type(
@@ -1281,7 +1369,11 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             let output_heteroclinic_events = if output_aug == corrected_aug {
                 heteroclinic_events.clone()
             } else {
-                self.problem.heteroclinic_event_diagnostics(&output_aug)?
+                aligned_heteroclinic_event_diagnostics(
+                    &mut self.problem,
+                    &output_aug,
+                    self.prev_heteroclinic_events.as_ref(),
+                )?
             };
             let (continuation_aug, continuation_diag) = if bifurcation_type != BifurcationType::None
             {
@@ -1772,7 +1864,7 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
             eigenvalues: endpoint.eigenvalues.clone(),
             cycle_points: endpoint.cycle_points.clone(),
             homoclinic_events: None,
-            heteroclinic_events: None,
+            heteroclinic_events: endpoint.heteroclinic_events.clone(),
         };
         continue_with_initial_tangent(
             problem,
@@ -1804,7 +1896,7 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
             eigenvalues: endpoint.eigenvalues.clone(),
             cycle_points: endpoint.cycle_points.clone(),
             homoclinic_events: None,
-            heteroclinic_events: None,
+            heteroclinic_events: endpoint.heteroclinic_events.clone(),
         };
 
         continue_with_initial_tangent(problem, initial_point, tangent.clone(), settings)?
@@ -1933,6 +2025,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
     settings: ContinuationSettings,
 ) -> Result<ContinuationBranch> {
     let mut dim = problem.dimension();
+    let serialized_initial_heteroclinic_events = initial_point.heteroclinic_events.clone();
 
     // Build initial augmented state
     let mut prev_aug = DVector::zeros(dim + 1);
@@ -1949,7 +2042,11 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
         None
     };
     let initial_heteroclinic_events = if problem.detect_heteroclinic_events_from_initial_seed() {
-        problem.heteroclinic_event_diagnostics(&prev_aug)?
+        aligned_heteroclinic_event_diagnostics(
+            problem,
+            &prev_aug,
+            serialized_initial_heteroclinic_events.as_ref(),
+        )?
     } else {
         None
     };
@@ -2064,7 +2161,11 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             // Compute diagnostics
             let diag = problem.diagnostics(&corrected_aug)?;
             let homoclinic_events = problem.homoclinic_event_diagnostics(&corrected_aug)?;
-            let heteroclinic_events = problem.heteroclinic_event_diagnostics(&corrected_aug)?;
+            let heteroclinic_events = aligned_heteroclinic_event_diagnostics(
+                problem,
+                &corrected_aug,
+                prev_heteroclinic_events.as_ref(),
+            )?;
 
             // Bifurcation detection via test function sign changes
             let detected_type = detect_bifurcation_type(
@@ -2118,7 +2219,11 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             let output_heteroclinic_events = if output_aug == corrected_aug {
                 heteroclinic_events.clone()
             } else {
-                problem.heteroclinic_event_diagnostics(&output_aug)?
+                aligned_heteroclinic_event_diagnostics(
+                    problem,
+                    &output_aug,
+                    prev_heteroclinic_events.as_ref(),
+                )?
             };
             let (continuation_aug, continuation_diag) = if bifurcation_type != BifurcationType::None
             {
@@ -2289,7 +2394,8 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
         // Compute diagnostics at corrected point
         let diag = problem.diagnostics(&corrected_aug)?;
         let homoclinic = problem.homoclinic_event_diagnostics(&corrected_aug)?;
-        let heteroclinic = problem.heteroclinic_event_diagnostics(&corrected_aug)?;
+        let heteroclinic =
+            aligned_heteroclinic_event_diagnostics(problem, &corrected_aug, prev_heteroclinic)?;
         let mid_test = homoclinic_aware_bifurcation_test_value(
             &diag,
             homoclinic.as_ref(),
@@ -3662,7 +3768,9 @@ fn homoclinic_event_for_bifurcation(bifurcation: BifurcationType) -> Option<Homo
         | BifurcationType::HeteroclinicSourceLeadingCollision
         | BifurcationType::HeteroclinicTargetLeadingCollision
         | BifurcationType::HeteroclinicSourceOrbitFlip
-        | BifurcationType::HeteroclinicTargetOrbitFlip => None,
+        | BifurcationType::HeteroclinicTargetOrbitFlip
+        | BifurcationType::HeteroclinicSourceInclinationFlip
+        | BifurcationType::HeteroclinicTargetInclinationFlip => None,
     }
 }
 
@@ -3698,9 +3806,13 @@ fn map_heteroclinic_event_to_bifurcation(event: HeteroclinicEventKind) -> Option
         HeteroclinicEventKind::TargetOrbitFlip => {
             Some(BifurcationType::HeteroclinicTargetOrbitFlip)
         }
-        HeteroclinicEventKind::CrossEndpointResonance
-        | HeteroclinicEventKind::SourceInclinationFlip
-        | HeteroclinicEventKind::TargetInclinationFlip => None,
+        HeteroclinicEventKind::SourceInclinationFlip => {
+            Some(BifurcationType::HeteroclinicSourceInclinationFlip)
+        }
+        HeteroclinicEventKind::TargetInclinationFlip => {
+            Some(BifurcationType::HeteroclinicTargetInclinationFlip)
+        }
+        HeteroclinicEventKind::CrossEndpointResonance => None,
     }
 }
 
@@ -3725,6 +3837,12 @@ fn heteroclinic_event_for_bifurcation(
         }
         BifurcationType::HeteroclinicTargetOrbitFlip => {
             Some(HeteroclinicEventKind::TargetOrbitFlip)
+        }
+        BifurcationType::HeteroclinicSourceInclinationFlip => {
+            Some(HeteroclinicEventKind::SourceInclinationFlip)
+        }
+        BifurcationType::HeteroclinicTargetInclinationFlip => {
+            Some(HeteroclinicEventKind::TargetInclinationFlip)
         }
         _ => None,
     }
@@ -3756,6 +3874,8 @@ fn heteroclinic_event_crossing(
         HeteroclinicEventKind::TargetLeadingCollision,
         HeteroclinicEventKind::SourceOrbitFlip,
         HeteroclinicEventKind::TargetOrbitFlip,
+        HeteroclinicEventKind::SourceInclinationFlip,
+        HeteroclinicEventKind::TargetInclinationFlip,
     ]
     .into_iter()
     .find_map(|kind| {
@@ -3939,7 +4059,9 @@ fn bifurcation_test_value(
         | BifurcationType::HeteroclinicSourceLeadingCollision
         | BifurcationType::HeteroclinicTargetLeadingCollision
         | BifurcationType::HeteroclinicSourceOrbitFlip
-        | BifurcationType::HeteroclinicTargetOrbitFlip => return None,
+        | BifurcationType::HeteroclinicTargetOrbitFlip
+        | BifurcationType::HeteroclinicSourceInclinationFlip
+        | BifurcationType::HeteroclinicTargetInclinationFlip => return None,
     };
     value.is_finite().then_some(value)
 }
@@ -4924,6 +5046,334 @@ mod tests {
                 heteroclinic_events::DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
             )))
         }
+    }
+
+    struct SyntheticHeteroclinicInclinationProblem;
+
+    impl ContinuationProblem for SyntheticHeteroclinicInclinationProblem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            out[0] = aug_state[1] - aug_state[0];
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            Ok(DMatrix::from_row_slice(1, 2, &[-1.0, 1.0]))
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            })
+        }
+
+        fn heteroclinic_event_diagnostics(
+            &mut self,
+            aug_state: &DVector<f64>,
+        ) -> Result<Option<HeteroclinicEventDiagnostics>> {
+            let parameter = aug_state[0];
+            let transport = heteroclinic_events::HeteroclinicInclinationTransportDiagnostics {
+                source: Some(heteroclinic_events::HeteroclinicInclinationFrame {
+                    ambient_dimension: 4,
+                    frame_dimension: 1,
+                    transported_frame: vec![parameter, 1.0, 0.0, 0.0],
+                    reference_frame: vec![1.0, 0.0, 0.0, 0.0],
+                    minimum_overlap_singular_value: parameter.abs(),
+                    relative_transport_residual: 0.0,
+                }),
+                target: None,
+            };
+            Ok(Some(
+                heteroclinic_events::compute_heteroclinic_event_diagnostics_with_inclination_transport(
+                    &[
+                        Complex::new(-4.0, 0.0),
+                        Complex::new(-2.0, 0.0),
+                        Complex::new(1.0, 0.0),
+                        Complex::new(3.0, 0.0),
+                    ],
+                    &[
+                        Complex::new(-3.0, 0.0),
+                        Complex::new(-1.0, 0.0),
+                        Complex::new(2.0, 0.0),
+                        Complex::new(4.0, 0.0),
+                    ],
+                    None,
+                    Some(transport),
+                    heteroclinic_events::DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+                ),
+            ))
+        }
+    }
+
+    struct SyntheticDiscontinuousInclinationProblem;
+
+    impl ContinuationProblem for SyntheticDiscontinuousInclinationProblem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            out[0] = aug_state[1] - aug_state[0];
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            Ok(DMatrix::from_row_slice(1, 2, &[-1.0, 1.0]))
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            })
+        }
+
+        fn heteroclinic_event_diagnostics(
+            &mut self,
+            aug_state: &DVector<f64>,
+        ) -> Result<Option<HeteroclinicEventDiagnostics>> {
+            let source_frame = if aug_state[0] < 0.0 {
+                vec![1.0, 0.0, 0.0, 0.0]
+            } else {
+                vec![0.0, 1.0, 0.0, 0.0]
+            };
+            let frame = |transported_frame, reference_frame| {
+                heteroclinic_events::HeteroclinicInclinationFrame {
+                    ambient_dimension: 4,
+                    frame_dimension: 1,
+                    transported_frame,
+                    reference_frame,
+                    minimum_overlap_singular_value: 1.0,
+                    relative_transport_residual: 0.0,
+                }
+            };
+            Ok(Some(
+                heteroclinic_events::compute_heteroclinic_event_diagnostics_with_inclination_transport(
+                    &[
+                        Complex::new(-4.0, 0.0),
+                        Complex::new(-2.0, 0.0),
+                        Complex::new(1.0, 0.0),
+                        Complex::new(3.0, 0.0),
+                    ],
+                    &[
+                        Complex::new(-3.0, 0.0),
+                        Complex::new(-1.0, 0.0),
+                        Complex::new(2.0, 0.0),
+                        Complex::new(4.0, 0.0),
+                    ],
+                    None,
+                    Some(heteroclinic_events::HeteroclinicInclinationTransportDiagnostics {
+                        source: Some(frame(
+                            source_frame,
+                            vec![1.0, 0.0, 0.0, 0.0],
+                        )),
+                        target: Some(frame(
+                            vec![0.0, 1.0, 0.0, 0.0],
+                            vec![0.0, 1.0, 0.0, 0.0],
+                        )),
+                    }),
+                    heteroclinic_events::DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+                ),
+            ))
+        }
+    }
+
+    fn heteroclinic_inclination_initial_point() -> ContinuationPoint {
+        ContinuationPoint {
+            state: vec![-0.1],
+            param_value: -0.1,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+            homoclinic_events: None,
+            heteroclinic_events: None,
+        }
+    }
+
+    fn heteroclinic_inclination_settings() -> ContinuationSettings {
+        ContinuationSettings {
+            step_size: 0.4,
+            min_step_size: 0.4,
+            max_step_size: 0.4,
+            max_steps: 1,
+            corrector_steps: 8,
+            corrector_tolerance: 1.0e-11,
+            step_tolerance: 1.0e-11,
+        }
+    }
+
+    fn assert_localized_source_inclination_flip(branch: &ContinuationBranch) {
+        assert_eq!(branch.bifurcations, vec![1]);
+        let event = &branch.points[1];
+        assert_eq!(
+            event.stability,
+            BifurcationType::HeteroclinicSourceInclinationFlip
+        );
+        assert!(event.param_value.abs() < 1.0e-6);
+        let diagnostics = event
+            .heteroclinic_events
+            .as_ref()
+            .expect("localized SIF diagnostics");
+        assert!(
+            diagnostics
+                .event(HeteroclinicEventKind::SourceInclinationFlip)
+                .value
+                .expect("localized SIF value")
+                .abs()
+                < 1.0e-6
+        );
+        assert!(diagnostics.inclination_transport.is_some());
+    }
+
+    #[test]
+    fn inclination_flip_localizes_in_full_stepped_and_saved_seed_runners() {
+        let mut problem = SyntheticHeteroclinicInclinationProblem;
+        let full = continue_with_problem(
+            &mut problem,
+            heteroclinic_inclination_initial_point(),
+            heteroclinic_inclination_settings(),
+            true,
+        )
+        .expect("full inclination event continuation");
+        assert_localized_source_inclination_flip(&full);
+
+        let mut stepped = ContinuationRunner::new(
+            SyntheticHeteroclinicInclinationProblem,
+            heteroclinic_inclination_initial_point(),
+            heteroclinic_inclination_settings(),
+            true,
+        )
+        .expect("stepped inclination event runner");
+        stepped.run_steps(1).expect("stepped inclination event");
+        assert_localized_source_inclination_flip(&stepped.take_result());
+
+        let mut saved = ContinuationRunner::new_from_seed(
+            SyntheticHeteroclinicInclinationProblem,
+            vec![-0.1, -0.1],
+            vec![1.0, 1.0],
+            0.4,
+            heteroclinic_inclination_settings(),
+        )
+        .expect("saved-seed inclination event runner");
+        saved.run_steps(1).expect("saved-seed inclination event");
+        let saved = saved.take_result();
+        assert!(saved.points[0]
+            .heteroclinic_events
+            .as_ref()
+            .and_then(|events| events.inclination_transport.as_ref())
+            .is_some());
+        assert_localized_source_inclination_flip(&saved);
+    }
+
+    #[test]
+    fn initial_full_tangent_and_stepped_paths_restore_the_serialized_frame_gauge() {
+        let mut problem = SyntheticHeteroclinicInclinationProblem;
+        let aug = DVector::from_vec(vec![-0.1, -0.1]);
+        let mut serialized = problem
+            .heteroclinic_event_diagnostics(&aug)
+            .expect("serialized gauge diagnostics")
+            .expect("inclination diagnostics");
+        let source = serialized
+            .inclination_transport
+            .as_mut()
+            .and_then(|transport| transport.source.as_mut())
+            .expect("serialized source frame");
+        source
+            .transported_frame
+            .iter_mut()
+            .for_each(|value| *value = -*value);
+        source
+            .reference_frame
+            .iter_mut()
+            .for_each(|value| *value = -*value);
+        let expected = source.clone();
+        let mut initial = heteroclinic_inclination_initial_point();
+        initial.heteroclinic_events = Some(serialized.clone());
+        let mut settings = heteroclinic_inclination_settings();
+        settings.max_steps = 0;
+
+        let mut full_problem = SyntheticHeteroclinicInclinationProblem;
+        let full = continue_with_problem(&mut full_problem, initial.clone(), settings, true)
+            .expect("full serialized inclination gauge");
+        let mut tangent_problem = SyntheticHeteroclinicInclinationProblem;
+        let tangent = continue_with_initial_tangent(
+            &mut tangent_problem,
+            initial.clone(),
+            DVector::from_vec(vec![1.0, 1.0]),
+            settings,
+        )
+        .expect("initial-tangent serialized inclination gauge");
+        let stepped = ContinuationRunner::new(
+            SyntheticHeteroclinicInclinationProblem,
+            initial.clone(),
+            settings,
+            true,
+        )
+        .expect("stepped serialized inclination gauge")
+        .take_result();
+        let seeded = ContinuationRunner::new_from_seed_with_heteroclinic_events(
+            SyntheticHeteroclinicInclinationProblem,
+            vec![-0.1, -0.1],
+            vec![1.0, 1.0],
+            0.4,
+            Some(serialized),
+            settings,
+        )
+        .expect("saved-seed serialized inclination gauge")
+        .take_result();
+
+        for branch in [&full, &tangent, &stepped, &seeded] {
+            assert_eq!(
+                branch.points[0]
+                    .heteroclinic_events
+                    .as_ref()
+                    .and_then(|events| events.inclination_transport.as_ref())
+                    .and_then(|transport| transport.source.as_ref()),
+                Some(&expected)
+            );
+        }
+    }
+
+    #[test]
+    fn continuity_failure_drops_only_one_channel_without_aborting_the_branch() {
+        let mut problem = SyntheticDiscontinuousInclinationProblem;
+        let branch = continue_with_problem(
+            &mut problem,
+            heteroclinic_inclination_initial_point(),
+            heteroclinic_inclination_settings(),
+            true,
+        )
+        .expect("a source gauge discontinuity must not abort continuation");
+        assert_eq!(branch.points.len(), 2);
+        assert!(branch.bifurcations.is_empty());
+        let diagnostics = branch.points[1]
+            .heteroclinic_events
+            .as_ref()
+            .expect("accepted event diagnostics");
+        let transport = diagnostics
+            .inclination_transport
+            .as_ref()
+            .expect("target transport persists");
+        assert!(transport.source.is_none());
+        assert!(transport.target.is_some());
+        assert_eq!(
+            diagnostics
+                .event(HeteroclinicEventKind::SourceInclinationFlip)
+                .status,
+            HeteroclinicEventStatus::Unavailable
+        );
+        assert_eq!(
+            diagnostics
+                .event(HeteroclinicEventKind::TargetInclinationFlip)
+                .status,
+            HeteroclinicEventStatus::Available
+        );
     }
 
     #[test]

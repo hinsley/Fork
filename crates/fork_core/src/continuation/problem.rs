@@ -127,7 +127,9 @@ impl TestFunctionValues {
             | BifurcationType::HeteroclinicSourceLeadingCollision
             | BifurcationType::HeteroclinicTargetLeadingCollision
             | BifurcationType::HeteroclinicSourceOrbitFlip
-            | BifurcationType::HeteroclinicTargetOrbitFlip => 0.0,
+            | BifurcationType::HeteroclinicTargetOrbitFlip
+            | BifurcationType::HeteroclinicSourceInclinationFlip
+            | BifurcationType::HeteroclinicTargetInclinationFlip => 0.0,
         }
     }
 
