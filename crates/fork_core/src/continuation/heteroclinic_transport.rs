@@ -44,34 +44,66 @@ pub(crate) fn transported_inclination_frames(
     target_strong_unstable: &DMatrix<f64>,
     source_strong_stable: &DMatrix<f64>,
 ) -> Result<(InclinationFrameData, InclinationFrameData)> {
-    if interval_maps.is_empty() || interval_maps.len() != interval_residuals.len() {
-        bail!("Inclination transport requires one residual per interval map");
-    }
-    let dim = interval_maps[0].nrows();
-    if dim == 0
-        || interval_maps.iter().any(|map| map.shape() != (dim, dim))
-        || source_unstable_frame.nrows() != dim
-        || target_stable_frame.nrows() != dim
-        || target_flow.len() != dim
-        || source_flow.len() != dim
-    {
-        bail!("Inclination transport dimensions are inconsistent");
-    }
-    let maximum_residual = interval_residuals.iter().copied().fold(0.0_f64, f64::max);
-    if !maximum_residual.is_finite() || maximum_residual > MAX_RELATIVE_TRANSPORT_RESIDUAL {
-        bail!(
-            "Inclination variational transport residual {maximum_residual:.3e} exceeds tolerance"
-        );
-    }
+    let source = transport_source_inclination(
+        interval_maps,
+        interval_residuals,
+        source_unstable_frame,
+        target_flow,
+        target_strong_unstable,
+    )?;
+    let target = transport_target_inclination(
+        interval_maps,
+        interval_residuals,
+        target_stable_frame,
+        source_flow,
+        source_strong_stable,
+    )?;
+    Ok((source, target))
+}
 
+pub(crate) fn transport_source_inclination(
+    interval_maps: &[DMatrix<f64>],
+    interval_residuals: &[f64],
+    source_unstable_frame: &DMatrix<f64>,
+    target_flow: &DVector<f64>,
+    target_strong_unstable: &DMatrix<f64>,
+) -> Result<InclinationFrameData> {
+    let maximum_residual = validate_transport_inputs(
+        interval_maps,
+        interval_residuals,
+        source_unstable_frame.nrows(),
+    )?;
     let mut forward = positive_qr(source_unstable_frame)?;
     for map in interval_maps {
         forward = positive_qr(&(map * forward))?;
     }
-    let source_transverse = oriented_flow_complement(&forward, target_flow)?;
+    let transverse = oriented_flow_complement(&forward, target_flow)?;
+    frame_data(transverse, target_strong_unstable, maximum_residual)
+}
 
+pub(crate) fn transport_target_inclination(
+    interval_maps: &[DMatrix<f64>],
+    interval_residuals: &[f64],
+    target_stable_frame: &DMatrix<f64>,
+    source_flow: &DVector<f64>,
+    source_strong_stable: &DMatrix<f64>,
+) -> Result<InclinationFrameData> {
+    let mut maximum_residual = validate_transport_inputs(
+        interval_maps,
+        interval_residuals,
+        target_stable_frame.nrows(),
+    )?;
     let mut backward = positive_qr(target_stable_frame)?;
     for map in interval_maps.iter().rev() {
+        let singular_values = map.clone().svd(false, false).singular_values;
+        let largest = singular_values.iter().copied().fold(0.0_f64, f64::max);
+        let smallest = singular_values
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, f64::min);
+        if !smallest.is_finite() || smallest <= 1.0e-12 * largest.max(1.0) {
+            bail!("Backward inclination variational map is singular or ill-conditioned");
+        }
         let solved = map
             .clone()
             .lu()
@@ -82,21 +114,32 @@ pub(crate) fn transported_inclination_frames(
         if !residual.is_finite() || residual > MAX_RELATIVE_TRANSPORT_RESIDUAL {
             bail!("Backward inclination transport residual {residual:.3e} exceeds tolerance");
         }
+        maximum_residual = maximum_residual.max(residual);
         backward = positive_qr(&solved)?;
     }
-    let target_transverse = oriented_flow_complement(&backward, source_flow)?;
+    let transverse = oriented_flow_complement(&backward, source_flow)?;
+    frame_data(transverse, source_strong_stable, maximum_residual)
+}
 
-    let source = frame_data(
-        source_transverse,
-        target_strong_unstable,
-        maximum_residual,
-    )?;
-    let target = frame_data(
-        target_transverse,
-        source_strong_stable,
-        maximum_residual,
-    )?;
-    Ok((source, target))
+fn validate_transport_inputs(
+    interval_maps: &[DMatrix<f64>],
+    interval_residuals: &[f64],
+    dim: usize,
+) -> Result<f64> {
+    if dim == 0
+        || interval_maps.is_empty()
+        || interval_maps.len() != interval_residuals.len()
+        || interval_maps.iter().any(|map| map.shape() != (dim, dim))
+    {
+        bail!("Inclination transport dimensions are inconsistent");
+    }
+    let maximum_residual = interval_residuals.iter().copied().fold(0.0_f64, f64::max);
+    if !maximum_residual.is_finite() || maximum_residual > MAX_RELATIVE_TRANSPORT_RESIDUAL {
+        bail!(
+            "Inclination variational transport residual {maximum_residual:.3e} exceeds tolerance"
+        );
+    }
+    Ok(maximum_residual)
 }
 
 fn frame_data(

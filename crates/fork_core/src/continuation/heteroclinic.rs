@@ -3,7 +3,7 @@ use super::heteroclinic_events::{
     HeteroclinicEventDiagnostics, DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
 };
 use super::heteroclinic_transport::{
-    transported_inclination_frames, InclinationFrameData,
+    transport_source_inclination, transport_target_inclination, InclinationFrameData,
 };
 use super::homoclinic::{
     open_profile_palc_weights, transfer_homoclinic_aug, transfer_homoclinic_state,
@@ -804,7 +804,7 @@ impl<'a> HeteroclinicProblem<'a> {
         &mut self,
         decoded: &DecodedHeteroclinicState,
         params: &[f64],
-    ) -> Result<(InclinationFrameData, InclinationFrameData)> {
+    ) -> Result<(Option<InclinationFrameData>, Option<InclinationFrameData>)> {
         let dim = self.dim();
         let source_unstable_q = basis_matrix(&self.setup.source_basis.unstable_q, dim)?;
         let source_yu = DMatrix::from_row_slice(
@@ -829,17 +829,8 @@ impl<'a> HeteroclinicProblem<'a> {
             &target_ys,
         )?;
 
-        if self.setup.target_basis.npos < 2 || self.setup.source_basis.nneg < 2 {
-            bail!("Inclination flips require source-unstable and target-stable dimensions of at least two");
-        }
         let target_unstable_q = basis_matrix(&self.setup.target_basis.unstable_q, dim)?;
-        let target_strong_unstable = target_unstable_q
-            .columns(1, self.setup.target_basis.npos - 1)
-            .into_owned();
         let source_stable_q = basis_matrix(&self.setup.source_basis.stable_q, dim)?;
-        let source_strong_stable = source_stable_q
-            .columns(1, self.setup.source_basis.nneg - 1)
-            .into_owned();
 
         let source_endpoint = decoded
             .mesh_states
@@ -852,16 +843,41 @@ impl<'a> HeteroclinicProblem<'a> {
         let source_flow = DVector::from_vec(self.flow_at(source_endpoint, params)?);
         let target_flow = DVector::from_vec(self.flow_at(target_endpoint, params)?);
         let (maps, residuals) = self.collocation_interval_maps(decoded, params)?;
-        transported_inclination_frames(
-            &maps,
-            &residuals,
-            &source_unstable,
-            &target_stable,
-            &target_flow,
-            &source_flow,
-            &target_strong_unstable,
-            &source_strong_stable,
-        )
+        let source = if self.setup.source_basis.npos >= 2
+            && self.setup.target_basis.npos == self.setup.source_basis.npos
+        {
+                let reference = target_unstable_q
+                    .columns(1, self.setup.target_basis.npos - 1)
+                    .into_owned();
+                transport_source_inclination(
+                    &maps,
+                    &residuals,
+                    &source_unstable,
+                    &target_flow,
+                    &reference,
+                )
+                .ok()
+        } else {
+            None
+        };
+        let target = if self.setup.target_basis.nneg >= 2
+            && self.setup.source_basis.nneg == self.setup.target_basis.nneg
+        {
+                let reference = source_stable_q
+                    .columns(1, self.setup.source_basis.nneg - 1)
+                    .into_owned();
+                transport_target_inclination(
+                    &maps,
+                    &residuals,
+                    &target_stable,
+                    &source_flow,
+                    &reference,
+                )
+                .ok()
+        } else {
+            None
+        };
+        Ok((source, target))
     }
 
     fn set_phase_reference(
