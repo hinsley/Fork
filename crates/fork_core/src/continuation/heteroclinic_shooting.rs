@@ -7,12 +7,15 @@
 //! single shooting and `M > 1` is multiple shooting.
 
 use super::heteroclinic::{
-    basis_matrix, build_stable_normals, build_unstable_normals, riccati_coeff,
-    HeteroclinicChartTransform, HeteroclinicSetupV1, HETEROCLINIC_SCHEMA_VERSION,
+    basis_matrix, build_stable_normals, build_unstable_normals, invariant_graph_frame,
+    riccati_coeff, HeteroclinicChartTransform, HeteroclinicSetupV1, HETEROCLINIC_SCHEMA_VERSION,
 };
 use super::heteroclinic_events::{
     build_heteroclinic_orbit_flip_data, compute_heteroclinic_event_diagnostics,
     HeteroclinicEventDiagnostics, DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+};
+use super::heteroclinic_transport::{
+    transport_source_inclination, transport_target_inclination, InclinationFrameData,
 };
 use super::homoclinic_init::{
     compute_homoclinic_basis, validate_homoclinic_extras, validate_homoclinic_parameter_plane,
@@ -29,6 +32,7 @@ use super::{
     ContinuationBranch, ContinuationPoint, ContinuationSettings, HeteroclinicConnectionSchemaV1,
     HomoclinicBasisSnapshot, HomoclinicDiscretization,
 };
+use crate::autodiff::TangentSystem;
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{compute_jacobian, SystemKind};
 use crate::solvers::Tsit5;
@@ -521,6 +525,86 @@ impl<'a> HeteroclinicShootingProblem<'a> {
         Ok(DMatrix::from_row_slice(dim, dim, &values))
     }
 
+    fn inclination_frames(
+        &mut self,
+        decoded: &DecodedHeteroclinicShootingState,
+        params: &[f64],
+    ) -> Result<(Option<InclinationFrameData>, Option<InclinationFrameData>)> {
+        let dim = self.dim();
+        let source_unstable_q = basis_matrix(&self.setup.source_basis.unstable_q, dim)?;
+        let source_yu = DMatrix::from_row_slice(
+            self.setup.source_basis.nneg,
+            self.setup.source_basis.npos,
+            &decoded.source_yu,
+        );
+        let source_unstable =
+            invariant_graph_frame(&source_unstable_q, self.setup.source_basis.npos, &source_yu)?;
+        let target_stable_q = basis_matrix(&self.setup.target_basis.stable_q, dim)?;
+        let target_ys = DMatrix::from_row_slice(
+            self.setup.target_basis.npos,
+            self.setup.target_basis.nneg,
+            &decoded.target_ys,
+        );
+        let target_stable =
+            invariant_graph_frame(&target_stable_q, self.setup.target_basis.nneg, &target_ys)?;
+        let target_unstable_q = basis_matrix(&self.setup.target_basis.unstable_q, dim)?;
+        let source_stable_q = basis_matrix(&self.setup.source_basis.stable_q, dim)?;
+        let source_endpoint = decoded
+            .nodes
+            .first()
+            .ok_or_else(|| anyhow!("Heteroclinic shooting nodes are empty"))?;
+        let target_endpoint = decoded
+            .nodes
+            .last()
+            .ok_or_else(|| anyhow!("Heteroclinic shooting nodes are empty"))?;
+        let source_flow = DVector::from_vec(flow_at(self.system, params, source_endpoint)?);
+        let target_flow = DVector::from_vec(flow_at(self.system, params, target_endpoint)?);
+        let segment_duration = 2.0 * decoded.time / self.setup.shooting.intervals as f64;
+        let (maps, residuals) = heteroclinic_shooting_interval_maps(
+            self.system,
+            &decoded.nodes,
+            segment_duration,
+            self.setup.shooting.integration_steps_per_segment,
+            params,
+        )?;
+
+        let source = if self.setup.source_basis.npos >= 2
+            && self.setup.target_basis.npos == self.setup.source_basis.npos
+        {
+            let reference = target_unstable_q
+                .columns(1, self.setup.target_basis.npos - 1)
+                .into_owned();
+            transport_source_inclination(
+                &maps,
+                &residuals,
+                &source_unstable,
+                &target_flow,
+                &reference,
+            )
+            .ok()
+        } else {
+            None
+        };
+        let target = if self.setup.target_basis.nneg >= 2
+            && self.setup.source_basis.nneg == self.setup.target_basis.nneg
+        {
+            let reference = source_stable_q
+                .columns(1, self.setup.source_basis.nneg - 1)
+                .into_owned();
+            transport_target_inclination(
+                &maps,
+                &residuals,
+                &target_stable,
+                &source_flow,
+                &reference,
+            )
+            .ok()
+        } else {
+            None
+        };
+        Ok((source, target))
+    }
+
     fn projector_chart_angle(&self, decoded: &DecodedHeteroclinicShootingState) -> f64 {
         let source = DMatrix::from_row_slice(
             self.setup.source_basis.nneg,
@@ -945,6 +1029,100 @@ fn basis_from_snapshot(snapshot: &HomoclinicBasisSnapshot) -> HomoclinicBasis {
     }
 }
 
+/// Construct one forward state-transition matrix per shooting interval by
+/// integrating the same Tsitouras-5 segment trajectory used by the nonlinear
+/// shooting residual. Each residual combines segment continuity with the
+/// flow-covariance identity `Phi f(x0) = f(Phi_t(x0))`.
+pub(crate) fn heteroclinic_shooting_interval_maps(
+    system: &mut EquationSystem,
+    nodes: &[Vec<f64>],
+    segment_duration: f64,
+    integration_steps_per_segment: usize,
+    params: &[f64],
+) -> Result<(Vec<DMatrix<f64>>, Vec<f64>)> {
+    if nodes.len() < 2
+        || nodes.iter().any(|node| node.len() != nodes[0].len())
+        || nodes[0].is_empty()
+        || !segment_duration.is_finite()
+        || segment_duration <= 0.0
+        || integration_steps_per_segment == 0
+    {
+        bail!("Heteroclinic shooting interval-map inputs are invalid");
+    }
+    if system.params.len() != params.len() {
+        bail!("Heteroclinic shooting parameter vector length mismatch");
+    }
+    let previous_params = system.params.clone();
+    system.params.copy_from_slice(params);
+    let result = (|| {
+        let dim = nodes[0].len();
+        let mut maps = Vec::with_capacity(nodes.len() - 1);
+        let mut residuals = Vec::with_capacity(nodes.len() - 1);
+        for interval in 0..nodes.len() - 1 {
+            let (endpoint, map) = integrate_fixed_with_tangent(
+                system,
+                &nodes[interval],
+                segment_duration,
+                integration_steps_per_segment,
+            )?;
+            let mut source_flow = vec![0.0; dim];
+            let mut endpoint_flow = vec![0.0; dim];
+            system.apply(0.0, &nodes[interval], &mut source_flow);
+            system.apply(segment_duration, &endpoint, &mut endpoint_flow);
+            let transported_flow = &map * DVector::from_vec(source_flow.clone());
+            let endpoint_flow = DVector::from_vec(endpoint_flow);
+            let covariance_residual = (&transported_flow - &endpoint_flow).norm()
+                / (map.norm() * l2_norm(&source_flow) + endpoint_flow.norm()).max(1.0);
+            let continuity_residual = vector_sub(&endpoint, &nodes[interval + 1])
+                .iter()
+                .map(|value| value * value)
+                .sum::<f64>()
+                .sqrt()
+                / (l2_norm(&endpoint) + l2_norm(&nodes[interval + 1])).max(1.0);
+            let residual = covariance_residual.max(continuity_residual);
+            if map.iter().any(|value| !value.is_finite()) || !residual.is_finite() {
+                bail!("Heteroclinic shooting variational integration is non-finite");
+            }
+            maps.push(map);
+            residuals.push(residual);
+        }
+        Ok((maps, residuals))
+    })();
+    system.params = previous_params;
+    result
+}
+
+fn integrate_fixed_with_tangent(
+    system: &EquationSystem,
+    initial: &[f64],
+    duration: f64,
+    steps: usize,
+) -> Result<(Vec<f64>, DMatrix<f64>)> {
+    if initial.is_empty() || !duration.is_finite() || duration <= 0.0 || steps == 0 {
+        bail!("Heteroclinic shooting tangent duration and step count must be positive");
+    }
+    let dim = initial.len();
+    let mut augmented = vec![0.0; dim + dim * dim];
+    augmented[..dim].copy_from_slice(initial);
+    for index in 0..dim {
+        augmented[dim + index * dim + index] = 1.0;
+    }
+    let tangent_system = TangentSystem::new(system, dim);
+    let mut solver = Tsit5::new(augmented.len());
+    let mut time = 0.0;
+    let dt = duration / steps as f64;
+    for _ in 0..steps {
+        solver.step(&tangent_system, &mut time, &mut augmented, dt);
+        if augmented.iter().any(|value| !value.is_finite()) {
+            bail!("Heteroclinic shooting tangent integration produced a non-finite value");
+        }
+    }
+    Ok((
+        augmented[..dim].to_vec(),
+        DMatrix::from_row_slice(dim, dim, &augmented[dim..]),
+    ))
+}
+
 fn integrate_fixed(
     system: &EquationSystem,
     initial: &[f64],
@@ -1106,6 +1284,78 @@ mod tests {
         .expect("collocation setup")
     }
 
+    fn manufactured_four_dimensional_setup(
+        system: &mut EquationSystem,
+        intervals: usize,
+    ) -> HeteroclinicShootingSetupV1 {
+        let sample_count = 161usize;
+        let time = 5.0;
+        let times = (0..sample_count)
+            .map(|index| -time + 2.0 * time * index as f64 / (sample_count - 1) as f64)
+            .collect::<Vec<_>>();
+        let states = times
+            .iter()
+            .map(|time| vec![time.tanh(), 0.0, 0.0, 0.0])
+            .collect::<Vec<_>>();
+        let collocation = heteroclinic_setup_from_orbit(
+            system,
+            &HeteroclinicOrbitSeed {
+                times,
+                states,
+                source_equilibrium: vec![-1.0, 0.0, 0.0, 0.0],
+                target_equilibrium: vec![1.0, 0.0, 0.0, 0.0],
+            },
+            24,
+            3,
+            &[0.0, 0.0],
+            0,
+            1,
+            "mu",
+            "nu",
+            HomoclinicExtraFlags {
+                free_time: true,
+                free_eps0: false,
+                free_eps1: false,
+            },
+        )
+        .expect("manufactured collocation setup");
+        let mut setup = heteroclinic_shooting_setup_from_collocation(
+            &collocation,
+            HeteroclinicShootingSettings {
+                intervals,
+                integration_steps_per_segment: 1024,
+            },
+        )
+        .expect("manufactured shooting setup");
+        setup.guess.nodes = (0..=intervals)
+            .map(|index| {
+                let time =
+                    -setup.guess.time + 2.0 * setup.guess.time * index as f64 / intervals as f64;
+                vec![time.tanh(), 0.0, 0.0, 0.0]
+            })
+            .collect();
+        setup
+    }
+
+    fn manufactured_four_dimensional_system() -> EquationSystem {
+        let variables = vec![
+            "x".to_owned(),
+            "y".to_owned(),
+            "z".to_owned(),
+            "w".to_owned(),
+        ];
+        let parameters = vec!["mu".to_owned(), "nu".to_owned()];
+        let compiler = Compiler::new(&variables, &parameters);
+        let equations = ["1-x^2", "(2+x)*y+(mu-nu)*(1-x^2)", "(-2+x)*z", "2*x*w"];
+        let bytecode = equations
+            .iter()
+            .map(|equation| compiler.compile(&parse(equation).expect("parse manufactured model")))
+            .collect();
+        let mut system = EquationSystem::new(bytecode, vec![0.0, 0.0]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+        system
+    }
+
     #[test]
     fn shooting_state_round_trips_two_independent_endpoints() {
         let mut system = analytic_system();
@@ -1182,5 +1432,85 @@ mod tests {
         let error = heteroclinic_shooting_setup_from_point(&point, &branch_type)
             .expect_err("invalid restart metadata must be rejected");
         assert!(error.to_string().contains("out of range"));
+    }
+
+    #[test]
+    fn manufactured_four_dimensional_interval_maps_match_the_analytic_cocycle() {
+        let mut system = manufactured_four_dimensional_system();
+        let setup = manufactured_four_dimensional_setup(&mut system, 4);
+        let segment_duration = 2.0 * setup.guess.time / setup.shooting.intervals as f64;
+        let (maps, residuals) = heteroclinic_shooting_interval_maps(
+            &mut system,
+            &setup.guess.nodes,
+            segment_duration,
+            setup.shooting.integration_steps_per_segment,
+            &setup.base_params,
+        )
+        .expect("shooting interval maps");
+
+        assert_eq!(maps.len(), 4);
+        assert!(
+            residuals.iter().all(|residual| *residual < 1.0e-8),
+            "interval residuals: {residuals:?}"
+        );
+        for (interval, map) in maps.iter().enumerate() {
+            let left = -setup.guess.time + interval as f64 * segment_duration;
+            let right = left + segment_duration;
+            let cosh_ratio = right.cosh() / left.cosh();
+            let expected = [
+                (1.0 / right.cosh()).powi(2) / (1.0 / left.cosh()).powi(2),
+                (2.0 * segment_duration).exp() * cosh_ratio,
+                (-2.0 * segment_duration).exp() * cosh_ratio,
+                cosh_ratio * cosh_ratio,
+            ];
+            for row in 0..4 {
+                for column in 0..4 {
+                    let target = if row == column { expected[row] } else { 0.0 };
+                    let scale = target.abs().max(1.0);
+                    assert!(
+                        (map[(row, column)] - target).abs() < 2.0e-7 * scale,
+                        "interval={interval}, entry=({row},{column}), actual={}, expected={target}",
+                        map[(row, column)]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn manufactured_four_dimensional_shooting_frames_have_oriented_sif_and_tif() {
+        let mut system = manufactured_four_dimensional_system();
+        let setup = manufactured_four_dimensional_setup(&mut system, 4);
+        let augmented = DVector::from_vec({
+            let mut values = vec![setup.guess.param1_value];
+            values.extend(pack_heteroclinic_shooting_state(&setup));
+            values
+        });
+        let mut problem = HeteroclinicShootingProblem::new(&mut system, setup)
+            .expect("manufactured shooting problem");
+        let decoded = problem
+            .decode(&augmented)
+            .expect("decode manufactured state");
+        let params = problem
+            .params(augmented[0], decoded.param2_value)
+            .expect("manufactured parameters");
+        let (source, target) = problem
+            .inclination_frames(&decoded, &params)
+            .expect("shooting inclination frames");
+        assert!(source.is_some(), "source inclination frame is unavailable");
+        assert!(target.is_some(), "target inclination frame is unavailable");
+        let source = source.expect("checked source inclination frame");
+        let target = target.expect("checked target inclination frame");
+
+        let source_value = source.signed_test().expect("SIF");
+        let target_value = target.signed_test().expect("TIF");
+        assert!((source_value + 1.0).abs() < 1.0e-8, "SIF={source_value}");
+        assert!((target_value + 1.0).abs() < 1.0e-8, "TIF={target_value}");
+        for frame in [&source, &target] {
+            assert_eq!(frame.transported_frame.shape(), (4, 1));
+            assert_eq!(frame.reference_frame.shape(), (4, 1));
+            assert!(frame.minimum_overlap_singular_value > 0.999_999);
+            assert!(frame.relative_transport_residual < 1.0e-8);
+        }
     }
 }
