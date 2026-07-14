@@ -60,6 +60,83 @@ assert.equal(state.length, 1);
 assert.ok(Math.abs(state[0] - 0.25) < 1e-10, `Expected x ~= 0.25 after one step, got ${state[0]}`);
 assert.ok(Math.abs(system.get_t() - 0.25) < 1e-12, `Expected t ~= 0.25, got ${system.get_t()}`);
 
+const extendedSmoothExpression = [
+  'sqrt(p)',
+  'cbrt(p)',
+  'asin(x)',
+  'acos(x)',
+  'atan(x)',
+  'asinh(x)',
+  'acosh(p)',
+  'atanh(x/2)',
+  'exp2(x)',
+  'expm1(x)',
+  'log2(p)',
+  'log10(p)',
+  'log1p(x)',
+  'atan2(x,p)',
+  'hypot(x,p)',
+  'pow(p,x)',
+  'log(p,2)',
+].join('+');
+const extendedSmoothSystem = new wasm.WasmSystem(
+  [extendedSmoothExpression],
+  new Float64Array([2]),
+  ['p'],
+  ['x'],
+  'discrete',
+  'map'
+);
+const extendedX = 0.4;
+const extendedP = 2;
+const evaluateExtendedSmooth = (x: number): number =>
+  Math.sqrt(extendedP) +
+  Math.cbrt(extendedP) +
+  Math.asin(x) +
+  Math.acos(x) +
+  Math.atan(x) +
+  Math.asinh(x) +
+  Math.acosh(extendedP) +
+  Math.atanh(x / 2) +
+  2 ** x +
+  Math.expm1(x) +
+  Math.log2(extendedP) +
+  Math.log10(extendedP) +
+  Math.log1p(x) +
+  Math.atan2(x, extendedP) +
+  Math.hypot(x, extendedP) +
+  extendedP ** x +
+  Math.log(extendedP) / Math.log(2);
+extendedSmoothSystem.set_state(new Float64Array([extendedX]));
+const extendedJacobian = Array.from(extendedSmoothSystem.compute_jacobian() as Float64Array);
+const finiteDifferenceStep = 1e-6;
+const expectedExtendedDerivative =
+  (evaluateExtendedSmooth(extendedX + finiteDifferenceStep) -
+    evaluateExtendedSmooth(extendedX - finiteDifferenceStep)) /
+  (2 * finiteDifferenceStep);
+assert.ok(
+  Math.abs(extendedJacobian[0] - expectedExtendedDerivative) < 1e-6,
+  `Extended-function Jacobian mismatch: got ${extendedJacobian[0]}, expected ${expectedExtendedDerivative}`
+);
+extendedSmoothSystem.step(1);
+assert.ok(
+  Math.abs(extendedSmoothSystem.get_state()[0] - evaluateExtendedSmooth(extendedX)) < 1e-10,
+  'Extended smooth functions should evaluate through generated WASM.'
+);
+
+const piecewiseSystem = new wasm.WasmSystem(
+  ['abs(x)+min(x,p,2)+max(-2,x,p)+floor(p)+ceil(p)+round(p)+trunc(p)+fract(x)+sign(x)'],
+  new Float64Array([1.3]),
+  ['p'],
+  ['x'],
+  'discrete',
+  'map'
+);
+piecewiseSystem.set_state(new Float64Array([0.4]));
+assert.ok(Math.abs(piecewiseSystem.compute_jacobian()[0] - 3) < 1e-12);
+piecewiseSystem.step(1);
+assert.ok(Math.abs(piecewiseSystem.get_state()[0] - 8.5) < 1e-12);
+
 const mapNormalFormSystem = new wasm.WasmSystem(
   ['(-1+mu*a)*x+c*x^3'],
   new Float64Array([0, 0.456, -1.234]),

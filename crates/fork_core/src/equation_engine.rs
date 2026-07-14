@@ -54,6 +54,56 @@ pub enum OpCode {
     Csch,
     /// Pops top value (a), pushes coth(a).
     Coth,
+    /// Pops top value (a), pushes asin(a).
+    Asin,
+    /// Pops top value (a), pushes acos(a).
+    Acos,
+    /// Pops top value (a), pushes atan(a).
+    Atan,
+    /// Pops top value (a), pushes asinh(a).
+    Asinh,
+    /// Pops top value (a), pushes acosh(a).
+    Acosh,
+    /// Pops top value (a), pushes atanh(a).
+    Atanh,
+    /// Pops top value (a), pushes sqrt(a).
+    Sqrt,
+    /// Pops top value (a), pushes cbrt(a).
+    Cbrt,
+    /// Pops top value (a), pushes 2^a.
+    Exp2,
+    /// Pops top value (a), pushes exp(a) - 1.
+    ExpM1,
+    /// Pops top value (a), pushes log2(a).
+    Log2,
+    /// Pops top value (a), pushes log10(a).
+    Log10,
+    /// Pops top value (a), pushes ln(1 + a).
+    Log1P,
+    /// Pops base and value, pushes log_base(value).
+    LogBase,
+    /// Pops x and y, pushes atan2(y, x).
+    Atan2,
+    /// Pops b and a, pushes hypot(a, b).
+    Hypot,
+    /// Pops b and a, pushes min(a, b).
+    Min,
+    /// Pops b and a, pushes max(a, b).
+    Max,
+    /// Pops top value (a), pushes abs(a).
+    Abs,
+    /// Pops top value (a), pushes floor(a).
+    Floor,
+    /// Pops top value (a), pushes ceil(a).
+    Ceil,
+    /// Pops top value (a), pushes round(a).
+    Round,
+    /// Pops top value (a), pushes trunc(a).
+    Trunc,
+    /// Pops top value (a), pushes fract(a).
+    Fract,
+    /// Pops top value (a), pushes signum(a).
+    Sign,
     /// Pops top value (a), pushes -a.
     Neg,
 }
@@ -186,6 +236,111 @@ impl VM {
                     let a = stack.pop().unwrap();
                     stack.push(T::one() / a.tanh());
                 }
+                OpCode::Asin => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.asin());
+                }
+                OpCode::Acos => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.acos());
+                }
+                OpCode::Atan => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.atan());
+                }
+                OpCode::Asinh => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.asinh());
+                }
+                OpCode::Acosh => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.acosh());
+                }
+                OpCode::Atanh => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.atanh());
+                }
+                OpCode::Sqrt => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.sqrt());
+                }
+                OpCode::Cbrt => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.cbrt());
+                }
+                OpCode::Exp2 => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.exp2());
+                }
+                OpCode::ExpM1 => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.exp_m1());
+                }
+                OpCode::Log2 => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.log2());
+                }
+                OpCode::Log10 => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.log10());
+                }
+                OpCode::Log1P => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.ln_1p());
+                }
+                OpCode::LogBase => {
+                    let base = stack.pop().unwrap();
+                    let value = stack.pop().unwrap();
+                    stack.push(value.log(base));
+                }
+                OpCode::Atan2 => {
+                    let x = stack.pop().unwrap();
+                    let y = stack.pop().unwrap();
+                    stack.push(y.atan2(x));
+                }
+                OpCode::Hypot => {
+                    let b = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
+                    stack.push(a.hypot(b));
+                }
+                OpCode::Min => {
+                    let b = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
+                    stack.push(a.min(b));
+                }
+                OpCode::Max => {
+                    let b = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
+                    stack.push(a.max(b));
+                }
+                OpCode::Abs => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.abs());
+                }
+                OpCode::Floor => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.floor());
+                }
+                OpCode::Ceil => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.ceil());
+                }
+                OpCode::Round => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.round());
+                }
+                OpCode::Trunc => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.trunc());
+                }
+                OpCode::Fract => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.fract());
+                }
+                OpCode::Sign => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.signum());
+                }
                 OpCode::Neg => {
                     let a = stack.pop().unwrap();
                     stack.push(-a);
@@ -207,8 +362,57 @@ pub enum Expr {
     Variable(String),
     Binary(Box<Expr>, char, Box<Expr>), // char is operator +, -, *, /, ^
     Unary(char, Box<Expr>),             // -, s (sin), c (cos), e (exp)
-    Call(String, Box<Expr>),            // functions like sin(x)
+    Call(String, Vec<Expr>),            // functions like sin(x) or atan2(y, x)
 }
+
+/// Function signatures suitable for user-facing expression-language help.
+pub const SMOOTH_FUNCTION_SIGNATURES: &[&str] = &[
+    "sin(x)",
+    "cos(x)",
+    "tan(x)",
+    "sec(x)",
+    "csc(x)",
+    "cot(x)",
+    "asin(x)",
+    "acos(x)",
+    "atan(x)",
+    "atan2(y, x)",
+    "sinh(x)",
+    "cosh(x)",
+    "tanh(x)",
+    "sech(x)",
+    "csch(x)",
+    "coth(x)",
+    "asinh(x)",
+    "acosh(x)",
+    "atanh(x)",
+    "sqrt(x)",
+    "cbrt(x)",
+    "exp(x)",
+    "exp2(x)",
+    "expm1(x)",
+    "ln(x)",
+    "log(x)",
+    "log(x, base)",
+    "log2(x)",
+    "log10(x)",
+    "log1p(x)",
+    "pow(x, y)",
+    "hypot(x, y)",
+];
+
+/// These functions have useful piecewise derivatives, but are not differentiable everywhere.
+pub const PIECEWISE_FUNCTION_SIGNATURES: &[&str] = &[
+    "abs(x)",
+    "min(x, y, ...)",
+    "max(x, y, ...)",
+    "floor(x)",
+    "ceil(x)",
+    "round(x)",
+    "trunc(x)",
+    "fract(x)",
+    "sign(x)",
+];
 
 /// Compiles an AST (`Expr`) into `Bytecode`.
 /// Resolves variable and parameter names to indices.
@@ -233,12 +437,18 @@ impl Compiler {
     }
 
     pub fn compile(&self, expr: &Expr) -> Bytecode {
-        let mut ops = Vec::new();
-        self.compile_recursive(expr, &mut ops);
-        Bytecode { ops }
+        self.try_compile(expr)
+            .unwrap_or_else(|error| panic!("{error}"))
     }
 
-    fn compile_recursive(&self, expr: &Expr, ops: &mut Vec<OpCode>) {
+    /// Compile an expression without panicking on unknown symbols, functions, or arities.
+    pub fn try_compile(&self, expr: &Expr) -> Result<Bytecode, String> {
+        let mut ops = Vec::new();
+        self.compile_recursive(expr, &mut ops)?;
+        Ok(Bytecode { ops })
+    }
+
+    fn compile_recursive(&self, expr: &Expr, ops: &mut Vec<OpCode>) -> Result<(), String> {
         match expr {
             Expr::Number(n) => ops.push(OpCode::LoadConst(*n)),
             Expr::Variable(name) => {
@@ -247,49 +457,127 @@ impl Compiler {
                 } else if let Some(&idx) = self.param_map.get(name) {
                     ops.push(OpCode::LoadParam(idx));
                 } else {
-                    panic!("Unknown variable or parameter: {}", name);
+                    return Err(format!("Unknown variable or parameter: {name}"));
                 }
             }
             Expr::Binary(left, op, right) => {
-                self.compile_recursive(left, ops);
-                self.compile_recursive(right, ops);
+                self.compile_recursive(left, ops)?;
+                self.compile_recursive(right, ops)?;
                 match op {
                     '+' => ops.push(OpCode::Add),
                     '-' => ops.push(OpCode::Sub),
                     '*' => ops.push(OpCode::Mul),
                     '/' => ops.push(OpCode::Div),
                     '^' => ops.push(OpCode::Pow),
-                    _ => panic!("Unknown binary operator: {}", op),
+                    _ => return Err(format!("Unknown binary operator: {op}")),
                 }
             }
             Expr::Unary(op, operand) => {
-                self.compile_recursive(operand, ops);
+                self.compile_recursive(operand, ops)?;
                 match op {
                     '-' => ops.push(OpCode::Neg),
-                    _ => panic!("Unknown unary operator: {}", op),
+                    _ => return Err(format!("Unknown unary operator: {op}")),
                 }
             }
-            Expr::Call(func, arg) => {
-                self.compile_recursive(arg, ops);
-                match func.as_str() {
-                    "sin" => ops.push(OpCode::Sin),
-                    "cos" => ops.push(OpCode::Cos),
-                    "tan" => ops.push(OpCode::Tan),
-                    "exp" => ops.push(OpCode::Exp),
-                    "log" | "ln" => ops.push(OpCode::Log),
-                    "sinh" => ops.push(OpCode::Sinh),
-                    "cosh" => ops.push(OpCode::Cosh),
-                    "tanh" => ops.push(OpCode::Tanh),
-                    "sec" => ops.push(OpCode::Sec),
-                    "csc" => ops.push(OpCode::Csc),
-                    "cot" => ops.push(OpCode::Cot),
-                    "sech" => ops.push(OpCode::Sech),
-                    "csch" => ops.push(OpCode::Csch),
-                    "coth" => ops.push(OpCode::Coth),
-                    _ => panic!("Unknown function: {}", func),
+            Expr::Call(func, args) => {
+                if matches!(func.as_str(), "min" | "max") {
+                    if args.len() < 2 {
+                        return Err(function_arity_error(
+                            func,
+                            "at least 2 arguments",
+                            args.len(),
+                        ));
+                    }
+                    self.compile_recursive(&args[0], ops)?;
+                    for arg in &args[1..] {
+                        self.compile_recursive(arg, ops)?;
+                        ops.push(if func == "min" {
+                            OpCode::Min
+                        } else {
+                            OpCode::Max
+                        });
+                    }
+                    return Ok(());
                 }
+
+                for arg in args {
+                    self.compile_recursive(arg, ops)?;
+                }
+                ops.push(resolve_fixed_function(func, args.len())?);
             }
         }
+        Ok(())
+    }
+}
+
+fn function_arity_error(name: &str, expected: &str, actual: usize) -> String {
+    format!("Function '{name}' expects {expected}; got {actual}.")
+}
+
+fn resolve_fixed_function(name: &str, arity: usize) -> Result<OpCode, String> {
+    let unary = match name {
+        "sin" => Some(OpCode::Sin),
+        "cos" => Some(OpCode::Cos),
+        "tan" => Some(OpCode::Tan),
+        "exp" => Some(OpCode::Exp),
+        "ln" => Some(OpCode::Log),
+        "sinh" => Some(OpCode::Sinh),
+        "cosh" => Some(OpCode::Cosh),
+        "tanh" => Some(OpCode::Tanh),
+        "sec" => Some(OpCode::Sec),
+        "csc" => Some(OpCode::Csc),
+        "cot" => Some(OpCode::Cot),
+        "sech" => Some(OpCode::Sech),
+        "csch" => Some(OpCode::Csch),
+        "coth" => Some(OpCode::Coth),
+        "asin" => Some(OpCode::Asin),
+        "acos" => Some(OpCode::Acos),
+        "atan" => Some(OpCode::Atan),
+        "asinh" => Some(OpCode::Asinh),
+        "acosh" => Some(OpCode::Acosh),
+        "atanh" => Some(OpCode::Atanh),
+        "sqrt" => Some(OpCode::Sqrt),
+        "cbrt" => Some(OpCode::Cbrt),
+        "exp2" => Some(OpCode::Exp2),
+        "expm1" | "exp_m1" => Some(OpCode::ExpM1),
+        "log2" => Some(OpCode::Log2),
+        "log10" => Some(OpCode::Log10),
+        "log1p" | "ln1p" | "ln_1p" => Some(OpCode::Log1P),
+        "abs" => Some(OpCode::Abs),
+        "floor" => Some(OpCode::Floor),
+        "ceil" => Some(OpCode::Ceil),
+        "round" => Some(OpCode::Round),
+        "trunc" => Some(OpCode::Trunc),
+        "fract" => Some(OpCode::Fract),
+        "sign" | "signum" => Some(OpCode::Sign),
+        _ => None,
+    };
+    if let Some(opcode) = unary {
+        return if arity == 1 {
+            Ok(opcode)
+        } else {
+            Err(function_arity_error(name, "1 argument", arity))
+        };
+    }
+
+    match name {
+        "log" => match arity {
+            1 => Ok(OpCode::Log),
+            2 => Ok(OpCode::LogBase),
+            _ => Err(function_arity_error(name, "1 or 2 arguments", arity)),
+        },
+        "atan2" => fixed_binary_function(name, arity, OpCode::Atan2),
+        "hypot" => fixed_binary_function(name, arity, OpCode::Hypot),
+        "pow" => fixed_binary_function(name, arity, OpCode::Pow),
+        _ => Err(format!("Unknown function: {name}")),
+    }
+}
+
+fn fixed_binary_function(name: &str, arity: usize, opcode: OpCode) -> Result<OpCode, String> {
+    if arity == 2 {
+        Ok(opcode)
+    } else {
+        Err(function_arity_error(name, "2 arguments", arity))
     }
 }
 
@@ -299,7 +587,14 @@ impl Compiler {
 pub fn parse(input: &str) -> Result<Expr, String> {
     let tokens = tokenize(input)?;
     let mut parser = Parser { tokens, pos: 0 };
-    parser.parse_expression()
+    let expression = parser.parse_expression()?;
+    if parser.pos != parser.tokens.len() {
+        return Err(format!(
+            "Unexpected trailing token {:?}",
+            parser.tokens[parser.pos]
+        ));
+    }
+    Ok(expression)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -311,6 +606,7 @@ enum Token {
     Star,
     Slash,
     Caret,
+    Comma,
     LParen,
     RParen,
 }
@@ -322,21 +618,59 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
     while let Some(&c) = chars.peek() {
         if c.is_whitespace() {
             chars.next();
-        } else if c.is_digit(10) || c == '.' {
+        } else if c.is_ascii_digit() || c == '.' {
             let mut num_str = String::new();
+            let mut has_digit = false;
+
             while let Some(&d) = chars.peek() {
-                if d.is_digit(10) || d == '.' {
+                if d.is_ascii_digit() {
                     num_str.push(d);
                     chars.next();
+                    has_digit = true;
                 } else {
                     break;
+                }
+            }
+            if chars.peek() == Some(&'.') {
+                num_str.push('.');
+                chars.next();
+                while let Some(&d) = chars.peek() {
+                    if d.is_ascii_digit() {
+                        num_str.push(d);
+                        chars.next();
+                        has_digit = true;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if !has_digit {
+                return Err(format!("Invalid number '{num_str}'"));
+            }
+            if matches!(chars.peek(), Some('e' | 'E')) {
+                num_str.push(chars.next().unwrap());
+                if matches!(chars.peek(), Some('+' | '-')) {
+                    num_str.push(chars.next().unwrap());
+                }
+                let mut exponent_digits = 0;
+                while let Some(&d) = chars.peek() {
+                    if d.is_ascii_digit() {
+                        num_str.push(d);
+                        chars.next();
+                        exponent_digits += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if exponent_digits == 0 {
+                    return Err(format!("Invalid number '{num_str}'"));
                 }
             }
             let value = num_str
                 .parse::<f64>()
                 .map_err(|_| format!("Invalid number '{}'", num_str))?;
             tokens.push(Token::Number(value));
-        } else if c.is_alphabetic() {
+        } else if c.is_alphabetic() || c == '_' {
             let mut ident = String::new();
             while let Some(&d) = chars.peek() {
                 if d.is_alphanumeric() || d == '_' {
@@ -354,6 +688,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 '*' => tokens.push(Token::Star),
                 '/' => tokens.push(Token::Slash),
                 '^' => tokens.push(Token::Caret),
+                ',' => tokens.push(Token::Comma),
                 '(' => tokens.push(Token::LParen),
                 ')' => tokens.push(Token::RParen),
                 _ => return Err(format!("Invalid token '{}'", c)),
@@ -468,12 +803,21 @@ impl Parser {
             Some(Token::Identifier(name)) => {
                 if let Some(Token::LParen) = self.peek() {
                     self.consume(); // eat '('
-                    let arg = self.parse_expression()?;
-                    if let Some(Token::RParen) = self.consume() {
-                        Ok(Expr::Call(name, Box::new(arg)))
-                    } else {
-                        Err("Expected ')'".to_string())
+                    let mut args = Vec::new();
+                    if let Some(Token::RParen) = self.peek() {
+                        self.consume();
+                        return Ok(Expr::Call(name, args));
                     }
+
+                    loop {
+                        args.push(self.parse_expression()?);
+                        match self.consume() {
+                            Some(Token::Comma) => continue,
+                            Some(Token::RParen) => break,
+                            _ => return Err("Expected ',' or ')'".to_string()),
+                        }
+                    }
+                    Ok(Expr::Call(name, args))
                 } else {
                     Ok(Expr::Variable(name))
                 }
@@ -589,6 +933,111 @@ mod tests {
             let expected_eps = numeric_derivative_wrt_p(expr, x, p);
             assert_close(dual.val, expected_val);
             assert_eps_close(dual.eps, expected_eps);
+        }
+    }
+
+    #[test]
+    fn evaluates_extended_smooth_unary_function_family() {
+        let cases = [
+            ("sqrt(p)", 2.3),
+            ("cbrt(p)", 2.3),
+            ("asin(p)", 0.3),
+            ("acos(p)", 0.3),
+            ("atan(p)", 0.3),
+            ("asinh(p)", 0.5),
+            ("acosh(p)", 2.0),
+            ("atanh(p)", 0.4),
+            ("exp2(p)", 1.5),
+            ("expm1(p)", 0.4),
+            ("log2(p)", 3.0),
+            ("log10(p)", 2.5),
+            ("log1p(p)", 0.4),
+        ];
+
+        for (expr, p) in cases {
+            let dual = eval_dual_wrt_p(expr, 0.7, p);
+            assert_close(dual.val, eval_with_x_and_p(expr, 0.7, p));
+            assert_eps_close(dual.eps, numeric_derivative_wrt_p(expr, 0.7, p));
+        }
+    }
+
+    #[test]
+    fn evaluates_binary_and_variadic_function_family() {
+        let x = 0.7_f64;
+        let p = 1.3_f64;
+        let expressions = [
+            "atan2(p, x)",
+            "hypot(p, x)",
+            "pow(p, x)",
+            "log(p, x)",
+            "min(p, x)",
+            "max(p, x)",
+            "min(2, p, x)",
+            "max(-2, p, x)",
+        ];
+
+        for expr in expressions {
+            let dual = eval_dual_wrt_p(expr, x, p);
+            assert_close(dual.val, eval_with_x_and_p(expr, x, p));
+            assert_eps_close(dual.eps, numeric_derivative_wrt_p(expr, x, p));
+        }
+    }
+
+    #[test]
+    fn evaluates_piecewise_function_family_away_from_breakpoints() {
+        let cases = [
+            ("abs(p)", -1.3),
+            ("floor(p)", 1.3),
+            ("ceil(p)", 1.3),
+            ("round(p)", 1.3),
+            ("trunc(p)", -1.3),
+            ("fract(p)", -1.3),
+            ("sign(p)", -1.3),
+        ];
+
+        for (expr, p) in cases {
+            let dual = eval_dual_wrt_p(expr, 0.7, p);
+            assert_close(dual.val, eval_with_x_and_p(expr, 0.7, p));
+            assert_eps_close(dual.eps, numeric_derivative_wrt_p(expr, 0.7, p));
+        }
+    }
+
+    #[test]
+    fn parser_accepts_scientific_notation_and_leading_underscore_identifiers() {
+        assert_close(eval_with_x_and_p("1e-3 + p", 0.0, 2.0), 2.001);
+        assert!(parse("_state + 1").is_ok());
+    }
+
+    #[test]
+    fn parser_rejects_trailing_tokens() {
+        assert!(parse("x y").is_err());
+        assert!(parse("sin(x) trailing").is_err());
+    }
+
+    #[test]
+    fn compiler_returns_user_facing_symbol_function_and_arity_errors() {
+        let compiler = Compiler::new(&["x".to_string()], &["p".to_string()]);
+        let cases = [
+            ("missing + 1", "Unknown variable or parameter: missing"),
+            ("mystery(x)", "Unknown function: mystery"),
+            ("sin()", "Function 'sin' expects 1 argument; got 0."),
+            ("pow(x)", "Function 'pow' expects 2 arguments; got 1."),
+            (
+                "log(x, p, 2)",
+                "Function 'log' expects 1 or 2 arguments; got 3.",
+            ),
+            (
+                "min(x)",
+                "Function 'min' expects at least 2 arguments; got 1.",
+            ),
+        ];
+
+        for (expression, expected) in cases {
+            let parsed = parse(expression).expect("expression syntax should parse");
+            let error = compiler
+                .try_compile(&parsed)
+                .expect_err("expression should fail compilation");
+            assert_eq!(error, expected);
         }
     }
 }

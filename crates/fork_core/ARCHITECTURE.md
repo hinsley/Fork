@@ -26,6 +26,9 @@ fork_core/
 
 The `EquationSystem` struct represents a dynamical system using a stack-based bytecode interpreter. This allows systems to be defined at runtime (e.g., from user input in the CLI).
 
+The complete user-facing grammar, function signatures, and autodiff caveats are documented in
+[`docs/expression-language.md`](../../docs/expression-language.md).
+
 ```rust
 // Bytecode opcodes
 enum OpCode {

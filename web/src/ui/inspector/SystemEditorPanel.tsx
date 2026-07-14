@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useReducer, type SetStateAction } from 'react'
 import type { SystemConfig } from '../../system/types'
+import {
+  EXPRESSION_FUNCTION_GROUPS,
+  PIECEWISE_EXPRESSION_FUNCTIONS,
+} from '../../system/expressionLanguage'
 import { validateSystemConfig } from '../../state/systemValidation'
 import {
   DEFAULT_VARIABLE_PERIOD,
@@ -151,6 +155,45 @@ function parseValues(value: string): number[] {
   return (value.match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) ?? [])
     .map(Number)
     .filter(Number.isFinite)
+}
+
+function ExpressionLanguageReference() {
+  return (
+    <details className="system-editor__expression-reference" data-testid="expression-reference">
+      <summary>Expression syntax and functions</summary>
+      <div className="system-editor__expression-reference-body">
+        <p>
+          Use variable and parameter names with <code>+</code>, <code>-</code>, <code>*</code>,{' '}
+          <code>/</code>, <code>^</code>, parentheses, and scientific notation such as{' '}
+          <code>1e-3</code>.
+        </p>
+        <div className="system-editor__expression-groups">
+          {EXPRESSION_FUNCTION_GROUPS.map((group) => (
+            <div key={group.label}>
+              <strong>{group.label}</strong>
+              <span>
+                {group.functions.map((signature) => (
+                  <code key={signature}>{signature}</code>
+                ))}
+              </span>
+            </div>
+          ))}
+          <div>
+            <strong>Piecewise</strong>
+            <span>
+              {PIECEWISE_EXPRESSION_FUNCTIONS.map((signature) => (
+                <code key={signature}>{signature}</code>
+              ))}
+            </span>
+          </div>
+        </div>
+        <p className="field-warning">
+          Piecewise functions are differentiated on their current branch but are not differentiable
+          at jumps, ties, or corners. Avoid those points in continuation and normal-form calculations.
+        </p>
+      </div>
+    </details>
+  )
 }
 
 async function copyText(value: string): Promise<void> {
@@ -332,6 +375,7 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
             {sections.variables ? (
               <div className="system-editor__card-body">
                 {showErrors && validation.errors.varNames ? <div className="field-error">{validation.errors.varNames}</div> : null}
+                <ExpressionLanguageReference />
                 <div className="system-editor__table-head system-editor__table-head--variables" aria-hidden="true"><span>Name</span><span>{draft.type === 'map' ? 'Next-state expression' : 'Derivative'}</span><span>Domain</span><span /></div>
                 <div className="inspector-list system-editor__variable-list">
                   {draft.varNames.map((name, index) => (

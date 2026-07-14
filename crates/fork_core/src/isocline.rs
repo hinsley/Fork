@@ -2,10 +2,8 @@ use crate::equation_engine::{parse, Bytecode, Compiler, EquationSystem, Expr, VM
 use anyhow::{anyhow, bail, Result};
 use marching_cubes::tables::{EDGE_TABLE, TRI_TABLE};
 use serde::{Deserialize, Serialize};
-use std::any::Any;
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IsoclineAxisSpec {
@@ -42,9 +40,7 @@ pub fn compile_scalar_expression(
     let parsed = parse(expression).map_err(|err| anyhow!(err))?;
     validate_expression_symbols(&parsed, var_names, param_names)?;
     let compiler = Compiler::new(var_names, param_names);
-    let compiled = catch_unwind(AssertUnwindSafe(|| compiler.compile(&parsed)))
-        .map_err(|payload| anyhow!(panic_payload_to_string(payload)))?;
-    Ok(compiled)
+    compiler.try_compile(&parsed).map_err(|err| anyhow!(err))
 }
 
 pub fn compute_isocline(
@@ -96,16 +92,6 @@ pub fn compute_isocline(
     }
 }
 
-fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<String>() {
-        return message.clone();
-    }
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        return (*message).to_string();
-    }
-    "Expression compilation failed.".to_string()
-}
-
 fn evaluate_isocline_value(
     system: &EquationSystem,
     scalar_expr: &Bytecode,
@@ -144,15 +130,11 @@ fn validate_expression_symbols_recursive(
             validate_expression_symbols_recursive(right, vars, params)
         }
         Expr::Unary(_, operand) => validate_expression_symbols_recursive(operand, vars, params),
-        Expr::Call(func, arg) => {
-            const KNOWN_FUNCTIONS: &[&str] = &[
-                "sin", "cos", "tan", "exp", "log", "ln", "sinh", "cosh", "tanh", "sec", "csc",
-                "cot", "sech", "csch", "coth",
-            ];
-            if !KNOWN_FUNCTIONS.contains(&func.as_str()) {
-                bail!("Unknown function: {func}");
+        Expr::Call(_, args) => {
+            for arg in args {
+                validate_expression_symbols_recursive(arg, vars, params)?;
             }
-            validate_expression_symbols_recursive(arg, vars, params)
+            Ok(())
         }
     }
 }

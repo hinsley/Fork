@@ -52,7 +52,11 @@ impl WasmEqManifold1DRunner {
         let mut bytecodes = Vec::new();
         for eq_str in equations {
             let expr = parse(&eq_str).map_err(|e| JsValue::from_str(&e))?;
-            bytecodes.push(compiler.compile(&expr));
+            bytecodes.push(
+                compiler
+                    .try_compile(&expr)
+                    .map_err(|e| JsValue::from_str(&e))?,
+            );
         }
         let mut system = EquationSystem::new(bytecodes, params);
         system.set_maps(compiler.param_map, compiler.var_map);

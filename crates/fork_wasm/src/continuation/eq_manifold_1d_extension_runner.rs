@@ -95,7 +95,11 @@ impl WasmEqManifold1DExtensionRunner {
         let mut bytecodes = Vec::new();
         for equation in equations {
             let expression = parse(&equation).map_err(|error| JsValue::from_str(&error))?;
-            bytecodes.push(compiler.compile(&expression));
+            bytecodes.push(
+                compiler
+                    .try_compile(&expression)
+                    .map_err(|error| JsValue::from_str(&error))?,
+            );
         }
         let mut system = EquationSystem::new(bytecodes, params);
         system.set_maps(compiler.param_map, compiler.var_map);

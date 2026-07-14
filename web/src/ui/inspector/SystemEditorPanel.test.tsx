@@ -47,6 +47,18 @@ describe('SystemEditorPanel', () => {
     expect(screen.getByTestId('system-periodic-period-0')).toBeVisible()
   })
 
+  it('documents the expression language and its piecewise autodiff caveat', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+
+    await user.click(screen.getByText('Expression syntax and functions'))
+
+    expect(screen.getByText('atan2(y, x)')).toBeVisible()
+    expect(screen.getByText('log(x, base)')).toBeVisible()
+    expect(screen.getByText('min(x, y, ...)')).toBeVisible()
+    expect(screen.getByText(/not differentiable at jumps, ties, or corners/i)).toBeVisible()
+  })
+
   it('validates and applies a changed configuration', async () => {
     const user = userEvent.setup()
     const { actions } = renderEditor()

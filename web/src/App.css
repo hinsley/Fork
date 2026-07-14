@@ -2630,6 +2630,63 @@
   text-transform: uppercase;
 }
 
+.system-editor__expression-reference {
+  padding: 8px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.system-editor__expression-reference summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 680;
+}
+
+.system-editor__expression-reference-body {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+.system-editor__expression-reference-body p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.system-editor__expression-groups {
+  display: grid;
+  gap: 8px;
+}
+
+.system-editor__expression-groups > div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.4fr) minmax(0, 1.6fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.system-editor__expression-groups > div > span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.system-editor__expression-reference code {
+  padding: 2px 5px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 0.64rem;
+}
+
+.system-editor__expression-reference .field-warning {
+  color: var(--warning);
+}
+
 .system-editor__table-head--variables,
 .system-editor__variable-row {
   grid-template-columns: minmax(70px, 0.5fr) minmax(170px, 1.8fr) minmax(110px, 0.7fr) auto;

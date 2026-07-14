@@ -39,7 +39,9 @@ pub(crate) fn build_system(
     let mut bytecodes = Vec::new();
     for eq_str in equations {
         let expr = parse(&eq_str).map_err(|e| JsValue::from_str(&e))?;
-        let code = compiler.compile(&expr);
+        let code = compiler
+            .try_compile(&expr)
+            .map_err(|e| JsValue::from_str(&e))?;
         bytecodes.push(code);
     }
 
@@ -65,7 +67,9 @@ impl WasmSystem {
         let mut bytecodes = Vec::new();
         for eq_str in equations {
             let expr = parse(&eq_str).map_err(|e| JsValue::from_str(&e))?;
-            let code = compiler.compile(&expr);
+            let code = compiler
+                .try_compile(&expr)
+                .map_err(|e| JsValue::from_str(&e))?;
             bytecodes.push(code);
         }
 
