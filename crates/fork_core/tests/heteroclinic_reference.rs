@@ -3,8 +3,9 @@ use fork_core::continuation::{
     continue_heteroclinic_curve, continue_heteroclinic_shooting_curve,
     decode_heteroclinic_shooting_state, decode_heteroclinic_state, extend_heteroclinic_curve,
     heteroclinic_setup_from_orbit, heteroclinic_shooting_setup_from_collocation, BranchType,
-    ContinuationBranch, ContinuationSettings, HeteroclinicOrbitSeed, HeteroclinicShootingSettings,
-    HomoclinicDiscretization, HomoclinicExtraFlags, HETEROCLINIC_SCHEMA_VERSION,
+    ContinuationBranch, ContinuationSettings, HeteroclinicEventKind, HeteroclinicEventStatus,
+    HeteroclinicOrbitSeed, HeteroclinicShootingSettings, HomoclinicDiscretization,
+    HomoclinicExtraFlags, HETEROCLINIC_SCHEMA_VERSION,
 };
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 
@@ -84,6 +85,13 @@ fn analytic_connection_continues_and_extends_with_single_and_multiple_shooting()
         );
 
         for point in &branch.points[1..] {
+            let event_diagnostics = point
+                .heteroclinic_events
+                .as_ref()
+                .expect("shooting points persist heteroclinic diagnostics");
+            assert_eq!(event_diagnostics.source_unstable_dimension, 1);
+            assert_eq!(event_diagnostics.target_stable_dimension, 1);
+            assert!(point.homoclinic_events.is_none());
             let decoded = decode_heteroclinic_shooting_state(&point.state, &shooting)
                 .expect("decode heteroclinic shooting point");
             assert!((point.param_value - decoded.param2_value).abs() < 3.0e-6);
@@ -116,6 +124,14 @@ fn analytic_connection_continues_and_extends_with_single_and_multiple_shooting()
             discretization,
             HomoclinicDiscretization::Shooting { .. }
         ));
+        assert!(
+            extended
+                .points
+                .last()
+                .and_then(|point| point.heteroclinic_events.as_ref())
+                .is_some(),
+            "extended shooting points retain heteroclinic diagnostics"
+        );
     }
 }
 
@@ -187,6 +203,21 @@ fn analytic_two_saddle_connection_continues_on_mu_equals_nu() {
     assert_eq!(schema.schema_version, HETEROCLINIC_SCHEMA_VERSION);
 
     for point in &branch.points[1..] {
+        let event_diagnostics = point
+            .heteroclinic_events
+            .as_ref()
+            .expect("corrected reference points persist heteroclinic diagnostics");
+        assert_eq!(event_diagnostics.source_eigenvalues.len(), 2);
+        assert_eq!(event_diagnostics.target_eigenvalues.len(), 2);
+        assert_eq!(event_diagnostics.source_unstable_dimension, 1);
+        assert_eq!(event_diagnostics.target_stable_dimension, 1);
+        assert!(point.homoclinic_events.is_none());
+        assert_eq!(
+            event_diagnostics
+                .event(HeteroclinicEventKind::CrossEndpointResonance)
+                .status,
+            HeteroclinicEventStatus::Unsupported
+        );
         let decoded = decode_heteroclinic_state(
             &point.state,
             2,
@@ -212,6 +243,7 @@ fn analytic_two_saddle_connection_continues_on_mu_equals_nu() {
     let encoded = serde_json::to_string(&branch).expect("serialize heteroclinic branch");
     let persisted: ContinuationBranch =
         serde_json::from_str(&encoded).expect("deserialize heteroclinic branch");
+    assert!(persisted.points[1].heteroclinic_events.is_some());
     let original_len = persisted.points.len();
     let extended = extend_heteroclinic_curve(
         &mut system,

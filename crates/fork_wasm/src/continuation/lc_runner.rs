@@ -136,6 +136,7 @@ impl WasmLimitCycleRunner {
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let mut runner = OwnedContinuationRunner::new(

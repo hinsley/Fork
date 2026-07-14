@@ -239,6 +239,7 @@ fn mlfast_reference_on_grid(
         eigenvalues: lpc.eigenvalues,
         cycle_points: None,
         homoclinic_events: None,
+        heteroclinic_events: None,
     };
     let curve = continue_with_problem(
         &mut { problem },
@@ -419,6 +420,7 @@ fn steinmetz_reference_on_grid(
         eigenvalues: ns.eigenvalues,
         cycle_points: None,
         homoclinic_events: None,
+        heteroclinic_events: None,
     };
     let curve = continue_with_problem(
         &mut problem,

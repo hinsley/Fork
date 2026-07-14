@@ -118,6 +118,7 @@ pub fn continue_homoclinic_shooting_curve(
         eigenvalues: Vec::new(),
         cycle_points: Some(setup.guess.nodes.clone()),
         homoclinic_events: None,
+        heteroclinic_events: None,
     };
     let mut problem = HomoclinicShootingProblem::new(system, setup.clone())?;
     let mut branch = continue_with_problem(&mut problem, initial_point, settings, forward)?;

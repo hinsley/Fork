@@ -362,6 +362,7 @@ impl WasmCodim1CurveExtensionRunner {
                     eigenvalues: endpoint.eigenvalues.clone(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 };
 
                 let runner =
@@ -449,6 +450,7 @@ impl WasmCodim1CurveExtensionRunner {
                     eigenvalues: endpoint.eigenvalues.clone(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 };
 
                 let runner =
@@ -546,6 +548,7 @@ impl WasmCodim1CurveExtensionRunner {
                     eigenvalues: endpoint.eigenvalues.clone(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 };
 
                 let runner =
@@ -642,6 +645,7 @@ impl WasmCodim1CurveExtensionRunner {
                     eigenvalues: endpoint.eigenvalues.clone(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 };
 
                 let runner =
@@ -737,6 +741,7 @@ impl WasmCodim1CurveExtensionRunner {
                     eigenvalues: endpoint.eigenvalues.clone(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 };
 
                 let runner =
@@ -837,6 +842,7 @@ impl WasmCodim1CurveExtensionRunner {
                     eigenvalues: endpoint.eigenvalues.clone(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 };
 
                 let runner =
@@ -1869,6 +1875,7 @@ mod tests {
                 eigenvalues: Vec::new(),
                 cycle_points: None,
                 homoclinic_events: None,
+                heteroclinic_events: None,
             },
             ContinuationPoint {
                 state: vec![0.0],
@@ -1877,6 +1884,7 @@ mod tests {
                 eigenvalues: Vec::new(),
                 cycle_points: None,
                 homoclinic_events: None,
+                heteroclinic_events: None,
             },
         ];
 
@@ -1939,6 +1947,7 @@ mod tests {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let converted = convert_extension_point(
@@ -1970,6 +1979,7 @@ mod tests {
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
         let metadata = Codim2PointData {
             bifurcation_type: Codim2BifurcationType::Cusp,
@@ -2140,6 +2150,7 @@ mod tests {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let err = convert_extension_point(

@@ -1,3 +1,7 @@
+use super::heteroclinic_events::{
+    build_heteroclinic_orbit_flip_data, compute_heteroclinic_event_diagnostics,
+    HeteroclinicEventDiagnostics, DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+};
 use super::homoclinic::{
     open_profile_palc_weights, transfer_homoclinic_aug, transfer_homoclinic_state,
 };
@@ -412,6 +416,7 @@ pub fn continue_heteroclinic_curve(
         eigenvalues: Vec::new(),
         cycle_points: None,
         homoclinic_events: None,
+        heteroclinic_events: None,
     };
     let mut problem = HeteroclinicProblem::new(system, setup)?;
     let mut branch = continue_with_problem(&mut problem, initial_point, settings, forward)?;
@@ -1156,6 +1161,54 @@ impl ContinuationProblem for HeteroclinicProblem<'_> {
             eigenvalues: Vec::new(),
             cycle_points: Some(decoded.mesh_states),
         })
+    }
+
+    fn heteroclinic_event_diagnostics(
+        &mut self,
+        aug_state: &DVector<f64>,
+    ) -> Result<Option<HeteroclinicEventDiagnostics>> {
+        let decoded = self.decode(aug_state)?;
+        let params = self.current_params(aug_state[0], decoded.param2_value)?;
+        let source_jacobian = self.jacobian_at(&decoded.source_equilibrium, &params)?;
+        let target_jacobian = self.jacobian_at(&decoded.target_equilibrium, &params)?;
+        let source_eigenvalues = source_jacobian
+            .clone()
+            .complex_eigenvalues()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        let target_eigenvalues = target_jacobian
+            .clone()
+            .complex_eigenvalues()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        let source_endpoint = decoded
+            .mesh_states
+            .first()
+            .ok_or_else(|| anyhow!("Heteroclinic collocation mesh is empty"))?;
+        let target_endpoint = decoded
+            .mesh_states
+            .last()
+            .ok_or_else(|| anyhow!("Heteroclinic collocation mesh is empty"))?;
+        let orbit_flip = build_heteroclinic_orbit_flip_data(
+            &source_jacobian,
+            &source_eigenvalues,
+            vector_sub(source_endpoint, &decoded.source_equilibrium),
+            &target_jacobian,
+            &target_eigenvalues,
+            vector_sub(target_endpoint, &decoded.target_equilibrium),
+        );
+        Ok(Some(compute_heteroclinic_event_diagnostics(
+            &source_eigenvalues,
+            &target_eigenvalues,
+            Some(&orbit_flip),
+            DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+        )))
+    }
+
+    fn detect_heteroclinic_events_from_initial_seed(&self) -> bool {
+        self.setup.initial_seed_is_corrected
     }
 
     fn is_step_acceptable(&mut self, aug_state: &DVector<f64>) -> Result<bool> {

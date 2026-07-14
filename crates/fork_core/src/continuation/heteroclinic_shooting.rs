@@ -10,6 +10,10 @@ use super::heteroclinic::{
     basis_matrix, build_stable_normals, build_unstable_normals, riccati_coeff,
     HeteroclinicChartTransform, HeteroclinicSetupV1, HETEROCLINIC_SCHEMA_VERSION,
 };
+use super::heteroclinic_events::{
+    build_heteroclinic_orbit_flip_data, compute_heteroclinic_event_diagnostics,
+    HeteroclinicEventDiagnostics, DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+};
 use super::homoclinic_init::{
     compute_homoclinic_basis, validate_homoclinic_extras, validate_homoclinic_parameter_plane,
     validate_homoclinic_scalars, HomoclinicBasis, HomoclinicExtraFlags,
@@ -373,6 +377,7 @@ pub fn continue_heteroclinic_shooting_curve(
         eigenvalues: Vec::new(),
         cycle_points: Some(setup.guess.nodes.clone()),
         homoclinic_events: None,
+        heteroclinic_events: None,
     };
     let mut problem = HeteroclinicShootingProblem::new(system, setup)?;
     let mut branch = continue_with_problem(&mut problem, initial_point, settings, forward)?;
@@ -684,6 +689,54 @@ impl ContinuationProblem for HeteroclinicShootingProblem<'_> {
             eigenvalues: Vec::new(),
             cycle_points: Some(decoded.nodes),
         })
+    }
+
+    fn heteroclinic_event_diagnostics(
+        &mut self,
+        augmented: &DVector<f64>,
+    ) -> Result<Option<HeteroclinicEventDiagnostics>> {
+        let decoded = self.decode(augmented)?;
+        let params = self.params(augmented[0], decoded.param2_value)?;
+        let source_jacobian = self.jacobian_at(&decoded.source_equilibrium, &params)?;
+        let target_jacobian = self.jacobian_at(&decoded.target_equilibrium, &params)?;
+        let source_eigenvalues = source_jacobian
+            .clone()
+            .complex_eigenvalues()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        let target_eigenvalues = target_jacobian
+            .clone()
+            .complex_eigenvalues()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        let source_endpoint = decoded
+            .nodes
+            .first()
+            .ok_or_else(|| anyhow!("Heteroclinic shooting nodes are empty"))?;
+        let target_endpoint = decoded
+            .nodes
+            .last()
+            .ok_or_else(|| anyhow!("Heteroclinic shooting nodes are empty"))?;
+        let orbit_flip = build_heteroclinic_orbit_flip_data(
+            &source_jacobian,
+            &source_eigenvalues,
+            vector_sub(source_endpoint, &decoded.source_equilibrium),
+            &target_jacobian,
+            &target_eigenvalues,
+            vector_sub(target_endpoint, &decoded.target_equilibrium),
+        );
+        Ok(Some(compute_heteroclinic_event_diagnostics(
+            &source_eigenvalues,
+            &target_eigenvalues,
+            Some(&orbit_flip),
+            DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+        )))
+    }
+
+    fn detect_heteroclinic_events_from_initial_seed(&self) -> bool {
+        self.setup.initial_seed_is_corrected
     }
 
     fn reparameterize_after_step(
@@ -1123,6 +1176,7 @@ mod tests {
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let error = heteroclinic_shooting_setup_from_point(&point, &branch_type)

@@ -763,6 +763,31 @@ export function formatHomoclinicEventDiagnosticLines(
   return lines;
 }
 
+export function formatHeteroclinicEventDiagnosticLines(
+  point: Pick<ContinuationPoint, 'heteroclinic_events'>
+): string[] {
+  const diagnostics = point.heteroclinic_events;
+  if (!diagnostics) return [];
+  const formatSpectrum = (values: Array<{ re: number; im: number }>) =>
+    values
+      .map(({ re, im }) => `${formatNumberFullPrecision(re)}${im < 0 ? '' : '+'}${formatNumberFullPrecision(im)}i`)
+      .join(', ');
+  const lines = [
+    `source dimensions: stable=${diagnostics.source_stable_dimension}, unstable=${diagnostics.source_unstable_dimension}, discarded eigenvalues=${diagnostics.source_discarded_eigenvalues}`,
+    `target dimensions: stable=${diagnostics.target_stable_dimension}, unstable=${diagnostics.target_unstable_dimension}, discarded eigenvalues=${diagnostics.target_discarded_eigenvalues}`,
+    `source spectrum: ${formatSpectrum(diagnostics.source_eigenvalues)}`,
+    `target spectrum: ${formatSpectrum(diagnostics.target_eigenvalues)}`,
+  ];
+  for (const event of diagnostics.events) {
+    const value =
+      event.value === null ? 'unavailable' : formatNumberFullPrecision(event.value);
+    lines.push(
+      `${event.kind} · ${event.name}: status=${event.status}; value=${value}; reason=${event.reason ?? '—'}`
+    );
+  }
+  return lines;
+}
+
 /**
  * Computes missing eigenvalues for points that lack them.
  * 
@@ -1070,6 +1095,11 @@ export async function showPointDetails(
         `  Mesh: ${branchTypeData.ntst} x ${branchTypeData.ncol}; ` +
           `projector refresh=${branchTypeData.schema.projector_refresh_interval}`
       );
+      const eventLines = formatHeteroclinicEventDiagnosticLines(pt);
+      if (eventLines.length > 0) {
+        console.log(chalk.white('  Connection event test functions:'));
+        eventLines.forEach((line) => console.log(`    ${line}`));
+      }
     }
   }
 

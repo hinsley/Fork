@@ -60,6 +60,7 @@ impl WasmHeteroclinicRunner {
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
         let initial_branch_type = BranchType::HeteroclinicCurve {
             schema: setup.connection_schema(),

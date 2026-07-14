@@ -1243,6 +1243,7 @@ mod tests {
             eigenvalues: hopf_point.eigenvalues.clone(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let curve_settings = ContinuationSettings {

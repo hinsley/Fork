@@ -199,6 +199,7 @@ pub fn continue_parameter(
         eigenvalues: Vec::new(),
         cycle_points: None,
         homoclinic_events: None,
+        heteroclinic_events: None,
     };
 
     continue_with_problem(&mut problem, initial_point, settings, forward)

@@ -981,6 +981,56 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                                 />
                               </div>
                             ) : null}
+                            {selectedBranchPoint.heteroclinic_events ? (
+                              <div data-testid="heteroclinic-event-diagnostics">
+                                <h4 className="inspector-subheading">
+                                  Heteroclinic connection event diagnostics
+                                </h4>
+                                <InspectorMetrics
+                                  rows={[
+                                    {
+                                      label: 'Source Morse dimensions',
+                                      value: `stable ${selectedBranchPoint.heteroclinic_events.source_stable_dimension} · unstable ${selectedBranchPoint.heteroclinic_events.source_unstable_dimension}`,
+                                    },
+                                    {
+                                      label: 'Target Morse dimensions',
+                                      value: `stable ${selectedBranchPoint.heteroclinic_events.target_stable_dimension} · unstable ${selectedBranchPoint.heteroclinic_events.target_unstable_dimension}`,
+                                    },
+                                    {
+                                      label: 'Source spectrum',
+                                      value: selectedBranchPoint.heteroclinic_events.source_eigenvalues
+                                        .map(
+                                          ({ re, im }) =>
+                                            `${formatScientific(re, 4)}${im < 0 ? '' : '+'}${formatScientific(im, 4)}i`
+                                        )
+                                        .join(', '),
+                                    },
+                                    {
+                                      label: 'Target spectrum',
+                                      value: selectedBranchPoint.heteroclinic_events.target_eigenvalues
+                                        .map(
+                                          ({ re, im }) =>
+                                            `${formatScientific(re, 4)}${im < 0 ? '' : '+'}${formatScientific(im, 4)}i`
+                                        )
+                                        .join(', '),
+                                    },
+                                  ]}
+                                />
+                                <InspectorMetrics
+                                  rows={selectedBranchPoint.heteroclinic_events.events.map(
+                                    (event) => ({
+                                      label: `${event.kind} · ${event.name}`,
+                                      value: `${event.status}${
+                                        typeof event.value !== 'number' ||
+                                        !Number.isFinite(event.value)
+                                          ? ' · value unavailable'
+                                          : ` · value ${formatScientific(event.value, 6)}`
+                                      } · reason ${event.reason ?? '—'}`,
+                                    })
+                                  )}
+                                />
+                              </div>
+                            ) : null}
                             {selectedBranchPoint.codim2 ? (
                               <>
                                 <h4 className="inspector-subheading">

@@ -578,6 +578,7 @@ fn chart_safe_projectors_refresh_repeatedly_on_the_non_diagonal_duffing_saddle()
         eigenvalues: Vec::new(),
         cycle_points: None,
         homoclinic_events: None,
+        heteroclinic_events: None,
     };
     let problem = HomoclinicProblem::new(&mut system, setup).expect("refresh problem");
     let mut runner = ContinuationRunner::new(
@@ -644,6 +645,7 @@ fn shooting_projectors_refresh_repeatedly_on_the_non_diagonal_duffing_saddle() {
         eigenvalues: Vec::new(),
         cycle_points: Some(setup.guess.nodes.clone()),
         homoclinic_events: None,
+        heteroclinic_events: None,
     };
     let problem = HomoclinicShootingProblem::new(&mut system, setup).expect("shooting problem");
     let mut runner = ContinuationRunner::new(

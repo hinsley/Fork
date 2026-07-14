@@ -312,6 +312,64 @@ async function run() {
     assert.deepEqual(serialized.points[0].homoclinic_events, point.homoclinic_events);
   });
 
+  test('CLI heteroclinic diagnostics keep endpoint spectra separate and report unsupported channels', () => {
+    const point = {
+      heteroclinic_events: {
+        source_stable_dimension: 1,
+        source_unstable_dimension: 3,
+        target_stable_dimension: 3,
+        target_unstable_dimension: 1,
+        source_discarded_eigenvalues: 0,
+        target_discarded_eigenvalues: 1,
+        source_eigenvalues: [{ re: 1, im: 0 }],
+        target_eigenvalues: [{ re: -2, im: 0 }],
+        events: [
+          {
+            kind: 'SLC',
+            name: 'Source leading-spectrum collision',
+            value: -0.25,
+            status: 'available',
+            reason: null,
+          },
+          {
+            kind: 'XRS',
+            name: 'Cross-endpoint resonance',
+            value: null,
+            status: 'unsupported',
+            reason: 'a single open connection has no intrinsic cross-endpoint analogue',
+          },
+        ],
+      },
+    } as Pick<import('../src/types').ContinuationPoint, 'heteroclinic_events'>;
+    const lines = inspect.formatHeteroclinicEventDiagnosticLines(point);
+    assert.match(lines[0], /source dimensions: stable=1, unstable=3/);
+    assert.match(lines[1], /target dimensions: stable=3, unstable=1/);
+    assert.match(lines[2], /source spectrum: 1\+0i/);
+    assert.match(lines[4], /SLC.*status=available.*value=-0\.25/);
+    assert.match(lines[5], /XRS.*status=unsupported.*single open connection/);
+
+    const serialized = serialization.serializeBranchDataForWasm({
+      points: [
+        {
+          state: [0],
+          param_value: 0,
+          stability: 'None',
+          eigenvalues: [],
+          ...point,
+        },
+      ],
+      bifurcations: [],
+      indices: [0],
+    });
+    assert.deepEqual(serialized.points[0].heteroclinic_events.source_eigenvalues, [[1, 0]]);
+    assert.deepEqual(serialized.points[0].heteroclinic_events.target_eigenvalues, [[-2, 0]]);
+    const normalized = serialization.normalizeBranchEigenvalues(serialized);
+    assert.deepEqual(
+      normalized.points[0].heteroclinic_events,
+      point.heteroclinic_events
+    );
+  });
+
   test('homoclinic CLI method labels match the documented numbering', () => {
     assert.match(homotopyInit.HOMOTOPY_SADDLE_MENU_TITLE, /^Method 3:/);
     assert.match(homocInit.HOMOCLINIC_FROM_HOMOTOPY_MENU_TITLE, /^Method 4:/);
@@ -781,6 +839,17 @@ async function run() {
       'BT - Bogdanov-Takens'
     );
     assert.equal(labels.formatBifurcationType('None'), 'Unknown');
+  });
+
+  test('labels two-equilibrium events without homoclinic terminology', () => {
+    assert.equal(
+      labels.formatBifurcationType('HeteroclinicSourceLeadingCollision'),
+      'SLC - Source Leading-Spectrum Collision'
+    );
+    assert.equal(
+      labels.formatBifurcationType('HeteroclinicTargetOrbitFlip'),
+      'TOF - Target Orbit Flip'
+    );
   });
 
   test('utils selects branch params', () => {
