@@ -65,7 +65,9 @@ test('switches a generalized-Hopf point to an LPC curve', async ({ page }) => {
   await page.getByTestId('codim2-switch-lpc').click()
 
   await expect(page.getByText(/lpc curve · (?:[2-9]|\d{2,}) points/i)).toBeVisible({
-    timeout: 60_000,
+    // The real-WASM switch takes about 50 seconds in isolation and can cross
+    // 60 seconds when the full Playwright suite runs five solver workers.
+    timeout: 90_000,
   })
   await page.getByTestId('action-branch-summary-toggle').click()
   await expect(page.getByText('Switched from')).toBeVisible()

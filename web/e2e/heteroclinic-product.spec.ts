@@ -155,6 +155,7 @@ test('continues, reloads, and extends a real two-equilibrium heteroclinic curve'
   await expect(inspector.getByText('Multiple shooting', { exact: true })).toBeVisible()
   await expect(inspector.getByText('6', { exact: true })).toBeVisible()
   await page.getByTestId('inspector-workflow-back').click()
+  await expect(page.getByTestId('action-branch-points-toggle')).toBeVisible()
   await harness.openDisclosure('branch-points-toggle')
   await page.getByTestId('branch-point-input').fill('1')
   await page.getByTestId('branch-point-jump').click()

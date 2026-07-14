@@ -224,6 +224,8 @@ independently. Detect endpoint hyperbolicity loss (`SHL`/`THL`), signed real-ver
 mode collisions (`SLC`/`TLC`), and simple-real endpoint orbit flips (`SOF`/`TOF`) using each
 endpoint's own adjoint mode. Localize only finite sign-changing brackets. Report cross-endpoint
 resonance (`XRS`) and source/target inclination flips (`SIF`/`TIF`) as unsupported with a reason.
+Require an endpoint Morse-index change before accepting `SHL` or `THL`, and orient localization by
+that index change so a nearest-mode identity swap cannot masquerade as loss of hyperbolicity.
 Why:
 The separate payload prevents homoclinic labels from leaking into a mathematically different
 problem, while retaining auditable test values, exact localized markers, and both endpoint spectra

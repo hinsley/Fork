@@ -38,7 +38,10 @@ The following are Fork's signed detection functions:
 - `SHL` and `THL` are the real part of the source or target eigenvalue
   nearest the imaginary axis. A zero marks loss of endpoint hyperbolicity and
   therefore the boundary of validity of the active hyperbolic connection
-  formulation.
+  formulation. Fork requires the corresponding endpoint Morse index to change
+  across the bracket, so a mere exchange between the nearest stable and
+  unstable modes cannot create a false marker. Localization uses the minimum
+  absolute real part with the bracket's Morse-index orientation.
 - For `SLC`, let `lambda_r^u` be the weak real source-unstable mode and
   `lambda_c^u` the positive-imaginary representative of the weak complex
   source-unstable pair. Fork uses

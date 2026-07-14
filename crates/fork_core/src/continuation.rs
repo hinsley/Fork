@@ -2203,6 +2203,8 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
     let mut lo_diag = prev_diag.clone();
     let mut hi_diag = new_diag.clone();
     let localization = homoclinic_localization_bracket(prev_diag, new_diag, bif_type);
+    let heteroclinic_localization =
+        heteroclinic_localization_bracket(prev_heteroclinic, new_heteroclinic, bif_type);
     let mut lo_position = 0.0;
     let mut hi_position = 1.0;
     let mut lo_test = homoclinic_aware_bifurcation_test_value(
@@ -2211,6 +2213,7 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
         prev_heteroclinic,
         bif_type,
         localization,
+        heteroclinic_localization,
         lo_position,
     )
     .ok_or_else(|| anyhow!("Previous bifurcation test value is unavailable"))?;
@@ -2220,6 +2223,7 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
         new_heteroclinic,
         bif_type,
         localization,
+        heteroclinic_localization,
         hi_position,
     )
     .ok_or_else(|| anyhow!("Current bifurcation test value is unavailable"))?;
@@ -2289,6 +2293,7 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
             heteroclinic.as_ref(),
             bif_type,
             localization,
+            heteroclinic_localization,
             mid_position,
         )
         .ok_or_else(|| anyhow!("Bifurcation test value became unavailable during refinement"))?;
@@ -3407,6 +3412,43 @@ enum HomoclinicLocalizationBracket {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
+struct HeteroclinicHyperbolicityBracket {
+    source: bool,
+    previous_stable_dimension: usize,
+    previous_unstable_dimension: usize,
+}
+
+impl HeteroclinicHyperbolicityBracket {
+    fn value(self, diagnostics: &HeteroclinicEventDiagnostics) -> Option<f64> {
+        let (spectrum, stable_dimension, unstable_dimension) = if self.source {
+            (
+                &diagnostics.source_eigenvalues,
+                diagnostics.source_stable_dimension,
+                diagnostics.source_unstable_dimension,
+            )
+        } else {
+            (
+                &diagnostics.target_eigenvalues,
+                diagnostics.target_stable_dimension,
+                diagnostics.target_unstable_dimension,
+            )
+        };
+        let magnitude = spectrum
+            .iter()
+            .map(|value| value.re.abs())
+            .filter(|value| value.is_finite())
+            .min_by(|left, right| left.total_cmp(right))?;
+        let remains_on_previous_side = stable_dimension == self.previous_stable_dimension
+            && unstable_dimension == self.previous_unstable_dimension;
+        Some(if remains_on_previous_side {
+            -magnitude
+        } else {
+            magnitude
+        })
+    }
+}
+
 impl HomoclinicLocalizationBracket {
     fn value(self, diagnostics: &PointDiagnostics, position: f64) -> Option<f64> {
         match self {
@@ -3469,16 +3511,45 @@ fn homoclinic_localization_bracket(
     }
 }
 
+fn heteroclinic_localization_bracket(
+    previous: Option<&HeteroclinicEventDiagnostics>,
+    current: Option<&HeteroclinicEventDiagnostics>,
+    bifurcation: BifurcationType,
+) -> Option<HeteroclinicHyperbolicityBracket> {
+    let (previous, current, source) = match bifurcation {
+        BifurcationType::HeteroclinicSourceHyperbolicityLoss => (previous?, current?, true),
+        BifurcationType::HeteroclinicTargetHyperbolicityLoss => (previous?, current?, false),
+        _ => return None,
+    };
+    heteroclinic_endpoint_morse_index_changed(previous, current, source).then_some(
+        HeteroclinicHyperbolicityBracket {
+            source,
+            previous_stable_dimension: if source {
+                previous.source_stable_dimension
+            } else {
+                previous.target_stable_dimension
+            },
+            previous_unstable_dimension: if source {
+                previous.source_unstable_dimension
+            } else {
+                previous.target_unstable_dimension
+            },
+        },
+    )
+}
+
 fn homoclinic_aware_bifurcation_test_value(
     diagnostics: &PointDiagnostics,
     homoclinic: Option<&HomoclinicEventDiagnostics>,
     heteroclinic: Option<&HeteroclinicEventDiagnostics>,
     bifurcation: BifurcationType,
     localization: Option<HomoclinicLocalizationBracket>,
+    heteroclinic_localization: Option<HeteroclinicHyperbolicityBracket>,
     position: f64,
 ) -> Option<f64> {
     localization
         .and_then(|bracket| bracket.value(diagnostics, position))
+        .or_else(|| heteroclinic_localization.and_then(|bracket| bracket.value(heteroclinic?)))
         .or_else(|| bifurcation_test_value(diagnostics, homoclinic, heteroclinic, bifurcation))
 }
 
@@ -3685,11 +3756,72 @@ fn heteroclinic_event_crossing(
     ]
     .into_iter()
     .find_map(|kind| {
+        if matches!(
+            kind,
+            HeteroclinicEventKind::SourceHyperbolicityLoss
+                | HeteroclinicEventKind::TargetHyperbolicityLoss
+        ) {
+            let source = kind == HeteroclinicEventKind::SourceHyperbolicityLoss;
+            if !heteroclinic_endpoint_morse_index_changed(previous, current, source) {
+                return None;
+            }
+        }
         let bifurcation = map_heteroclinic_event_to_bifurcation(kind)?;
         let previous = available_heteroclinic_event_value(previous, kind)?;
         let current = available_heteroclinic_event_value(current, kind)?;
         scalar_test_crossed_or_reached(previous, current).then_some(bifurcation)
     })
+}
+
+fn heteroclinic_endpoint_morse_index_changed(
+    previous: &HeteroclinicEventDiagnostics,
+    current: &HeteroclinicEventDiagnostics,
+    source: bool,
+) -> bool {
+    let (previous_spectrum, current_spectrum, previous_discarded, current_discarded) = if source {
+        (
+            &previous.source_eigenvalues,
+            &current.source_eigenvalues,
+            previous.source_discarded_eigenvalues,
+            current.source_discarded_eigenvalues,
+        )
+    } else {
+        (
+            &previous.target_eigenvalues,
+            &current.target_eigenvalues,
+            previous.target_discarded_eigenvalues,
+            current.target_discarded_eigenvalues,
+        )
+    };
+    if previous_spectrum.is_empty()
+        || previous_spectrum.len() != current_spectrum.len()
+        || previous_discarded != current_discarded
+    {
+        return false;
+    }
+    let previous_dimensions = if source {
+        (
+            previous.source_stable_dimension,
+            previous.source_unstable_dimension,
+        )
+    } else {
+        (
+            previous.target_stable_dimension,
+            previous.target_unstable_dimension,
+        )
+    };
+    let current_dimensions = if source {
+        (
+            current.source_stable_dimension,
+            current.source_unstable_dimension,
+        )
+    } else {
+        (
+            current.target_stable_dimension,
+            current.target_unstable_dimension,
+        )
+    };
+    previous_dimensions != current_dimensions
 }
 
 fn homoclinic_event_crossing(
@@ -4752,6 +4884,130 @@ mod tests {
                 heteroclinic_events::DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
             )))
         }
+    }
+
+    struct SyntheticHeteroclinicHyperbolicityProblem;
+
+    impl ContinuationProblem for SyntheticHeteroclinicHyperbolicityProblem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            out[0] = aug_state[1] - aug_state[0];
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            Ok(DMatrix::from_row_slice(1, 2, &[-1.0, 1.0]))
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            })
+        }
+
+        fn heteroclinic_event_diagnostics(
+            &mut self,
+            aug_state: &DVector<f64>,
+        ) -> Result<Option<HeteroclinicEventDiagnostics>> {
+            Ok(Some(compute_heteroclinic_event_diagnostics(
+                &[Complex::new(aug_state[0], 0.0), Complex::new(2.0, 0.0)],
+                &[Complex::new(-1.0, 0.0), Complex::new(1.0, 0.0)],
+                None,
+                heteroclinic_events::DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+            )))
+        }
+    }
+
+    #[test]
+    fn heteroclinic_hyperbolicity_guard_rejects_a_nearest_side_swap() {
+        let previous = compute_heteroclinic_event_diagnostics(
+            &[Complex::new(-0.1, 0.0), Complex::new(2.0, 0.0)],
+            &[Complex::new(-1.0, 0.0), Complex::new(1.0, 0.0)],
+            None,
+            heteroclinic_events::DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+        );
+        let current = compute_heteroclinic_event_diagnostics(
+            &[Complex::new(-2.0, 0.0), Complex::new(0.1, 0.0)],
+            &[Complex::new(-1.0, 0.0), Complex::new(1.0, 0.0)],
+            None,
+            heteroclinic_events::DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+        );
+        assert!(scalar_test_crossed_or_reached(
+            previous
+                .event(HeteroclinicEventKind::SourceHyperbolicityLoss)
+                .value
+                .expect("previous SHL"),
+            current
+                .event(HeteroclinicEventKind::SourceHyperbolicityLoss)
+                .value
+                .expect("current SHL"),
+        ));
+        assert_eq!(
+            (
+                previous.source_stable_dimension,
+                previous.source_unstable_dimension
+            ),
+            (
+                current.source_stable_dimension,
+                current.source_unstable_dimension
+            )
+        );
+        assert_eq!(
+            heteroclinic_event_crossing(Some(&previous), Some(&current)),
+            None
+        );
+    }
+
+    #[test]
+    fn localizes_a_morse_index_changing_source_hyperbolicity_loss() {
+        let initial = ContinuationPoint {
+            state: vec![-0.1],
+            param_value: -0.1,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+            homoclinic_events: None,
+            heteroclinic_events: None,
+        };
+        let branch = continue_with_problem(
+            &mut SyntheticHeteroclinicHyperbolicityProblem,
+            initial,
+            ContinuationSettings {
+                step_size: 0.4,
+                min_step_size: 0.4,
+                max_step_size: 0.4,
+                max_steps: 1,
+                corrector_steps: 8,
+                corrector_tolerance: 1.0e-11,
+                step_tolerance: 1.0e-11,
+            },
+            true,
+        )
+        .expect("synthetic heteroclinic hyperbolicity continuation");
+
+        assert_eq!(branch.bifurcations, vec![1]);
+        let event = &branch.points[1];
+        assert_eq!(
+            event.stability,
+            BifurcationType::HeteroclinicSourceHyperbolicityLoss
+        );
+        assert!(event.param_value.abs() < 1.0e-6);
+        assert!(
+            event
+                .heteroclinic_events
+                .as_ref()
+                .expect("localized SHL diagnostics")
+                .event(HeteroclinicEventKind::SourceHyperbolicityLoss)
+                .value
+                .expect("localized SHL value")
+                .abs()
+                < 1.0e-6
+        );
     }
 
     #[test]

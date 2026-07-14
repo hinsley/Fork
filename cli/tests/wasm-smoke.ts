@@ -1374,6 +1374,10 @@ for (const intervals of [1, 6]) {
     shootingBranch.branch_type.discretization.integration_steps_per_segment,
     96
   );
+  const shootingCorrectedPoint = shootingBranch.points[1];
+  assert.equal(shootingCorrectedPoint.homoclinic_events, undefined);
+  assert.equal(shootingCorrectedPoint.heteroclinic_events?.source_unstable_dimension, 1);
+  assert.equal(shootingCorrectedPoint.heteroclinic_events?.target_stable_dimension, 1);
 }
 
 console.log('PASS real WASM node boundary smoke');

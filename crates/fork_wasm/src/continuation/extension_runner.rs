@@ -1224,6 +1224,7 @@ fn build_heteroclinic_shooting_extension(
             eigenvalues: Vec::new(),
             cycle_points: endpoint.cycle_points,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
         ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings).map_err(
             |error| {
