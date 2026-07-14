@@ -747,6 +747,7 @@ fn refine_segment<P: Codim2CurveProblem>(
         eigenvalues: diagnostics.eigenvalues,
         cycle_points: diagnostics.cycle_points,
         homoclinic_events: None,
+        heteroclinic_events: None,
     };
     let data = Codim2PointData {
         bifurcation_type,
@@ -1353,6 +1354,7 @@ mod tests {
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         }
     }
 
@@ -1364,6 +1366,7 @@ mod tests {
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         }
     }
 
@@ -1558,6 +1561,7 @@ mod tests {
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let events =
@@ -1602,6 +1606,7 @@ mod tests {
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let events =
@@ -1649,6 +1654,7 @@ mod tests {
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let events =

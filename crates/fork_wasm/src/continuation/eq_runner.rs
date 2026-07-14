@@ -76,6 +76,7 @@ impl WasmEquilibriumRunner {
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let problem = OwnedEquilibriumContinuationProblem::new_with_periodicity(

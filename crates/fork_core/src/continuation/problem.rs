@@ -3,6 +3,7 @@ use nalgebra::{DMatrix, DVector};
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 
+use super::heteroclinic_events::HeteroclinicEventDiagnostics;
 use super::homoclinic_events::HomoclinicEventDiagnostics;
 use super::types::ContinuationPoint;
 use super::{BifurcationType, BranchType};
@@ -120,7 +121,13 @@ impl TestFunctionValues {
             | BifurcationType::HomoclinicShilnikovHopf
             | BifurcationType::HomoclinicBogdanovTakens
             | BifurcationType::HomoclinicOrbitFlipUnstable
-            | BifurcationType::HomoclinicOrbitFlipStable => 0.0,
+            | BifurcationType::HomoclinicOrbitFlipStable
+            | BifurcationType::HeteroclinicSourceHyperbolicityLoss
+            | BifurcationType::HeteroclinicTargetHyperbolicityLoss
+            | BifurcationType::HeteroclinicSourceLeadingCollision
+            | BifurcationType::HeteroclinicTargetLeadingCollision
+            | BifurcationType::HeteroclinicSourceOrbitFlip
+            | BifurcationType::HeteroclinicTargetOrbitFlip => 0.0,
         }
     }
 
@@ -182,6 +189,21 @@ pub trait ContinuationProblem {
     /// functions discontinuously even though no event lies on the corrected
     /// branch.
     fn detect_homoclinic_events_from_initial_seed(&self) -> bool {
+        true
+    }
+
+    /// Return two-equilibrium connection event tests when this problem owns
+    /// independent source and target equilibria.
+    fn heteroclinic_event_diagnostics(
+        &mut self,
+        _aug_state: &DVector<f64>,
+    ) -> Result<Option<HeteroclinicEventDiagnostics>> {
+        Ok(None)
+    }
+
+    /// Whether an approximate initial connection is already corrected enough
+    /// to participate in the first event bracket.
+    fn detect_heteroclinic_events_from_initial_seed(&self) -> bool {
         true
     }
 

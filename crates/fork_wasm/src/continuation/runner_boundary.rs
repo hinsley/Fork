@@ -229,6 +229,7 @@ mod tests {
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
         let runner = ContinuationRunner::new(problem, initial_point, settings(max_steps), true)
             .expect("runner");

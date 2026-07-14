@@ -6,6 +6,7 @@
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 
+use super::heteroclinic_events::HeteroclinicEventDiagnostics;
 use super::homoclinic_events::HomoclinicEventDiagnostics;
 use super::periodic::{CollocationAdaptationReport, CollocationAdaptivitySettings};
 
@@ -620,6 +621,18 @@ pub enum BifurcationType {
     HomoclinicOrbitFlipUnstable,
     /// Orbit flip with respect to the stable manifold (`OFS`).
     HomoclinicOrbitFlipStable,
+    /// Source equilibrium loses hyperbolicity (`SHL`).
+    HeteroclinicSourceHyperbolicityLoss,
+    /// Target equilibrium loses hyperbolicity (`THL`).
+    HeteroclinicTargetHyperbolicityLoss,
+    /// Real/complex leading source-unstable modes exchange dominance (`SLC`).
+    HeteroclinicSourceLeadingCollision,
+    /// Real/complex leading target-stable modes exchange dominance (`TLC`).
+    HeteroclinicTargetLeadingCollision,
+    /// The connection loses its weak real source-unstable component (`SOF`).
+    HeteroclinicSourceOrbitFlip,
+    /// The connection loses its weak real target-stable component (`TOF`).
+    HeteroclinicTargetOrbitFlip,
 }
 
 /// A single point on a continuation branch.
@@ -636,6 +649,10 @@ pub struct ContinuationPoint {
     /// serialized state. Non-homoclinic points omit the payload.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub homoclinic_events: Option<HomoclinicEventDiagnostics>,
+    /// Two-equilibrium event tests evaluated from independent source and
+    /// target spectra. Non-heteroclinic points omit the payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heteroclinic_events: Option<HeteroclinicEventDiagnostics>,
 }
 
 /// Type of continuation branch.

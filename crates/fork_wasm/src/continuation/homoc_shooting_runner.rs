@@ -58,6 +58,7 @@ impl WasmHomoclinicShootingRunner {
             eigenvalues: Vec::new(),
             cycle_points: Some(setup.guess.nodes.clone()),
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
         let mut runner = OwnedContinuationRunner::new(
             system,

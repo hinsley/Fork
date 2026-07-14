@@ -7,7 +7,7 @@ const branchName = 'heteroc_source_to_target'
 test('continues, reloads, and extends a real two-equilibrium heteroclinic curve', async ({
   page,
 }) => {
-  test.setTimeout(150_000)
+  test.setTimeout(240_000)
   const harness = createHarness(page)
 
   // Real browser persistence is required for the reload-and-extension leg.
@@ -93,6 +93,18 @@ test('continues, reloads, and extends a real two-equilibrium heteroclinic curve'
   await expect(inspector.getByText('TargetEq', { exact: true })).toBeVisible()
   await expect(inspector.getByText('v1', { exact: true })).toBeVisible()
   await expect(inspector.getByText('20 x 3', { exact: true })).toBeVisible()
+  await page.getByTestId('inspector-workflow-back').click()
+  await expect(page.getByTestId('action-branch-points-toggle')).toBeVisible()
+  await harness.openDisclosure('branch-points-toggle')
+  await page.getByTestId('branch-point-input').fill('1')
+  await page.getByTestId('branch-point-jump').click()
+  await page.getByTestId('branch-point-details-toggle').click()
+  const eventDiagnostics = page.getByTestId('heteroclinic-event-diagnostics')
+  await expect(eventDiagnostics).toContainText('Source spectrum')
+  await expect(eventDiagnostics).toContainText('Target spectrum')
+  await expect(eventDiagnostics).toContainText('XRS · Cross-endpoint resonance')
+  await expect(eventDiagnostics).toContainText('unsupported · value unavailable')
+  await expect(page.getByTestId('homoclinic-event-diagnostics')).toHaveCount(0)
 
   await page.reload()
   await harness.openSystem(systemName)

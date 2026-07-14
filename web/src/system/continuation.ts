@@ -4,6 +4,7 @@ import type {
   ContinuationEigenvalue,
   ContinuationObject,
   ContinuationPoint,
+  HeteroclinicEventDiagnostics,
   System,
 } from './types'
 import { isValidParameterSet } from './parameters'
@@ -13,16 +14,40 @@ type EigenvalueWire = [number, number]
 
 type EigenvalueInput = ContinuationEigenvalue | EigenvalueWire | { re?: number; im?: number }
 
-type ContinuationPointInput = Omit<ContinuationPoint, 'eigenvalues'> & {
+type HeteroclinicEventDiagnosticsInput = Omit<
+  HeteroclinicEventDiagnostics,
+  'source_eigenvalues' | 'target_eigenvalues'
+> & {
+  source_eigenvalues: EigenvalueInput[]
+  target_eigenvalues: EigenvalueInput[]
+}
+
+type ContinuationPointInput = Omit<
+  ContinuationPoint,
+  'eigenvalues' | 'heteroclinic_events'
+> & {
   eigenvalues?: EigenvalueInput[]
+  heteroclinic_events?: HeteroclinicEventDiagnosticsInput
 }
 
 type ContinuationBranchDataInput = Omit<ContinuationBranchData, 'points'> & {
   points: ContinuationPointInput[]
 }
 
-type ContinuationPointWire = Omit<ContinuationPoint, 'eigenvalues'> & {
+type HeteroclinicEventDiagnosticsWire = Omit<
+  HeteroclinicEventDiagnostics,
+  'source_eigenvalues' | 'target_eigenvalues'
+> & {
+  source_eigenvalues: EigenvalueWire[]
+  target_eigenvalues: EigenvalueWire[]
+}
+
+type ContinuationPointWire = Omit<
+  ContinuationPoint,
+  'eigenvalues' | 'heteroclinic_events'
+> & {
   eigenvalues: EigenvalueWire[]
+  heteroclinic_events?: HeteroclinicEventDiagnosticsWire
 }
 
 export type ContinuationBranchDataWire = Omit<ContinuationBranchData, 'points'> & {
@@ -420,6 +445,17 @@ export function normalizeBranchEigenvalues(
         ...point,
         param2_value,
         eigenvalues: normalizeEigenvalueArray(point.eigenvalues),
+        heteroclinic_events: point.heteroclinic_events
+          ? {
+              ...point.heteroclinic_events,
+              source_eigenvalues: normalizeEigenvalueArray(
+                point.heteroclinic_events.source_eigenvalues
+              ),
+              target_eigenvalues: normalizeEigenvalueArray(
+                point.heteroclinic_events.target_eigenvalues
+              ),
+            }
+          : undefined,
       }
     }),
   }
@@ -581,6 +617,17 @@ export function serializeBranchDataForWasm(
   const points = data.points.map((point) => ({
     ...point,
     eigenvalues: serializeEigenvalueArray(point.eigenvalues),
+    heteroclinic_events: point.heteroclinic_events
+      ? {
+          ...point.heteroclinic_events,
+          source_eigenvalues: serializeEigenvalueArray(
+            point.heteroclinic_events.source_eigenvalues
+          ),
+          target_eigenvalues: serializeEigenvalueArray(
+            point.heteroclinic_events.target_eigenvalues
+          ),
+        }
+      : undefined,
   }))
 
   let branchType = data.branch_type
@@ -870,6 +917,12 @@ const BIFURCATION_TYPE_LABELS: Record<string, string> = {
   HomoclinicBogdanovTakens: 'BT - Bogdanov-Takens',
   HomoclinicOrbitFlipUnstable: 'OFU - Orbit Flip Unstable',
   HomoclinicOrbitFlipStable: 'OFS - Orbit Flip Stable',
+  HeteroclinicSourceHyperbolicityLoss: 'SHL - Source Hyperbolicity Loss',
+  HeteroclinicTargetHyperbolicityLoss: 'THL - Target Hyperbolicity Loss',
+  HeteroclinicSourceLeadingCollision: 'SLC - Source Leading-Spectrum Collision',
+  HeteroclinicTargetLeadingCollision: 'TLC - Target Leading-Spectrum Collision',
+  HeteroclinicSourceOrbitFlip: 'SOF - Source Orbit Flip',
+  HeteroclinicTargetOrbitFlip: 'TOF - Target Orbit Flip',
 }
 
 export function formatBifurcationType(value?: ContinuationPoint['stability']): string {

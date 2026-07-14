@@ -147,6 +147,39 @@ export interface HomoclinicEventDiagnostics {
   discarded_eigenvalues: number;
 }
 
+export type HeteroclinicEventKind =
+  | 'SHL'
+  | 'THL'
+  | 'SLC'
+  | 'TLC'
+  | 'SOF'
+  | 'TOF'
+  | 'XRS'
+  | 'SIF'
+  | 'TIF';
+
+export type HeteroclinicEventStatus = 'available' | 'unavailable' | 'unsupported';
+
+export interface HeteroclinicEventValue {
+  kind: HeteroclinicEventKind;
+  name: string;
+  value: number | null;
+  status: HeteroclinicEventStatus;
+  reason: string | null;
+}
+
+export interface HeteroclinicEventDiagnostics {
+  events: HeteroclinicEventValue[];
+  source_eigenvalues: ContinuationEigenvalue[];
+  target_eigenvalues: ContinuationEigenvalue[];
+  source_stable_dimension: number;
+  source_unstable_dimension: number;
+  target_stable_dimension: number;
+  target_unstable_dimension: number;
+  source_discarded_eigenvalues: number;
+  target_discarded_eigenvalues: number;
+}
+
 export interface ContinuationPoint {
   state: number[];
   param_value: number;
@@ -159,6 +192,7 @@ export interface ContinuationPoint {
   codim2_events?: Codim2PointData[];
   normal_form?: NormalFormProvenance;
   homoclinic_events?: HomoclinicEventDiagnostics;
+  heteroclinic_events?: HeteroclinicEventDiagnostics;
 }
 
 export type ManifoldStability = 'Stable' | 'Unstable';

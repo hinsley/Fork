@@ -518,6 +518,46 @@ describe('continuation helpers', () => {
     )
   })
 
+  it('normalizes and serializes independent heteroclinic endpoint spectra', () => {
+    const wireDiagnostics = {
+      source_stable_dimension: 1,
+      source_unstable_dimension: 3,
+      target_stable_dimension: 3,
+      target_unstable_dimension: 1,
+      source_discarded_eigenvalues: 0,
+      target_discarded_eigenvalues: 0,
+      source_eigenvalues: [[1, 0]],
+      target_eigenvalues: [[-2, 0]],
+      events: [
+        {
+          kind: 'XRS' as const,
+          name: 'Cross-endpoint resonance',
+          value: null,
+          status: 'unsupported' as const,
+          reason: 'a single open connection has no intrinsic analogue',
+        },
+      ],
+    }
+    const normalized = normalizeBranchEigenvalues({
+      points: [{ ...basePoint, heteroclinic_events: wireDiagnostics as never }],
+      bifurcations: [],
+      indices: [0],
+    })
+    expect(normalized.points[0].heteroclinic_events?.source_eigenvalues).toEqual([
+      { re: 1, im: 0 },
+    ])
+    expect(normalized.points[0].heteroclinic_events?.events[0].kind).toBe('XRS')
+
+    const branch: ContinuationObject = {
+      ...baseBranch,
+      branchType: 'heteroclinic_curve',
+      data: normalized,
+    }
+    const serialized = serializeBranchDataForWasm(branch)
+    expect(serialized.points[0].heteroclinic_events?.source_eigenvalues).toEqual([[1, 0]])
+    expect(serialized.points[0].heteroclinic_events?.target_eigenvalues).toEqual([[-2, 0]])
+  })
+
   it('rejects missing limit-cycle branch metadata', () => {
     const branch: ContinuationObject = {
       ...baseBranch,
@@ -641,6 +681,12 @@ describe('continuation helpers', () => {
     )
     expect(formatBifurcationType('HomoclinicOrbitFlipStable')).toBe(
       'OFS - Orbit Flip Stable'
+    )
+    expect(formatBifurcationType('HeteroclinicSourceLeadingCollision')).toBe(
+      'SLC - Source Leading-Spectrum Collision'
+    )
+    expect(formatBifurcationType('HeteroclinicTargetOrbitFlip')).toBe(
+      'TOF - Target Orbit Flip'
     )
     expect(formatBifurcationType('None')).toBe('Unknown')
     expect(formatBifurcationLabel(3, 'Hopf')).toBe('Index 3 - Hopf')

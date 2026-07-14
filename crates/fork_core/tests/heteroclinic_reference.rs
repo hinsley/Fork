@@ -2,7 +2,8 @@ use fork_core::continuation::periodic::CollocationAdaptivitySettings;
 use fork_core::continuation::{
     continue_heteroclinic_curve, decode_heteroclinic_state, extend_heteroclinic_curve,
     heteroclinic_setup_from_orbit, BranchType, ContinuationBranch, ContinuationSettings,
-    HeteroclinicOrbitSeed, HomoclinicExtraFlags, HETEROCLINIC_SCHEMA_VERSION,
+    HeteroclinicEventKind, HeteroclinicEventStatus, HeteroclinicOrbitSeed, HomoclinicExtraFlags,
+    HETEROCLINIC_SCHEMA_VERSION,
 };
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 
@@ -91,6 +92,21 @@ fn analytic_two_saddle_connection_continues_on_mu_equals_nu() {
     assert_eq!(schema.schema_version, HETEROCLINIC_SCHEMA_VERSION);
 
     for point in &branch.points[1..] {
+        let event_diagnostics = point
+            .heteroclinic_events
+            .as_ref()
+            .expect("corrected reference points persist heteroclinic diagnostics");
+        assert_eq!(event_diagnostics.source_eigenvalues.len(), 2);
+        assert_eq!(event_diagnostics.target_eigenvalues.len(), 2);
+        assert_eq!(event_diagnostics.source_unstable_dimension, 1);
+        assert_eq!(event_diagnostics.target_stable_dimension, 1);
+        assert!(point.homoclinic_events.is_none());
+        assert_eq!(
+            event_diagnostics
+                .event(HeteroclinicEventKind::CrossEndpointResonance)
+                .status,
+            HeteroclinicEventStatus::Unsupported
+        );
         let decoded = decode_heteroclinic_state(
             &point.state,
             2,
@@ -116,6 +132,7 @@ fn analytic_two_saddle_connection_continues_on_mu_equals_nu() {
     let encoded = serde_json::to_string(&branch).expect("serialize heteroclinic branch");
     let persisted: ContinuationBranch =
         serde_json::from_str(&encoded).expect("deserialize heteroclinic branch");
+    assert!(persisted.points[1].heteroclinic_events.is_some());
     let original_len = persisted.points.len();
     let extended = extend_heteroclinic_curve(
         &mut system,

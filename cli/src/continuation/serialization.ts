@@ -23,7 +23,14 @@ export function serializeBranchDataForWasm(data: ContinuationBranchData): any {
           return ev as EigenvalueWire;
         }
         return [ev?.re ?? 0, ev?.im ?? 0] as EigenvalueWire;
-      }) ?? []
+      }) ?? [],
+      heteroclinic_events: pt.heteroclinic_events
+        ? {
+            ...pt.heteroclinic_events,
+            source_eigenvalues: pt.heteroclinic_events.source_eigenvalues.map(ev => [ev.re, ev.im]),
+            target_eigenvalues: pt.heteroclinic_events.target_eigenvalues.map(ev => [ev.re, ev.im]),
+          }
+        : undefined,
     })) as any
   };
 }
@@ -56,7 +63,18 @@ export function normalizeBranchEigenvalues(data: ContinuationBranchData): Contin
       param2_value: Number.isFinite(pt.param2_value)
         ? pt.param2_value
         : inferParam2(pt.state),
-      eigenvalues: normalizeEigenvalueArray(pt.eigenvalues as any)
+      eigenvalues: normalizeEigenvalueArray(pt.eigenvalues as any),
+      heteroclinic_events: pt.heteroclinic_events
+        ? {
+            ...pt.heteroclinic_events,
+            source_eigenvalues: normalizeEigenvalueArray(
+              pt.heteroclinic_events.source_eigenvalues as any
+            ),
+            target_eigenvalues: normalizeEigenvalueArray(
+              pt.heteroclinic_events.target_eigenvalues as any
+            ),
+          }
+        : undefined,
     }))
   };
 }

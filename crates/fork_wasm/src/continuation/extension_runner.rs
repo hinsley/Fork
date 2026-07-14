@@ -1112,6 +1112,7 @@ fn build_homoclinic_shooting_extension(
             eigenvalues: endpoint.eigenvalues,
             cycle_points: endpoint.cycle_points,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
         ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
             .map_err(|error| JsValue::from_str(&format!("Continuation init failed: {}", error)))?
@@ -1310,6 +1311,7 @@ impl WasmContinuationExtensionRunner {
                         eigenvalues: endpoint.eigenvalues.clone(),
                         cycle_points: endpoint.cycle_points.clone(),
                         homoclinic_events: None,
+                        heteroclinic_events: None,
                     };
 
                     ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
@@ -1477,6 +1479,7 @@ impl WasmContinuationExtensionRunner {
                         eigenvalues: endpoint.eigenvalues.clone(),
                         cycle_points: endpoint.cycle_points.clone(),
                         homoclinic_events: None,
+                        heteroclinic_events: None,
                     };
 
                     ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
@@ -1590,6 +1593,7 @@ impl WasmContinuationExtensionRunner {
                         eigenvalues: Vec::new(),
                         cycle_points: endpoint.cycle_points.clone(),
                         homoclinic_events: None,
+                        heteroclinic_events: None,
                     };
                     ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
                         .map_err(|error| {
@@ -1938,6 +1942,7 @@ impl WasmContinuationExtensionRunner {
                         eigenvalues: endpoint.eigenvalues.clone(),
                         cycle_points: endpoint.cycle_points.clone(),
                         homoclinic_events: None,
+                        heteroclinic_events: None,
                     };
 
                     ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
@@ -2387,6 +2392,7 @@ mod tests {
                 eigenvalues: Vec::new(),
                 cycle_points: None,
                 homoclinic_events: None,
+                heteroclinic_events: None,
             }],
             bifurcations: Vec::new(),
             indices: vec![0],
@@ -2432,6 +2438,7 @@ mod tests {
                 eigenvalues: Vec::new(),
                 cycle_points: None,
                 homoclinic_events: None,
+                heteroclinic_events: None,
             }],
             bifurcations: Vec::new(),
             indices: Vec::new(),
@@ -2475,6 +2482,7 @@ mod tests {
                     eigenvalues: Vec::new(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![1.1],
@@ -2483,6 +2491,7 @@ mod tests {
                     eigenvalues: Vec::new(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -2527,6 +2536,7 @@ mod tests {
                     eigenvalues: Vec::new(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![1.01],
@@ -2535,6 +2545,7 @@ mod tests {
                     eigenvalues: Vec::new(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -2603,6 +2614,7 @@ mod tests {
                     eigenvalues: Vec::new(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![0.21],
@@ -2611,6 +2623,7 @@ mod tests {
                     eigenvalues: Vec::new(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -2668,6 +2681,7 @@ mod tests {
                     eigenvalues: Vec::new(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![0.1],
@@ -2676,6 +2690,7 @@ mod tests {
                     eigenvalues: Vec::new(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![0.3],
@@ -2684,6 +2699,7 @@ mod tests {
                     eigenvalues: Vec::new(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -2743,6 +2759,7 @@ mod tests {
                 eigenvalues: Vec::new(),
                 cycle_points: None,
                 homoclinic_events: None,
+                heteroclinic_events: None,
             }],
             bifurcations: Vec::new(),
             indices: vec![0],
@@ -2807,6 +2824,7 @@ mod tests {
                     eigenvalues: Vec::new(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![2.0, 20.0, 3.0],
@@ -2815,6 +2833,7 @@ mod tests {
                     eigenvalues: Vec::new(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![30.0, 300.0, 5.0],
@@ -2823,6 +2842,7 @@ mod tests {
                     eigenvalues: Vec::new(),
                     cycle_points: None,
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -3754,6 +3774,7 @@ mod orientation_tests {
                 eigenvalues: Vec::new(),
                 cycle_points: None,
                 homoclinic_events: None,
+                heteroclinic_events: None,
             }],
             bifurcations: Vec::new(),
             indices: vec![3],

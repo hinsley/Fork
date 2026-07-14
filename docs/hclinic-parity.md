@@ -42,7 +42,7 @@ than evidence for strict HBK parity.
 | One-sided spectral events | HBK exposes raw `TLS`, `TLU`, `NCH`, `SH`, and `BT` scalars, but its event handler cannot normally bracket their ordered one-sided formulas | Supported and localized with continuation-aware spectral identities; raw values remain serialized at the corrected marker |
 | Orbit flip | Optional `OFS`/`OFU` tests | Exposed only when the required adjoint data are available |
 | Inclination flip | `IFS`/`IFU` are constant placeholders, not implemented | Explicitly reported as unsupported |
-| Genuine two-saddle heteroclinic | Not implemented | Supported beyond strict parity with adaptive orthogonal collocation, restart, and extension; standard shooting and connection-specific events remain follow-ups |
+| Genuine two-saddle heteroclinic | Not implemented | Supported beyond strict parity with adaptive orthogonal collocation, restart, extension, independent endpoint spectra, localized `SHL`/`THL`/`SLC`/`TLC`/`SOF`/`TOF` channels, and explicit unsupported `XRS`/`SIF`/`TIF` statuses; standard shooting remains a follow-up |
 
 Fork uses the mathematically symmetric three-leading-unstable diagnostic
 `Re(lambda1) - Re(lambda3)`. HBK 0.2.1 literally uses a plus sign for `TLU`,

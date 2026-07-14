@@ -1747,6 +1747,7 @@ impl WasmSystem {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         // Run continuation
@@ -1936,6 +1937,7 @@ impl WasmSystem {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         // Run continuation
@@ -2135,6 +2137,7 @@ impl WasmSystem {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
@@ -2263,6 +2266,7 @@ impl WasmSystem {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
@@ -2409,6 +2413,7 @@ impl WasmSystem {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
@@ -2520,6 +2525,7 @@ impl WasmSystem {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
@@ -2948,6 +2954,7 @@ mod tests {
                 eigenvalues: Vec::new(),
                 cycle_points: None,
                 homoclinic_events: None,
+                heteroclinic_events: None,
             }],
             bifurcations: Vec::new(),
             indices: vec![0],
@@ -3003,6 +3010,7 @@ mod tests {
                 eigenvalues: Vec::new(),
                 cycle_points: None,
                 homoclinic_events: None,
+                heteroclinic_events: None,
             }],
             bifurcations: Vec::new(),
             indices: vec![0],

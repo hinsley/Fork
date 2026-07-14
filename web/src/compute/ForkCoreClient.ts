@@ -9,6 +9,7 @@ import type {
   ManifoldStability,
   EquilibriumSolution,
   EventSeriesMode,
+  HeteroclinicEventDiagnostics,
   SystemConfig,
 } from '../system/types'
 import type {
@@ -334,8 +335,15 @@ export type LimitCycleFloquetModesResult = {
 
 export type ContinuationBranchDataWire = Omit<ContinuationBranchData, 'points'> & {
   points: Array<
-    Omit<ContinuationPoint, 'eigenvalues'> & {
+    Omit<ContinuationPoint, 'eigenvalues' | 'heteroclinic_events'> & {
       eigenvalues: Array<[number, number] | { re?: number; im?: number }>
+      heteroclinic_events?: Omit<
+        HeteroclinicEventDiagnostics,
+        'source_eigenvalues' | 'target_eigenvalues'
+      > & {
+        source_eigenvalues: Array<[number, number] | { re?: number; im?: number }>
+        target_eigenvalues: Array<[number, number] | { re?: number; im?: number }>
+      }
     }
   >
 }

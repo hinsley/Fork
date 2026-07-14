@@ -185,6 +185,36 @@ References:
 
 ---
 
+### 2026-07-14: Keep two-equilibrium event diagnostics endpoint-local
+Context:
+A genuine connection has different source and target equilibria. HBK/HomCont event names such as
+neutral saddle, Shilnikov-Hopf, and Bogdanov-Takens are one-saddle homoclinic classifications and
+cannot be obtained by concatenating eigenvalues from two unrelated endpoint Jacobians. At the same
+time, the connection has useful endpoint-local spectral and geometric degeneracies that should be
+localized and persisted.
+Decision:
+Store a separate `heteroclinic_events` payload. Eigendecompose the source and target Jacobians
+independently. Detect endpoint hyperbolicity loss (`SHL`/`THL`), signed real-versus-complex leading
+mode collisions (`SLC`/`TLC`), and simple-real endpoint orbit flips (`SOF`/`TOF`) using each
+endpoint's own adjoint mode. Localize only finite sign-changing brackets. Report cross-endpoint
+resonance (`XRS`) and source/target inclination flips (`SIF`/`TIF`) as unsupported with a reason.
+Why:
+The separate payload prevents homoclinic labels from leaking into a mathematically different
+problem, while retaining auditable test values, exact localized markers, and both endpoint spectra
+through Rust, WASM, CLI, web, and restart serialization.
+Impact:
+Users can inspect independent endpoint spectra and available/unavailable/unsupported connection
+events. Loss-of-hyperbolicity markers are limiting points where the active hyperbolic formulation
+ceases to apply. Scalar orbit-flip tests are unavailable for a complex leading eigenspace, and
+inclination flips remain a future transported-variational calculation.
+References:
+`crates/fork_core/src/continuation/heteroclinic_events.rs`,
+`docs/heteroclinic-methods.md`,
+[Beyn (1990)](https://doi.org/10.1093/imanum/10.3.379),
+[Homburg and Sandstede (2010)](https://doi.org/10.1016/S1874-575X(10)00316-4)
+
+---
+
 ### 2026-07-14: Match HBK's HomHS formulations and keep true heteroclinics separate
 Context:
 HclinicBifurcationKit 0.2.1 follows a truncated orbit whose two endpoints approach the same

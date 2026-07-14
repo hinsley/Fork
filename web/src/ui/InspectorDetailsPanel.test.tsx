@@ -43,6 +43,7 @@ const continuationSettings = {
 
 const stateSpaceStrideCycleLikeBranchTypes = [
   'homoclinic_curve',
+  'heteroclinic_curve',
   'homotopy_saddle_curve',
   'pd_curve',
   'lpc_curve',
@@ -65,6 +66,41 @@ function makeStateSpaceStrideBranchTypeData(
         free_time: true,
         free_eps0: true,
         free_eps1: true,
+      }
+    case 'heteroclinic_curve':
+      return {
+        type: 'HeteroclinicCurve',
+        schema: {
+          schema_version: 1,
+          base_params: [0.2, 0.1],
+          param1_index: 0,
+          param2_index: 1,
+          source_basis: {
+            stable_q: [1, 0, 0, 1],
+            unstable_q: [1, 0, 0, 1],
+            dim: 2,
+            nneg: 1,
+            npos: 1,
+          },
+          target_basis: {
+            stable_q: [1, 0, 0, 1],
+            unstable_q: [1, 0, 0, 1],
+            dim: 2,
+            nneg: 1,
+            npos: 1,
+          },
+          fixed_time: 5,
+          fixed_eps0: 0.01,
+          fixed_eps1: 0.01,
+          projector_refresh_interval: 5,
+        },
+        ntst: 4,
+        ncol: 2,
+        param1_name: 'mu',
+        param2_name: 'nu',
+        free_time: true,
+        free_eps0: false,
+        free_eps1: false,
       }
     case 'homotopy_saddle_curve':
       return {
@@ -245,6 +281,66 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByTestId('collocation-adaptation-report')).toHaveTextContent(
       'refinement: 4 → 6'
     )
+  })
+
+  it('renders independent endpoint spectra and unsupported heteroclinic channels', async () => {
+    const user = userEvent.setup()
+    const fixture = createStateSpaceStrideBranchFixture('heteroclinic_curve')
+    const sourceBranch = fixture.system.branches[fixture.nodeId]
+    const point = sourceBranch.data.points[0]
+    const system = updateBranch(fixture.system, fixture.nodeId, {
+      ...sourceBranch,
+      data: {
+        ...sourceBranch.data,
+        points: [
+          {
+            ...point,
+            heteroclinic_events: {
+              source_stable_dimension: 1,
+              source_unstable_dimension: 3,
+              target_stable_dimension: 3,
+              target_unstable_dimension: 1,
+              source_discarded_eigenvalues: 0,
+              target_discarded_eigenvalues: 0,
+              source_eigenvalues: [{ re: 1, im: 0 }],
+              target_eigenvalues: [{ re: -2, im: 0 }],
+              events: [
+                {
+                  kind: 'SLC',
+                  name: 'Source leading-spectrum collision',
+                  value: -0.25,
+                  status: 'available',
+                  reason: null,
+                },
+                {
+                  kind: 'XRS',
+                  name: 'Cross-endpoint resonance',
+                  value: null,
+                  status: 'unsupported',
+                  reason: 'a single open connection has no intrinsic analogue',
+                },
+              ],
+            },
+          },
+        ],
+      },
+    })
+
+    renderInspectorForStateSpaceStride(system, fixture.nodeId, vi.fn())
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-bifurcation-0'))
+    await user.click(screen.getByTestId('branch-point-details-toggle'))
+
+    const diagnostics = screen.getByTestId('heteroclinic-event-diagnostics')
+    expect(diagnostics).toHaveTextContent('Source Morse dimensionsstable 1 · unstable 3')
+    expect(diagnostics).toHaveTextContent('Target spectrum-2.0000e+0+0.0000e+0i')
+    expect(diagnostics).toHaveTextContent(
+      'SLC · Source leading-spectrum collisionavailable · value -2.500000e-1'
+    )
+    expect(diagnostics).toHaveTextContent(
+      'XRS · Cross-endpoint resonanceunsupported · value unavailable'
+    )
+    expect(screen.queryByTestId('homoclinic-event-diagnostics')).toBeNull()
   })
 
   it.each([

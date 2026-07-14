@@ -576,6 +576,7 @@ fn build_eq_1d_branch(
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         })
         .collect();
     let geometry = ManifoldGeometry::Curve(ManifoldCurveGeometry {
@@ -1287,6 +1288,7 @@ fn merge_manifold_surface_extension(
                 eigenvalues: Vec::new(),
                 cycle_points: None,
                 homoclinic_events: None,
+                heteroclinic_events: None,
             });
             branch
                 .indices
@@ -6945,6 +6947,7 @@ fn surface_points_to_branch_points(
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         });
     }
     points
@@ -8037,6 +8040,7 @@ fn merge_manifold_curve_extension(
             eigenvalues: Vec::new(),
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         });
         branch
             .indices

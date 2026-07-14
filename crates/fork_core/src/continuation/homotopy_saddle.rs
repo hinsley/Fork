@@ -104,6 +104,7 @@ fn state_to_point(setup: &HomotopySaddleSetup) -> ContinuationPoint {
         eigenvalues: Vec::new(),
         cycle_points: Some(setup.setup.guess.mesh_states.clone()),
         homoclinic_events: None,
+        heteroclinic_events: None,
     }
 }
 

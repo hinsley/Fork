@@ -277,6 +277,7 @@ impl WasmFoldCurveRunner {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let runner = OwnedContinuationRunner::new(
@@ -765,6 +766,7 @@ impl WasmHopfCurveRunner {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let runner = OwnedContinuationRunner::new(
@@ -1007,6 +1009,7 @@ impl WasmLPCCurveRunner {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let runner = OwnedContinuationRunner::new(
@@ -1229,6 +1232,7 @@ impl WasmIsoperiodicCurveRunner {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let runner = OwnedContinuationRunner::new(
@@ -1420,6 +1424,7 @@ impl WasmPDCurveRunner {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let runner = OwnedContinuationRunner::new(
@@ -1639,6 +1644,7 @@ impl WasmNSCurveRunner {
             eigenvalues: vec![],
             cycle_points: None,
             homoclinic_events: None,
+            heteroclinic_events: None,
         };
 
         let runner = OwnedContinuationRunner::new(

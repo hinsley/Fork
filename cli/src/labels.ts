@@ -86,6 +86,12 @@ const BIFURCATION_TYPE_LABELS: Record<string, string> = {
   HomoclinicBogdanovTakens: 'BT - Bogdanov-Takens',
   HomoclinicOrbitFlipUnstable: 'OFU - Orbit Flip Unstable',
   HomoclinicOrbitFlipStable: 'OFS - Orbit Flip Stable',
+  HeteroclinicSourceHyperbolicityLoss: 'SHL - Source Hyperbolicity Loss',
+  HeteroclinicTargetHyperbolicityLoss: 'THL - Target Hyperbolicity Loss',
+  HeteroclinicSourceLeadingCollision: 'SLC - Source Leading-Spectrum Collision',
+  HeteroclinicTargetLeadingCollision: 'TLC - Target Leading-Spectrum Collision',
+  HeteroclinicSourceOrbitFlip: 'SOF - Source Orbit Flip',
+  HeteroclinicTargetOrbitFlip: 'TOF - Target Orbit Flip',
 }
 
 export function formatBifurcationType(value?: string): string {

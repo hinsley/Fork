@@ -114,6 +114,7 @@ fn rotating_map_ns_curve_follows_unit_modulus_locus() {
         eigenvalues: vec![],
         cycle_points: None,
         homoclinic_events: None,
+        heteroclinic_events: None,
     };
     let settings = ContinuationSettings {
         step_size: 0.02,

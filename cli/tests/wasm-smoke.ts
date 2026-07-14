@@ -1323,5 +1323,16 @@ assert.equal(heteroclinicBranch.branch_type.type, 'HeteroclinicCurve');
 assert.equal(heteroclinicBranch.branch_type.schema.schema_version, 1);
 assert.equal(heteroclinicBranch.branch_type.schema.source_basis.npos, 1);
 assert.equal(heteroclinicBranch.branch_type.schema.target_basis.nneg, 1);
+const heteroclinicCorrectedPoint = heteroclinicBranch.points[1];
+assert.equal(heteroclinicCorrectedPoint.homoclinic_events, undefined);
+assert.ok(heteroclinicCorrectedPoint.heteroclinic_events);
+assert.equal(heteroclinicCorrectedPoint.heteroclinic_events.source_eigenvalues.length, 2);
+assert.equal(heteroclinicCorrectedPoint.heteroclinic_events.target_eigenvalues.length, 2);
+assert.equal(
+  heteroclinicCorrectedPoint.heteroclinic_events.events.find(
+    (event: { kind: string }) => event.kind === 'XRS'
+  )?.status,
+  'unsupported'
+);
 
 console.log('PASS real WASM node boundary smoke');

@@ -4525,6 +4525,7 @@ pub fn continue_limit_cycle_collocation_with_report(
         eigenvalues: Vec::new(),
         cycle_points: None,
         homoclinic_events: None,
+        heteroclinic_events: None,
     };
 
     let mut branch = continue_with_problem(&mut problem, point, settings, forward)?;
@@ -5839,6 +5840,7 @@ mod tests {
                 eigenvalues: Vec::new(),
                 cycle_points: Some(vec![vec![-999.0; 2]]),
                 homoclinic_events: None,
+                heteroclinic_events: None,
             }
         };
         let branch = ContinuationBranch {

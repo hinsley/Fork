@@ -45,6 +45,7 @@ pub fn continue_homoclinic_curve(
         eigenvalues: Vec::new(),
         cycle_points: None,
         homoclinic_events: None,
+        heteroclinic_events: None,
     };
 
     let mut problem = HomoclinicProblem::new(system, setup.clone())?;
@@ -2087,6 +2088,7 @@ mod tests {
                     eigenvalues: diagnostics.eigenvalues.clone(),
                     cycle_points: Some(stale_cycle.clone()),
                     homoclinic_events: None,
+                    heteroclinic_events: None,
                 }],
                 bifurcations: Vec::new(),
                 indices: vec![0],
@@ -2097,6 +2099,7 @@ mod tests {
                 manifold_geometry: None,
             };
             let mut events = None;
+            let mut heteroclinic_events = None;
 
             let disposition = super::super::handle_rejected_trial(
                 &mut problem,
@@ -2104,6 +2107,7 @@ mod tests {
                 &mut tangent,
                 &mut diagnostics,
                 &mut events,
+                &mut heteroclinic_events,
                 &mut branch,
                 &rejected,
             )
