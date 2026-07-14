@@ -21,6 +21,47 @@ References:
 
 ---
 
+### 2026-07-14: Detect two-equilibrium inclination flips with transported tangent frames
+Context:
+Endpoint eigenvalues and endpoint displacement projections can detect spectral and orbit-flip
+degeneracies, but they do not determine whether the source or target tangent bundle loses its
+orientation along an open connection. Reusing a one-saddle homoclinic orientation flag would also
+conflate two independent endpoint geometries.
+Decision:
+Transport the source principal tangent frame forward and the target principal tangent frame
+backward along the corrected connection. Align each new frame to its previously accepted frame by a
+full `O(k)` Procrustes transform, independently continuing transported-to-previous-transported and
+reference-to-previous-reference gauges. Never align transported directly to reference. Require each
+current-to-previous overlap to have minimum singular value at least `cos(pi / 9)`, then use the
+signed determinants `det(R_source^T T_source)` and `det(R_target^T T_target)` as `SIF` and `TIF`. Restrict
+automatic construction to a real, simple principal endpoint mode; report complex, repeated,
+malformed, rank-deficient, or high-residual frames as unavailable. Localize only finite,
+orientation-continuous sign brackets. Persist an optional `inclination_transport` diagnostic with
+independent nullable `source` and `target` frames. Each frame stores the ambient and frame
+dimensions, flattened column-major transported and reference matrices, minimum physical overlap
+singular value, and relative transport residual.
+Why:
+Direct tangent transport measures the strong-inclination geometry itself. Independent full-`O(k)`
+gauge continuation removes arbitrary eigensolver basis signs and reflections without forcing the
+physical transported-versus-reference determinant positive, so its sign remains meaningful across
+continuation steps. Optional version-tolerant diagnostics keep older branches readable and make
+numerical eligibility auditable in Rust, WASM, CLI, and web.
+Impact:
+Two-equilibrium branches can carry localized `HeteroclinicSourceInclinationFlip` and
+`HeteroclinicTargetInclinationFlip` markers labeled `SIF` and `TIF`. This is a Fork extension beyond
+HBK 0.2.1 and AUTO97 heteroclinic orientation support, not a strict parity claim. De Witte et al.
+supports the tangent/Riccati numerical approach but is not cited as defining Fork's exact
+endpoint-separated determinant.
+References:
+`crates/fork_core/src/continuation/heteroclinic_events.rs`,
+`docs/heteroclinic-methods.md`,
+[Deng](https://www.math.unl.edu/~bdeng1/Papers/DengTwistedLoop.pdf),
+[Liu, Ruan, and Zhu (2011)](https://www.math.miami.edu/~ruan/MyPapers/LiuRuanZhu-DCDSS2011.pdf),
+[De Witte et al. (2012)](https://doi.org/10.1145/2168773.2168776),
+[AUTO97 manual](https://www.staff.science.uu.nl/~kouzn101/AUTO/auto97man.pdf)
+
+---
+
 ### 2026-07-13: Split published Orbit references from regular CI and project Chenciner conditioning
 Context:
 The MLfast LPC and Steinmetz-Larter NS targets were documented but not executable, while the natural

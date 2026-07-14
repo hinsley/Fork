@@ -85,6 +85,15 @@ describe('continuation helpers', () => {
     )
   })
 
+  it('labels transported heteroclinic inclination flips by endpoint', () => {
+    expect(formatBifurcationType('HeteroclinicSourceInclinationFlip')).toBe(
+      'SIF - Source Inclination Flip'
+    )
+    expect(formatBifurcationType('HeteroclinicTargetInclinationFlip')).toBe(
+      'TIF - Target Inclination Flip'
+    )
+  })
+
   it('normalizes eigenvalue inputs', () => {
     const normalized = normalizeEigenvalueArray([
       [1, -2],
@@ -528,6 +537,24 @@ describe('continuation helpers', () => {
       target_discarded_eigenvalues: 0,
       source_eigenvalues: [[1, 0]],
       target_eigenvalues: [[-2, 0]],
+      inclination_transport: {
+        source: {
+          ambient_dimension: 3,
+          frame_dimension: 1,
+          transported_frame: [1, 0, 0],
+          reference_frame: [0.8, 0.6, 0],
+          minimum_overlap_singular_value: 0.8,
+          relative_transport_residual: 2e-9,
+        },
+        target: {
+          ambient_dimension: 3,
+          frame_dimension: 1,
+          transported_frame: [0, 1, 0],
+          reference_frame: [0, -1, 0],
+          minimum_overlap_singular_value: 1,
+          relative_transport_residual: 3e-9,
+        },
+      },
       events: [
         {
           kind: 'XRS' as const,
@@ -547,6 +574,10 @@ describe('continuation helpers', () => {
       { re: 1, im: 0 },
     ])
     expect(normalized.points[0].heteroclinic_events?.events[0].kind).toBe('XRS')
+    expect(
+      normalized.points[0].heteroclinic_events?.inclination_transport?.source
+        ?.transported_frame
+    ).toEqual([1, 0, 0])
 
     const branch: ContinuationObject = {
       ...baseBranch,
@@ -556,6 +587,9 @@ describe('continuation helpers', () => {
     const serialized = serializeBranchDataForWasm(branch)
     expect(serialized.points[0].heteroclinic_events?.source_eigenvalues).toEqual([[1, 0]])
     expect(serialized.points[0].heteroclinic_events?.target_eigenvalues).toEqual([[-2, 0]])
+    expect(serialized.points[0].heteroclinic_events?.inclination_transport).toEqual(
+      wireDiagnostics.inclination_transport
+    )
   })
 
   it('rejects missing limit-cycle branch metadata', () => {

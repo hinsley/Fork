@@ -42,7 +42,19 @@ than evidence for strict HBK parity.
 | One-sided spectral events | HBK exposes raw `TLS`, `TLU`, `NCH`, `SH`, and `BT` scalars, but its event handler cannot normally bracket their ordered one-sided formulas | Supported and localized with continuation-aware spectral identities; raw values remain serialized at the corrected marker |
 | Orbit flip | Optional `OFS`/`OFU` tests | Exposed only when the required adjoint data are available |
 | Inclination flip | `IFS`/`IFU` are constant placeholders, not implemented | Explicitly reported as unsupported |
-| Genuine two-saddle heteroclinic | Not implemented | Supported beyond strict parity with adaptive orthogonal collocation (default), standard single/multiple shooting, restart, extension, independent endpoint spectra, localized `SHL`/`THL`/`SLC`/`TLC`/`SOF`/`TOF` channels, and explicit unsupported `XRS`/`SIF`/`TIF` statuses |
+| Genuine two-saddle heteroclinic | Not implemented | Supported beyond strict parity with adaptive orthogonal collocation (default), standard single/multiple shooting, restart, extension, independent endpoint spectra, localized `SHL`/`THL`/`SLC`/`TLC`/`SOF`/`TOF` and transported `SIF`/`TIF` channels, with `XRS` explicitly unsupported |
+
+The transported two-saddle `SIF`/`TIF` channels do not change the strict HBK
+inclination-flip row above. They are a separate Fork extension with independent
+source-forward and target-backward tangent frames, plus independent `O(k)`
+Procrustes gauge alignment against the preceding accepted frames, and a
+real-simple principal-mode restriction. The transported and reference frames
+are never aligned directly to one another before evaluating their signed determinant. The
+[AUTO97 manual](https://www.staff.science.uu.nl/~kouzn101/AUTO/auto97man.pdf)
+likewise does not provide heteroclinic orientation support, while
+[De Witte et al. (2012)](https://doi.org/10.1145/2168773.2168776) provides the
+tangent/Riccati numerical precedent rather than Fork's exact two-endpoint
+determinant scalar.
 
 Fork uses the mathematically symmetric three-leading-unstable diagnostic
 `Re(lambda1) - Re(lambda3)`. HBK 0.2.1 literally uses a plus sign for `TLU`,
@@ -83,7 +95,8 @@ Fork's separate heteroclinic acceptance fixture uses
 `(x, y) = (tanh(t), 0)` runs from `(-1, 0)` to `(1, 0)` on `mu = nu`.
 The test certifies independent endpoint equilibria and splittings, the packed
 version-one schema, defect-driven mesh redistribution, serialization, restart,
-extension, and the real Node-WASM, CLI, and web boundaries. See
+extension, transported inclination-frame persistence and diagnostics, and the
+real Node-WASM, CLI, and web boundaries. See
 [`heteroclinic-methods.md`](heteroclinic-methods.md) for the user workflow and
 current limitations.
 

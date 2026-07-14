@@ -5,6 +5,8 @@ import type {
   ContinuationObject,
   ContinuationPoint,
   HeteroclinicEventDiagnostics,
+  HeteroclinicInclinationFrame,
+  HeteroclinicInclinationTransport,
   System,
 } from './types'
 import { isValidParameterSet } from './parameters'
@@ -13,6 +15,27 @@ import { resolveTrivialFloquetModeIndex } from './floquetModes'
 type EigenvalueWire = [number, number]
 
 type EigenvalueInput = ContinuationEigenvalue | EigenvalueWire | { re?: number; im?: number }
+
+function copyInclinationFrame(
+  frame: HeteroclinicInclinationFrame | null | undefined
+): HeteroclinicInclinationFrame | null | undefined {
+  if (!frame) return frame
+  return {
+    ...frame,
+    transported_frame: [...frame.transported_frame],
+    reference_frame: [...frame.reference_frame],
+  }
+}
+
+function copyInclinationTransport(
+  transport: HeteroclinicInclinationTransport | null | undefined
+): HeteroclinicInclinationTransport | null | undefined {
+  if (!transport) return transport
+  const copy = { ...transport }
+  if ('source' in transport) copy.source = copyInclinationFrame(transport.source)
+  if ('target' in transport) copy.target = copyInclinationFrame(transport.target)
+  return copy
+}
 
 type HeteroclinicEventDiagnosticsInput = Omit<
   HeteroclinicEventDiagnostics,
@@ -454,6 +477,9 @@ export function normalizeBranchEigenvalues(
               target_eigenvalues: normalizeEigenvalueArray(
                 point.heteroclinic_events.target_eigenvalues
               ),
+              inclination_transport: copyInclinationTransport(
+                point.heteroclinic_events.inclination_transport
+              ),
             }
           : undefined,
       }
@@ -625,6 +651,9 @@ export function serializeBranchDataForWasm(
           ),
           target_eigenvalues: serializeEigenvalueArray(
             point.heteroclinic_events.target_eigenvalues
+          ),
+          inclination_transport: copyInclinationTransport(
+            point.heteroclinic_events.inclination_transport
           ),
         }
       : undefined,
@@ -923,6 +952,8 @@ const BIFURCATION_TYPE_LABELS: Record<string, string> = {
   HeteroclinicTargetLeadingCollision: 'TLC - Target Leading-Spectrum Collision',
   HeteroclinicSourceOrbitFlip: 'SOF - Source Orbit Flip',
   HeteroclinicTargetOrbitFlip: 'TOF - Target Orbit Flip',
+  HeteroclinicSourceInclinationFlip: 'SIF - Source Inclination Flip',
+  HeteroclinicTargetInclinationFlip: 'TIF - Target Inclination Flip',
 }
 
 export function formatBifurcationType(value?: ContinuationPoint['stability']): string {

@@ -305,6 +305,24 @@ describe('InspectorDetailsPanel', () => {
               target_discarded_eigenvalues: 0,
               source_eigenvalues: [{ re: 1, im: 0 }],
               target_eigenvalues: [{ re: -2, im: 0 }],
+              inclination_transport: {
+                source: {
+                  ambient_dimension: 3,
+                  frame_dimension: 1,
+                  transported_frame: [1, 0, 0],
+                  reference_frame: [0.8, 0.6, 0],
+                  minimum_overlap_singular_value: 0.8,
+                  relative_transport_residual: 2e-9,
+                },
+                target: {
+                  ambient_dimension: 3,
+                  frame_dimension: 1,
+                  transported_frame: [0, 1, 0],
+                  reference_frame: [0, -1, 0],
+                  minimum_overlap_singular_value: 1,
+                  relative_transport_residual: 3e-9,
+                },
+              },
               events: [
                 {
                   kind: 'SLC',
@@ -319,6 +337,20 @@ describe('InspectorDetailsPanel', () => {
                   value: null,
                   status: 'unsupported',
                   reason: 'a single open connection has no intrinsic analogue',
+                },
+                {
+                  kind: 'SIF',
+                  name: 'Source inclination flip',
+                  value: 0.8,
+                  status: 'available',
+                  reason: null,
+                },
+                {
+                  kind: 'TIF',
+                  name: 'Target inclination flip',
+                  value: -1,
+                  status: 'available',
+                  reason: null,
                 },
               ],
             },
@@ -340,6 +372,18 @@ describe('InspectorDetailsPanel', () => {
     )
     expect(diagnostics).toHaveTextContent(
       'XRS · Cross-endpoint resonanceunsupported · value unavailable'
+    )
+    expect(diagnostics).toHaveTextContent(
+      'Source inclination transport3 x 1 frame · minimum physical overlap 8.000000e-1 · relative residual 2.000000e-9'
+    )
+    expect(diagnostics).toHaveTextContent(
+      'Target inclination transport3 x 1 frame · minimum physical overlap 1.000000e+0 · relative residual 3.000000e-9'
+    )
+    expect(diagnostics).toHaveTextContent(
+      'SIF · Source inclination flipavailable · value 8.000000e-1'
+    )
+    expect(diagnostics).toHaveTextContent(
+      'TIF · Target inclination flipavailable · value -1.000000e+0'
     )
     expect(screen.queryByTestId('homoclinic-event-diagnostics')).toBeNull()
   })

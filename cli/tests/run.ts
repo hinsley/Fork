@@ -323,6 +323,24 @@ async function run() {
         target_discarded_eigenvalues: 1,
         source_eigenvalues: [{ re: 1, im: 0 }],
         target_eigenvalues: [{ re: -2, im: 0 }],
+        inclination_transport: {
+          source: {
+            ambient_dimension: 3,
+            frame_dimension: 1,
+            transported_frame: [1, 0, 0],
+            reference_frame: [0.8, 0.6, 0],
+            minimum_overlap_singular_value: 0.8,
+            relative_transport_residual: 2e-9,
+          },
+          target: {
+            ambient_dimension: 3,
+            frame_dimension: 1,
+            transported_frame: [0, 1, 0],
+            reference_frame: [0, -1, 0],
+            minimum_overlap_singular_value: 1,
+            relative_transport_residual: 3e-9,
+          },
+        },
         events: [
           {
             kind: 'SLC',
@@ -338,6 +356,20 @@ async function run() {
             status: 'unsupported',
             reason: 'a single open connection has no intrinsic cross-endpoint analogue',
           },
+          {
+            kind: 'SIF',
+            name: 'Source inclination flip',
+            value: 0.8,
+            status: 'available',
+            reason: null,
+          },
+          {
+            kind: 'TIF',
+            name: 'Target inclination flip',
+            value: -1,
+            status: 'available',
+            reason: null,
+          },
         ],
       },
     } as Pick<import('../src/types').ContinuationPoint, 'heteroclinic_events'>;
@@ -345,8 +377,16 @@ async function run() {
     assert.match(lines[0], /source dimensions: stable=1, unstable=3/);
     assert.match(lines[1], /target dimensions: stable=3, unstable=1/);
     assert.match(lines[2], /source spectrum: 1\+0i/);
-    assert.match(lines[4], /SLC.*status=available.*value=-0\.25/);
-    assert.match(lines[5], /XRS.*status=unsupported.*single open connection/);
+    assert.ok(
+      lines.some(line => /source inclination transport: ambient=3, frame=1.*minimum physical overlap=0\.8.*relative residual=2\.0000000000e-9/.test(line))
+    );
+    assert.ok(
+      lines.some(line => /target inclination transport: ambient=3, frame=1.*minimum physical overlap=1.*relative residual=3\.0000000000e-9/.test(line))
+    );
+    assert.ok(lines.some(line => /SLC.*status=available.*value=-0\.25/.test(line)));
+    assert.ok(lines.some(line => /XRS.*status=unsupported.*single open connection/.test(line)));
+    assert.ok(lines.some(line => /SIF.*status=available.*value=0\.8/.test(line)));
+    assert.ok(lines.some(line => /TIF.*status=available.*value=-1/.test(line)));
 
     const serialized = serialization.serializeBranchDataForWasm({
       points: [
@@ -849,6 +889,14 @@ async function run() {
     assert.equal(
       labels.formatBifurcationType('HeteroclinicTargetOrbitFlip'),
       'TOF - Target Orbit Flip'
+    );
+    assert.equal(
+      labels.formatBifurcationType('HeteroclinicSourceInclinationFlip'),
+      'SIF - Source Inclination Flip'
+    );
+    assert.equal(
+      labels.formatBifurcationType('HeteroclinicTargetInclinationFlip'),
+      'TIF - Target Inclination Flip'
     );
   });
 
