@@ -469,6 +469,8 @@ export async function extendBranch(
     'isoperiodic_curve',
     'pd_curve',
     'ns_curve',
+    'homoclinic_curve',
+    'heteroclinic_curve',
   ].includes(branch.branchType);
   const adaptivityInputs = defaultCollocationAdaptivityInputs();
   const storedAdaptivity = defaults.collocation_adaptivity;
@@ -553,7 +555,9 @@ export async function extendBranch(
     max_step_size: defaults.max_step_size || 0.1,
     max_steps: parseIntOrDefault(maxStepsInput, 300),
     corrector_steps:
-      branch.branchType === 'homoclinic_curve' ? 32 : defaults.corrector_steps || 4,
+      branch.branchType === 'homoclinic_curve' || branch.branchType === 'heteroclinic_curve'
+        ? 32
+        : defaults.corrector_steps || 4,
     corrector_tolerance: defaults.corrector_tolerance || 1e-6,
     step_tolerance: defaults.step_tolerance || 1e-6,
     ...(supportsAdaptiveCollocation

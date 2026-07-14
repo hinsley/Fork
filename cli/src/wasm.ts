@@ -79,9 +79,20 @@ type HomoclinicShootingRunnerConstructor = new (
     forward: boolean
 ) => ContinuationRunner;
 
+type HeteroclinicRunnerConstructor = new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    setup: unknown,
+    settings: unknown,
+    forward: boolean
+) => ContinuationRunner;
+
 type GeneratedForkWasmModule = typeof import("../../crates/fork_wasm/pkg/fork_wasm");
 export type ForkWasmModule = GeneratedForkWasmModule & {
     WasmHomoclinicShootingRunner?: HomoclinicShootingRunnerConstructor;
+    WasmHeteroclinicRunner?: HeteroclinicRunnerConstructor;
 };
 export type GeneratedWasmSystem = InstanceType<GeneratedForkWasmModule["WasmSystem"]>;
 type WasmSystem = GeneratedWasmSystem & {
@@ -105,6 +116,16 @@ type WasmSystem = GeneratedWasmSystem & {
         setup: unknown,
         intervals: number,
         integrationStepsPerSegment: number
+    ) => unknown;
+    init_heteroclinic_from_orbit?: (
+        seed: unknown,
+        parameterName: string,
+        param2Name: string,
+        ntst: number,
+        ncol: number,
+        freeTime: boolean,
+        freeEps0: boolean,
+        freeEps1: boolean
     ) => unknown;
 };
 
@@ -414,6 +435,29 @@ export class WasmBridge {
             );
         }
 
+        return new Runner(
+            this.config.equations,
+            new Float64Array(this.config.params),
+            this.config.paramNames,
+            this.config.varNames,
+            setup,
+            settings,
+            forward
+        );
+    }
+
+    createHeteroclinicContinuationRunner(
+        setup: any,
+        settings: any,
+        forward: boolean
+    ): ContinuationRunner {
+        if (!wasmModule) throw new Error("WASM module not loaded");
+        const Runner = wasmModule.WasmHeteroclinicRunner;
+        if (typeof Runner !== 'function') {
+            throw new Error(
+                "Heteroclinic continuation runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
         return new Runner(
             this.config.equations,
             new Float64Array(this.config.params),
@@ -1164,6 +1208,43 @@ export class WasmBridge {
             param2Name,
             targetNtst,
             targetNcol,
+            freeTime,
+            freeEps0,
+            freeEps1
+        );
+    }
+
+    initHeteroclinicFromOrbit(
+        orbitTimes: number[],
+        orbitStates: number[][],
+        sourceEquilibrium: number[],
+        targetEquilibrium: number[],
+        parameterName: string,
+        param2Name: string,
+        ntst: number,
+        ncol: number,
+        freeTime: boolean,
+        freeEps0: boolean,
+        freeEps1: boolean
+    ): any {
+        const init = this.instance.init_heteroclinic_from_orbit;
+        if (typeof init !== 'function') {
+            throw new Error(
+                "Heteroclinic initialization is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+        return init.call(
+            this.instance,
+            {
+                times: orbitTimes,
+                states: orbitStates,
+                source_equilibrium: sourceEquilibrium,
+                target_equilibrium: targetEquilibrium,
+            },
+            parameterName,
+            param2Name,
+            ntst,
+            ncol,
             freeTime,
             freeEps0,
             freeEps1

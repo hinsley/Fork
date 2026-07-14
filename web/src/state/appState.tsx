@@ -1482,6 +1482,23 @@ export type HomoclinicFromHomotopySaddleRequest = {
   forward: boolean
 }
 
+export type HeteroclinicFromOrbitRequest = {
+  orbitId: string
+  sourceEquilibriumId: string
+  targetEquilibriumId: string
+  name: string
+  parameterName: string
+  param2Name: string
+  ntst: number
+  ncol: number
+  freeTime: boolean
+  freeEps0: boolean
+  freeEps1: boolean
+  projectorRefreshInterval?: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
 export type IsoclineComputeRequest = {
   isoclineId: string
   useLastComputedSettings?: boolean
@@ -1846,6 +1863,7 @@ export type AppActions = {
   createHomoclinicFromHomotopySaddle: (
     request: HomoclinicFromHomotopySaddleRequest
   ) => Promise<void>
+  createHeteroclinicFromOrbit: (request: HeteroclinicFromOrbitRequest) => Promise<void>
   addScene: (name: string, targetId?: string | null) => Promise<void>
   addAnalysisViewport: (name: string, targetId?: string | null) => Promise<void>
   addBifurcationDiagram: (name: string, targetId?: string | null) => Promise<void>
@@ -4687,6 +4705,7 @@ export function AppProvider({
             'equilibrium',
             'limit_cycle',
             'homoclinic_curve',
+            'heteroclinic_curve',
             'fold_curve',
             'hopf_curve',
             'lpc_curve',
@@ -4696,7 +4715,7 @@ export function AppProvider({
           ].includes(sourceBranch.branchType)
         ) {
           throw new Error(
-            `Branch extension is only available for ${equilibriumLabelLower}, limit cycle, homoclinic, or bifurcation curve branches.`
+            `Branch extension is only available for ${equilibriumLabelLower}, limit cycle, homoclinic, heteroclinic, or bifurcation curve branches.`
           )
         }
         if (!sourceBranch.data.points.length) {
@@ -7015,6 +7034,211 @@ export function AppProvider({
     [client, state.system, store]
   )
 
+  const createHeteroclinicFromOrbit = useCallback(
+    async (request: HeteroclinicFromOrbitRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) throw new Error('System settings are invalid.')
+        if (system.type !== 'flow') {
+          throw new Error('Heteroclinic continuation is available for flow systems only.')
+        }
+
+        const orbit = state.system.objects[request.orbitId]
+        const source = state.system.objects[request.sourceEquilibriumId]
+        const target = state.system.objects[request.targetEquilibriumId]
+        if (!orbit || orbit.type !== 'orbit') {
+          throw new Error('Select a valid orbit for heteroclinic continuation.')
+        }
+        if (!source || source.type !== 'equilibrium' || !source.solution) {
+          throw new Error('Select a solved source equilibrium.')
+        }
+        if (!target || target.type !== 'equilibrium' || !target.solution) {
+          throw new Error('Select a solved target equilibrium.')
+        }
+        if (request.sourceEquilibriumId === request.targetEquilibriumId) {
+          throw new Error('Source and target equilibria must be different objects.')
+        }
+        if (orbit.data.length < 2) {
+          throw new Error('The seed orbit must contain at least two samples.')
+        }
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) throw new Error(nameError)
+        if (branchNameExists(state.system, request.orbitId, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+        if (!Number.isInteger(request.ntst) || request.ntst < 2) {
+          throw new Error('NTST must be an integer greater than or equal to 2.')
+        }
+        if (!Number.isInteger(request.ncol) || request.ncol < 1) {
+          throw new Error('NCOL must be a positive integer.')
+        }
+        if (
+          request.projectorRefreshInterval !== undefined &&
+          (!Number.isInteger(request.projectorRefreshInterval) ||
+            request.projectorRefreshInterval < 1)
+        ) {
+          throw new Error('Projector refresh interval must be a positive integer.')
+        }
+
+        const snapshot = buildObjectSubsystemSnapshot(system, orbit, {
+          useStoredSnapshot: true,
+        })
+        const sourceSnapshot = buildObjectSubsystemSnapshot(system, source, {
+          useStoredSnapshot: true,
+        })
+        const targetSnapshot = buildObjectSubsystemSnapshot(system, target, {
+          useStoredSnapshot: true,
+        })
+        if (sourceSnapshot.hash !== snapshot.hash || targetSnapshot.hash !== snapshot.hash) {
+          throw new Error(
+            'Orbit, source equilibrium, and target equilibrium must use the same frozen-variable subsystem.'
+          )
+        }
+
+        const baseParams =
+          orbit.parameters?.length === system.params.length
+            ? [...orbit.parameters]
+            : resolveObjectParams(system, orbit.customParameters)
+        const objectParams = (object: EquilibriumObject) =>
+          object.parameters?.length === system.params.length
+            ? object.parameters
+            : resolveObjectParams(system, object.customParameters)
+        const sameParams = (values: number[]) =>
+          values.length === baseParams.length &&
+          values.every((value, index) => {
+            const expected = baseParams[index] ?? Number.NaN
+            return (
+              Number.isFinite(value) &&
+              Number.isFinite(expected) &&
+              Math.abs(value - expected) <= 1e-10 * (1 + Math.abs(expected))
+            )
+          })
+        if (!sameParams(objectParams(source)) || !sameParams(objectParams(target))) {
+          throw new Error(
+            'Orbit and endpoint equilibria must have the same parameter snapshot. Recompute them at the same parameters.'
+          )
+        }
+
+        const param1Ref = parseContinuationParameter(system, snapshot, request.parameterName)
+        const param2Ref = parseContinuationParameter(system, snapshot, request.param2Name)
+        if (formatParameterRefLabel(param1Ref) === formatParameterRefLabel(param2Ref)) {
+          throw new Error('Second parameter must be different from the continuation parameter.')
+        }
+        const param1Name = resolveRuntimeParameterName(snapshot, param1Ref)
+        const param2Name = resolveRuntimeParameterName(snapshot, param2Ref)
+        const param1DisplayName = resolveDisplayParameterName(param1Ref)
+        const param2DisplayName = resolveDisplayParameterName(param2Ref)
+        const runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        const reducedRows = mapStateRowsToReduced(snapshot, orbit.data)
+
+        const branchData = await client.runHeteroclinicFromOrbit(
+          {
+            system: runConfig,
+            orbitTimes: reducedRows.map((entry) => entry[0]),
+            orbitStates: reducedRows.map((entry) => entry.slice(1)),
+            sourceEquilibrium: projectStateForSnapshot(
+              snapshot,
+              source.solution.state,
+              'Source equilibrium'
+            ),
+            targetEquilibrium: projectStateForSnapshot(
+              snapshot,
+              target.solution.state,
+              'Target equilibrium'
+            ),
+            parameterName: param1Name,
+            param2Name,
+            ntst: request.ntst,
+            ncol: request.ncol,
+            freeTime: request.freeTime,
+            freeEps0: request.freeEps0,
+            freeEps1: request.freeEps1,
+            projectorRefreshInterval: request.projectorRefreshInterval,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Heteroclinic', progress },
+              }),
+          }
+        )
+        if (branchData.points.length <= 1) {
+          throw new Error(
+            'Heteroclinic continuation stopped at the seed point. Try a smaller step size or improve the connecting-orbit seed.'
+          )
+        }
+        if (branchData.branch_type?.type !== 'HeteroclinicCurve') {
+          throw new Error('Heteroclinic continuation returned invalid branch metadata.')
+        }
+
+        const indices =
+          branchData.indices?.length === branchData.points.length
+            ? branchData.indices
+            : branchData.points.map((_, index) => index)
+        const normalized = normalizeBranchEigenvalues(
+          {
+            ...branchData,
+            indices,
+            branch_type: {
+              ...branchData.branch_type,
+              param1_name: param1DisplayName,
+              param2_name: param2DisplayName,
+              param1_ref: param1Ref,
+              param2_ref: param2Ref,
+            },
+          },
+          { stateDimension: snapshot.freeVariableNames.length }
+        )
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: `${param1DisplayName}, ${param2DisplayName}`,
+          parameterRef: param1Ref,
+          parameter2Ref: param2Ref,
+          parentObjectId: request.orbitId,
+          startObjectId: request.orbitId,
+          parentObject: orbit.name,
+          startObject: orbit.name,
+          branchType: 'heteroclinic_curve',
+          data: normalized,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
+          heteroclinicEndpoints: {
+            sourceObjectId: request.sourceEquilibriumId,
+            sourceObjectName: source.name,
+            targetObjectId: request.targetEquilibriumId,
+            targetObjectName: target.name,
+          },
+        }
+        const created = addBranch(state.system, branch, request.orbitId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (error) {
+        dispatch({
+          type: 'SET_ERROR',
+          error: error instanceof Error ? error.message : String(error),
+        })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
   const createCycleFromPD = useCallback(
     async (request: MapCyclePDContinuationRequest) => {
       if (!state.system) return
@@ -8510,6 +8734,7 @@ export function AppProvider({
       createHomoclinicFromHomoclinic,
       createHomotopySaddleFromEquilibrium,
       createHomoclinicFromHomotopySaddle,
+      createHeteroclinicFromOrbit,
       addScene: addSceneAction,
       addAnalysisViewport: addAnalysisViewportAction,
       addBifurcationDiagram: addBifurcationDiagramAction,
@@ -8557,6 +8782,7 @@ export function AppProvider({
       createHomoclinicFromHomoclinic,
       createHomotopySaddleFromEquilibrium,
       createHomoclinicFromHomotopySaddle,
+      createHeteroclinicFromOrbit,
       addBifurcationDiagramAction,
       createSystemAction,
       deleteSystem,

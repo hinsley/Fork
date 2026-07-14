@@ -468,6 +468,42 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                             { label: 'Parent', value: branch.parentObject },
                             { label: 'Start', value: branch.startObject },
                             { label: 'Continuation param', value: branch.parameterName },
+                            ...(branch.branchType === 'heteroclinic_curve'
+                              ? [
+                                  {
+                                    label: 'Source equilibrium',
+                                    value:
+                                      branch.heteroclinicEndpoints?.sourceObjectName ?? 'unknown',
+                                  },
+                                  {
+                                    label: 'Target equilibrium',
+                                    value:
+                                      branch.heteroclinicEndpoints?.targetObjectName ?? 'unknown',
+                                  },
+                                  ...(
+                                    branch.data.branch_type?.type === 'HeteroclinicCurve'
+                                      ? [
+                                          {
+                                            label: 'Schema',
+                                            value: `v${branch.data.branch_type.schema.schema_version}`,
+                                          },
+                                          {
+                                            label: 'Mesh',
+                                            value: `${branch.data.branch_type.ntst} x ${branch.data.branch_type.ncol}`,
+                                          },
+                                          {
+                                            label: 'Source unstable dimension',
+                                            value: branch.data.branch_type.schema.source_basis.npos,
+                                          },
+                                          {
+                                            label: 'Target stable dimension',
+                                            value: branch.data.branch_type.schema.target_basis.nneg,
+                                          },
+                                        ]
+                                      : []
+                                  ),
+                                ]
+                              : []),
                             { label: 'Points', value: branch.data.points.length },
                             { label: 'Bifurcations', value: branchBifurcations.length },
                             ...(branch.data.codim2_seed

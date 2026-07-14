@@ -28,6 +28,9 @@ pub mod lc_codim1_curves;
 #[path = "continuation/homoclinic.rs"]
 pub mod homoclinic;
 
+#[path = "continuation/heteroclinic.rs"]
+pub mod heteroclinic;
+
 #[path = "continuation/homoclinic_events.rs"]
 pub mod homoclinic_events;
 
@@ -61,6 +64,12 @@ pub use codim1_curves::{
     Codim2TestFunctions, EquilibriumCodim2NormalFormDiagnostics, FoldCurveProblem,
     HomoclinicBranchSeed, HopfCurveProblem, HopfHopfNeimarkSackerPredictor, HopfHopfNormalForm,
     RefinedCodim2Event, ZeroHopfNormalForm,
+};
+pub use heteroclinic::{
+    continue_heteroclinic_curve, decode_heteroclinic_state, extend_heteroclinic_curve,
+    heteroclinic_setup_from_orbit, heteroclinic_setup_from_point, pack_heteroclinic_state,
+    DecodedHeteroclinicState, HeteroclinicGuess, HeteroclinicOrbitSeed, HeteroclinicProblem,
+    HeteroclinicSetupV1, HETEROCLINIC_SCHEMA_VERSION,
 };
 pub use homoclinic::continue_homoclinic_curve;
 pub use homoclinic_events::{
@@ -137,11 +146,11 @@ pub use types::{
     Codim2Bifurcation, Codim2BifurcationType, Codim2BranchSwitch, Codim2Certification,
     Codim2Coefficient, Codim2Conditioning, Codim2PointData, ContinuationBranch,
     ContinuationEndpointSeed, ContinuationPoint, ContinuationResumeState, ContinuationSettings,
-    HomoclinicBasisSnapshot, HomoclinicDiscretization, HomoclinicResumeContext, HomotopyStage,
-    Manifold1DSettings, Manifold2DSettings, ManifoldBounds, ManifoldCurveGeometry,
-    ManifoldCurveResumeState, ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind,
-    ManifoldGeometry, ManifoldHkoFiberResumeState, ManifoldMapDomainCursor, ManifoldRingDiagnostic,
-    ManifoldStability, ManifoldSurfaceGeometry, ManifoldSurfaceResumeState,
+    HeteroclinicConnectionSchemaV1, HomoclinicBasisSnapshot, HomoclinicDiscretization,
+    HomoclinicResumeContext, HomotopyStage, Manifold1DSettings, Manifold2DSettings, ManifoldBounds,
+    ManifoldCurveGeometry, ManifoldCurveResumeState, ManifoldCycle2DSettings, ManifoldDirection,
+    ManifoldEigenKind, ManifoldGeometry, ManifoldHkoFiberResumeState, ManifoldMapDomainCursor,
+    ManifoldRingDiagnostic, ManifoldStability, ManifoldSurfaceGeometry, ManifoldSurfaceResumeState,
     ManifoldTerminationCaps, StepResult,
 };
 pub use util::{

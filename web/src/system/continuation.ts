@@ -484,7 +484,11 @@ function resolveHomoclinicPackedOffsets(
   if (!Number.isFinite(stateDimension) || stateDimension < 1) {
     return null
   }
-  if (branchType.type !== 'HomoclinicCurve' && branchType.type !== 'HomotopySaddleCurve') {
+  if (
+    branchType.type !== 'HomoclinicCurve' &&
+    branchType.type !== 'HeteroclinicCurve' &&
+    branchType.type !== 'HomotopySaddleCurve'
+  ) {
     return null
   }
   const ntst = branchType.ntst
@@ -496,7 +500,10 @@ function resolveHomoclinicPackedOffsets(
   const meshLen = (ntst + 1) * dim
   const stageLen = ntst * ncol * dim
   const equilibriumStart = meshLen + stageLen
-  const param2Index = equilibriumStart + dim
+  const param2Index =
+    branchType.type === 'HeteroclinicCurve'
+      ? equilibriumStart + 2 * dim
+      : equilibriumStart + dim
   return { dim, equilibriumStart, param2Index }
 }
 

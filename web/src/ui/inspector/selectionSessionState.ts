@@ -6,6 +6,7 @@ export const WORKFLOW_IDS = [
   'orbit-data-toggle',
   'oseledets-toggle',
   'limit-cycle-toggle',
+  'heteroclinic-from-orbit-toggle',
   'equilibrium-solver-toggle',
   'equilibrium-data-toggle',
   'equilibrium-continuation-toggle',

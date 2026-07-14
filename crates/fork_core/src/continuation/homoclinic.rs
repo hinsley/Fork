@@ -576,7 +576,7 @@ impl<'a> HomoclinicProblem<'a> {
     }
 }
 
-fn open_profile_palc_weights(
+pub(crate) fn open_profile_palc_weights(
     augmented_len: usize,
     normalized_mesh: &[f64],
     ncol: usize,
@@ -679,7 +679,7 @@ fn sample_open_collocation_component(
     interpolate_local_profile(&local_nodes, &local_values, tau)
 }
 
-fn transfer_homoclinic_aug(
+pub(crate) fn transfer_homoclinic_aug(
     aug: &DVector<f64>,
     source_mesh: &[f64],
     destination_mesh: &[f64],
@@ -744,7 +744,7 @@ fn transfer_homoclinic_aug(
     Ok(transferred)
 }
 
-fn transfer_homoclinic_state(
+pub(crate) fn transfer_homoclinic_state(
     state: &[f64],
     source_mesh: &[f64],
     destination_mesh: &[f64],

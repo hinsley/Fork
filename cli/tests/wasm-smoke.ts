@@ -20,6 +20,7 @@ const requiredExports = [
   'WasmCodim1CurveExtensionRunner',
   'WasmFoldCurveRunner',
   'WasmHomoclinicRunner',
+  'WasmHeteroclinicRunner',
   'WasmHomotopySaddleRunner',
   'WasmHopfCurveRunner',
   'WasmLPCCurveRunner',
@@ -1267,5 +1268,60 @@ const duffingMethod4Setup = duffingRestartSystem.init_homoclinic_from_homotopy_s
 );
 const duffingMethod4Branch = runDuffingHomoclinic(duffingMethod4Setup, duffingSourceParams);
 assertDuffingHomoclinicBranch('Method 4', duffingMethod4Setup, duffingMethod4Branch);
+
+const heteroclinicTimes = Array.from({ length: 161 }, (_, index) => -5 + 10 * index / 160);
+const heteroclinicSystem = new wasm.WasmSystem(
+  ['1-x^2', 'x*y+(mu-nu)*(1-x^2)'],
+  new Float64Array([0, 0]),
+  ['mu', 'nu'],
+  ['x', 'y'],
+  'rk4',
+  'flow'
+);
+const heteroclinicSetup = heteroclinicSystem.init_heteroclinic_from_orbit(
+  {
+    times: heteroclinicTimes,
+    states: heteroclinicTimes.map((time) => [Math.tanh(time), 0]),
+    source_equilibrium: [-1, 0],
+    target_equilibrium: [1, 0],
+  },
+  'mu',
+  'nu',
+  20,
+  3,
+  true,
+  false,
+  false
+);
+assert.notDeepEqual(
+  heteroclinicSetup.guess.source_equilibrium,
+  heteroclinicSetup.guess.target_equilibrium
+);
+const heteroclinicRunner = new wasm.WasmHeteroclinicRunner(
+  ['1-x^2', 'x*y+(mu-nu)*(1-x^2)'],
+  new Float64Array([0, 0]),
+  ['mu', 'nu'],
+  ['x', 'y'],
+  heteroclinicSetup,
+  {
+    step_size: 1e-3,
+    min_step_size: 1e-7,
+    max_step_size: 2e-3,
+    max_steps: 2,
+    corrector_steps: 24,
+    corrector_tolerance: 1e-9,
+    step_tolerance: 1e-9,
+    collocation_adaptivity: { enabled: false },
+    projector_refresh_interval: 1,
+  },
+  true
+);
+while (!heteroclinicRunner.get_progress().done) heteroclinicRunner.run_steps(1);
+const heteroclinicBranch = heteroclinicRunner.get_result();
+assert.ok(heteroclinicBranch.points.length > 1);
+assert.equal(heteroclinicBranch.branch_type.type, 'HeteroclinicCurve');
+assert.equal(heteroclinicBranch.branch_type.schema.schema_version, 1);
+assert.equal(heteroclinicBranch.branch_type.schema.source_basis.npos, 1);
+assert.equal(heteroclinicBranch.branch_type.schema.target_basis.nneg, 1);
 
 console.log('PASS real WASM node boundary smoke');

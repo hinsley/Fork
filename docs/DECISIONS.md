@@ -154,6 +154,37 @@ References:
 
 ---
 
+### 2026-07-14: Add a versioned two-equilibrium heteroclinic formulation
+Context:
+HBK 0.2.1's HomHS problem approaches the same saddle at both ends, while a genuine heteroclinic
+connection approaches distinct source and target equilibria. Reusing Fork's one-saddle restart
+metadata would conflate two different defining systems and could silently apply the wrong invariant
+subspace at an endpoint.
+Decision:
+Add a separate `HeteroclinicCurve` and version-one connection schema. Solve both equilibrium
+equations in the augmented system, maintain independent source-unstable and target-stable Riccati
+charts, and impose endpoint projection and radius conditions against their corresponding
+equilibria. Require the codimension-one index condition that the source unstable dimension plus the
+target stable dimension equals the state dimension. Use adaptive nonuniform orthogonal collocation
+as the first numerical representation, with atomic dual-projector refresh and exact mesh/schema
+preservation through restart and extension. Expose creation from an open orbit plus two compatible
+solved equilibria in the CLI and web UI.
+Why:
+Separate schemas make the endpoint ownership explicit and prevent homoclinic decoders from
+accepting heteroclinic state. Collocation reuses Fork's established defect-control machinery while
+providing a deterministic first end-to-end milestone.
+Impact:
+Fork can continue, serialize, restart, extend, inspect, and plot genuine two-equilibrium
+heteroclinic curves through core, WASM, CLI, and web. The exact `tanh` connection on `mu = nu`
+certifies the formulation. Standard single/multiple shooting and heteroclinic-specific spectral
+event and special-point theory remain separate follow-ups; homoclinic event labels are not reused.
+References:
+`crates/fork_core/src/continuation/heteroclinic.rs`,
+`crates/fork_wasm/src/continuation/heteroclinic_runner.rs`,
+`docs/heteroclinic-methods.md`
+
+---
+
 ### 2026-07-14: Match HBK's HomHS formulations and keep true heteroclinics separate
 Context:
 HclinicBifurcationKit 0.2.1 follows a truncated orbit whose two endpoints approach the same
@@ -180,8 +211,9 @@ two-equilibrium connection.
 Impact:
 Core, WASM, CLI, and web support long-cycle and Bogdanov-Takens HomHS continuation with collocation
 or shooting, adaptive collocation restarts/extensions, localized signed-bracket special points,
-raw one-sided HBK diagnostics, and exact discretization metadata. A two-saddle heteroclinic schema
-remains an explicit beyond-parity task. Continuation-aware eigenvalue tracking and touching-root
+raw one-sided HBK diagnostics, and exact discretization metadata. The separate two-saddle
+heteroclinic schema is implemented by the decision above and remains outside the HBK parity claim.
+Continuation-aware eigenvalue tracking and touching-root
 localization are required before `TLS`, `TLU`, `NCH`, `SH`, or `BT` can be promoted from diagnostics
 to robust automatic markers. The tracked-spectral-identity decision above implements and supersedes
 this original limitation.

@@ -84,12 +84,14 @@ Map cycles are represented as fixed points of an iterated map, <code>F<sup>k</su
 | --- | --- | --- |
 | Homoclinic to a saddle equilibrium | **Available; HBK 0.2.1 numerical parity** | Projection boundary conditions, chart-safe Riccati coordinates, adaptive nonuniform orthogonal collocation, and standard single/multiple shooting are available from long cycles and Bogdanov-Takens points. Restarts and extensions preserve the discretization, mesh, invariant-subspace chart, and fixed scalar context. A Duffing reference certifies collocation and shooting through core, Node WASM, CLI, and web workflows. Fork's separate heuristic Method 3 Stage-D generation is not used as parity evidence and still needs an independent model certification. |
 | Homoclinic to a saddle-focus | **Available; analytic reference validated** | Rank-revealing real invariant-subspace construction handles complex conjugate and repeated eigenvalues without double-counting. A four-dimensional Duffing-plus-focus reference certifies both collocation and multiple shooting and exercises the neutral saddle-focus diagnostic. |
-| Heteroclinic between distinct equilibria | **Not implemented; beyond HBK 0.2.1** | HBK's HomHS formulation uses the same saddle at both endpoints. A genuine heteroclinic implementation needs independent source/target equilibria, Jacobians, invariant splittings, and boundary conditions and is tracked separately from strict HBK parity. |
+| Heteroclinic between distinct equilibria | **Available; collocation reference validated** | Continue a sampled open orbit between two independently solved hyperbolic equilibria in two parameters. The versioned schema preserves separate source/target equilibria, invariant splittings, endpoint radii, adaptive nonuniform collocation mesh, and projector charts through restart and extension. The analytic <code>x=tanh(t)</code> reference certifies the exact <code>mu=nu</code> locus through core, Node WASM, CLI, and web workflows. Standard shooting and heteroclinic-specific spectral event theory remain follow-ups. |
 | Homoclinic to a periodic orbit | **Not implemented** | No periodic-orbit endpoint and invariant-bundle defining system is present. |
 
-See [the HclinicBifurcationKit parity matrix](docs/hclinic-parity.md) and the
-[homoclinic workflow guide](docs/homoclinic-methods.md) for the audited scope,
-initializers, discretizations, event codes, and numerical acceptance tests.
+See [the HclinicBifurcationKit parity matrix](docs/hclinic-parity.md), the
+[homoclinic workflow guide](docs/homoclinic-methods.md), and the
+[heteroclinic workflow guide](docs/heteroclinic-methods.md) for the audited
+scope, initializers, discretizations, event codes, and numerical acceptance
+tests.
 
 ### Codimension-two points
 

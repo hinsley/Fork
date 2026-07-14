@@ -55,6 +55,7 @@ const expectedOperationKinds = [
   'runHomoclinicFromHomoclinic',
   'runHomotopySaddleFromEquilibrium',
   'runHomoclinicFromHomotopySaddle',
+  'runHeteroclinicFromOrbit',
   'runMapCycleContinuationFromPD',
   'validateSystem',
 ] as const satisfies readonly ComputeOperationKind[]
@@ -80,6 +81,7 @@ const expectedProgressOperationKinds = [
   'runHomoclinicFromHomoclinic',
   'runHomotopySaddleFromEquilibrium',
   'runHomoclinicFromHomotopySaddle',
+  'runHeteroclinicFromOrbit',
   'runMapCycleContinuationFromPD',
 ] as const satisfies readonly ProgressOperationKind[]
 

@@ -74,6 +74,7 @@ export function InspectorPanel({
           onCreateHomoclinicFromHomoclinic={actions.createHomoclinicFromHomoclinic}
           onCreateHomotopySaddleFromEquilibrium={actions.createHomotopySaddleFromEquilibrium}
           onCreateHomoclinicFromHomotopySaddle={actions.createHomoclinicFromHomotopySaddle}
+          onCreateHeteroclinicFromOrbit={actions.createHeteroclinicFromOrbit}
         />
       </div>
     </div>

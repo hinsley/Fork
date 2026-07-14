@@ -673,6 +673,25 @@ pub enum BranchType {
         free_eps0: bool,
         free_eps1: bool,
     },
+    /// A connection from one hyperbolic equilibrium to a distinct one.
+    /// Unlike `HomoclinicCurve`, the two endpoint equilibria and invariant
+    /// splittings are independent and are persisted in a versioned schema.
+    HeteroclinicCurve {
+        schema: HeteroclinicConnectionSchemaV1,
+        ntst: usize,
+        ncol: usize,
+        #[serde(default)]
+        normalized_mesh: Vec<f64>,
+        #[serde(default)]
+        collocation_adaptivity: CollocationAdaptivitySettings,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        collocation_adaptation: Option<CollocationAdaptationReport>,
+        param1_name: String,
+        param2_name: String,
+        free_time: bool,
+        free_eps0: bool,
+        free_eps1: bool,
+    },
     HomotopySaddleCurve {
         ntst: usize,
         ncol: usize,
@@ -774,6 +793,25 @@ pub struct HomoclinicBasisSnapshot {
     pub dim: usize,
     pub nneg: usize,
     pub npos: usize,
+}
+
+/// Version-one restart schema for a genuine two-equilibrium connection.
+///
+/// Keeping this distinct from `HomoclinicResumeContext` prevents a branch
+/// whose endpoints approach different equilibria from being decoded as a
+/// one-saddle HomHS problem.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HeteroclinicConnectionSchemaV1 {
+    pub schema_version: u32,
+    pub base_params: Vec<f64>,
+    pub param1_index: usize,
+    pub param2_index: usize,
+    pub source_basis: HomoclinicBasisSnapshot,
+    pub target_basis: HomoclinicBasisSnapshot,
+    pub fixed_time: f64,
+    pub fixed_eps0: f64,
+    pub fixed_eps1: f64,
+    pub projector_refresh_interval: usize,
 }
 
 /// Persisted homoclinic context used to reconstruct extension problems

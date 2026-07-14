@@ -535,6 +535,19 @@ export interface HomoclinicResumeContext {
   projector_refresh_interval?: number
 }
 
+export interface HeteroclinicConnectionSchemaV1 {
+  schema_version: number
+  base_params: number[]
+  param1_index: number
+  param2_index: number
+  source_basis: HomoclinicBasisSnapshot
+  target_basis: HomoclinicBasisSnapshot
+  fixed_time: number
+  fixed_eps0: number
+  fixed_eps1: number
+  projector_refresh_interval: number
+}
+
 export type HomoclinicBranchDiscretization =
   | { type: 'collocation' }
   | { type: 'shooting'; integration_steps_per_segment: number }
@@ -554,6 +567,22 @@ export type BranchType =
       free_eps0: boolean
       free_eps1: boolean
       discretization?: HomoclinicBranchDiscretization
+      normalized_mesh?: number[]
+      collocation_adaptivity?: CollocationAdaptivitySettings
+      collocation_adaptation?: CollocationAdaptationReport
+    }
+  | {
+      type: 'HeteroclinicCurve'
+      schema: HeteroclinicConnectionSchemaV1
+      ntst: number
+      ncol: number
+      param1_name: string
+      param2_name: string
+      param1_ref?: ParameterRef
+      param2_ref?: ParameterRef
+      free_time: boolean
+      free_eps0: boolean
+      free_eps1: boolean
       normalized_mesh?: number[]
       collocation_adaptivity?: CollocationAdaptivitySettings
       collocation_adaptation?: CollocationAdaptationReport
@@ -691,6 +720,7 @@ export interface ContinuationObject {
     | 'equilibrium'
     | 'limit_cycle'
     | 'homoclinic_curve'
+    | 'heteroclinic_curve'
     | 'homotopy_saddle_curve'
     | 'fold_curve'
     | 'hopf_curve'
@@ -712,6 +742,12 @@ export interface ContinuationObject {
   params?: number[]
   mapIterations?: number
   subsystemSnapshot?: SubsystemSnapshot
+  heteroclinicEndpoints?: {
+    sourceObjectId: string
+    sourceObjectName: string
+    targetObjectId: string
+    targetObjectName: string
+  }
 }
 
 export type LimitCycleOrigin =

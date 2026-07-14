@@ -31,6 +31,7 @@ export function OrbitInspectorSections({
     handleComputeCovariant,
     handleComputeLyapunov,
     handleCreateLimitCycleFromOrbit,
+    handleCreateHeteroclinicFromOrbit,
     handleOrbitPreviewJump,
     handlePasteOrbitState,
     handleRunOrbit,
@@ -39,6 +40,10 @@ export function OrbitInspectorSections({
     limitCycleFromOrbitDraft,
     limitCycleFromOrbitError,
     limitCycleFromOrbitNameSuggestion,
+    heteroclinicEquilibriumOptions,
+    heteroclinicFromOrbitDraft,
+    heteroclinicFromOrbitError,
+    heteroclinicFromOrbitNameSuggestion,
     lyapunovDimension,
     lyapunovDraft,
     lyapunovError,
@@ -62,6 +67,7 @@ export function OrbitInspectorSections({
     selectionKey,
     setCovariantDraft,
     setLimitCycleFromOrbitDraft,
+    setHeteroclinicFromOrbitDraft,
     setLyapunovDraft,
     setOrbitDraft,
     setOrbitPreviewError,
@@ -919,6 +925,359 @@ export function OrbitInspectorSections({
                       </button>
                     </>
                     )}
+                  </div>
+                </InspectorDisclosure>
+              ) : null}
+              {!isDiscreteMap ? (
+                <InspectorDisclosure
+                  key={`${selectionKey}-heteroclinic-from-orbit`}
+                  title="Heteroclinic Connection"
+                  testId="heteroclinic-from-orbit-toggle"
+                  defaultOpen={false}
+                  actionOnly
+                >
+                  <div className="inspector-section">
+                    <h4 className="inspector-subheading">Continue a two-equilibrium connection</h4>
+                    <p className="field-help">
+                      The orbit must run from the source saddle toward the target saddle. Both
+                      endpoints must be solved at the orbit&apos;s parameter values.
+                    </p>
+                    {continuationParameterCount < 2 ? (
+                      <p className="empty-state">Add two parameters before continuing.</p>
+                    ) : null}
+                    {heteroclinicEquilibriumOptions.length < 2 ? (
+                      <p className="empty-state">Solve two equilibrium objects first.</p>
+                    ) : null}
+                    {orbit.data.length < 2 ? (
+                      <p className="empty-state">Run an orbit before continuing.</p>
+                    ) : null}
+                    {continuationParameterCount >= 2 &&
+                    heteroclinicEquilibriumOptions.length >= 2 &&
+                    orbit.data.length >= 2 ? (
+                      <>
+                        <label>
+                          Branch name
+                          <input
+                            value={heteroclinicFromOrbitDraft.name}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                name: event.target.value,
+                              }))
+                            }
+                            placeholder={heteroclinicFromOrbitNameSuggestion}
+                            data-testid="heteroclinic-from-orbit-name"
+                          />
+                        </label>
+                        <label>
+                          Source equilibrium
+                          <select
+                            value={heteroclinicFromOrbitDraft.sourceEquilibriumId}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                sourceEquilibriumId: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-source-equilibrium"
+                          >
+                            {heteroclinicEquilibriumOptions.map((option) => (
+                              <option
+                                key={option.id}
+                                value={option.id}
+                                disabled={option.id === heteroclinicFromOrbitDraft.targetEquilibriumId}
+                              >
+                                {option.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Target equilibrium
+                          <select
+                            value={heteroclinicFromOrbitDraft.targetEquilibriumId}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                targetEquilibriumId: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-target-equilibrium"
+                          >
+                            {heteroclinicEquilibriumOptions.map((option) => (
+                              <option
+                                key={option.id}
+                                value={option.id}
+                                disabled={option.id === heteroclinicFromOrbitDraft.sourceEquilibriumId}
+                              >
+                                {option.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Continuation parameter
+                          <select
+                            value={heteroclinicFromOrbitDraft.parameterName}
+                            onChange={(event) => {
+                              const parameterName = event.target.value
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                parameterName,
+                                param2Name:
+                                  prev.param2Name === parameterName
+                                    ? continuationParameterLabels.find(
+                                        (name) => name !== parameterName
+                                      ) ?? ''
+                                    : prev.param2Name,
+                              }))
+                            }}
+                            data-testid="heteroclinic-param1"
+                          >
+                            {continuationParameterLabels.map((name) => (
+                              <option key={name} value={name}>{name}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Second parameter
+                          <select
+                            value={heteroclinicFromOrbitDraft.param2Name}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                param2Name: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-param2"
+                          >
+                            {continuationParameterLabels.map((name) => (
+                              <option
+                                key={name}
+                                value={name}
+                                disabled={name === heteroclinicFromOrbitDraft.parameterName}
+                              >
+                                {name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          NTST
+                          <input
+                            type="number"
+                            min="2"
+                            value={heteroclinicFromOrbitDraft.ntst}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                ntst: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-ntst"
+                          />
+                        </label>
+                        <label>
+                          NCOL
+                          <input
+                            type="number"
+                            min="1"
+                            value={heteroclinicFromOrbitDraft.ncol}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                ncol: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-ncol"
+                          />
+                        </label>
+                        <label className="toggle-row">
+                          <input
+                            type="checkbox"
+                            checked={heteroclinicFromOrbitDraft.freeTime}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                freeTime: event.target.checked,
+                              }))
+                            }
+                          />
+                          Free flight time T
+                        </label>
+                        <label className="toggle-row">
+                          <input
+                            type="checkbox"
+                            checked={heteroclinicFromOrbitDraft.freeEps0}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                freeEps0: event.target.checked,
+                              }))
+                            }
+                          />
+                          Free source radius eps0
+                        </label>
+                        <label className="toggle-row">
+                          <input
+                            type="checkbox"
+                            checked={heteroclinicFromOrbitDraft.freeEps1}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                freeEps1: event.target.checked,
+                              }))
+                            }
+                          />
+                          Free target radius eps1
+                        </label>
+                        <label>
+                          Projector refresh interval
+                          <input
+                            type="number"
+                            min="1"
+                            value={heteroclinicFromOrbitDraft.projectorRefreshInterval}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                projectorRefreshInterval: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-projector-refresh"
+                          />
+                        </label>
+                        <label>
+                          Direction
+                          <select
+                            value={heteroclinicFromOrbitDraft.forward ? 'forward' : 'backward'}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                forward: event.target.value === 'forward',
+                              }))
+                            }
+                          >
+                            <option value="forward">Forward</option>
+                            <option value="backward">Backward</option>
+                          </select>
+                        </label>
+                        <label>
+                          Initial step size
+                          <input
+                            type="number"
+                            value={heteroclinicFromOrbitDraft.stepSize}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                stepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-step-size"
+                          />
+                        </label>
+                        <label>
+                          Max points
+                          <input
+                            type="number"
+                            value={heteroclinicFromOrbitDraft.maxSteps}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                maxSteps: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-max-steps"
+                          />
+                        </label>
+                        <label>
+                          Min step size
+                          <input
+                            type="number"
+                            value={heteroclinicFromOrbitDraft.minStepSize}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                minStepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-min-step-size"
+                          />
+                        </label>
+                        <label>
+                          Max step size
+                          <input
+                            type="number"
+                            value={heteroclinicFromOrbitDraft.maxStepSize}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                maxStepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-max-step-size"
+                          />
+                        </label>
+                        <label>
+                          Corrector steps
+                          <input
+                            type="number"
+                            value={heteroclinicFromOrbitDraft.correctorSteps}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                correctorSteps: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-corrector-steps"
+                          />
+                        </label>
+                        <label>
+                          Corrector tolerance
+                          <input
+                            type="number"
+                            value={heteroclinicFromOrbitDraft.correctorTolerance}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                correctorTolerance: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-corrector-tolerance"
+                          />
+                        </label>
+                        <label>
+                          Step tolerance
+                          <input
+                            type="number"
+                            value={heteroclinicFromOrbitDraft.stepTolerance}
+                            onChange={(event) =>
+                              setHeteroclinicFromOrbitDraft((prev) => ({
+                                ...prev,
+                                stepTolerance: event.target.value,
+                              }))
+                            }
+                            data-testid="heteroclinic-step-tolerance"
+                          />
+                        </label>
+                        <CollocationAdaptivityFields
+                          draft={heteroclinicFromOrbitDraft}
+                          onChange={(patch) =>
+                            setHeteroclinicFromOrbitDraft((prev) => ({ ...prev, ...patch }))
+                          }
+                          testIdPrefix="heteroclinic-from-orbit"
+                        />
+                        {heteroclinicFromOrbitError ? (
+                          <div className="field-error">{heteroclinicFromOrbitError}</div>
+                        ) : null}
+                        <button
+                          onClick={handleCreateHeteroclinicFromOrbit}
+                          disabled={runDisabled}
+                          data-testid="heteroclinic-from-orbit-submit"
+                        >
+                          Continue Heteroclinic Curve
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </InspectorDisclosure>
               ) : null}

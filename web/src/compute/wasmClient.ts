@@ -26,6 +26,8 @@ import type {
   HomoclinicFromHomoclinicRequest,
   HomoclinicFromHomotopySaddleRequest,
   HomoclinicFromLargeCycleRequest,
+  HeteroclinicContinuationResult,
+  HeteroclinicFromOrbitRequest,
   HopfCurveContinuationRequest,
   IsoperiodicCurveContinuationRequest,
   HomotopySaddleContinuationResult,
@@ -536,6 +538,19 @@ export class WasmForkCoreClient implements ForkCoreClient {
           signal,
           opts?.onProgress
         ),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runHeteroclinicFromOrbit(
+    request: HeteroclinicFromOrbitRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HeteroclinicContinuationResult> {
+    const job = this.queue.enqueue(
+      'runHeteroclinicFromOrbit',
+      (signal) =>
+        this.runWorker('runHeteroclinicFromOrbit', request, signal, opts?.onProgress),
       opts
     )
     return await job.promise

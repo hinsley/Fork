@@ -71,6 +71,7 @@ export const computeOperationMetadata = {
   runHomoclinicFromHomoclinic: { reportsProgress: true },
   runHomotopySaddleFromEquilibrium: { reportsProgress: true },
   runHomoclinicFromHomotopySaddle: { reportsProgress: true },
+  runHeteroclinicFromOrbit: { reportsProgress: true },
   runMapCycleContinuationFromPD: { reportsProgress: true },
   validateSystem: { reportsProgress: false },
 } as const satisfies ComputeOperationMetadata

@@ -50,6 +50,7 @@ export type InspectorActions = Pick<
   | 'createHomoclinicFromHomoclinic'
   | 'createHomotopySaddleFromEquilibrium'
   | 'createHomoclinicFromHomotopySaddle'
+  | 'createHeteroclinicFromOrbit'
 >
 
 export type SystemEditorActions = Pick<AppActions, 'updateSystem' | 'validateSystem'>

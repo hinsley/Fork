@@ -54,6 +54,7 @@ import type {
   HomoclinicFromHomoclinicRequest,
   HomoclinicFromHomotopySaddleRequest,
   HomoclinicFromLargeCycleRequest,
+  HeteroclinicFromOrbitRequest,
   HopfCurveContinuationRequest,
   HomotopySaddleFromEquilibriumRequest,
   IsoperiodicCurveContinuationRequest,
@@ -252,12 +253,16 @@ type InspectorDetailsPanelProps = {
   onCreateHomoclinicFromHomotopySaddle?: (
     request: HomoclinicFromHomotopySaddleRequest
   ) => Promise<void>
+  onCreateHeteroclinicFromOrbit?: (
+    request: HeteroclinicFromOrbitRequest
+  ) => Promise<void>
 }
 
 const STATE_SPACE_STRIDE_BRANCH_TYPES: ReadonlySet<ContinuationObject['branchType']> = new Set([
   'limit_cycle',
   'isoperiodic_curve',
   'homoclinic_curve',
+  'heteroclinic_curve',
   'homotopy_saddle_curve',
   'pd_curve',
   'lpc_curve',
@@ -394,6 +399,28 @@ type HomoclinicRestartDraft = CollocationAdaptivityDraft & {
   freeTime: boolean
   freeEps0: boolean
   freeEps1: boolean
+  stepSize: string
+  maxSteps: string
+  minStepSize: string
+  maxStepSize: string
+  correctorSteps: string
+  correctorTolerance: string
+  stepTolerance: string
+  forward: boolean
+}
+
+type HeteroclinicFromOrbitDraft = CollocationAdaptivityDraft & {
+  name: string
+  sourceEquilibriumId: string
+  targetEquilibriumId: string
+  parameterName: string
+  param2Name: string
+  ntst: string
+  ncol: string
+  freeTime: boolean
+  freeEps0: boolean
+  freeEps1: boolean
+  projectorRefreshInterval: string
   stepSize: string
   maxSteps: string
   minStepSize: string
@@ -1332,6 +1359,41 @@ function makeHomoclinicRestartDraft(system: SystemConfig): HomoclinicRestartDraf
   }
 }
 
+function makeHeteroclinicFromOrbitDraft(
+  system: SystemConfig,
+  equilibriumIds: string[] = []
+): HeteroclinicFromOrbitDraft {
+  const parameterName = system.paramNames[0] ?? ''
+  const param2Name =
+    system.paramNames.find((name) => name !== parameterName) ?? system.paramNames[0] ?? ''
+  return {
+    name: '',
+    sourceEquilibriumId: equilibriumIds[0] ?? '',
+    targetEquilibriumId: equilibriumIds.find((id) => id !== equilibriumIds[0]) ?? '',
+    parameterName,
+    param2Name,
+    ntst: '40',
+    ncol: '4',
+    freeTime: false,
+    freeEps0: true,
+    freeEps1: true,
+    projectorRefreshInterval: '2',
+    stepSize: '0.01',
+    maxSteps: '300',
+    minStepSize: '1e-5',
+    maxStepSize: '0.1',
+    correctorSteps: '32',
+    correctorTolerance: '1e-8',
+    stepTolerance: '1e-8',
+    adaptiveCollocationEnabled: true,
+    adaptiveRedistributionEnabled: true,
+    adaptiveDefectTolerance: '0.025',
+    adaptiveMaxRefinements: '3',
+    adaptiveMaxMeshPoints: '512',
+    forward: true,
+  }
+}
+
 function makeHomotopySaddleFromEquilibriumDraft(
   system: SystemConfig
 ): HomotopySaddleFromEquilibriumDraft {
@@ -1593,7 +1655,9 @@ function makeBranchExtensionDraft(
   const base = makeContinuationDraft(system)
   const defaults = branch?.settings
   const fallbackCorrectorSteps =
-    branch?.branchType === 'homoclinic_curve' ? '32' : base.correctorSteps
+    branch?.branchType === 'homoclinic_curve' || branch?.branchType === 'heteroclinic_curve'
+      ? '32'
+      : base.correctorSteps
   return {
     ...base,
     stepSize: defaults?.step_size?.toString() ?? base.stepSize,
@@ -1601,7 +1665,7 @@ function makeBranchExtensionDraft(
     minStepSize: defaults?.min_step_size?.toString() ?? base.minStepSize,
     maxStepSize: defaults?.max_step_size?.toString() ?? base.maxStepSize,
     correctorSteps:
-      branch?.branchType === 'homoclinic_curve'
+      branch?.branchType === 'homoclinic_curve' || branch?.branchType === 'heteroclinic_curve'
         ? '32'
         : defaults?.corrector_steps?.toString() ?? fallbackCorrectorSteps,
     correctorTolerance: defaults?.corrector_tolerance?.toString() ?? base.correctorTolerance,
@@ -2070,6 +2134,7 @@ function useInspectorSelectionController({
   onCreateHomoclinicFromHomoclinic = async () => {},
   onCreateHomotopySaddleFromEquilibrium = async () => {},
   onCreateHomoclinicFromHomotopySaddle = async () => {},
+  onCreateHeteroclinicFromOrbit = async () => {},
 }: InspectorDetailsPanelProps) {
   const workflowFocus = useWorkflowFocus()
   const node = selectedNodeId ? system.nodes[selectedNodeId] : null
@@ -2170,6 +2235,7 @@ function useInspectorSelectionController({
         'equilibrium',
         'limit_cycle',
         'homoclinic_curve',
+        'heteroclinic_curve',
         'fold_curve',
         'hopf_curve',
         'lpc_curve',
@@ -2529,6 +2595,29 @@ function useInspectorSelectionController({
   const [limitCycleFromOrbitError, setLimitCycleFromOrbitError] = useState<string | null>(
     null
   )
+  const heteroclinicEquilibriumOptions = useMemo(
+    () =>
+      Object.entries(system.objects)
+        .filter((entry): entry is [string, EquilibriumObject] => {
+          const candidate = entry[1]
+          return candidate.type === 'equilibrium' && Boolean(candidate.solution)
+        })
+        .map(([id, equilibriumObject]) => ({ id, name: equilibriumObject.name }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    [system.objects]
+  )
+  const [heteroclinicFromOrbitDraft, setHeteroclinicFromOrbitDraft] =
+    useState<HeteroclinicFromOrbitDraft>(() =>
+      makeHeteroclinicFromOrbitDraft(
+        system.config,
+        Object.entries(system.objects)
+          .filter(([, candidate]) => candidate.type === 'equilibrium' && Boolean(candidate.solution))
+          .map(([id]) => id)
+      )
+    )
+  const [heteroclinicFromOrbitError, setHeteroclinicFromOrbitError] = useState<
+    string | null
+  >(null)
   const [limitCycleManifoldDraft, setLimitCycleManifoldDraft] = useState<LimitCycleManifoldDraft>(
     () => makeLimitCycleManifoldDraft(limitCycle)
   )
@@ -3128,6 +3217,20 @@ function useInspectorSelectionController({
           : resolveDistinctParam(parameterName)
       return { ...prev, parameterName, param2Name }
     })
+    setHeteroclinicFromOrbitDraft((prev) => {
+      if (continuationParameterLabels.length === 0) {
+        if (!prev.parameterName && !prev.param2Name) return prev
+        return { ...prev, parameterName: '', param2Name: '' }
+      }
+      const parameterName = continuationParameterSet.has(prev.parameterName)
+        ? prev.parameterName
+        : firstParam
+      const param2Name =
+        continuationParameterSet.has(prev.param2Name) && prev.param2Name !== parameterName
+          ? prev.param2Name
+          : resolveDistinctParam(parameterName)
+      return { ...prev, parameterName, param2Name }
+    })
     setHomoclinicFromHomoclinicDraft((prev) => {
       if (continuationParameterLabels.length === 0) {
         if (!prev.parameterName && !prev.param2Name) return prev
@@ -3251,6 +3354,31 @@ function useInspectorSelectionController({
       setLyapunovError(null)
       setCovariantError(null)
       setLimitCycleFromOrbitError(null)
+      setHeteroclinicFromOrbitDraft((prev) => {
+        const availableIds = heteroclinicEquilibriumOptions.map((option) => option.id)
+        const fresh = makeHeteroclinicFromOrbitDraft(stableSystemConfig, availableIds)
+        return {
+          ...fresh,
+          name: prev.name,
+          sourceEquilibriumId: availableIds.includes(prev.sourceEquilibriumId)
+            ? prev.sourceEquilibriumId
+            : fresh.sourceEquilibriumId,
+          targetEquilibriumId:
+            availableIds.includes(prev.targetEquilibriumId) &&
+            prev.targetEquilibriumId !== prev.sourceEquilibriumId
+              ? prev.targetEquilibriumId
+              : fresh.targetEquilibriumId,
+          parameterName: continuationParameterSet.has(prev.parameterName)
+            ? prev.parameterName
+            : fresh.parameterName,
+          param2Name:
+            continuationParameterSet.has(prev.param2Name) &&
+            prev.param2Name !== prev.parameterName
+              ? prev.param2Name
+              : fresh.param2Name,
+        }
+      })
+      setHeteroclinicFromOrbitError(null)
     }
     if (current.type === 'equilibrium') {
       setEquilibriumDraft(makeEquilibriumSolveDraft(stableSystemConfig, current))
@@ -3285,7 +3413,13 @@ function useInspectorSelectionController({
       )
       isoclineSelectionIdRef.current = selectedNodeId
     }
-  }, [object?.type, selectedNodeId, systemConfigKey])
+  }, [
+    continuationParameterSet,
+    heteroclinicEquilibriumOptions,
+    object?.type,
+    selectedNodeId,
+    systemConfigKey,
+  ])
 
   useEffect(() => {
     return () => {
@@ -4182,6 +4316,26 @@ function useInspectorSelectionController({
     limitCycleFromOrbitNameSuggestion,
   ])
 
+  const heteroclinicFromOrbitNameSuggestion = useMemo(() => {
+    const sourceName =
+      heteroclinicEquilibriumOptions.find(
+        (option) => option.id === heteroclinicFromOrbitDraft.sourceEquilibriumId
+      )?.name ?? 'source'
+    const targetName =
+      heteroclinicEquilibriumOptions.find(
+        (option) => option.id === heteroclinicFromOrbitDraft.targetEquilibriumId
+      )?.name ?? 'target'
+    return suggestDefaultName('heteroclinic', {
+      sourceName: `${sourceName}_to_${targetName}`,
+      existingNames: existingBranchNames,
+    })
+  }, [
+    existingBranchNames,
+    heteroclinicEquilibriumOptions,
+    heteroclinicFromOrbitDraft.sourceEquilibriumId,
+    heteroclinicFromOrbitDraft.targetEquilibriumId,
+  ])
+
   const limitCycleFromHopfBranchSuggestion = useMemo(() => {
     if (!branch) return ''
     const baseName =
@@ -4673,12 +4827,20 @@ function useInspectorSelectionController({
       })
     }
     if (!isDiscreteMap && orbit.data.length > 0) {
-      workflowActions.push({
-        id: 'limit-cycle-toggle',
-        group: 'Continuation',
-        label: 'Limit cycle from orbit',
-        description: 'Initialize and continue a periodic orbit from this trajectory.',
-      })
+      workflowActions.push(
+        {
+          id: 'limit-cycle-toggle',
+          group: 'Continuation',
+          label: 'Limit cycle from orbit',
+          description: 'Initialize and continue a periodic orbit from this trajectory.',
+        },
+        {
+          id: 'heteroclinic-from-orbit-toggle',
+          group: 'Continuation',
+          label: 'Heteroclinic connection',
+          description: 'Continue this open orbit between two solved equilibria.',
+        }
+      )
     }
   }
   if (equilibrium) {
@@ -5988,7 +6150,7 @@ function useInspectorSelectionController({
     }
     if (!canExtendBranch) {
       setBranchExtensionError(
-        `Branch extension is only available for ${equilibriumLabelLower}, limit cycle, homoclinic, or bifurcation curve branches.`
+        `Branch extension is only available for ${equilibriumLabelLower}, limit cycle, homoclinic, heteroclinic, or bifurcation curve branches.`
       )
       return
     }
@@ -7534,6 +7696,105 @@ function useInspectorSelectionController({
     })
   }
 
+  const handleCreateHeteroclinicFromOrbit = async () => {
+    if (runDisabled) {
+      setHeteroclinicFromOrbitError('Apply valid system settings before continuing.')
+      return
+    }
+    if (systemDraft.type !== 'flow') {
+      setHeteroclinicFromOrbitError('Heteroclinic continuation requires a flow system.')
+      return
+    }
+    if (!orbit || !selectedNodeId || orbit.data.length < 2) {
+      setHeteroclinicFromOrbitError('Run and select an orbit with at least two samples.')
+      return
+    }
+    if (continuationParameterCount < 2) {
+      setHeteroclinicFromOrbitError('Add two continuation parameters first.')
+      return
+    }
+    if (heteroclinicEquilibriumOptions.length < 2) {
+      setHeteroclinicFromOrbitError('Solve two distinct equilibrium objects first.')
+      return
+    }
+    if (
+      !heteroclinicFromOrbitDraft.sourceEquilibriumId ||
+      !heteroclinicFromOrbitDraft.targetEquilibriumId ||
+      heteroclinicFromOrbitDraft.sourceEquilibriumId ===
+        heteroclinicFromOrbitDraft.targetEquilibriumId
+    ) {
+      setHeteroclinicFromOrbitError('Select distinct source and target equilibria.')
+      return
+    }
+    if (
+      !continuationParameterSet.has(heteroclinicFromOrbitDraft.parameterName) ||
+      !continuationParameterSet.has(heteroclinicFromOrbitDraft.param2Name) ||
+      heteroclinicFromOrbitDraft.parameterName === heteroclinicFromOrbitDraft.param2Name
+    ) {
+      setHeteroclinicFromOrbitError('Select two distinct continuation parameters.')
+      return
+    }
+    const name =
+      heteroclinicFromOrbitDraft.name.trim() || heteroclinicFromOrbitNameSuggestion
+    if (!name || !isCliSafeName(name)) {
+      setHeteroclinicFromOrbitError(
+        'Branch names must be alphanumeric with underscores only.'
+      )
+      return
+    }
+    const ntst = parseInteger(heteroclinicFromOrbitDraft.ntst)
+    const ncol = parseInteger(heteroclinicFromOrbitDraft.ncol)
+    const projectorRefreshInterval = parseInteger(
+      heteroclinicFromOrbitDraft.projectorRefreshInterval
+    )
+    if (ntst === null || ntst < 2) {
+      setHeteroclinicFromOrbitError('NTST must be an integer of at least 2.')
+      return
+    }
+    if (ncol === null || ncol < 1) {
+      setHeteroclinicFromOrbitError('NCOL must be a positive integer.')
+      return
+    }
+    if (projectorRefreshInterval === null || projectorRefreshInterval < 1) {
+      setHeteroclinicFromOrbitError('Projector refresh interval must be positive.')
+      return
+    }
+    const extraError = homoclinicExtraSelectionError(
+      heteroclinicFromOrbitDraft.freeTime,
+      heteroclinicFromOrbitDraft.freeEps0,
+      heteroclinicFromOrbitDraft.freeEps1
+    )
+    if (extraError) {
+      setHeteroclinicFromOrbitError(extraError)
+      return
+    }
+    const { settings, error } = buildContinuationSettings({
+      ...heteroclinicFromOrbitDraft,
+      parameterName: heteroclinicFromOrbitDraft.parameterName,
+    })
+    if (!settings) {
+      setHeteroclinicFromOrbitError(error ?? 'Invalid continuation settings.')
+      return
+    }
+    setHeteroclinicFromOrbitError(null)
+    await onCreateHeteroclinicFromOrbit({
+      orbitId: selectedNodeId,
+      sourceEquilibriumId: heteroclinicFromOrbitDraft.sourceEquilibriumId,
+      targetEquilibriumId: heteroclinicFromOrbitDraft.targetEquilibriumId,
+      name,
+      parameterName: heteroclinicFromOrbitDraft.parameterName,
+      param2Name: heteroclinicFromOrbitDraft.param2Name,
+      ntst,
+      ncol,
+      freeTime: heteroclinicFromOrbitDraft.freeTime,
+      freeEps0: heteroclinicFromOrbitDraft.freeEps0,
+      freeEps1: heteroclinicFromOrbitDraft.freeEps1,
+      projectorRefreshInterval,
+      settings,
+      forward: heteroclinicFromOrbitDraft.forward,
+    })
+  }
+
   const updateClvRender = useCallback(
     (update: Partial<ClvRenderStyle>) => {
       if (!selectionNode) return
@@ -7803,6 +8064,7 @@ function useInspectorSelectionController({
     handleCreateHomoclinicFromHomoclinic,
     handleCreateHomoclinicFromHomotopySaddle,
     handleCreateHomoclinicFromLargeCycle,
+    handleCreateHeteroclinicFromOrbit,
     handleCreateHomotopySaddleFromEquilibrium,
     handleCreateHopfCurve,
     handleCreateIsoperiodicCurve,
@@ -7841,6 +8103,10 @@ function useInspectorSelectionController({
     homoclinicFromHomotopySaddleError,
     homoclinicFromLargeCycleDraft,
     homoclinicFromLargeCycleError,
+    heteroclinicEquilibriumOptions,
+    heteroclinicFromOrbitDraft,
+    heteroclinicFromOrbitError,
+    heteroclinicFromOrbitNameSuggestion,
     homotopyBranchStage,
     homotopySaddleFromEquilibriumDraft,
     homotopySaddleFromEquilibriumError,
@@ -8012,6 +8278,7 @@ function useInspectorSelectionController({
     setHomoclinicFromHomoclinicDraft,
     setHomoclinicFromHomotopySaddleDraft,
     setHomoclinicFromLargeCycleDraft,
+    setHeteroclinicFromOrbitDraft,
     setHomotopySaddleFromEquilibriumDraft,
     setHopfCurveDraft,
     setIsoperiodicCurveDraft,

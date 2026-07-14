@@ -139,6 +139,13 @@ describe('selection inspector workflow shell', () => {
     expect(within(actions).getAllByRole('button')[0]).toHaveTextContent('Appearance')
     expect(actions).not.toHaveTextContent('Modify appearance')
     expect(within(actions).getByRole('heading', { name: 'Continuation' })).toBeVisible()
+    expect(screen.getByTestId('action-limit-cycle-toggle')).toBeVisible()
+    expect(screen.getByTestId('action-heteroclinic-from-orbit-toggle')).toHaveTextContent(
+      'Heteroclinic connection'
+    )
+    expect(screen.getByTestId('heteroclinic-from-orbit-toggle').closest('details')).toHaveClass(
+      'inspector-disclosure--action-only'
+    )
     expect(within(actions).queryByRole('heading', { name: 'Continue' })).toBeNull()
   })
 

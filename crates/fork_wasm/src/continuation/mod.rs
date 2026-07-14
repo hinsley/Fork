@@ -12,6 +12,7 @@ mod eq_manifold_2d_runner;
 mod eq_runner;
 mod equilibrium_codim2;
 mod extension_runner;
+mod heteroclinic_runner;
 mod homoc_runner;
 mod homoc_shooting_methods;
 mod homoc_shooting_runner;
@@ -36,6 +37,7 @@ pub use eq_manifold_1d_runner::WasmEqManifold1DRunner;
 pub use eq_manifold_2d_runner::WasmEqManifold2DRunner;
 pub use eq_runner::WasmEquilibriumRunner;
 pub use extension_runner::WasmContinuationExtensionRunner;
+pub use heteroclinic_runner::WasmHeteroclinicRunner;
 pub use homoc_runner::WasmHomoclinicRunner;
 pub use homoc_shooting_runner::WasmHomoclinicShootingRunner;
 pub use homotopy_saddle_runner::WasmHomotopySaddleRunner;
@@ -47,7 +49,7 @@ mod tests {
     use super::{
         WasmCodim1CurveExtensionRunner, WasmContinuationExtensionRunner, WasmCycleManifold2DRunner,
         WasmEqManifold1DExtensionRunner, WasmEqManifold1DRunner, WasmEqManifold2DRunner,
-        WasmEquilibriumRunner, WasmFoldCurveRunner, WasmHomoclinicRunner,
+        WasmEquilibriumRunner, WasmFoldCurveRunner, WasmHeteroclinicRunner, WasmHomoclinicRunner,
         WasmHomoclinicShootingRunner, WasmHomotopySaddleRunner, WasmHopfCurveRunner,
         WasmIsoperiodicCurveRunner, WasmLPCCurveRunner, WasmLimitCycleRunner,
         WasmManifold2DExtensionRunner, WasmNSCurveRunner, WasmPDCurveRunner,
@@ -77,6 +79,7 @@ mod tests {
             .ends_with("WasmCodim1CurveExtensionRunner"));
         assert!(std::any::type_name::<WasmLimitCycleRunner>().ends_with("WasmLimitCycleRunner"));
         assert!(std::any::type_name::<WasmHomoclinicRunner>().ends_with("WasmHomoclinicRunner"));
+        assert!(std::any::type_name::<WasmHeteroclinicRunner>().ends_with("WasmHeteroclinicRunner"));
         assert!(std::any::type_name::<WasmHomoclinicShootingRunner>()
             .ends_with("WasmHomoclinicShootingRunner"));
         assert!(

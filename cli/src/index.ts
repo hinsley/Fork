@@ -28,6 +28,7 @@ import { createEquilibriumBranchForObject, createLimitCycleBranchForObject } fro
 import { extendBranch, supportsContinuationBranchExtension } from './continuation/extend';
 import { inspectBranch } from './continuation/inspect';
 import { initiateLCFromOrbit } from './continuation/initiate-lc-from-orbit';
+import { initiateHeteroclinicFromOrbit } from './continuation/initiate-heteroclinic';
 
 import {
     ConfigEntry,
@@ -1230,12 +1231,66 @@ async function manageLimitCycle(
     }
 }
 
+async function orbitBranchesMenu(
+    sysName: string,
+    obj: OrbitObject,
+    opts: { autoOpenBranchName?: string; autoInspect?: boolean } = {}
+): Promise<NavigationRequest | void> {
+    let autoOpenBranchName = opts.autoOpenBranchName;
+    let autoInspect = opts.autoInspect ?? false;
+    while (true) {
+        if (autoOpenBranchName) {
+            const target = autoOpenBranchName;
+            autoOpenBranchName = undefined;
+            const branch = Storage.loadBranch(sysName, obj.name, target) as ContinuationObject;
+            const nav = await manageBranch(sysName, branch, { autoInspect });
+            autoInspect = false;
+            if (nav) return nav;
+        }
+        const branches = Storage.listBranches(sysName, obj.name)
+            .map(name => Storage.loadBranch(sysName, obj.name, name))
+            .filter((branch): branch is ContinuationObject =>
+                (branch as ContinuationObject)?.type === 'continuation' &&
+                (branch as ContinuationObject).branchType === 'heteroclinic_curve'
+            );
+        const choices: Array<{ name: string; value: string } | inquirer.Separator> = branches.map(
+            branch => ({
+                name: `${branch.name} (${branch.parameterName}, ${branch.data.points.length} pts)`,
+                value: branch.name
+            })
+        );
+        choices.push(new inquirer.Separator(), { name: 'Back', value: 'BACK' });
+        const { selection } = await inquirer.prompt({
+            type: 'rawlist',
+            name: 'selection',
+            message: `Heteroclinic branches (Orbit: ${obj.name})`,
+            choices,
+            pageSize: MENU_PAGE_SIZE
+        });
+        if (selection === 'BACK') return;
+        const branch = Storage.loadBranch(sysName, obj.name, selection) as ContinuationObject;
+        const nav = await manageBranch(sysName, branch);
+        if (nav) return nav;
+    }
+}
+
 async function manageOrbit(
     sysName: string,
     obj: OrbitObject,
-    _nav?: NavigationRequest
+    nav?: NavigationRequest
 ): Promise<NavigationRequest | void> {
+    let pendingNav = nav;
     while (true) {
+        if (pendingNav?.kind === 'OPEN_BRANCH' && pendingNav.objectName === obj.name) {
+            const branchNav = await orbitBranchesMenu(sysName, obj, {
+                autoOpenBranchName: pendingNav.branchName,
+                autoInspect: pendingNav.autoInspect
+            });
+            if (branchNav) return branchNav;
+            obj = Storage.loadObject(sysName, obj.name) as OrbitObject;
+            pendingNav = undefined;
+            continue;
+        }
         printHeader(obj.name, 'orbit');
         printField('System', obj.systemName);
         if (obj.parameters) {
@@ -1253,6 +1308,10 @@ async function manageOrbit(
                 { name: 'Extend Orbit', value: 'Extend Orbit' },
                 { name: 'Oseledets Solver', value: 'Oseledets Solver' },
                 { name: 'Create Limit Cycle Object (from this orbit)', value: 'Create Limit Cycle Object' },
+                { name: 'Continue Heteroclinic Connection (between two equilibria)', value: 'Create Heteroclinic Curve' },
+                ...(Storage.listBranches(sysName, obj.name).length > 0
+                    ? [{ name: 'Heteroclinic Branches', value: 'Heteroclinic Branches' }]
+                    : []),
                 new inquirer.Separator(),
                 { name: 'Rename Object', value: 'Rename Object' },
                 { name: 'Delete Object', value: 'Delete Object' },
@@ -1322,6 +1381,28 @@ async function manageOrbit(
                     autoInspect: true
                 };
             }
+            continue;
+        }
+
+        if (action === 'Create Heteroclinic Curve') {
+            const newBranch = await initiateHeteroclinicFromOrbit(sysName, obj, {
+                autoInspect: false
+            });
+            if (newBranch) {
+                return {
+                    kind: 'OPEN_BRANCH',
+                    objectName: newBranch.parentObject,
+                    branchName: newBranch.name,
+                    autoInspect: true
+                };
+            }
+            continue;
+        }
+
+        if (action === 'Heteroclinic Branches') {
+            const branchNav = await orbitBranchesMenu(sysName, obj);
+            if (branchNav) return branchNav;
+            obj = Storage.loadObject(sysName, obj.name) as OrbitObject;
             continue;
         }
 

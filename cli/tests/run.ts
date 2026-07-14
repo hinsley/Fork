@@ -114,6 +114,7 @@ async function run() {
   const homocInit = require('../src/continuation/initiate-homoclinic') as typeof import('../src/continuation/initiate-homoclinic');
   const homocExtras = require('../src/continuation/homoclinic-extras') as typeof import('../src/continuation/homoclinic-extras');
   const homotopyInit = require('../src/continuation/initiate-homotopy-saddle') as typeof import('../src/continuation/initiate-homotopy-saddle');
+  const heteroclinicInit = require('../src/continuation/initiate-heteroclinic') as typeof import('../src/continuation/initiate-heteroclinic');
   const branchExtension = require('../src/continuation/extend') as typeof import('../src/continuation/extend');
   const wasmBridge = require('../src/wasm') as typeof import('../src/wasm');
   const utils = require('../src/continuation/utils') as typeof import('../src/continuation/utils');
@@ -166,6 +167,64 @@ async function run() {
     assert.equal(
       typeof wasmBridge.WasmBridge.prototype.createHomoclinicShootingContinuationRunner,
       'function'
+    );
+  });
+
+  test('CLI bridge and eligibility expose genuine two-equilibrium heteroclinics', () => {
+    assert.equal(
+      typeof wasmBridge.WasmBridge.prototype.initHeteroclinicFromOrbit,
+      'function'
+    );
+    assert.equal(
+      typeof wasmBridge.WasmBridge.prototype.createHeteroclinicContinuationRunner,
+      'function'
+    );
+    const config: SystemConfig = {
+      name: 'heteroclinic_reference',
+      equations: ['1-x*x', 'x*y+(mu-nu)*(1-x*x)'],
+      params: [0, 0],
+      paramNames: ['mu', 'nu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    };
+    const orbit = {
+      type: 'orbit' as const,
+      name: 'connection',
+      systemName: config.name,
+      data: [[-1, -0.76, 0], [1, 0.76, 0]],
+      t_start: -1,
+      t_end: 1,
+      dt: 2,
+      parameters: [0, 0],
+    };
+    const equilibrium = (name: string, state: number[]) => ({
+      type: 'equilibrium' as const,
+      name,
+      systemName: config.name,
+      parameters: [0, 0],
+      solution: {
+        state,
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [],
+      },
+    });
+    assert.equal(
+      heteroclinicInit.heteroclinicEligibilityError(config, orbit, [
+        equilibrium('source', [-1, 0]),
+        equilibrium('target', [1, 0]),
+      ]),
+      null
+    );
+    assert.match(
+      heteroclinicInit.heteroclinicEligibilityError(
+        { ...config, type: 'map', solver: 'discrete' },
+        orbit,
+        [equilibrium('source', [-1, 0]), equilibrium('target', [1, 0])]
+      ) ?? '',
+      /flows only/i
     );
   });
 

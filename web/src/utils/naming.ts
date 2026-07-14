@@ -24,6 +24,7 @@ export type DefaultNameKind =
   | 'pdCurve'
   | 'nsCurve'
   | 'homoclinic'
+  | 'heteroclinic'
   | 'homoclinicRestart'
   | 'homotopySaddle'
   | 'homoclinicStageD'
@@ -237,6 +238,9 @@ export function suggestDefaultName(
       break
     case 'homoclinic':
       baseName = composeDerivedName(['homoc'], source || 'branch')
+      break
+    case 'heteroclinic':
+      baseName = composeDerivedName(['heteroc'], source || 'connection')
       break
     case 'homoclinicRestart':
       baseName = composeDerivedName(['homoc'], source || 'branch', ['restart'])

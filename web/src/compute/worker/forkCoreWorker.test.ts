@@ -27,6 +27,13 @@ const wasmState = {
     steps: number
   },
   lastHomoclinicRunner: null as null | 'collocation' | 'shooting',
+  heteroclinicSeed: null as null | {
+    times: number[]
+    states: number[][]
+    source_equilibrium: number[]
+    target_equilibrium: number[]
+  },
+  heteroclinicRunnerSettings: null as null | Record<string, unknown>,
   disableIsoperiodicRunner: false,
   isoperiodicFallbackCalls: 0,
   lastRunStepsArg: null as number | null,
@@ -268,6 +275,10 @@ beforeAll(async () => {
       }
       init_homoclinic_from_homotopy_saddle() {
         return {}
+      }
+      init_heteroclinic_from_orbit(seed: typeof wasmState.heteroclinicSeed) {
+        wasmState.heteroclinicSeed = seed
+        return { kind: 'heteroclinic' }
       }
       continue_isoperiodic_curve() {
         wasmState.isoperiodicFallbackCalls += 1
@@ -607,6 +618,30 @@ beforeAll(async () => {
       }
     }
 
+    class MockHeteroclinicRunner extends MockContinuationRunner {
+      constructor(...args: unknown[]) {
+        super()
+        wasmState.heteroclinicRunnerSettings = args[5] as Record<string, unknown>
+      }
+
+      override get_result(): MockRunnerResult {
+        return {
+          points: [
+            { state: [0, 0], param_value: 0.1, stability: 'None', eigenvalues: [] },
+            { state: [1, 1], param_value: 0.2, stability: 'None', eigenvalues: [] },
+          ],
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: {
+            type: 'HeteroclinicCurve',
+            schema: { schema_version: 1 },
+            ntst: 8,
+            ncol: 3,
+          },
+        }
+      }
+    }
+
     class MockLimitCycleRunner extends MockContinuationRunner {
       constructor(...args: unknown[]) {
         super()
@@ -633,6 +668,7 @@ beforeAll(async () => {
       },
       WasmLimitCycleRunner: MockLimitCycleRunner,
       WasmHomoclinicRunner: MockHomoclinicRunner,
+      WasmHeteroclinicRunner: MockHeteroclinicRunner,
       get WasmHomoclinicShootingRunner() {
         return wasmState.disableHomoclinicShootingRunner
           ? undefined
@@ -664,6 +700,8 @@ beforeEach(() => {
   wasmState.homoclinicShootingInitArgs = null
   wasmState.homoclinicShootingRestartArgs = null
   wasmState.lastHomoclinicRunner = null
+  wasmState.heteroclinicSeed = null
+  wasmState.heteroclinicRunnerSettings = null
   wasmState.disableIsoperiodicRunner = false
   wasmState.isoperiodicFallbackCalls = 0
   wasmState.lastRunStepsArg = null
@@ -1099,6 +1137,62 @@ describe('forkCoreWorker', () => {
     expect(h4Response?.result?.points?.length).toBe(3)
     expect(h4Response?.result?.indices).toEqual([10, 11, 12])
     expect(h4Response?.result?.bifurcations).toEqual([0, 1, 2])
+  })
+
+  it('runs a genuine two-equilibrium heteroclinic handler', async () => {
+    const handler = requireHandler()
+    await handler({
+      data: {
+        id: 'job-heteroclinic',
+        kind: 'runHeteroclinicFromOrbit',
+        payload: {
+          system: {
+            ...baseSystem,
+            equations: ['1-x*x', 'x*y+(mu-nu)*(1-x*x)'],
+            varNames: ['x', 'y'],
+            params: [0.2, 0.2],
+            paramNames: ['mu', 'nu'],
+          },
+          orbitTimes: [-4, 0, 4],
+          orbitStates: [[-0.999, 0], [0, 0], [0.999, 0]],
+          sourceEquilibrium: [-1, 0],
+          targetEquilibrium: [1, 0],
+          parameterName: 'mu',
+          param2Name: 'nu',
+          ntst: 8,
+          ncol: 3,
+          freeTime: false,
+          freeEps0: true,
+          freeEps1: true,
+          projectorRefreshInterval: 1,
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.heteroclinicSeed).toEqual({
+      times: [-4, 0, 4],
+      states: [[-0.999, 0], [0, 0], [0.999, 0]],
+      source_equilibrium: [-1, 0],
+      target_equilibrium: [1, 0],
+    })
+    expect(wasmState.heteroclinicRunnerSettings).toMatchObject({
+      projector_refresh_interval: 1,
+      step_size: continuationSettings.step_size,
+    })
+    expect(workerScope.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({
+      id: 'job-heteroclinic',
+      ok: true,
+      result: {
+        branch_type: {
+          type: 'HeteroclinicCurve',
+          schema: { schema_version: 1 },
+          ntst: 8,
+          ncol: 3,
+        },
+      },
+    })
   })
 
   it('converts the Method 1 collocation seed and runs standard shooting', async () => {

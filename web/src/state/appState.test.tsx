@@ -1951,6 +1951,193 @@ describe('appState limit cycle render targets', () => {
   })
 })
 
+describe('appState heteroclinic continuation', () => {
+  it('creates a versioned two-equilibrium branch from an orbit seed', async () => {
+    const base = createSystem({ name: 'Heteroclinic_Reference' })
+    const configured = {
+      ...base,
+      config: {
+        ...base.config,
+        paramNames: ['mu', 'nu'],
+        params: [0.2, 0.2],
+      },
+    }
+    configured.config = {
+      ...configured.config,
+      type: 'flow',
+      solver: 'rk4',
+      varNames: ['x', 'y'],
+      equations: ['1-x*x', 'x*y+(mu-nu)*(1-x*x)'],
+    }
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Connecting_Orbit',
+      systemName: configured.config.name,
+      data: [
+        [-4, -0.999, 0],
+        [0, 0, 0],
+        [4, 0.999, 0],
+      ],
+      t_start: -4,
+      t_end: 4,
+      dt: 4,
+      parameters: [...configured.config.params],
+    }
+    const source: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Source_Saddle',
+      systemName: configured.config.name,
+      parameters: [...configured.config.params],
+      solution: {
+        state: [-1, 0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [],
+      },
+    }
+    const target: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Target_Saddle',
+      systemName: configured.config.name,
+      parameters: [...configured.config.params],
+      solution: {
+        state: [1, 0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [],
+      },
+    }
+    const withOrbit = addObject(configured, orbit)
+    const withSource = addObject(withOrbit.system, source)
+    const withTarget = addObject(withSource.system, target)
+    const client = new MockForkCoreClient(0)
+    let captured: Parameters<typeof client.runHeteroclinicFromOrbit>[0] | null = null
+    client.runHeteroclinicFromOrbit = async (request) => {
+      captured = request
+      const basis = {
+        stable_q: [1, 0, 0, 1],
+        unstable_q: [1, 0, 0, 1],
+        dim: 2,
+        nneg: 1,
+        npos: 1,
+      }
+      const state = new Array(24).fill(0)
+      return {
+        points: [
+          { state, param_value: 0.2, stability: 'None', eigenvalues: [] },
+          { state, param_value: 0.21, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: {
+          type: 'HeteroclinicCurve',
+          schema: {
+            schema_version: 1,
+            base_params: [0.2, 0.2],
+            param1_index: 0,
+            param2_index: 1,
+            source_basis: basis,
+            target_basis: basis,
+            fixed_time: 8,
+            fixed_eps0: 0.01,
+            fixed_eps1: 0.01,
+            projector_refresh_interval: 1,
+          },
+          ntst: 2,
+          ncol: 1,
+          normalized_mesh: [0, 0.5, 1],
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: false,
+          free_eps0: true,
+          free_eps1: true,
+        },
+      }
+    }
+    const { getContext } = setupApp(withTarget.system, client)
+
+    await act(async () => {
+      await getContext().actions.createHeteroclinicFromOrbit({
+        orbitId: withOrbit.nodeId,
+        sourceEquilibriumId: withSource.nodeId,
+        targetEquilibriumId: withTarget.nodeId,
+        name: 'heteroc_Source_to_Target',
+        parameterName: 'mu',
+        param2Name: 'nu',
+        ntst: 2,
+        ncol: 1,
+        freeTime: false,
+        freeEps0: true,
+        freeEps1: true,
+        projectorRefreshInterval: 1,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    expect(captured).toMatchObject({
+      orbitTimes: [-4, 0, 4],
+      orbitStates: [[-0.999, 0], [0, 0], [0.999, 0]],
+      sourceEquilibrium: [-1, 0],
+      targetEquilibrium: [1, 0],
+      parameterName: 'mu',
+      param2Name: 'nu',
+    })
+    const created = Object.values(getContext().state.system!.branches).find(
+      (branch) => branch.name === 'heteroc_Source_to_Target'
+    )
+    expect(getContext().state.error).toBeNull()
+    expect(created).toMatchObject({
+      branchType: 'heteroclinic_curve',
+      parentObjectId: withOrbit.nodeId,
+      heteroclinicEndpoints: {
+        sourceObjectId: withSource.nodeId,
+        targetObjectId: withTarget.nodeId,
+      },
+      data: {
+        branch_type: {
+          type: 'HeteroclinicCurve',
+          schema: { schema_version: 1 },
+        },
+      },
+    })
+    if (!created) throw new Error('Expected a stored heteroclinic branch.')
+    const createdId = Object.entries(getContext().state.system!.branches).find(
+      ([, branch]) => branch === created
+    )?.[0]
+    if (!createdId) throw new Error('Expected a heteroclinic branch id.')
+    let extensionBranchType: unknown = null
+    client.runContinuationExtension = async (request) => {
+      extensionBranchType = request.branchData.branch_type
+      return {
+        ...created.data,
+        points: [
+          ...created.data.points,
+          {
+            ...created.data.points.at(-1)!,
+            param_value: created.data.points.at(-1)!.param_value + 0.01,
+          },
+        ],
+        indices: [0, 1, 2],
+      }
+    }
+    await act(async () => {
+      await getContext().actions.extendBranch({
+        branchId: createdId,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+    expect(extensionBranchType).toMatchObject({
+      type: 'HeteroclinicCurve',
+      schema: { schema_version: 1 },
+    })
+    expect(getContext().state.system!.branches[createdId].data.points).toHaveLength(3)
+  })
+})
+
 describe('appState Hopf curve continuation', () => {
   it('continues a Hopf curve after renaming the parent equilibrium', async () => {
     const base = createSystem({

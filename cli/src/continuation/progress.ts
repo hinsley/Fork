@@ -145,6 +145,22 @@ export function runHomoclinicShootingContinuationWithProgress(
   return runContinuationRunnerWithProgress(runner, label);
 }
 
+/** Continue a genuine two-equilibrium heteroclinic curve. */
+export function runHeteroclinicContinuationWithProgress(
+  bridge: WasmBridge,
+  setup: any,
+  settings: any,
+  forward: boolean,
+  label: string
+): ContinuationBranchData {
+  const runner = bridge.createHeteroclinicContinuationRunner(
+    setup,
+    settings,
+    forward
+  );
+  return runContinuationRunnerWithProgress(runner, label);
+}
+
 /**
  * Continue a homotopy-saddle curve with stepped progress updates.
  */

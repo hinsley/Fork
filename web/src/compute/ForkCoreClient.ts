@@ -675,6 +675,26 @@ export type HomoclinicFromHomotopySaddleRequest = {
 export type HomoclinicContinuationResult = ContinuationBranchData
 export type HomotopySaddleContinuationResult = ContinuationBranchData
 
+export type HeteroclinicFromOrbitRequest = {
+  system: SystemConfig
+  orbitTimes: number[]
+  orbitStates: number[][]
+  sourceEquilibrium: number[]
+  targetEquilibrium: number[]
+  parameterName: string
+  param2Name: string
+  ntst: number
+  ncol: number
+  freeTime: boolean
+  freeEps0: boolean
+  freeEps1: boolean
+  projectorRefreshInterval?: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type HeteroclinicContinuationResult = ContinuationBranchData
+
 export type MapCycleContinuationFromPDRequest = {
   system: SystemConfig
   pdState: number[]
@@ -814,6 +834,10 @@ export interface ForkCoreClient {
     request: HomoclinicFromHomotopySaddleRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<HomoclinicContinuationResult>
+  runHeteroclinicFromOrbit(
+    request: HeteroclinicFromOrbitRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HeteroclinicContinuationResult>
   runMapCycleContinuationFromPD(
     request: MapCycleContinuationFromPDRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }

@@ -232,6 +232,59 @@ describe('continuation helpers', () => {
     expect(normalized.points[0].param2_value).toBeCloseTo(p2, 12)
   })
 
+  it('decodes a heteroclinic secondary parameter after both endpoint equilibria', () => {
+    const p2 = 0.73
+    const basis = {
+      stable_q: [1, 0, 0, 1],
+      unstable_q: [1, 0, 0, 1],
+      dim: 2,
+      nneg: 1,
+      npos: 1,
+    }
+    const branchType = {
+      type: 'HeteroclinicCurve' as const,
+      schema: {
+        schema_version: 1,
+        base_params: [0, 0],
+        param1_index: 0,
+        param2_index: 1,
+        source_basis: basis,
+        target_basis: basis,
+        fixed_time: 10,
+        fixed_eps0: 0.01,
+        fixed_eps1: 0.01,
+        projector_refresh_interval: 2,
+      },
+      ntst: 2,
+      ncol: 1,
+      param1_name: 'mu',
+      param2_name: 'nu',
+      free_time: false,
+      free_eps0: true,
+      free_eps1: true,
+    }
+    const state = [
+      -1, 0, 0, 0, 1, 0,
+      -0.5, 0, 0.5, 0,
+      -1, 0,
+      1, 0,
+      p2,
+      0.01, 0.01,
+      0, 0,
+    ]
+
+    expect(
+      resolveContinuationPointParam2Value(
+        { state, param2_value: undefined },
+        branchType,
+        2
+      )
+    ).toBeCloseTo(p2, 12)
+    expect(
+      resolveContinuationPointEquilibriumState({ state }, branchType, 2)
+    ).toEqual([-1, 0])
+  })
+
   it('extracts equilibrium coordinates from packed homoclinic states', () => {
     const x0 = [1.25, -0.75]
     const state = [

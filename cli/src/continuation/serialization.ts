@@ -33,10 +33,29 @@ export function serializeBranchDataForWasm(data: ContinuationBranchData): any {
  * Converts eigenvalues from tuple format to object format.
  */
 export function normalizeBranchEigenvalues(data: ContinuationBranchData): ContinuationBranchData {
+  const branchType = data.branch_type;
+  const inferParam2 = (state: number[]): number | undefined => {
+    if (branchType?.type === 'HeteroclinicCurve') {
+      const dim = branchType.schema.source_basis.dim;
+      const profileLength = ((branchType.ntst + 1) + branchType.ntst * branchType.ncol) * dim;
+      const value = state[profileLength + 2 * dim];
+      return Number.isFinite(value) ? value : undefined;
+    }
+    if (branchType?.type === 'HomoclinicCurve' && data.homoc_context) {
+      const dim = data.homoc_context.basis.dim;
+      const profileLength = ((branchType.ntst + 1) + branchType.ntst * branchType.ncol) * dim;
+      const value = state[profileLength + dim];
+      return Number.isFinite(value) ? value : undefined;
+    }
+    return undefined;
+  };
   return {
     ...data,
     points: data.points.map(pt => ({
       ...pt,
+      param2_value: Number.isFinite(pt.param2_value)
+        ? pt.param2_value
+        : inferParam2(pt.state),
       eigenvalues: normalizeEigenvalueArray(pt.eigenvalues as any)
     }))
   };

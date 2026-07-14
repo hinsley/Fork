@@ -15,12 +15,14 @@ use fork_core::continuation::{
     compute_limit_cycle_floquet_modes_on_mesh as core_compute_limit_cycle_floquet_modes_on_mesh,
     compute_limit_cycle_floquet_modes_on_mesh_with_backend as core_compute_limit_cycle_floquet_modes_on_mesh_with_backend,
     compute_limit_cycle_floquet_modes_with_backend as core_compute_limit_cycle_floquet_modes_with_backend,
-    continue_homoclinic_curve, continue_homotopy_saddle_curve, continue_limit_cycle_collocation,
-    continue_limit_cycle_manifold_2d, continue_limit_cycle_manifold_2d_with_progress,
+    continue_heteroclinic_curve, continue_homoclinic_curve, continue_homotopy_saddle_curve,
+    continue_limit_cycle_collocation, continue_limit_cycle_manifold_2d,
+    continue_limit_cycle_manifold_2d_with_progress,
     continue_manifold_eq_1d_with_kind_and_periodicity, continue_manifold_eq_2d,
-    continue_manifold_eq_2d_with_progress, continue_with_problem, extend_limit_cycle_collocation,
-    extend_limit_cycle_manifold_2d_with_progress, extend_manifold_eq_2d_with_progress,
-    generalized_hopf_lpc_seed, homoclinic_setup_from_homoclinic_point_with_source_extras,
+    continue_manifold_eq_2d_with_progress, continue_with_problem, extend_heteroclinic_curve,
+    extend_limit_cycle_collocation, extend_limit_cycle_manifold_2d_with_progress,
+    extend_manifold_eq_2d_with_progress, generalized_hopf_lpc_seed, heteroclinic_setup_from_orbit,
+    homoclinic_setup_from_homoclinic_point_with_source_extras,
     homoclinic_setup_from_homoclinic_point_with_source_extras_on_mesh,
     homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
     homoclinic_setup_from_large_cycle_on_mesh, homotopy_saddle_setup_from_equilibrium,
@@ -28,10 +30,11 @@ use fork_core::continuation::{
     limit_cycle_setup_from_pd_on_mesh, uniform_normalized_mesh, BranchType, Codim1CurveBranch,
     Codim1CurvePoint, Codim1CurveType, Codim2Bifurcation, Codim2BifurcationType, CollocationConfig,
     ContinuationBranch, ContinuationSettings, FloquetBackend, FoldCurveProblem,
-    HomoclinicExtraFlags, HomoclinicFixedScalars, HomoclinicSetup, HomotopySaddleSetup,
-    HopfCurveProblem, IsoperiodicCurveProblem, LPCCurveProblem, LimitCycleSetup,
-    Manifold1DSettings, Manifold2DSettings, ManifoldCycle2DSettings, ManifoldGeometry,
-    ManifoldSurfaceResumeState, NSCurveProblem, OrbitTimeMode, PDCurveProblem, StepResult,
+    HeteroclinicOrbitSeed, HeteroclinicSetupV1, HomoclinicExtraFlags, HomoclinicFixedScalars,
+    HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem, IsoperiodicCurveProblem,
+    LPCCurveProblem, LimitCycleSetup, Manifold1DSettings, Manifold2DSettings,
+    ManifoldCycle2DSettings, ManifoldGeometry, ManifoldSurfaceResumeState, NSCurveProblem,
+    OrbitTimeMode, PDCurveProblem, StepResult,
 };
 use fork_core::equilibrium::{compute_jacobian, compute_system_jacobian, SystemKind};
 use fork_core::traits::DynamicalSystem;
@@ -319,6 +322,15 @@ impl WasmSystem {
                 )
                 .map_err(|e| JsValue::from_str(&format!("LC branch extension failed: {}", e)))?
             }
+            BranchType::HeteroclinicCurve { .. } => extend_heteroclinic_curve(
+                &mut self.system,
+                branch,
+                settings,
+                forward,
+            )
+            .map_err(|error| {
+                JsValue::from_str(&format!("Heteroclinic branch extension failed: {error}"))
+            })?,
             BranchType::HomoclinicCurve { .. } | BranchType::HomotopySaddleCurve { .. } => {
                 return Err(JsValue::from_str(
                     "Branch extension for homoclinic and homotopy-saddle curves is not available yet.",
@@ -1175,6 +1187,98 @@ impl WasmSystem {
         .map_err(|e| JsValue::from_str(&format!("Limit cycle continuation failed: {}", e)))?;
 
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn init_heteroclinic_from_orbit(
+        &mut self,
+        seed_val: JsValue,
+        parameter_name: &str,
+        param2_name: &str,
+        target_ntst: u32,
+        target_ncol: u32,
+        free_time: bool,
+        free_eps0: bool,
+        free_eps1: bool,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "Heteroclinic continuation is available only for flows",
+            ));
+        }
+        let seed: HeteroclinicOrbitSeed = from_value(seed_val).map_err(|error| {
+            JsValue::from_str(&format!("Invalid heteroclinic orbit seed: {error}"))
+        })?;
+        let param1_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {parameter_name}"))
+            })?;
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {param2_name}")))?;
+        let base_params = self.system.params.clone();
+        let setup = heteroclinic_setup_from_orbit(
+            &mut self.system,
+            &seed,
+            target_ntst as usize,
+            target_ncol as usize,
+            &base_params,
+            param1_index,
+            param2_index,
+            parameter_name,
+            param2_name,
+            HomoclinicExtraFlags {
+                free_time,
+                free_eps0,
+                free_eps1,
+            },
+        )
+        .map_err(|error| {
+            JsValue::from_str(&format!(
+                "Failed to initialize two-equilibrium heteroclinic setup: {error}"
+            ))
+        })?;
+        to_value(&setup)
+            .map_err(|error| JsValue::from_str(&format!("Serialization error: {error}")))
+    }
+
+    pub fn compute_heteroclinic_continuation(
+        &mut self,
+        setup_val: JsValue,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        let setup: HeteroclinicSetupV1 = from_value(setup_val)
+            .map_err(|error| JsValue::from_str(&format!("Invalid heteroclinic setup: {error}")))?;
+        let settings: ContinuationSettings = from_value(settings_val).map_err(|error| {
+            JsValue::from_str(&format!("Invalid continuation settings: {error}"))
+        })?;
+        let branch = continue_heteroclinic_curve(&mut self.system, setup, settings, forward)
+            .map_err(|error| {
+                JsValue::from_str(&format!("Heteroclinic continuation failed: {error}"))
+            })?;
+        to_value(&branch)
+            .map_err(|error| JsValue::from_str(&format!("Serialization error: {error}")))
+    }
+
+    pub fn extend_heteroclinic_continuation(
+        &mut self,
+        branch_val: JsValue,
+        settings_val: JsValue,
+        extend_forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        let branch: ContinuationBranch = from_value(branch_val)
+            .map_err(|error| JsValue::from_str(&format!("Invalid heteroclinic branch: {error}")))?;
+        let settings: ContinuationSettings = from_value(settings_val).map_err(|error| {
+            JsValue::from_str(&format!("Invalid continuation settings: {error}"))
+        })?;
+        let extended =
+            extend_heteroclinic_curve(&mut self.system, branch, settings, extend_forward).map_err(
+                |error| JsValue::from_str(&format!("Heteroclinic extension failed: {error}")),
+            )?;
+        to_value(&extended)
+            .map_err(|error| JsValue::from_str(&format!("Serialization error: {error}")))
     }
 
     pub fn init_homoclinic_from_large_cycle(

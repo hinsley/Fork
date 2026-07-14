@@ -20,9 +20,10 @@ connection between two distinct equilibria: the source and target boundary
 conditions share one saddle, one Jacobian, and one stable/unstable splitting.
 
 Accordingly, strict HBK parity and genuine two-saddle heteroclinic continuation
-are separate Fork milestones.  A future heteroclinic formulation needs two
+are separate Fork milestones. Fork now implements the latter with two
 equilibria, two Jacobians, independent source/target invariant subspaces, and a
-versioned connection schema; it must not be represented as an HBK feature.
+versioned connection schema. It remains an extension beyond HBK 0.2.1 rather
+than evidence for strict HBK parity.
 
 ## Source-backed capability matrix
 
@@ -41,7 +42,7 @@ versioned connection schema; it must not be represented as an HBK feature.
 | One-sided spectral events | HBK exposes raw `TLS`, `TLU`, `NCH`, `SH`, and `BT` scalars, but its event handler cannot normally bracket their ordered one-sided formulas | Supported and localized with continuation-aware spectral identities; raw values remain serialized at the corrected marker |
 | Orbit flip | Optional `OFS`/`OFU` tests | Exposed only when the required adjoint data are available |
 | Inclination flip | `IFS`/`IFU` are constant placeholders, not implemented | Explicitly reported as unsupported |
-| Genuine two-saddle heteroclinic | Not implemented | Beyond strict parity; tracked separately |
+| Genuine two-saddle heteroclinic | Not implemented | Supported beyond strict parity with adaptive orthogonal collocation, restart, and extension; standard shooting and connection-specific events remain follow-ups |
 
 Fork uses the mathematically symmetric three-leading-unstable diagnostic
 `Re(lambda1) - Re(lambda3)`. HBK 0.2.1 literally uses a plus sign for `TLU`,
@@ -76,6 +77,15 @@ The four-dimensional saddle-focus fixture appends a stable complex pair to the
 Duffing loop. It certifies conjugate-pair basis construction, multiple shooting,
 and an available `NSF` channel without treating unavailable real/bi-focus
 channels as zero-valued events.
+
+Fork's separate heteroclinic acceptance fixture uses
+`x' = 1 - x^2`, `y' = x y + (mu - nu)(1 - x^2)`. Its exact connection
+`(x, y) = (tanh(t), 0)` runs from `(-1, 0)` to `(1, 0)` on `mu = nu`.
+The test certifies independent endpoint equilibria and splittings, the packed
+version-one schema, defect-driven mesh redistribution, serialization, restart,
+extension, and the real Node-WASM, CLI, and web boundaries. See
+[`heteroclinic-methods.md`](heteroclinic-methods.md) for the user workflow and
+current limitations.
 
 ## Important non-parity workflow
 

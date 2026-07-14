@@ -28,6 +28,8 @@ import type {
   HomoclinicFromHomoclinicRequest,
   HomoclinicFromHomotopySaddleRequest,
   HomoclinicFromLargeCycleRequest,
+  HeteroclinicContinuationResult,
+  HeteroclinicFromOrbitRequest,
   HomotopySaddleContinuationResult,
   HomotopySaddleFromEquilibriumRequest,
   HopfCurveContinuationRequest,
@@ -1963,6 +1965,57 @@ async function runHomoclinicFromHomotopySaddle(
   return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
+async function runHeteroclinicFromOrbit(
+  request: HeteroclinicFromOrbitRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<HeteroclinicContinuationResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = createWasmSystem(wasm, request.system)
+  const initHeteroclinic = system.init_heteroclinic_from_orbit
+  if (typeof initHeteroclinic !== 'function') {
+    throw new Error(
+      'Heteroclinic continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const setup = initHeteroclinic.call(
+    system,
+    {
+      times: request.orbitTimes,
+      states: request.orbitStates,
+      source_equilibrium: request.sourceEquilibrium,
+      target_equilibrium: request.targetEquilibrium,
+    },
+    request.parameterName,
+    request.param2Name,
+    request.ntst,
+    request.ncol,
+    request.freeTime,
+    request.freeEps0,
+    request.freeEps1
+  )
+  const HeteroclinicRunner = wasm.WasmHeteroclinicRunner
+  if (typeof HeteroclinicRunner !== 'function') {
+    throw new Error(
+      'Heteroclinic continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const runner = new HeteroclinicRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    setup,
+    {
+      ...request.settings,
+      projector_refresh_interval: request.projectorRefreshInterval,
+    },
+    request.forward
+  )
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
+}
+
 async function runMapCycleContinuationFromPD(
   request: MapCycleContinuationFromPDRequest,
   signal: AbortSignal,
@@ -2088,6 +2141,7 @@ const handlers = {
   runHomoclinicFromHomoclinic,
   runHomotopySaddleFromEquilibrium,
   runHomoclinicFromHomotopySaddle,
+  runHeteroclinicFromOrbit,
   runMapCycleContinuationFromPD,
   validateSystem: runValidateSystem,
 } satisfies ComputeHandlerMap

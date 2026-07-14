@@ -583,6 +583,7 @@ export function formatPointRow(
     branch.branchType === 'pd_curve' ||
     branch.branchType === 'ns_curve' ||
     branch.branchType === 'homoclinic_curve' ||
+    branch.branchType === 'heteroclinic_curve' ||
     branch.branchType === 'homotopy_saddle_curve'
   ) {
     // Two-parameter branch: show both p1 and p2
@@ -782,6 +783,7 @@ export async function hydrateEigenvalues(sysName: string, branch: ContinuationOb
     branch.branchType === 'pd_curve' ||
     branch.branchType === 'ns_curve' ||
     branch.branchType === 'homoclinic_curve' ||
+    branch.branchType === 'heteroclinic_curve' ||
     branch.branchType === 'homotopy_saddle_curve' ||
     branch.branchType === 'eq_manifold_1d' ||
     branch.branchType === 'eq_manifold_2d' ||
@@ -912,6 +914,7 @@ export async function showPointDetails(
     branchType === 'pd_curve' ||
     branchType === 'ns_curve' ||
     branchType === 'homoclinic_curve' ||
+    branchType === 'heteroclinic_curve' ||
     branchType === 'homotopy_saddle_curve'
   ) {
     // Get param names from branch_type
@@ -1047,6 +1050,26 @@ export async function showPointDetails(
         free_eps0: Boolean(branchTypeData.free_eps0),
         free_eps1: Boolean(branchTypeData.free_eps1),
       });
+    }
+  }
+
+  if (branchType === 'heteroclinic_curve') {
+    const branchTypeData = branch.data.branch_type;
+    if (branchTypeData?.type === 'HeteroclinicCurve') {
+      console.log(chalk.white('\nHeteroclinic diagnostics:'));
+      console.log(`  Schema: v${branchTypeData.schema.schema_version}`);
+      console.log(
+        `  Endpoints: ${branch.heteroclinicEndpoints?.sourceObjectName ?? 'source'} -> ` +
+          `${branch.heteroclinicEndpoints?.targetObjectName ?? 'target'}`
+      );
+      console.log(
+        `  Morse dimensions: source unstable=${branchTypeData.schema.source_basis.npos}, ` +
+          `target stable=${branchTypeData.schema.target_basis.nneg}`
+      );
+      console.log(
+        `  Mesh: ${branchTypeData.ntst} x ${branchTypeData.ncol}; ` +
+          `projector refresh=${branchTypeData.schema.projector_refresh_interval}`
+      );
     }
   }
 

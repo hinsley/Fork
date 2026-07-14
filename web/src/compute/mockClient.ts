@@ -28,6 +28,8 @@ import type {
   HomoclinicFromHomoclinicRequest,
   HomoclinicFromHomotopySaddleRequest,
   HomoclinicFromLargeCycleRequest,
+  HeteroclinicContinuationResult,
+  HeteroclinicFromOrbitRequest,
   HopfCurveContinuationRequest,
   IsoperiodicCurveContinuationRequest,
   HomotopySaddleContinuationResult,
@@ -1829,6 +1831,90 @@ export class MockForkCoreClient implements ForkCoreClient {
             free_time: request.freeTime,
             free_eps0: request.freeEps0,
             free_eps1: request.freeEps1,
+          },
+        })
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runHeteroclinicFromOrbit(
+    request: HeteroclinicFromOrbitRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HeteroclinicContinuationResult> {
+    const job = this.queue.enqueue(
+      'runHeteroclinicFromOrbit',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        const param1Index = request.system.paramNames.indexOf(request.parameterName)
+        const param2Index = request.system.paramNames.indexOf(request.param2Name)
+        const paramValue = request.system.params[param1Index] ?? 0
+        opts?.onProgress?.({
+          done: true,
+          current_step: request.settings.max_steps,
+          max_steps: request.settings.max_steps,
+          points_computed: 2,
+          bifurcations_found: 0,
+          current_param: paramValue + request.settings.step_size,
+        })
+        const dim = request.system.varNames.length
+        const zeroBasis = {
+          stable_q: new Array(dim * dim).fill(0),
+          unstable_q: new Array(dim * dim).fill(0),
+          dim,
+          nneg: Math.max(0, dim - 1),
+          npos: dim > 0 ? 1 : 0,
+        }
+        const state = [
+          ...request.orbitStates.flat(),
+          ...request.sourceEquilibrium,
+          ...request.targetEquilibrium,
+        ]
+        return normalizeBranchEigenvalues({
+          points: [
+            { state, param_value: paramValue, stability: 'None', eigenvalues: [] },
+            {
+              state,
+              param_value: paramValue + request.settings.step_size,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: {
+            type: 'HeteroclinicCurve',
+            schema: {
+              schema_version: 1,
+              base_params: [...request.system.params],
+              param1_index: param1Index,
+              param2_index: param2Index,
+              source_basis: zeroBasis,
+              target_basis: zeroBasis,
+              fixed_time:
+                (request.orbitTimes.at(-1) ?? 1) - (request.orbitTimes[0] ?? 0),
+              fixed_eps0: 0.01,
+              fixed_eps1: 0.01,
+              projector_refresh_interval: request.projectorRefreshInterval ?? 2,
+            },
+            ntst: request.ntst,
+            ncol: request.ncol,
+            param1_name: request.parameterName,
+            param2_name: request.param2Name,
+            free_time: request.freeTime,
+            free_eps0: request.freeEps0,
+            free_eps1: request.freeEps1,
+            normalized_mesh: Array.from(
+              { length: request.ntst + 1 },
+              (_, index) => index / request.ntst
+            ),
+            collocation_adaptivity: request.settings.collocation_adaptivity,
           },
         })
       },

@@ -1265,6 +1265,7 @@ const LIMIT_CYCLE_BRANCH_TYPES = new Set([
   'limit_cycle',
   'isoperiodic_curve',
   'homoclinic_curve',
+  'heteroclinic_curve',
   'homotopy_saddle_curve',
   'pd_curve',
   'lpc_curve',
@@ -1277,6 +1278,7 @@ const CODIM1_BIFURCATION_CURVE_BRANCH_TYPES = new Set([
   'pd_curve',
   'ns_curve',
   'homoclinic_curve',
+  'heteroclinic_curve',
   'homotopy_saddle_curve',
 ])
 const MANIFOLD_CURVE_BRANCH_TYPES = new Set<ContinuationObject['branchType']>(['eq_manifold_1d'])
@@ -1302,6 +1304,7 @@ function resolveLimitCycleMesh(
       [
         'LimitCycle',
         'HomoclinicCurve',
+        'HeteroclinicCurve',
         'HomotopySaddleCurve',
         'IsoperiodicCurve',
         'PDCurve',
@@ -1466,7 +1469,11 @@ function resolveLimitCycleLayout(
 function allowsPackedTailLimitCycleProfile(
   branchType: ContinuationObject['branchType']
 ): boolean {
-  return branchType === 'homoclinic_curve' || branchType === 'homotopy_saddle_curve'
+  return (
+    branchType === 'homoclinic_curve' ||
+    branchType === 'heteroclinic_curve' ||
+    branchType === 'homotopy_saddle_curve'
+  )
 }
 
 type LimitCycleTraceConfig = {

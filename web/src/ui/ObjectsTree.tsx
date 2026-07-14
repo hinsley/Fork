@@ -64,6 +64,7 @@ function getBranchTypeLabel(branch: ContinuationObject, system: System): string 
   }
   if (branch.branchType === 'limit_cycle') return 'limit cycle'
   if (branch.branchType === 'homoclinic_curve') return 'homoclinic curve'
+  if (branch.branchType === 'heteroclinic_curve') return 'heteroclinic curve'
   if (branch.branchType === 'homotopy_saddle_curve') return 'homotopy saddle curve'
   if (branch.branchType === 'fold_curve') return 'fold curve'
   if (branch.branchType === 'hopf_curve') {
