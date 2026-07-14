@@ -17,6 +17,7 @@ import {
   updateBranch,
   updateLimitCycleRenderTarget,
   updateNodeRender,
+  updateObject,
 } from '../system/model'
 import { buildSubsystemSnapshot } from '../system/subsystemGateway'
 import { renderPlot } from '../viewports/plotly/plotlyAdapter'
@@ -562,6 +563,87 @@ describe('InspectorDetailsPanel', () => {
         simulation.compareDocumentPosition(dependent) & Node.DOCUMENT_POSITION_FOLLOWING
       ).not.toBe(0)
     }
+  })
+
+  it('preserves Lyapunov drafts when orbit analysis results update', () => {
+    const baseSystem = createSystem({
+      name: 'Lyapunov_Draft_Lifecycle',
+      config: {
+        name: 'Lyapunov_Draft_Lifecycle',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Lyapunov',
+      systemName: baseSystem.config.name,
+      data: [
+        [0, 1, 0],
+        [20, 0, 1],
+      ],
+      t_start: 0,
+      t_end: 20,
+      dt: 0.01,
+      parameters: [...baseSystem.config.params],
+    }
+    const added = addObject(baseSystem, orbit)
+    const renderPanel = (system: System) => (
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    const rendered = render(renderPanel(added.system))
+    fireEvent.click(screen.getByTestId('oseledets-toggle'))
+    fireEvent.change(screen.getByTestId('lyapunov-transient'), {
+      target: { value: '12' },
+    })
+    fireEvent.change(screen.getByTestId('lyapunov-qr'), { target: { value: '5' } })
+    fireEvent.change(screen.getByTestId('clv-transient'), { target: { value: '3' } })
+    fireEvent.change(screen.getByTestId('clv-forward'), { target: { value: '4' } })
+    fireEvent.change(screen.getByTestId('clv-backward'), { target: { value: '6' } })
+    fireEvent.change(screen.getByTestId('clv-qr'), { target: { value: '7' } })
+
+    const withResults = updateObject(added.system, added.nodeId, {
+      lyapunovExponents: [0.1, -0.1],
+    })
+    rendered.rerender(renderPanel(withResults))
+
+    expect(screen.getByTestId('lyapunov-transient')).toHaveValue(12)
+    expect(screen.getByTestId('lyapunov-qr')).toHaveValue(5)
+    expect(screen.getByTestId('clv-transient')).toHaveValue(3)
+    expect(screen.getByTestId('clv-forward')).toHaveValue(4)
+    expect(screen.getByTestId('clv-backward')).toHaveValue(6)
+    expect(screen.getByTestId('clv-qr')).toHaveValue(7)
   })
 
   it('hides equilibrium result menus until the equilibrium has been solved', () => {
