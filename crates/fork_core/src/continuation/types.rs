@@ -633,6 +633,10 @@ pub enum BifurcationType {
     HeteroclinicSourceOrbitFlip,
     /// The connection loses its weak real target-stable component (`TOF`).
     HeteroclinicTargetOrbitFlip,
+    /// The transported source frame becomes non-transverse to its reference (`SIF`).
+    HeteroclinicSourceInclinationFlip,
+    /// The transported target frame becomes non-transverse to its reference (`TIF`).
+    HeteroclinicTargetInclinationFlip,
 }
 
 /// A single point on a continuation branch.
