@@ -308,10 +308,14 @@ describe('InspectorDetailsPanel', () => {
               inclination_transport: {
                 source: {
                   ambient_dimension: 3,
-                  frame_dimension: 1,
-                  transported_frame: [1, 0, 0],
+                  frame_dimension: 2,
+                  reference_dimension: 1,
+                  principal_dimension: 2,
+                  transported_frame: [1, 0, 0, 0, 1, 0],
                   reference_frame: [0.8, 0.6, 0],
+                  exterior_orientation: [1, 0],
                   minimum_overlap_singular_value: 0.8,
+                  gauge_invariant_overlap_volume: 0.8,
                   relative_transport_residual: 2e-9,
                 },
                 target: {
@@ -374,10 +378,10 @@ describe('InspectorDetailsPanel', () => {
       'XRS · Cross-endpoint resonanceunsupported · value unavailable'
     )
     expect(diagnostics).toHaveTextContent(
-      'Source inclination transport3 x 1 frame · minimum physical overlap 8.000000e-1 · relative residual 2.000000e-9'
+      'Source inclination transport3D · transported 2 · reference 1 · principal block 2 · minimum physical overlap 8.000000e-1 · exterior volume 8.000000e-1 · relative residual 2.000000e-9'
     )
     expect(diagnostics).toHaveTextContent(
-      'Target inclination transport3 x 1 frame · minimum physical overlap 1.000000e+0 · relative residual 3.000000e-9'
+      'Target inclination transport3D · transported 1 · reference 1 · principal block 1 · minimum physical overlap 1.000000e+0 · exterior volume 1.000000e+0 · relative residual 3.000000e-9'
     )
     expect(diagnostics).toHaveTextContent(
       'SIF · Source inclination flipavailable · value 8.000000e-1'

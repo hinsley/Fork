@@ -17,7 +17,11 @@ function formatInclinationFrame(
   formatScientific: (value: number, digits?: number) => string
 ): string {
   if (!frame) return 'unavailable'
-  return `${frame.ambient_dimension} x ${frame.frame_dimension} frame · minimum physical overlap ${formatScientific(frame.minimum_overlap_singular_value, 6)} · relative residual ${formatScientific(frame.relative_transport_residual, 6)}`
+  const referenceDimension = frame.reference_dimension ?? frame.frame_dimension
+  const principalDimension = frame.principal_dimension ?? 1
+  const exteriorVolume =
+    frame.gauge_invariant_overlap_volume ?? frame.minimum_overlap_singular_value
+  return `${frame.ambient_dimension}D · transported ${frame.frame_dimension} · reference ${referenceDimension} · principal block ${principalDimension} · minimum physical overlap ${formatScientific(frame.minimum_overlap_singular_value, 6)} · exterior volume ${formatScientific(exteriorVolume, 6)} · relative residual ${formatScientific(frame.relative_transport_residual, 6)}`
 }
 
 export function BranchDataSections({ scope }: { scope: InspectorSelectionController }) {

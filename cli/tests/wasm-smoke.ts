@@ -1380,4 +1380,88 @@ for (const intervals of [1, 6]) {
   assert.equal(shootingCorrectedPoint.heteroclinic_events?.target_stable_dimension, 1);
 }
 
+for (const fixture of [
+  {
+    kind: 'SIF',
+    marker: 'HeteroclinicSourceInclinationFlip',
+    equations: [
+      '1-x^2',
+      '0.5*w-y',
+      'w+0.5*y',
+      '0.75*x*u+(mu-nu)*(1-x^2)+mu*(1-x^2)*w',
+      '-3*z',
+    ],
+  },
+  {
+    kind: 'TIF',
+    marker: 'HeteroclinicTargetInclinationFlip',
+    equations: [
+      '1-x^2',
+      '-0.5*w-y',
+      'w-0.5*y',
+      '0.75*x*u-(mu-nu)*(1-x^2)-mu*(1-x^2)*w',
+      '3*z',
+    ],
+  },
+]) {
+  const complexSystem = new wasm.WasmSystem(
+    fixture.equations,
+    new Float64Array([-0.003, -0.003]),
+    ['mu', 'nu'],
+    ['x', 'w', 'y', 'u', 'z'],
+    'rk4',
+    'flow'
+  );
+  const complexSetup = complexSystem.init_heteroclinic_from_orbit(
+    {
+      times: heteroclinicTimes,
+      states: heteroclinicTimes.map((time) => [Math.tanh(time), 0, 0, 0, 0]),
+      source_equilibrium: [-1, 0, 0, 0, 0],
+      target_equilibrium: [1, 0, 0, 0, 0],
+    },
+    'mu',
+    'nu',
+    20,
+    3,
+    true,
+    false,
+    false
+  );
+  const complexRunner = new wasm.WasmHeteroclinicRunner(
+    fixture.equations,
+    new Float64Array([-0.003, -0.003]),
+    ['mu', 'nu'],
+    ['x', 'w', 'y', 'u', 'z'],
+    complexSetup,
+    {
+      step_size: 1e-3,
+      min_step_size: 1e-7,
+      max_step_size: 1e-3,
+      max_steps: 8,
+      corrector_steps: 24,
+      corrector_tolerance: 1e-9,
+      step_tolerance: 1e-9,
+      collocation_adaptivity: { enabled: false },
+    },
+    true
+  );
+  while (!complexRunner.get_progress().done) complexRunner.run_steps(1);
+  const branch = complexRunner.get_result();
+  const values = branch.points
+    .map((point: any) => point.heteroclinic_events?.events.find((event: any) => event.kind === fixture.kind)?.value)
+    .filter((value: unknown): value is number => typeof value === 'number');
+  assert.ok(values.some((value: number) => value < -1e-6));
+  assert.ok(values.some((value: number) => value > 1e-6));
+  assert.ok(branch.points.some((point: any) => point.stability === fixture.marker));
+  const payload = branch.points
+    .map((point: any) => point.heteroclinic_events?.inclination_transport)
+    .map((transport: any) => fixture.kind === 'SIF' ? transport?.source : transport?.target)
+    .find(Boolean);
+  assert.equal(payload.frame_dimension, 2);
+  assert.equal(payload.reference_dimension, 1);
+  assert.equal(payload.principal_dimension, 2);
+  assert.equal(payload.exterior_orientation.length, 2);
+  assert.ok(Number.isFinite(payload.gauge_invariant_overlap_volume));
+}
+
 console.log('PASS real WASM node boundary smoke');

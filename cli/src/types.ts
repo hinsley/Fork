@@ -170,13 +170,22 @@ export interface HeteroclinicEventValue {
 
 export interface HeteroclinicInclinationFrame {
   ambient_dimension: number;
+  /** Transported transverse-frame dimension. */
   frame_dimension: number;
+  /** Strong reference-frame dimension; legacy square payloads omit it. */
+  reference_dimension?: number;
+  /** Real dimension of the weak principal spectral block. */
+  principal_dimension?: number;
   /** Flattened ambient-by-frame matrix in column-major order. */
   transported_frame: number[];
-  /** Flattened ambient-by-frame matrix in column-major order. */
+  /** Flattened ambient-by-reference matrix in column-major order. */
   reference_frame: number[];
+  /** Restart-safe orientation in maximal-minor coordinates. */
+  exterior_orientation?: number[];
   /** Minimum singular value of the same-point physical reference/transport overlap. */
   minimum_overlap_singular_value: number;
+  /** Product of overlap singular values, invariant under frame gauges. */
+  gauge_invariant_overlap_volume?: number;
   relative_transport_residual: number;
 }
 

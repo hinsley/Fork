@@ -47,9 +47,13 @@ than evidence for strict HBK parity.
 The transported two-saddle `SIF`/`TIF` channels do not change the strict HBK
 inclination-flip row above. They are a separate Fork extension with independent
 source-forward and target-backward tangent frames, plus independent `O(k)`
-Procrustes gauge alignment against the preceding accepted frames, and a
-real-simple principal-mode restriction. The transported and reference frames
-are never aligned directly to one another before evaluating their signed determinant. The
+Procrustes gauge alignment against the preceding accepted frames. Simple-real
+principal modes use the signed overlap determinant. Complex, clustered, and
+multiple principal blocks use the gauge-invariant vector of maximal overlap
+minors plus a serialized exterior orientation for localization; rotation-only
+coordinate sign changes are rejected unless the exterior norm approaches rank
+loss. The transported and reference frames are never aligned directly to one
+another. The
 [AUTO97 manual](https://www.staff.science.uu.nl/~kouzn101/AUTO/auto97man.pdf)
 likewise does not provide heteroclinic orientation support, while
 [De Witte et al. (2012)](https://doi.org/10.1145/2168773.2168776) provides the
@@ -113,6 +117,21 @@ $$
 w'=xw-(\mu-\nu)(1-x^2)-\mu(1-x^2)y,\quad
 y'=-\tfrac12y,\quad z'=3z.
 $$
+
+Complex-principal acceptance uses five-dimensional lifts with a weak pair
+`0.5 +/- i` for `SIF` or `-0.5 +/- i` for `TIF`, a strong real mode
+`0.75 x`, and the same exact connection. For `SIF` the transverse equations
+are
+
+$$
+w'=\tfrac12w-y,\quad y'=w+\tfrac12y,\quad
+u'=\tfrac34xu+(\mu-\nu)(1-x^2)+\mu(1-x^2)w,\quad z'=-3z,
+$$
+
+with the time-reversed stable construction used for `TIF`. The tests require
+the two-coordinate exterior vector to change orientation through zero, reject
+rotation without rank loss, localize in both directions with collocation and
+shooting, and preserve the exterior gauge through serialization and restart.
 
 Their analytic SIF and TIF zeros are `mu = 0`. Core tests require collocation
 and shooting, in both continuation directions, to produce both signs, localize

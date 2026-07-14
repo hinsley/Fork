@@ -24,6 +24,9 @@ function copyInclinationFrame(
     ...frame,
     transported_frame: [...frame.transported_frame],
     reference_frame: [...frame.reference_frame],
+    ...(frame.exterior_orientation
+      ? { exterior_orientation: [...frame.exterior_orientation] }
+      : {}),
   }
 }
 

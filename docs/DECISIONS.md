@@ -21,6 +21,43 @@ References:
 
 ---
 
+### 2026-07-14: Continue multidimensional inclination tests in exterior coordinates
+Context:
+A complex conjugate principal pair or a cluster of equally weak real modes has real dimension
+`r > 1`. The transported transverse frame then has `m - 1` columns while the strong reference
+frame has `m - r` columns, so `R^T T` is rectangular and has no signed determinant. Treating its
+smallest singular value as a signed scalar would fabricate an orientation and create false events
+when the overlap merely rotates.
+Decision:
+This decision supersedes the simple-real principal-mode restriction in the inclination-transport
+entry below.
+Represent the rank condition by every maximal minor of `R^T T`, that is, its top exterior-power
+coordinate vector. Its norm `sqrt(det((R^T T)(R^T T)^T))` is the gauge-invariant product of overlap
+singular values. Serialize a unit exterior orientation from the first nonzero accepted diagnostic,
+carry it through the existing independent Procrustes frame alignment, and use its pairing with the
+current minor vector only for the sign of the invariant exterior-volume scalar. For rectangular
+brackets, additionally require
+the chord between consecutive minor vectors to pass within `1e-3` relative norm of the origin; a
+coordinate sign change without near-rank-loss is rejected. Group principal modes by normalized real
+part with the existing inclination separation tolerance, and require a nonempty strong complement.
+Why:
+The exterior vector vanishes exactly when the strong-inclination overlap loses row rank and its norm
+is invariant under orthogonal basis changes. The persisted orientation makes one-parameter
+bracketing and restart deterministic without claiming that a complex determinant is intrinsically
+signed.
+Impact:
+`SIF` and `TIF` now support complex conjugate, clustered, and multiple principal blocks when a
+strong complement exists. Diagnostic payloads distinguish transported, reference, and principal
+dimensions and expose the gauge-invariant exterior volume. Legacy square payloads remain readable.
+References:
+`crates/fork_core/src/continuation/heteroclinic_events.rs`,
+`crates/fork_core/src/continuation/heteroclinic_transport.rs`,
+`docs/heteroclinic-methods.md`,
+[Deng](https://www.math.unl.edu/~bdeng1/Papers/DengTwistedLoop.pdf),
+[De Witte et al. (2012)](https://doi.org/10.1145/2168773.2168776)
+
+---
+
 ### 2026-07-14: Detect two-equilibrium inclination flips with transported tangent frames
 Context:
 Endpoint eigenvalues and endpoint displacement projections can detect spectral and orbit-flip

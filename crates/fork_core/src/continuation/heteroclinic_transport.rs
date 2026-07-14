@@ -150,19 +150,24 @@ fn frame_data(
     relative_transport_residual: f64,
 ) -> Result<InclinationFrameData> {
     let reference_frame = positive_qr(reference_frame)?;
-    if reference_frame.shape() != transported_frame.shape() {
-        bail!("Inclination transported and reference frames have different dimensions");
+    if reference_frame.nrows() != transported_frame.nrows()
+        || reference_frame.ncols() == 0
+        || reference_frame.ncols() > transported_frame.ncols()
+    {
+        bail!("Inclination reference frame must be a non-empty subspace of the transported transverse dimension");
     }
     let overlap = reference_frame.transpose() * &transported_frame;
-    let minimum_overlap_singular_value = overlap
-        .clone()
-        .svd(false, false)
-        .singular_values
+    let singular_values = overlap.clone().svd(false, false).singular_values;
+    let minimum_overlap_singular_value = singular_values
         .iter()
         .copied()
         .fold(f64::INFINITY, f64::min);
+    let gauge_invariant_overlap_volume = singular_values.iter().copied().product::<f64>();
     if !minimum_overlap_singular_value.is_finite() {
         bail!("Inclination overlap has a non-finite singular value");
+    }
+    if !gauge_invariant_overlap_volume.is_finite() {
+        bail!("Inclination overlap has a non-finite exterior volume");
     }
     Ok(InclinationFrameData {
         transported_frame,

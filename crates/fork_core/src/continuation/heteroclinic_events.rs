@@ -42,10 +42,10 @@ pub enum HeteroclinicEventKind {
     /// single open connection.
     #[serde(rename = "XRS")]
     CrossEndpointResonance,
-    /// Source inclination-flip test (not yet implemented).
+    /// Loss of source strong inclination after forward tangent transport.
     #[serde(rename = "SIF")]
     SourceInclinationFlip,
-    /// Target inclination-flip test (not yet implemented).
+    /// Loss of target strong inclination after backward tangent transport.
     #[serde(rename = "TIF")]
     TargetInclinationFlip,
 }
@@ -158,17 +158,29 @@ pub struct HeteroclinicOrbitFlipData {
 }
 
 /// Caller-supplied variational transport data for one endpoint inclination
-/// test. Frames are flattened column-major `ambient_dimension x frame_dimension`
-/// matrices. Fork evaluates the signed overlap determinant; callers do not
-/// supply an event scalar.
+/// test. Frames are flattened column-major matrices. The transported frame has
+/// `frame_dimension` columns; the strong reference frame may have fewer
+/// columns when the principal spectral block is multidimensional.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HeteroclinicInclinationFrame {
     pub ambient_dimension: usize,
     pub frame_dimension: usize,
+    #[serde(default)]
+    pub reference_dimension: usize,
+    #[serde(default = "default_principal_dimension")]
+    pub principal_dimension: usize,
     pub transported_frame: Vec<f64>,
     pub reference_frame: Vec<f64>,
+    #[serde(default)]
+    pub exterior_orientation: Vec<f64>,
     pub minimum_overlap_singular_value: f64,
+    #[serde(default)]
+    pub gauge_invariant_overlap_volume: f64,
     pub relative_transport_residual: f64,
+}
+
+const fn default_principal_dimension() -> usize {
+    1
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -187,11 +199,17 @@ pub fn heteroclinic_inclination_frame_from_matrices(
     minimum_overlap_singular_value: f64,
     relative_transport_residual: f64,
 ) -> Result<HeteroclinicInclinationFrame> {
-    if transported_frame.shape() != reference_frame.shape() {
-        bail!("inclination transported and reference frame dimensions differ");
+    if transported_frame.nrows() != reference_frame.nrows()
+        || reference_frame.ncols() == 0
+        || reference_frame.ncols() > transported_frame.ncols()
+    {
+        bail!(
+            "inclination reference frame must be non-empty and no wider than the transported frame"
+        );
     }
     let ambient_dimension = transported_frame.nrows();
     let frame_dimension = transported_frame.ncols();
+    let reference_dimension = reference_frame.ncols();
     inclination_frame_matrix(
         transported_frame.as_slice(),
         ambient_dimension,
@@ -201,15 +219,31 @@ pub fn heteroclinic_inclination_frame_from_matrices(
     inclination_frame_matrix(
         reference_frame.as_slice(),
         ambient_dimension,
-        frame_dimension,
+        reference_dimension,
         "reference",
     )?;
+    let exterior_coordinates = overlap_exterior_coordinates(reference_frame, transported_frame)?;
+    let gauge_invariant_overlap_volume = DVector::from_vec(exterior_coordinates.clone()).norm();
+    let exterior_orientation = if reference_dimension < frame_dimension
+        && gauge_invariant_overlap_volume > MIN_INCLINATION_FRAME_SINGULAR_VALUE
+    {
+        exterior_coordinates
+            .iter()
+            .map(|value| value / gauge_invariant_overlap_volume)
+            .collect()
+    } else {
+        Vec::new()
+    };
     Ok(HeteroclinicInclinationFrame {
         ambient_dimension,
         frame_dimension,
+        reference_dimension,
+        principal_dimension: frame_dimension - reference_dimension + 1,
         transported_frame: transported_frame.as_slice().to_vec(),
         reference_frame: reference_frame.as_slice().to_vec(),
+        exterior_orientation,
         minimum_overlap_singular_value,
+        gauge_invariant_overlap_volume,
         relative_transport_residual,
     })
 }
@@ -484,11 +518,16 @@ fn validate_inclination_spectral_eligibility(
             if frame.frame_dimension != source_unstable_dimension - 1 {
                 bail!("source inclination frame dimension must equal unstable dimension minus one");
             }
-            validate_simple_real_principal_mode(
+            let principal_dimension = principal_spectral_block_dimension(
                 target_eigenvalues,
                 false,
                 focus_tolerance,
                 "target unstable",
+            )?;
+            validate_inclination_reference_dimensions(
+                frame,
+                source_unstable_dimension,
+                principal_dimension,
             )?;
         }
         HeteroclinicEventKind::TargetInclinationFlip => {
@@ -501,11 +540,16 @@ fn validate_inclination_spectral_eligibility(
             if frame.frame_dimension != target_stable_dimension - 1 {
                 bail!("target inclination frame dimension must equal stable dimension minus one");
             }
-            validate_simple_real_principal_mode(
+            let principal_dimension = principal_spectral_block_dimension(
                 source_eigenvalues,
                 true,
                 focus_tolerance,
                 "source stable",
+            )?;
+            validate_inclination_reference_dimensions(
+                frame,
+                target_stable_dimension,
+                principal_dimension,
             )?;
         }
         _ => bail!("inclination spectral eligibility requested for a non-inclination event"),
@@ -513,12 +557,12 @@ fn validate_inclination_spectral_eligibility(
     Ok(())
 }
 
-fn validate_simple_real_principal_mode(
+pub(crate) fn principal_spectral_block_dimension(
     eigenvalues: &[Complex<f64>],
     stable: bool,
-    focus_tolerance: f64,
+    _focus_tolerance: f64,
     label: &str,
-) -> Result<()> {
+) -> Result<usize> {
     let on_side = |value: Complex<f64>| {
         if stable {
             value.re < -CENTER_TOLERANCE
@@ -539,35 +583,105 @@ fn validate_simple_real_principal_mode(
             left.re.total_cmp(&right.re)
         }
     });
-    let (principal_index, principal) = candidates
+    let (_, principal) = candidates
         .first()
         .copied()
         .ok_or_else(|| anyhow!("{label} principal mode is unavailable"))?;
-    if principal.im.abs() >= focus_tolerance {
-        bail!("{label} principal mode must be real");
-    }
-    let minimum_separation = eigenvalues
+    let principal_dimension = candidates
         .iter()
-        .copied()
-        .enumerate()
-        .filter(|(index, _)| *index != principal_index)
-        .map(|(_, value)| normalized_complex_distance(principal, value))
-        .min_by(|left, right| left.total_cmp(right))
-        .unwrap_or(f64::INFINITY);
-    if !minimum_separation.is_finite() || minimum_separation <= MIN_INCLINATION_PRINCIPAL_SEPARATION
-    {
-        bail!("{label} principal mode must be simple and spectrally separated");
+        .filter(|(_, value)| {
+            let scale = 1.0 + principal.norm() + value.norm();
+            (value.re - principal.re).abs() / scale <= MIN_INCLINATION_PRINCIPAL_SEPARATION
+        })
+        .count();
+    if principal_dimension == 0 {
+        bail!("{label} principal spectral block is unavailable");
+    }
+    Ok(principal_dimension)
+}
+
+fn validate_inclination_reference_dimensions(
+    frame: &HeteroclinicInclinationFrame,
+    bundle_dimension: usize,
+    principal_dimension: usize,
+) -> Result<()> {
+    if principal_dimension >= bundle_dimension {
+        bail!("inclination diagnostics require a non-empty strong spectral complement");
+    }
+    let reference_dimension = resolved_reference_dimension(frame);
+    let expected_reference_dimension = bundle_dimension - principal_dimension;
+    if reference_dimension != expected_reference_dimension {
+        bail!(
+            "inclination reference dimension must equal bundle dimension minus principal block dimension"
+        );
+    }
+    if frame.principal_dimension != 0 && frame.principal_dimension != principal_dimension {
+        bail!("inclination principal block dimension does not match the endpoint spectrum");
     }
     Ok(())
 }
 
-fn normalized_complex_distance(left: Complex<f64>, right: Complex<f64>) -> f64 {
-    (left - right).norm() / (1.0 + left.norm() + right.norm())
+fn resolved_reference_dimension(frame: &HeteroclinicInclinationFrame) -> usize {
+    if frame.reference_dimension == 0 {
+        frame.frame_dimension
+    } else {
+        frame.reference_dimension
+    }
 }
 
-/// Evaluate `det(R^T T)` from caller-supplied reference and transported
-/// frames. A singular overlap is a valid zero of the event function; only
-/// malformed/rank-deficient frames or an inaccurate transport are rejected.
+fn overlap_exterior_coordinates(
+    reference: &DMatrix<f64>,
+    transported: &DMatrix<f64>,
+) -> Result<Vec<f64>> {
+    if reference.nrows() != transported.nrows()
+        || reference.ncols() == 0
+        || reference.ncols() > transported.ncols()
+    {
+        bail!("inclination exterior overlap dimensions are inconsistent");
+    }
+    let overlap = reference.transpose() * transported;
+    let rows = overlap.nrows();
+    let columns = overlap.ncols();
+    let mut selections = Vec::<Vec<usize>>::new();
+    fn choose(
+        start: usize,
+        remaining: usize,
+        columns: usize,
+        current: &mut Vec<usize>,
+        selections: &mut Vec<Vec<usize>>,
+    ) {
+        if remaining == 0 {
+            selections.push(current.clone());
+            return;
+        }
+        for column in start..=columns - remaining {
+            current.push(column);
+            choose(column + 1, remaining - 1, columns, current, selections);
+            current.pop();
+        }
+    }
+    choose(0, rows, columns, &mut Vec::new(), &mut selections);
+    if selections.is_empty() || selections.len() > 4096 {
+        bail!("inclination exterior coordinate count is unsupported");
+    }
+    let coordinates = selections
+        .into_iter()
+        .map(|selection| {
+            DMatrix::from_fn(rows, rows, |row, column| overlap[(row, selection[column])])
+                .determinant()
+        })
+        .collect::<Vec<_>>();
+    if coordinates.iter().any(|value| !value.is_finite()) {
+        bail!("inclination exterior coordinates are non-finite");
+    }
+    Ok(coordinates)
+}
+
+/// Evaluate the inclination test from caller-supplied reference and transported
+/// frames. Square overlaps retain the signed determinant. Rectangular overlaps
+/// use the maximal-minor vector of `R^T T`. Its gauge-invariant norm is the
+/// scalar magnitude, while the serialized orientation supplies a restart-safe
+/// sign for one-parameter localization.
 pub fn signed_heteroclinic_inclination_determinant(
     frame: &HeteroclinicInclinationFrame,
 ) -> Result<f64> {
@@ -595,16 +709,96 @@ pub fn signed_heteroclinic_inclination_determinant(
     let reference = inclination_frame_matrix(
         &frame.reference_frame,
         frame.ambient_dimension,
-        frame.frame_dimension,
+        resolved_reference_dimension(frame),
         "reference",
     )?;
     validate_full_rank_inclination_frame(&transported, "transported")?;
     validate_full_rank_inclination_frame(&reference, "reference")?;
-    let determinant = (reference.transpose() * transported).determinant();
-    if !determinant.is_finite() {
-        bail!("inclination overlap determinant is non-finite");
+    let exterior = overlap_exterior_coordinates(&reference, &transported)?;
+    let value = if reference.ncols() == transported.ncols() {
+        exterior[0]
+    } else {
+        let exterior = DVector::from_vec(exterior);
+        let volume = exterior.norm();
+        if volume == 0.0 {
+            return Ok(0.0);
+        }
+        if frame.exterior_orientation.len() != exterior.len()
+            || frame
+                .exterior_orientation
+                .iter()
+                .any(|value| !value.is_finite())
+        {
+            bail!("multidimensional inclination test lacks a finite exterior orientation");
+        }
+        let orientation = DVector::from_column_slice(&frame.exterior_orientation);
+        if (orientation.norm() - 1.0).abs() > 1.0e-6 {
+            bail!("multidimensional inclination exterior orientation is not unit length");
+        }
+        let oriented_coordinate = orientation.dot(&exterior);
+        if oriented_coordinate < 0.0 {
+            -volume
+        } else {
+            volume
+        }
+    };
+    if !value.is_finite() {
+        bail!("inclination exterior test is non-finite");
     }
-    Ok(determinant)
+    Ok(value)
+}
+
+/// Confirm that a rectangular multidimensional inclination bracket approaches
+/// rank loss in the gauge-invariant exterior norm. A sign change of one
+/// oriented coordinate alone is insufficient because a nonzero exterior
+/// vector can rotate through the orientation hyperplane without losing rank.
+pub fn heteroclinic_inclination_rank_loss_bracket(
+    previous: &HeteroclinicInclinationFrame,
+    current: &HeteroclinicInclinationFrame,
+) -> Result<bool> {
+    let reference_dimension = resolved_reference_dimension(previous);
+    if reference_dimension == previous.frame_dimension {
+        return Ok(true);
+    }
+    if previous.ambient_dimension != current.ambient_dimension
+        || previous.frame_dimension != current.frame_dimension
+        || reference_dimension != resolved_reference_dimension(current)
+    {
+        return Ok(false);
+    }
+    let exterior = |frame: &HeteroclinicInclinationFrame| -> Result<DVector<f64>> {
+        let transported = inclination_frame_matrix(
+            &frame.transported_frame,
+            frame.ambient_dimension,
+            frame.frame_dimension,
+            "transported",
+        )?;
+        let reference = inclination_frame_matrix(
+            &frame.reference_frame,
+            frame.ambient_dimension,
+            resolved_reference_dimension(frame),
+            "reference",
+        )?;
+        Ok(DVector::from_vec(overlap_exterior_coordinates(
+            &reference,
+            &transported,
+        )?))
+    };
+    let left = exterior(previous)?;
+    let right = exterior(current)?;
+    if left.len() != right.len() {
+        return Ok(false);
+    }
+    let direction = &right - &left;
+    let denominator = direction.norm_squared();
+    let position = if denominator > 1.0e-24 {
+        (-left.dot(&direction) / denominator).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let minimum = (&left + direction * position).norm();
+    let scale = left.norm().max(right.norm()).max(1.0e-12);
+    Ok(minimum.is_finite() && minimum <= 1.0e-3 * scale)
 }
 
 /// Align a locally continuous current frame to the previous frame using the
@@ -705,6 +899,8 @@ fn align_inclination_endpoint(
     };
     if previous.ambient_dimension != current.ambient_dimension
         || previous.frame_dimension != current.frame_dimension
+        || resolved_reference_dimension(previous) != resolved_reference_dimension(current)
+        || previous.principal_dimension != current.principal_dimension
     {
         bail!("inclination frame dimensions changed across continuation steps");
     }
@@ -719,8 +915,29 @@ fn align_inclination_endpoint(
         &previous.reference_frame,
         &current.reference_frame,
         current.ambient_dimension,
-        current.frame_dimension,
+        resolved_reference_dimension(current),
     )?;
+    if resolved_reference_dimension(current) < current.frame_dimension {
+        let expected = overlap_exterior_coordinates(
+            &inclination_frame_matrix(
+                &aligned.reference_frame,
+                aligned.ambient_dimension,
+                resolved_reference_dimension(&aligned),
+                "aligned reference",
+            )?,
+            &inclination_frame_matrix(
+                &aligned.transported_frame,
+                aligned.ambient_dimension,
+                aligned.frame_dimension,
+                "aligned transported",
+            )?,
+        )?
+        .len();
+        if previous.exterior_orientation.len() != expected {
+            bail!("inclination exterior orientation dimension changed across continuation steps");
+        }
+        aligned.exterior_orientation = previous.exterior_orientation.clone();
+    }
     Ok(Some(aligned))
 }
 
@@ -1078,9 +1295,13 @@ mod tests {
         HeteroclinicInclinationFrame {
             ambient_dimension: 4,
             frame_dimension: 1,
+            reference_dimension: 1,
+            principal_dimension: 1,
             transported_frame,
             reference_frame,
+            exterior_orientation: Vec::new(),
             minimum_overlap_singular_value,
+            gauge_invariant_overlap_volume: minimum_overlap_singular_value,
             relative_transport_residual,
         }
     }
@@ -1138,6 +1359,31 @@ mod tests {
     }
 
     #[test]
+    fn legacy_square_inclination_payloads_remain_readable() {
+        let frame: HeteroclinicInclinationFrame = serde_json::from_str(
+            r#"{
+                "ambient_dimension": 2,
+                "frame_dimension": 1,
+                "transported_frame": [1.0, 0.0],
+                "reference_frame": [-1.0, 0.0],
+                "minimum_overlap_singular_value": 1.0,
+                "relative_transport_residual": 0.0
+            }"#,
+        )
+        .expect("legacy inclination payload");
+
+        assert_eq!(frame.reference_dimension, 0);
+        assert_eq!(frame.principal_dimension, 1);
+        assert!(frame.exterior_orientation.is_empty());
+        assert_eq!(frame.gauge_invariant_overlap_volume, 0.0);
+        assert_eq!(
+            signed_heteroclinic_inclination_determinant(&frame)
+                .expect("legacy square inclination determinant"),
+            -1.0
+        );
+    }
+
+    #[test]
     fn transport_residual_controls_eligibility_but_zero_overlap_remains_evaluable() {
         let eligible_zero = inclination_frame(
             vec![0.0, 1.0, 0.0, 0.0],
@@ -1177,7 +1423,7 @@ mod tests {
     }
 
     #[test]
-    fn inclination_eligibility_requires_matching_morse_indices_and_a_simple_real_principal_mode() {
+    fn inclination_eligibility_requires_matching_morse_indices_and_supports_principal_blocks() {
         let source =
             inclination_frame(vec![0.5, 1.0, 0.0, 0.0], vec![1.0, 0.0, 0.0, 0.0], 0.5, 0.0);
         let transport = HeteroclinicInclinationTransportDiagnostics {
@@ -1210,19 +1456,6 @@ mod tests {
             .as_deref()
             .is_some_and(|reason| reason.contains("hyperbolic")));
 
-        let complex_principal = compute_heteroclinic_event_diagnostics_with_inclination_transport(
-            &[c(-4.0, 0.0), c(-2.0, 0.0), c(1.0, 0.0), c(3.0, 0.0)],
-            &[c(-3.0, 0.0), c(-1.0, 0.0), c(2.0, 1.0), c(2.0, -1.0)],
-            None,
-            Some(transport.clone()),
-            DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
-        );
-        assert!(complex_principal
-            .event(HeteroclinicEventKind::SourceInclinationFlip)
-            .reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("real")));
-
         let clustered_source = [
             c(-4.0, 0.0),
             c(-2.0, 0.0),
@@ -1240,11 +1473,37 @@ mod tests {
         let clustered_frame = HeteroclinicInclinationFrame {
             ambient_dimension: 5,
             frame_dimension: 2,
+            reference_dimension: 1,
+            principal_dimension: 2,
             transported_frame: vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-            reference_frame: vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            reference_frame: vec![1.0, 0.0, 0.0, 0.0, 0.0],
+            exterior_orientation: vec![1.0, 0.0],
             minimum_overlap_singular_value: 1.0,
+            gauge_invariant_overlap_volume: 1.0,
             relative_transport_residual: 0.0,
         };
+        let complex_principal = compute_heteroclinic_event_diagnostics_with_inclination_transport(
+            &clustered_source,
+            &[
+                c(-3.0, 0.0),
+                c(-1.0, 0.0),
+                c(0.5, 1.0),
+                c(0.5, -1.0),
+                c(4.0, 0.0),
+            ],
+            None,
+            Some(HeteroclinicInclinationTransportDiagnostics {
+                source: Some(clustered_frame.clone()),
+                target: None,
+            }),
+            DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+        );
+        assert_eq!(
+            complex_principal
+                .event(HeteroclinicEventKind::SourceInclinationFlip)
+                .status,
+            HeteroclinicEventStatus::Available
+        );
         let clustered = compute_heteroclinic_event_diagnostics_with_inclination_transport(
             &clustered_source,
             &clustered_target,
@@ -1255,11 +1514,12 @@ mod tests {
             }),
             DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
         );
-        assert!(clustered
-            .event(HeteroclinicEventKind::SourceInclinationFlip)
-            .reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("separated")));
+        assert_eq!(
+            clustered
+                .event(HeteroclinicEventKind::SourceInclinationFlip)
+                .status,
+            HeteroclinicEventStatus::Available
+        );
     }
 
     #[test]
@@ -1282,6 +1542,103 @@ mod tests {
     }
 
     #[test]
+    fn multidimensional_exterior_test_is_signed_and_rejects_rotation_without_rank_loss() {
+        let spectra_source = [
+            c(-4.0, 0.0),
+            c(-2.0, 0.0),
+            c(1.0, 0.0),
+            c(3.0, 0.0),
+            c(5.0, 0.0),
+        ];
+        let spectra_target = [
+            c(-3.0, 0.0),
+            c(-1.0, 0.0),
+            c(0.5, 1.0),
+            c(0.5, -1.0),
+            c(4.0, 0.0),
+        ];
+        let reference = DMatrix::from_column_slice(5, 1, &[1.0, 0.0, 0.0, 0.0, 0.0]);
+        let frame = |parameter: f64| {
+            let transverse = (1.0 - parameter * parameter).sqrt();
+            let transported = DMatrix::from_column_slice(
+                5,
+                2,
+                &[
+                    parameter, 0.0, transverse, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+                ],
+            );
+            heteroclinic_inclination_frame_from_matrices(
+                &transported,
+                &reference,
+                parameter.abs(),
+                0.0,
+            )
+            .expect("rectangular inclination frame")
+        };
+        let diagnostics = |frame| {
+            compute_heteroclinic_event_diagnostics_with_inclination_transport(
+                &spectra_source,
+                &spectra_target,
+                None,
+                Some(HeteroclinicInclinationTransportDiagnostics {
+                    source: Some(frame),
+                    target: None,
+                }),
+                DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+            )
+        };
+        let previous = diagnostics(frame(-0.1));
+        let current =
+            align_heteroclinic_event_diagnostics_continuously(&previous, diagnostics(frame(0.1)));
+        let previous_value = previous
+            .event(HeteroclinicEventKind::SourceInclinationFlip)
+            .value
+            .expect("previous exterior value");
+        let current_value = current
+            .event(HeteroclinicEventKind::SourceInclinationFlip)
+            .value
+            .expect("current exterior value");
+        assert!(previous_value * current_value < 0.0);
+        assert!(heteroclinic_inclination_rank_loss_bracket(
+            previous
+                .inclination_transport
+                .as_ref()
+                .and_then(|transport| transport.source.as_ref())
+                .expect("previous frame"),
+            current
+                .inclination_transport
+                .as_ref()
+                .and_then(|transport| transport.source.as_ref())
+                .expect("current frame"),
+        )
+        .expect("rank-loss bracket"));
+
+        let rotating = |first: f64| HeteroclinicInclinationFrame {
+            ambient_dimension: 5,
+            frame_dimension: 2,
+            reference_dimension: 1,
+            principal_dimension: 2,
+            transported_frame: vec![first, 1.0, 0.0, 0.0, 0.0, 0.995, 0.0, 1.0, 0.0, 0.0],
+            reference_frame: vec![1.0, 0.0, 0.0, 0.0, 0.0],
+            exterior_orientation: vec![1.0, 0.0],
+            minimum_overlap_singular_value: 1.0,
+            gauge_invariant_overlap_volume: 1.0,
+            relative_transport_residual: 0.0,
+        };
+        assert!(
+            !heteroclinic_inclination_rank_loss_bracket(&rotating(0.1), &rotating(-0.1),)
+                .expect("rotation-only bracket")
+        );
+        assert!(
+            signed_heteroclinic_inclination_determinant(&rotating(0.0))
+                .expect("orientation-hyperplane value")
+                .abs()
+                > 0.9,
+            "a nonzero exterior vector must not fabricate an inclination zero"
+        );
+    }
+
+    #[test]
     fn continuity_gate_rejects_a_large_frame_jump() {
         let previous = vec![1.0, 0.0];
         let discontinuous = vec![0.0, 1.0];
@@ -1299,10 +1656,14 @@ mod tests {
             |transported_frame: Vec<f64>, reference_frame: Vec<f64>| HeteroclinicInclinationFrame {
                 ambient_dimension: 4,
                 frame_dimension: 1,
+                reference_dimension: 1,
+                principal_dimension: 1,
                 minimum_overlap_singular_value: 1.0,
+                gauge_invariant_overlap_volume: 1.0,
                 relative_transport_residual: 0.0,
                 transported_frame,
                 reference_frame,
+                exterior_orientation: Vec::new(),
             };
         let previous = compute_heteroclinic_event_diagnostics_with_inclination_transport(
             &spectra_source,

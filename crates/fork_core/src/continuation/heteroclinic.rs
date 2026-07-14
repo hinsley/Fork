@@ -1,8 +1,9 @@
 use super::heteroclinic_events::{
     build_heteroclinic_orbit_flip_data,
     compute_heteroclinic_event_diagnostics_with_inclination_transport,
-    heteroclinic_inclination_frame_from_matrices, HeteroclinicEventDiagnostics,
-    HeteroclinicInclinationTransportDiagnostics, DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+    heteroclinic_inclination_frame_from_matrices, principal_spectral_block_dimension,
+    HeteroclinicEventDiagnostics, HeteroclinicInclinationTransportDiagnostics,
+    DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
 };
 use super::heteroclinic_transport::{
     transport_source_inclination, transport_target_inclination, InclinationFrameData,
@@ -838,6 +839,32 @@ impl<'a> HeteroclinicProblem<'a> {
             compute_homoclinic_basis(self.system, &decoded.target_equilibrium, params)?;
         let target_unstable_q = basis_matrix(&current_target_basis.unstable_q, dim)?;
         let source_stable_q = basis_matrix(&current_source_basis.stable_q, dim)?;
+        let target_principal_dimension = self
+            .jacobian_at(&decoded.target_equilibrium, params)
+            .ok()
+            .and_then(|jacobian| {
+                let eigenvalues = jacobian.complex_eigenvalues();
+                principal_spectral_block_dimension(
+                    eigenvalues.as_slice(),
+                    false,
+                    DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+                    "target unstable",
+                )
+                .ok()
+            });
+        let source_principal_dimension = self
+            .jacobian_at(&decoded.source_equilibrium, params)
+            .ok()
+            .and_then(|jacobian| {
+                let eigenvalues = jacobian.complex_eigenvalues();
+                principal_spectral_block_dimension(
+                    eigenvalues.as_slice(),
+                    true,
+                    DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
+                    "source stable",
+                )
+                .ok()
+            });
 
         let source_endpoint = decoded
             .mesh_states
@@ -850,9 +877,16 @@ impl<'a> HeteroclinicProblem<'a> {
         let source_flow = DVector::from_vec(self.flow_at(source_endpoint, params)?);
         let target_flow = DVector::from_vec(self.flow_at(target_endpoint, params)?);
         let (maps, residuals) = self.collocation_interval_maps(decoded, params)?;
-        let source = if source_eligible {
+        let source = if source_eligible
+            && target_principal_dimension
+                .is_some_and(|dimension| dimension < self.setup.target_basis.npos)
+        {
+            let principal_dimension = target_principal_dimension.expect("checked principal block");
             let reference = target_unstable_q
-                .columns(1, self.setup.target_basis.npos - 1)
+                .columns(
+                    principal_dimension,
+                    self.setup.target_basis.npos - principal_dimension,
+                )
                 .into_owned();
             transport_source_inclination(
                 &maps,
@@ -865,9 +899,16 @@ impl<'a> HeteroclinicProblem<'a> {
         } else {
             None
         };
-        let target = if target_eligible {
+        let target = if target_eligible
+            && source_principal_dimension
+                .is_some_and(|dimension| dimension < self.setup.source_basis.nneg)
+        {
+            let principal_dimension = source_principal_dimension.expect("checked principal block");
             let reference = source_stable_q
-                .columns(1, self.setup.source_basis.nneg - 1)
+                .columns(
+                    principal_dimension,
+                    self.setup.source_basis.nneg - principal_dimension,
+                )
                 .into_owned();
             transport_target_inclination(
                 &maps,

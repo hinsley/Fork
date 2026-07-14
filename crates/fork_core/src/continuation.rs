@@ -86,9 +86,10 @@ pub use heteroclinic_events::{
     align_heteroclinic_inclination_transport_continuously, build_heteroclinic_orbit_flip_data,
     compute_heteroclinic_event_diagnostics,
     compute_heteroclinic_event_diagnostics_with_inclination_transport,
-    heteroclinic_inclination_frame_from_matrices, signed_heteroclinic_inclination_determinant,
-    HeteroclinicEndpointFlipData, HeteroclinicEventDiagnostics, HeteroclinicEventKind,
-    HeteroclinicEventStatus, HeteroclinicEventValue, HeteroclinicInclinationFrame,
+    heteroclinic_inclination_frame_from_matrices, heteroclinic_inclination_rank_loss_bracket,
+    signed_heteroclinic_inclination_determinant, HeteroclinicEndpointFlipData,
+    HeteroclinicEventDiagnostics, HeteroclinicEventKind, HeteroclinicEventStatus,
+    HeteroclinicEventValue, HeteroclinicInclinationFrame,
     HeteroclinicInclinationTransportDiagnostics, HeteroclinicOrbitFlipData,
 };
 pub use heteroclinic_shooting::{
@@ -3890,9 +3891,34 @@ fn heteroclinic_event_crossing(
             }
         }
         let bifurcation = map_heteroclinic_event_to_bifurcation(kind)?;
-        let previous = available_heteroclinic_event_value(previous, kind)?;
-        let current = available_heteroclinic_event_value(current, kind)?;
-        scalar_test_crossed_or_reached(previous, current).then_some(bifurcation)
+        let previous_value = available_heteroclinic_event_value(previous, kind)?;
+        let current_value = available_heteroclinic_event_value(current, kind)?;
+        if matches!(
+            kind,
+            HeteroclinicEventKind::SourceInclinationFlip
+                | HeteroclinicEventKind::TargetInclinationFlip
+        ) {
+            let previous_frame = previous
+                .inclination_transport
+                .as_ref()
+                .and_then(|transport| match kind {
+                    HeteroclinicEventKind::SourceInclinationFlip => transport.source.as_ref(),
+                    HeteroclinicEventKind::TargetInclinationFlip => transport.target.as_ref(),
+                    _ => None,
+                })?;
+            let current_frame = current
+                .inclination_transport
+                .as_ref()
+                .and_then(|transport| match kind {
+                    HeteroclinicEventKind::SourceInclinationFlip => transport.source.as_ref(),
+                    HeteroclinicEventKind::TargetInclinationFlip => transport.target.as_ref(),
+                    _ => None,
+                })?;
+            if !heteroclinic_inclination_rank_loss_bracket(previous_frame, current_frame).ok()? {
+                return None;
+            }
+        }
+        scalar_test_crossed_or_reached(previous_value, current_value).then_some(bifurcation)
     })
 }
 
@@ -5081,9 +5107,13 @@ mod tests {
                 source: Some(heteroclinic_events::HeteroclinicInclinationFrame {
                     ambient_dimension: 4,
                     frame_dimension: 1,
+                    reference_dimension: 1,
+                    principal_dimension: 1,
                     transported_frame: vec![parameter, 1.0, 0.0, 0.0],
                     reference_frame: vec![1.0, 0.0, 0.0, 0.0],
+                    exterior_orientation: Vec::new(),
                     minimum_overlap_singular_value: parameter.abs(),
+                    gauge_invariant_overlap_volume: parameter.abs(),
                     relative_transport_residual: 0.0,
                 }),
                 target: None,
@@ -5147,9 +5177,13 @@ mod tests {
                 heteroclinic_events::HeteroclinicInclinationFrame {
                     ambient_dimension: 4,
                     frame_dimension: 1,
+                    reference_dimension: 1,
+                    principal_dimension: 1,
                     transported_frame,
                     reference_frame,
+                    exterior_orientation: Vec::new(),
                     minimum_overlap_singular_value: 1.0,
+                    gauge_invariant_overlap_volume: 1.0,
                     relative_transport_residual: 0.0,
                 }
             };

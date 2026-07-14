@@ -326,10 +326,14 @@ async function run() {
         inclination_transport: {
           source: {
             ambient_dimension: 3,
-            frame_dimension: 1,
-            transported_frame: [1, 0, 0],
+            frame_dimension: 2,
+            reference_dimension: 1,
+            principal_dimension: 2,
+            transported_frame: [1, 0, 0, 0, 1, 0],
             reference_frame: [0.8, 0.6, 0],
+            exterior_orientation: [1, 0],
             minimum_overlap_singular_value: 0.8,
+            gauge_invariant_overlap_volume: 0.8,
             relative_transport_residual: 2e-9,
           },
           target: {
@@ -378,10 +382,10 @@ async function run() {
     assert.match(lines[1], /target dimensions: stable=3, unstable=1/);
     assert.match(lines[2], /source spectrum: 1\+0i/);
     assert.ok(
-      lines.some(line => /source inclination transport: ambient=3, frame=1.*minimum physical overlap=0\.8.*relative residual=2\.0000000000e-9/.test(line))
+      lines.some(line => /source inclination transport: ambient=3, transported=2, reference=1, principal=2.*minimum physical overlap=0\.8.*exterior volume=0\.8.*relative residual=2\.0000000000e-9/.test(line))
     );
     assert.ok(
-      lines.some(line => /target inclination transport: ambient=3, frame=1.*minimum physical overlap=1.*relative residual=3\.0000000000e-9/.test(line))
+      lines.some(line => /target inclination transport: ambient=3, transported=1, reference=1, principal=1.*minimum physical overlap=1.*exterior volume=1.*relative residual=3\.0000000000e-9/.test(line))
     );
     assert.ok(lines.some(line => /SLC.*status=available.*value=-0\.25/.test(line)));
     assert.ok(lines.some(line => /XRS.*status=unsupported.*single open connection/.test(line)));

@@ -785,7 +785,7 @@ export function formatHeteroclinicEventDiagnosticLines(
     ] as const) {
       lines.push(
         frame
-          ? `${side} inclination transport: ambient=${frame.ambient_dimension}, frame=${frame.frame_dimension}; minimum physical overlap=${formatNumberFullPrecision(frame.minimum_overlap_singular_value)}; relative residual=${formatNumberFullPrecision(frame.relative_transport_residual)}`
+          ? `${side} inclination transport: ambient=${frame.ambient_dimension}, transported=${frame.frame_dimension}, reference=${frame.reference_dimension ?? frame.frame_dimension}, principal=${frame.principal_dimension ?? 1}; minimum physical overlap=${formatNumberFullPrecision(frame.minimum_overlap_singular_value)}; exterior volume=${formatNumberFullPrecision(frame.gauge_invariant_overlap_volume ?? frame.minimum_overlap_singular_value)}; relative residual=${formatNumberFullPrecision(frame.relative_transport_residual)}`
           : `${side} inclination transport: unavailable`
       );
     }

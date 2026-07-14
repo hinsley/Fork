@@ -68,6 +68,59 @@ fn inclination_seed() -> HeteroclinicOrbitSeed {
     }
 }
 
+fn complex_inclination_system(source_flip: bool, params: Vec<f64>) -> EquationSystem {
+    let variables = ["x", "w", "y", "u", "z"]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let parameter_names = vec!["mu".to_string(), "nu".to_string()];
+    let compiler = Compiler::new(&variables, &parameter_names);
+    let equations = if source_flip {
+        [
+            "1-x^2",
+            "0.5*w-y",
+            "w+0.5*y",
+            "0.75*x*u+(mu-nu)*(1-x^2)+mu*(1-x^2)*w",
+            "-3*z",
+        ]
+    } else {
+        [
+            "1-x^2",
+            "-0.5*w-y",
+            "w-0.5*y",
+            "0.75*x*u-(mu-nu)*(1-x^2)-mu*(1-x^2)*w",
+            "3*z",
+        ]
+    };
+    let bytecode = equations
+        .iter()
+        .map(|equation| {
+            compiler.compile(&parse(equation).expect("parse complex inclination oracle"))
+        })
+        .collect();
+    let mut system = EquationSystem::new(bytecode, params);
+    system.set_maps(compiler.param_map, compiler.var_map);
+    system
+}
+
+fn complex_inclination_seed() -> HeteroclinicOrbitSeed {
+    let sample_count = 161usize;
+    let times = (0..sample_count)
+        .map(|index| {
+            SOURCE_TIME + (TARGET_TIME - SOURCE_TIME) * index as f64 / (sample_count - 1) as f64
+        })
+        .collect::<Vec<_>>();
+    HeteroclinicOrbitSeed {
+        states: times
+            .iter()
+            .map(|time| vec![time.tanh(), 0.0, 0.0, 0.0, 0.0])
+            .collect(),
+        times,
+        source_equilibrium: vec![-1.0, 0.0, 0.0, 0.0, 0.0],
+        target_equilibrium: vec![1.0, 0.0, 0.0, 0.0, 0.0],
+    }
+}
+
 #[test]
 fn transported_inclination_tests_cross_on_analytic_connections() {
     for (source_flip, kind, bifurcation) in [
@@ -120,7 +173,8 @@ fn transported_inclination_tests_cross_on_analytic_connections() {
                 forward,
             )
             .expect("analytic inclination continuation");
-            let collocation_zero = assert_inclination_branch(&collocation, kind, bifurcation);
+            let collocation_zero =
+                assert_inclination_branch(&collocation, kind, bifurcation, (4, 1, 1, 1));
             if source_flip && forward {
                 let persisted: ContinuationBranch = serde_json::from_str(
                     &serde_json::to_string(&collocation)
@@ -171,7 +225,8 @@ fn transported_inclination_tests_cross_on_analytic_connections() {
                 forward,
             )
             .expect("analytic inclination shooting continuation");
-            let shooting_zero = assert_inclination_branch(&shooting, kind, bifurcation);
+            let shooting_zero =
+                assert_inclination_branch(&shooting, kind, bifurcation, (4, 1, 1, 1));
             assert!(
             collocation_zero.abs() < 1.0e-5 && shooting_zero.abs() < 1.0e-5,
             "{kind:?} must localize the analytic zero: collocation={collocation_zero}, shooting={shooting_zero}"
@@ -184,10 +239,116 @@ fn transported_inclination_tests_cross_on_analytic_connections() {
     }
 }
 
+#[test]
+fn complex_principal_blocks_localize_transport_rank_loss() {
+    for (source_flip, kind, bifurcation) in [
+        (
+            true,
+            HeteroclinicEventKind::SourceInclinationFlip,
+            fork_core::continuation::BifurcationType::HeteroclinicSourceInclinationFlip,
+        ),
+        (
+            false,
+            HeteroclinicEventKind::TargetInclinationFlip,
+            fork_core::continuation::BifurcationType::HeteroclinicTargetInclinationFlip,
+        ),
+    ] {
+        for forward in [true, false] {
+            let start = if forward { -3.0e-3 } else { 3.0e-3 };
+            let mut system = complex_inclination_system(source_flip, vec![start, start]);
+            let setup = heteroclinic_setup_from_orbit(
+                &mut system,
+                &complex_inclination_seed(),
+                20,
+                3,
+                &[start, start],
+                0,
+                1,
+                "mu",
+                "nu",
+                HomoclinicExtraFlags {
+                    free_time: true,
+                    free_eps0: false,
+                    free_eps1: false,
+                },
+            )
+            .expect("complex-principal inclination setup");
+            let continuation_settings = ContinuationSettings {
+                step_size: 1.0e-3,
+                min_step_size: 1.0e-7,
+                max_step_size: 1.0e-3,
+                max_steps: 8,
+                corrector_steps: 24,
+                corrector_tolerance: 1.0e-9,
+                step_tolerance: 1.0e-9,
+            };
+            let collocation = continue_heteroclinic_curve(
+                &mut system,
+                setup.clone(),
+                continuation_settings,
+                forward,
+            )
+            .expect("complex-principal collocation continuation");
+            let collocation_zero =
+                assert_inclination_branch(&collocation, kind, bifurcation, (5, 2, 1, 2));
+            if source_flip && forward {
+                let persisted: ContinuationBranch = serde_json::from_str(
+                    &serde_json::to_string(&collocation)
+                        .expect("serialize complex-principal inclination branch"),
+                )
+                .expect("deserialize complex-principal inclination branch");
+                let original_len = persisted.points.len();
+                let extended = extend_heteroclinic_curve(
+                    &mut system,
+                    persisted,
+                    ContinuationSettings {
+                        max_steps: 2,
+                        ..continuation_settings
+                    },
+                    forward,
+                )
+                .expect("extend serialized complex-principal inclination branch");
+                assert_eq!(extended.points.len(), original_len + 2);
+                let endpoint = extended
+                    .points
+                    .last()
+                    .and_then(|point| point.heteroclinic_events.as_ref())
+                    .and_then(|diagnostics| diagnostics.inclination_transport.as_ref())
+                    .and_then(|transport| transport.source.as_ref())
+                    .expect("complex-principal restart frame");
+                assert_eq!(endpoint.exterior_orientation.len(), 2);
+                assert!(endpoint.gauge_invariant_overlap_volume.is_finite());
+            }
+
+            let shooting_setup = heteroclinic_shooting_setup_from_collocation(
+                &setup,
+                HeteroclinicShootingSettings {
+                    intervals: 6,
+                    integration_steps_per_segment: 128,
+                },
+            )
+            .expect("complex-principal shooting setup");
+            let shooting = continue_heteroclinic_shooting_curve(
+                &mut system,
+                shooting_setup,
+                continuation_settings,
+                forward,
+            )
+            .expect("complex-principal shooting continuation");
+            let shooting_zero =
+                assert_inclination_branch(&shooting, kind, bifurcation, (5, 2, 1, 2));
+            assert!(collocation_zero.abs() < 1.0e-5);
+            assert!(shooting_zero.abs() < 1.0e-5);
+            assert!((collocation_zero - shooting_zero).abs() < 1.0e-5);
+        }
+    }
+}
+
 fn assert_inclination_branch(
     branch: &ContinuationBranch,
     kind: HeteroclinicEventKind,
     bifurcation: fork_core::continuation::BifurcationType,
+    expected_dimensions: (usize, usize, usize, usize),
 ) -> f64 {
     let values = branch
         .points
@@ -200,9 +361,14 @@ fn assert_inclination_branch(
                 .flatten()
         })
         .collect::<Vec<_>>();
+    let parameters = branch
+        .points
+        .iter()
+        .map(|point| point.param_value)
+        .collect::<Vec<_>>();
     assert!(
         values.iter().any(|value| *value < -1.0e-6),
-        "{kind:?} must be negative before the analytic flip: {values:?}"
+        "{kind:?} must be negative before the analytic flip: values={values:?}, parameters={parameters:?}"
     );
     assert!(
         values.iter().any(|value| *value > 1.0e-6),
@@ -226,8 +392,10 @@ fn assert_inclination_branch(
         .collect::<Vec<_>>();
     assert!(!frames.is_empty(), "{kind:?} frame payload must persist");
     assert!(frames.iter().all(|frame| {
-        frame.ambient_dimension == 4
-            && frame.frame_dimension == 1
+        frame.ambient_dimension == expected_dimensions.0
+            && frame.frame_dimension == expected_dimensions.1
+            && frame.reference_dimension == expected_dimensions.2
+            && frame.principal_dimension == expected_dimensions.3
             && frame.relative_transport_residual < 1.0e-6
     }));
     localized.param_value

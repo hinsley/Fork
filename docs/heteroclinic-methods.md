@@ -80,10 +80,12 @@ $$
 \dot V(t) = D_x f(u(t), \alpha)V(t).
 $$
 
-  Let `R_-` and `R_+` be orientation-continuous orthonormal reference frames
-  for the source and target principal bundles, and let `T_-` and `T_+` be the
-  corresponding transported frames. Before evaluating a new continuation
-  point, Fork independently aligns the current transported frame to the
+  Let the relevant endpoint bundle have dimension `m`, and let its principal
+  spectral block have real dimension `r`. Fork groups a complex conjugate pair
+  or equally weak real modes into the same block. The transported transverse
+  frame `T` has `m - 1` columns, while the strong reference frame `R` has
+  `m - r` columns. Before evaluating a new continuation point, Fork
+  independently aligns the current transported frame to the
   preceding accepted transported frame and the current reference frame to the
   preceding accepted reference frame using full `O(k)` Procrustes transforms.
   It never aligns the transported frame directly to the reference frame. The
@@ -91,21 +93,41 @@ $$
   current-to-previous overlap is at least `cos(pi / 9)`; otherwise only that
   endpoint channel becomes unavailable. This removes arbitrary eigensolver
   basis signs and reflections while preserving the physical relative
-  orientation. The signed tests are then
+  orientation. For a simple real principal mode (`r = 1`), the overlap is
+  square and the signed tests are
 
 $$
 \psi_{\mathrm{SIF}} = \det(R_-^\mathsf{T}T_-), \qquad
 \psi_{\mathrm{TIF}} = \det(R_+^\mathsf{T}T_+).
 $$
 
-  For a one-dimensional frame these determinants reduce to signed dot
-  products. Automatic construction currently requires the relevant principal
-  source-unstable or target-stable mode to be real and simple; a complex or
-  repeated principal mode makes that endpoint channel unavailable. Frames must
-  have the declared ambient-by-frame size, full column rank, and an acceptable
+  For `r > 1`, let `Xi(R^T T)` be the vector of every maximal minor of the
+  rectangular overlap. Fork records the gauge-invariant exterior volume
+
+$$
+\rho = \lVert \Xi(R^\mathsf{T}T)\rVert_2
+     = \sqrt{\det\!\left((R^\mathsf{T}T)(R^\mathsf{T}T)^\mathsf{T}\right)}.
+$$
+
+  This vanishes exactly at row-rank loss. A unit exterior orientation `omega`
+  is initialized from the first nonzero accepted `Xi`, serialized, and carried
+  through the same frame-gauge alignment. Fork localizes with the signed
+  exterior volume
+
+$$
+\psi = \operatorname{sgn}\!\left(\omega^\mathsf{T}\Xi(R^\mathsf{T}T)\right)\rho.
+$$
+
+  A rectangular sign bracket is accepted only when the chord between its two
+  exterior vectors also approaches the origin; this rejects a nonzero vector
+  merely rotating through the `omega` hyperplane. Thus the scalar magnitude
+  itself can vanish only at rank loss. For `r = 1`, `Xi` has one coordinate
+  and reduces to the determinant above. Fully principal bundles
+  with no strong complement remain unavailable. Frames must have the declared
+  ambient and column dimensions, full column rank, and an acceptable
   relative tangent-transport residual. The physical transported-to-reference
-  overlap is allowed to become singular because its determinant zero is the
-  event being detected; the separate current-to-previous gauge overlaps must
+  overlap is allowed to lose rank because that is the event being detected;
+  the separate current-to-previous gauge overlaps must
   still pass the continuity threshold.
 
 The forward/backward construction follows the strong-inclination geometry and
@@ -117,7 +139,8 @@ use of tangent transport and continuously updated invariant subspaces in
 connecting-orbit numerics; it does not define Fork's exact endpoint-separated
 determinant scalar.
 
-Each available scalar is localized only across a finite sign-changing bracket.
+Each available scalar is localized only across a finite sign-changing bracket;
+multidimensional brackets must additionally pass the exterior rank-loss guard.
 The corrected marker serializes the exact event value and both endpoint
 spectra. A complex leading eigenspace makes the scalar `SOF` or `TOF` channel
 unavailable because eliminating a two-dimensional complex coefficient is not
@@ -132,8 +155,9 @@ homoclinic analogues:
 
 `SIF` and `TIF` are available only when their corresponding transport frame is
 present and eligible. The serialized `inclination_transport` payload records
-the flattened column-major transported and reference frames, ambient and frame
-dimensions, minimum overlap singular value, and relative transport residual
+the flattened column-major transported and reference frames, ambient,
+transported, reference, and principal-block dimensions, exterior orientation
+and volume, minimum overlap singular value, and relative transport residual
 for independent source and target inspection. The reported minimum singular
 value measures conditioning and event proximity of the same-point physical
 transported-to-reference overlap. The transient current-to-previous overlaps

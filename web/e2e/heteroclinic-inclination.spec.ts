@@ -4,53 +4,84 @@ import { createHarness } from './harness'
 const fixtures = [
   {
     slug: 'sif',
-    wEquation: 'x*w+(mu-nu)*(1-x^2)+mu*(1-x^2)*y',
-    yEquation: '0.5*y',
-    zEquation: '-3*z',
+    variables: ['x', 'w', 'y', 'z'],
+    equations: ['1-x^2', 'x*w+(mu-nu)*(1-x^2)+mu*(1-x^2)*y', '0.5*y', '-3*z'],
     marker: 'HeteroclinicSourceInclinationFlip',
     diagnostic: 'SIF · Source inclination flip',
+    principalDimension: 1,
   },
   {
     slug: 'tif',
-    wEquation: 'x*w-(mu-nu)*(1-x^2)-mu*(1-x^2)*y',
-    yEquation: '-0.5*y',
-    zEquation: '3*z',
+    variables: ['x', 'w', 'y', 'z'],
+    equations: ['1-x^2', 'x*w-(mu-nu)*(1-x^2)-mu*(1-x^2)*y', '-0.5*y', '3*z'],
     marker: 'HeteroclinicTargetInclinationFlip',
     diagnostic: 'TIF · Target inclination flip',
+    principalDimension: 1,
+  },
+  {
+    slug: 'complex_sif',
+    variables: ['x', 'w', 'y', 'u', 'z'],
+    equations: [
+      '1-x^2',
+      '0.5*w-y',
+      'w+0.5*y',
+      '0.75*x*u+(mu-nu)*(1-x^2)+mu*(1-x^2)*w',
+      '-3*z',
+    ],
+    marker: 'HeteroclinicSourceInclinationFlip',
+    diagnostic: 'SIF · Source inclination flip',
+    principalDimension: 2,
+  },
+  {
+    slug: 'complex_tif',
+    variables: ['x', 'w', 'y', 'u', 'z'],
+    equations: [
+      '1-x^2',
+      '-0.5*w-y',
+      'w-0.5*y',
+      '0.75*x*u-(mu-nu)*(1-x^2)-mu*(1-x^2)*w',
+      '3*z',
+    ],
+    marker: 'HeteroclinicTargetInclinationFlip',
+    diagnostic: 'TIF · Target inclination flip',
+    principalDimension: 2,
   },
 ] as const
 
 async function configureSystem(page: Page, fixture: (typeof fixtures)[number]) {
   await page.getByTestId('open-system-settings').click()
-  await page.getByTestId('system-add-variable').click()
-  await page.getByTestId('system-add-variable').click()
-  await page.getByTestId('system-var-0').fill('x')
-  await page.getByTestId('system-var-1').fill('w')
-  await page.getByTestId('system-var-2').fill('y')
-  await page.getByTestId('system-var-3').fill('z')
+  for (let index = 2; index < fixture.variables.length; index += 1) {
+    await page.getByTestId('system-add-variable').click()
+  }
+  for (const [index, variable] of fixture.variables.entries()) {
+    await page.getByTestId(`system-var-${index}`).fill(variable)
+  }
   await page.getByTestId('system-add-parameter').click()
   await page.getByTestId('system-add-parameter').click()
   await page.getByTestId('system-param-0').fill('mu')
   await page.getByTestId('system-param-value-0').fill('-0.003')
   await page.getByTestId('system-param-1').fill('nu')
   await page.getByTestId('system-param-value-1').fill('-0.003')
-  await page.getByTestId('system-eq-0').fill('1-x^2')
-  await page.getByTestId('system-eq-1').fill(fixture.wEquation)
-  await page.getByTestId('system-eq-2').fill(fixture.yEquation)
-  await page.getByTestId('system-eq-3').fill(fixture.zEquation)
+  for (const [index, equation] of fixture.equations.entries()) {
+    await page.getByTestId(`system-eq-${index}`).fill(equation)
+  }
   await page.getByTestId('system-apply').click()
   await expect(page.getByText('Validating equations…')).toBeHidden()
   await expect(page.getByTestId('system-errors')).toHaveCount(0)
   await page.getByTestId('close-system-settings').click()
 }
 
-async function createSeedObjects(page: Page, harness: ReturnType<typeof createHarness>) {
+async function createSeedObjects(
+  page: Page,
+  harness: ReturnType<typeof createHarness>,
+  dimension: number
+) {
   await harness.createOrbit()
   await page.getByTestId('inspector-name').fill('ConnectionOrbit')
   await page.getByTestId('inspector-name').press('Enter')
   await page.getByTestId('action-orbit-run-toggle').click()
   await page.getByTestId('orbit-run-ic-0').fill('-0.9999092042625951')
-  for (let index = 1; index < 4; index += 1) {
+  for (let index = 1; index < dimension; index += 1) {
     await page.getByTestId(`orbit-run-ic-${index}`).fill('0')
   }
   await page.getByTestId('orbit-run-duration').fill('10')
@@ -67,7 +98,7 @@ async function createSeedObjects(page: Page, harness: ReturnType<typeof createHa
     await page.getByTestId('inspector-name').press('Enter')
     await page.getByTestId('action-equilibrium-solver-toggle').click()
     await page.getByTestId('equilibrium-solve-guess-0').fill(x)
-    for (let index = 1; index < 4; index += 1) {
+    for (let index = 1; index < dimension; index += 1) {
       await page.getByTestId(`equilibrium-solve-guess-${index}`).fill('0')
     }
     await page.getByTestId('equilibrium-solve-submit').click()
@@ -89,7 +120,7 @@ for (const fixture of fixtures) {
     await harness.goto({ deterministic: false, mock: false })
     await harness.createSystem(systemName)
     await configureSystem(page, fixture)
-    await createSeedObjects(page, harness)
+    await createSeedObjects(page, harness, fixture.variables.length)
 
     await harness.selectTreeNode('ConnectionOrbit')
     await page.getByTestId('action-heteroclinic-from-orbit-toggle').click()
@@ -138,6 +169,7 @@ for (const fixture of fixtures) {
     await expect(diagnostics).toContainText(fixture.diagnostic)
     await expect(diagnostics).toContainText('available')
     await expect(diagnostics).toContainText(/inclination transport/i)
+    await expect(diagnostics).toContainText(`principal block ${fixture.principalDimension}`)
 
     await page.reload()
     await harness.openSystem(systemName)
