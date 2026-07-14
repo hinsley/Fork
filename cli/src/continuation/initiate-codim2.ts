@@ -7,11 +7,17 @@ import { WasmBridge } from '../wasm';
 import {
   runFoldCurveWithProgress,
   runHomoclinicContinuationWithProgress,
+  runHomoclinicShootingContinuationWithProgress,
   runHopfCurveWithProgress,
   runLPCCurveWithProgress,
   runNSCurveWithProgress,
 } from './progress';
 import { getBranchParams } from './utils';
+import {
+  DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT,
+  DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS,
+  homoclinicShootingSettingsError,
+} from './homoclinic-extras';
 
 export type Codim2SwitchTarget =
   | 'Fold'
@@ -20,7 +26,7 @@ export type Codim2SwitchTarget =
   | 'NeimarkSacker'
   | 'Homoclinic';
 
-const settings = {
+const baseSettings = {
   step_size: 0.01,
   min_step_size: 1e-5,
   max_step_size: 0.1,
@@ -123,8 +129,15 @@ export async function initiateCodim2Branch(
   const answers = await inquirer.prompt([
     { type: 'input', name: 'name', message: 'New branch name:', default: defaults.name },
     { type: 'number', name: 'perturbation', message: target === 'NeimarkSacker' ? 'Cycle amplitude:' : 'Predictor perturbation:', default: defaults.perturbation },
-    { type: 'number', name: 'ntst', message: 'Mesh intervals:', default: defaults.ntst, when: ['LimitPointCycle', 'NeimarkSacker', 'Homoclinic'].includes(target) },
-    { type: 'number', name: 'ncol', message: 'Collocation degree:', default: defaults.ncol, when: ['LimitPointCycle', 'NeimarkSacker', 'Homoclinic'].includes(target) },
+    { type: 'list', name: 'homoclinicDiscretization', message: 'Homoclinic method:', choices: [{ name: 'Orthogonal Collocation', value: 'collocation' }, { name: 'Standard Shooting', value: 'shooting' }], default: 'collocation', when: target === 'Homoclinic' },
+    { type: 'number', name: 'ntst', message: 'Mesh intervals:', default: defaults.ntst, when: (current: any) => ['LimitPointCycle', 'NeimarkSacker'].includes(target) || (target === 'Homoclinic' && current.homoclinicDiscretization !== 'shooting') },
+    { type: 'number', name: 'ncol', message: 'Collocation degree:', default: defaults.ncol, when: (current: any) => ['LimitPointCycle', 'NeimarkSacker'].includes(target) || (target === 'Homoclinic' && current.homoclinicDiscretization !== 'shooting') },
+    { type: 'number', name: 'shootingIntervals', message: 'Shooting intervals:', default: DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS, when: (current: any) => target === 'Homoclinic' && current.homoclinicDiscretization === 'shooting' },
+    { type: 'number', name: 'integrationStepsPerSegment', message: 'Integration steps per segment:', default: DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT, when: (current: any) => target === 'Homoclinic' && current.homoclinicDiscretization === 'shooting' },
+    { type: 'confirm', name: 'adaptiveCollocationEnabled', message: 'Enable adaptive collocation mesh?', default: true, when: (current: any) => target === 'Homoclinic' && current.homoclinicDiscretization !== 'shooting' },
+    { type: 'number', name: 'adaptiveDefectTolerance', message: 'Collocation defect tolerance:', default: 0.025, when: (current: any) => target === 'Homoclinic' && current.homoclinicDiscretization !== 'shooting' && current.adaptiveCollocationEnabled },
+    { type: 'number', name: 'adaptiveMaxRefinements', message: 'Maximum mesh adaptations:', default: 3, when: (current: any) => target === 'Homoclinic' && current.homoclinicDiscretization !== 'shooting' && current.adaptiveCollocationEnabled },
+    { type: 'number', name: 'adaptiveMaxMeshPoints', message: 'Maximum mesh intervals:', default: 512, when: (current: any) => target === 'Homoclinic' && current.homoclinicDiscretization !== 'shooting' && current.adaptiveCollocationEnabled },
     { type: 'list', name: 'orientation', message: 'Predictor orientation:', choices: ['Positive', 'Negative'], default: 'Positive', when: (sourceType === 'ZeroHopf' && target !== 'NeimarkSacker') || (sourceType === 'DoubleHopf' && target === 'Hopf') },
     { type: 'list', name: 'mode', message: 'Hopf mode:', choices: [1, 2], default: 1, when: sourceType === 'DoubleHopf' },
     { type: 'confirm', name: 'forward', message: 'Continue forward?', default: true },
@@ -145,6 +158,38 @@ export async function initiateCodim2Branch(
   const ncol = Math.max(1, Math.trunc(answers.ncol ?? defaults.ncol));
   const perturbation = Math.max(Number(answers.perturbation), 1e-6);
   const tolerance = 1e-7;
+  const homoclinicDiscretization =
+    answers.homoclinicDiscretization === 'shooting' ? 'shooting' : 'collocation';
+  const shootingIntervals = Math.trunc(
+    answers.shootingIntervals ?? DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS
+  );
+  const integrationStepsPerSegment = Math.trunc(
+    answers.integrationStepsPerSegment ??
+      DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+  );
+  const shootingSettingsError = homoclinicShootingSettingsError(
+    homoclinicDiscretization,
+    shootingIntervals,
+    integrationStepsPerSegment
+  );
+  if (target === 'Homoclinic' && shootingSettingsError) {
+    printError(shootingSettingsError);
+    return null;
+  }
+  const settings = {
+    ...baseSettings,
+    ...(target === 'Homoclinic' && homoclinicDiscretization === 'collocation'
+      ? {
+          collocation_adaptivity: {
+            enabled: answers.adaptiveCollocationEnabled ?? true,
+            redistribution_enabled: true,
+            defect_tolerance: Number(answers.adaptiveDefectTolerance ?? 0.025),
+            max_refinements: Math.max(0, Math.trunc(answers.adaptiveMaxRefinements ?? 3)),
+            max_mesh_points: Math.max(2, Math.trunc(answers.adaptiveMaxMeshPoints ?? 512)),
+          },
+        }
+      : {}),
+  };
 
   try {
     let seed: any;
@@ -243,7 +288,25 @@ export async function initiateCodim2Branch(
         point.state, param1Name, param2Name, point.param_value, point.param2_value as number,
         perturbation, ntst, ncol, tolerance
       );
-      result = runHomoclinicContinuationWithProgress(bridge, seed.setup, settings, answers.forward, 'Homoclinic Branch');
+      result = homoclinicDiscretization === 'shooting'
+        ? runHomoclinicShootingContinuationWithProgress(
+            bridge,
+            bridge.initHomoclinicShootingFromCollocation(
+              seed.setup,
+              shootingIntervals,
+              integrationStepsPerSegment
+            ),
+            settings,
+            answers.forward,
+            'Homoclinic Shooting Branch'
+          )
+        : runHomoclinicContinuationWithProgress(
+            bridge,
+            seed.setup,
+            settings,
+            answers.forward,
+            'Homoclinic Branch'
+          );
     } else {
       const seeds = bridge.initCurvesFromBogdanovTakens(
         point.state, param1Name, param2Name, point.param_value, point.param2_value as number,
@@ -301,7 +364,20 @@ export async function initiateCodim2Branch(
               ? 'ns_curve'
               : 'homoclinic_curve',
       data,
-      settings,
+      settings: {
+        ...settings,
+        ...(target === 'Homoclinic'
+          ? {
+              homoclinic_discretization: homoclinicDiscretization,
+              ...(homoclinicDiscretization === 'shooting'
+                ? {
+                    shooting_intervals: shootingIntervals,
+                    integration_steps_per_segment: integrationStepsPerSegment,
+                  }
+                : {}),
+            }
+          : {}),
+      },
       timestamp: new Date().toISOString(),
       params,
     };

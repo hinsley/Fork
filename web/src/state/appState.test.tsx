@@ -3238,7 +3238,7 @@ describe('appState homoclinic and homotopy actions', () => {
     })
   }
 
-  it('creates a homoclinic branch from a limit-cycle branch point', async () => {
+  it('creates a standard-shooting homoclinic branch from a limit-cycle branch point', async () => {
     const base = makeTwoParamSystem('Homoc_App_M1')
     const limitCycle: LimitCycleObject = {
       type: 'limit_cycle',
@@ -3279,8 +3279,14 @@ describe('appState homoclinic and homotopy actions', () => {
     }
     const branchResult = addBranch(added.system, branch, added.nodeId)
     const client = new MockForkCoreClient(0)
-    client.runHomoclinicFromLargeCycle = async () =>
-      normalizeBranchEigenvalues({
+    let capturedDiscretization: string | undefined
+    let capturedShootingIntervals: number | undefined
+    let capturedIntegrationSteps: number | undefined
+    client.runHomoclinicFromLargeCycle = async (request) => {
+      capturedDiscretization = request.discretization
+      capturedShootingIntervals = request.shootingIntervals
+      capturedIntegrationSteps = request.integrationStepsPerSegment
+      return normalizeBranchEigenvalues({
         points: [
           {
             state: [0, 0, 0.5, 0.5],
@@ -3305,8 +3311,8 @@ describe('appState homoclinic and homotopy actions', () => {
         indices: [0, 11, 12],
         branch_type: {
           type: 'HomoclinicCurve',
-          ntst: 8,
-          ncol: 2,
+          ntst: 6,
+          ncol: 0,
           param1_name: 'mu',
           param2_name: 'nu',
           free_time: true,
@@ -3328,6 +3334,7 @@ describe('appState homoclinic and homotopy actions', () => {
           },
         },
       })
+    }
     const { getContext } = setupApp(branchResult.system, client)
 
     await act(async () => {
@@ -3339,6 +3346,9 @@ describe('appState homoclinic and homotopy actions', () => {
         param2Name: 'nu',
         targetNtst: 8,
         targetNcol: 2,
+        discretization: 'shooting',
+        shootingIntervals: 6,
+        integrationStepsPerSegment: 96,
         freeTime: true,
         freeEps0: true,
         freeEps1: false,
@@ -3354,6 +3364,10 @@ describe('appState homoclinic and homotopy actions', () => {
       expect(
         created.branchType
       ).toBe('homoclinic_curve')
+      expect(capturedDiscretization).toBe('shooting')
+      expect(capturedShootingIntervals).toBe(6)
+      expect(capturedIntegrationSteps).toBe(96)
+      expect(created.data.branch_type).toMatchObject({ ntst: 6, ncol: 0 })
       expect(created.data.indices).toEqual([0, 1])
       expect(created.data.resume_state?.min_index_seed?.endpoint_index).toBe(0)
       expect(created.data.resume_state?.min_index_seed?.step_size).toBe(0.01)
@@ -3362,7 +3376,7 @@ describe('appState homoclinic and homotopy actions', () => {
     })
   })
 
-  it('rejects nonuniform large-cycle meshes before homoclinic initialization', async () => {
+  it('forwards an exact nonuniform large-cycle mesh to homoclinic initialization', async () => {
     const base = makeTwoParamSystem('Homoc_App_M1_Nonuniform')
     const limitCycle: LimitCycleObject = {
       type: 'limit_cycle',
@@ -3409,10 +3423,28 @@ describe('appState homoclinic and homotopy actions', () => {
     }
     const branchResult = addBranch(added.system, branch, added.nodeId)
     const client = new MockForkCoreClient(0)
-    let initializerCalls = 0
-    client.runHomoclinicFromLargeCycle = async () => {
-      initializerCalls += 1
-      throw new Error('legacy initializer should not be called')
+    let capturedMesh: number[] | undefined
+    client.runHomoclinicFromLargeCycle = async (request) => {
+      capturedMesh = request.sourceNormalizedMesh
+      return {
+        points: [
+          { state: [0, 0], param_value: 0.2, stability: 'None', eigenvalues: [] },
+          { state: [0.1, 0], param_value: 0.21, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: request.targetNtst,
+          ncol: request.targetNcol,
+          param1_name: request.parameterName,
+          param2_name: request.param2Name,
+          free_time: request.freeTime,
+          free_eps0: request.freeEps0,
+          free_eps1: request.freeEps1,
+          discretization: { type: 'collocation' },
+        },
+      }
     }
     const { getContext } = setupApp(branchResult.system, client)
 
@@ -3433,11 +3465,9 @@ describe('appState homoclinic and homotopy actions', () => {
       })
     })
 
-    expect(initializerCalls).toBe(0)
-    expect(getContext().state.error).toContain(
-      'does not yet support a nonuniform collocation mesh'
-    )
-    expect(getContext().state.error).toContain('uniform mesh')
+    expect(capturedMesh).toEqual([0, 0.2, 1])
+    expect(findBranchIdByName(getContext().state.system!, 'homoc_nonuniform')).toBeTruthy()
+    expect(getContext().state.error).toBeNull()
   })
 
   it('creates a homoclinic branch from a frozen large-cycle point with reduced packed state', async () => {
@@ -4423,7 +4453,7 @@ describe('appState homoclinic and homotopy actions', () => {
         targetNcol: 1,
         freeTime: true,
         freeEps0: true,
-        freeEps1: true,
+        freeEps1: false,
         settings: continuationSettings,
         forward: true,
       })
@@ -4504,7 +4534,7 @@ describe('appState homoclinic and homotopy actions', () => {
         targetNcol: 1,
         freeTime: true,
         freeEps0: true,
-        freeEps1: true,
+        freeEps1: false,
         settings: continuationSettings,
         forward: true,
       })

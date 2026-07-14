@@ -30,6 +30,8 @@ How to think about it:
 - It is a bridge workflow, not the final homoclinic curve you usually analyze.
 - It is useful when Method 1 is hard to start robustly from your current large-cycle seed.
 - Stage progression is automatic; you do not manually drive StageA/B/C/D.
+- Homotopy-saddle branches therefore do not expose the generic `Extend Branch` action. Use the
+  staged Method 3 run to reach StageD, then start Method 4 from a selected StageD point.
 
 ## Which Method to Use
 
@@ -52,6 +54,9 @@ Current homoclinic/homotopy defaults:
 
 Field meanings:
 
+For Methods 1, 2, and 4, exactly one or two of `Free T`, `Free eps0`, and `Free eps1`
+must be selected. The homoclinic continuation layout rejects both zero and all three free extras.
+
 | Field | What It Controls | When to Change It |
 |---|---|---|
 | Branch name | Name of the output continuation object | Use meaningful names that encode source and parameter plane |
@@ -70,19 +75,41 @@ Field meanings:
 
 Source: selected limit-cycle branch point.
 
-The source cycle must use a uniform normalized collocation mesh. Method 1's legacy initializer does
-not yet consume explicit nonuniform interval coordinates, so web and CLI reject adaptive nonuniform
-sources before initialization. Recontinue the cycle on a uniform mesh (with collocation adaptivity
-disabled) and select a point from that branch before retrying Method 1.
+Method 1 supports two numerical discretizations:
+
+- `Orthogonal Collocation` is the default and preserves Fork's existing Method 1 behavior.
+- `Standard Shooting` first builds the same collocation seed, then samples that seed onto shooting
+  nodes before continuation. One shooting interval gives single shooting; more than one gives
+  multiple shooting.
+
+The shooting option changes only the numerical representation of the homoclinic connection. The
+endpoint manifold conditions, continuation parameters, and `Free T`/`Free eps0`/`Free eps1`
+choices remain the same. Method 2 can keep collocation or switch a collocation source to shooting;
+a shooting source restarts as shooting. Method 4 currently uses orthogonal collocation.
+
+Method 1 consumes the source cycle's exact normalized mesh, including an adaptive nonuniform mesh.
+The selected seam interval is removed from the periodic profile and its interval width is accounted
+for when converting the retained open-orbit time. The resulting seed can then be transferred to a
+new collocation mesh or sampled onto shooting nodes.
 
 | Field | Meaning | Practical Guidance |
 |---|---|---|
 | First parameter / Second parameter | Parameter plane for codim-1 homoclinic continuation | Choose two parameters with visible effect in your model |
-| Target NTST | Number of mesh intervals for the orbit profile | Increase for long/steep orbits; lower for quick scouting |
-| Target NCOL | Collocation polynomial order per interval | Usually keep moderate; increase only when profile needs higher local fidelity |
+| Method | Numerical representation of the homoclinic connection | Keep `Orthogonal Collocation` for the established path; choose `Standard Shooting` to use single/multiple shooting |
+| Target NTST | Number of collocation intervals for the output, or for the intermediate seed when shooting | Increase for long/steep orbits; lower for quick scouting |
+| Target NCOL | Collocation polynomial order for the output, or for the intermediate seed when shooting | Usually keep moderate; increase only when profile needs higher local fidelity |
+| Shooting intervals | Number of shooting segments | `1` is single shooting; values greater than `1` are multiple shooting. Default: `8` |
+| Integration steps per segment | Fixed integration resolution within each shooting segment | Increase when segment integration error is visible or Newton correction is sensitive. Default: `64` |
+| Adaptive collocation | Defect-driven redistribution and bounded NTST growth | Available only for collocation. Keep enabled unless you need a deliberately fixed comparison mesh |
+| Defect tolerance / retry budget / mesh cap | Resolution acceptance and adaptation limits | Lower the tolerance for a stricter profile; raise retries/cap only when the defect report shows the current budget or cap was reached |
 | Free T | Whether total homoclinic time is solved as unknown | Keep off initially unless continuation needs time re-adjustment |
 | Free eps0 | Free start-endpoint distance from equilibrium | Usually on for robust starts |
 | Free eps1 | Free end-endpoint distance from equilibrium | Usually on for robust starts |
+
+Shooting branches store their node count as `NTST`, use `NCOL = 0` to identify the node-based packed
+profile, and retain the integration-step count in their discretization metadata. Fork's data
+inspector and orbit renderer decode this representation directly, including the equilibrium and
+continuation scalars appended after the shooting nodes.
 
 ### Method 2: Continue from Point (Homoclinic Restart)
 
@@ -92,10 +119,16 @@ Source: selected homoclinic branch point.
 |---|---|---|
 | Branch name | Name of the restarted branch | Use a restart suffix so provenance is obvious |
 | First parameter / Second parameter | Parameter plane for the restarted homoclinic continuation | You can switch to a new parameter pair; the two selections must be distinct |
-| Target NTST / Target NCOL | Restart mesh for the homoclinic profile | Use to remesh before long extension or after repeated failures |
+| Method | Restart representation | Keep collocation, switch a collocation source to shooting, or retain shooting for a shooting source |
+| Target NTST / Target NCOL | Restart mesh for a collocation profile | Use to remesh before long extension or after repeated failures |
+| Shooting intervals / integration steps | Shooting-node count and per-segment integration resolution | Shown for shooting restarts; a shooting source cannot currently be converted back to collocation |
+| Adaptive collocation | Defect-driven mesh control for the restarted branch | Shown only for collocation restarts |
 | Free T / Free eps0 / Free eps1 | Which homoclinic extras remain unknowns | Start with same choices as source branch, then change one at a time |
 
-Method 2 seed reconstruction uses the source branch encoding (`NTST/NCOL` and source free/fixed-extra flags), then applies your target extras for the restarted run. This keeps the restart local even when you change continuation parameters or free/fixed-extra choices.
+Method 2 seed reconstruction uses the source branch encoding (discretization, exact normalized mesh
+or shooting nodes, and source free/fixed-extra flags), then applies your target representation and
+extras. This keeps the restart local even when you change continuation parameters,
+free/fixed-extra choices, or collocation resolution.
 
 UI note: in the Inspector menu this method appears as `Continue from Point` when a homoclinic branch point is selected.
 
@@ -137,7 +170,32 @@ Important behavior:
 
 - Extension does one continuation attempt with your selected settings.
 - There is no automatic retry and no automatic method switch during extension.
+- Collocation extension retains adaptive mesh control and transfers the published history whenever
+  the mesh changes. Shooting extension keeps the saved segment and integration settings.
 - For runs with any fixed homoclinic extras (`Free T`/`Free eps0`/`Free eps1` off), extension requires saved branch metadata.
+
+## Special-Point Diagnostics
+
+Every corrected homoclinic point records the HBK-style test channels that are mathematically
+available for its saddle spectrum. The channels with genuine signed brackets are localized and
+labeled with the standard codes:
+
+- neutral types: `NNS`, `NSF`, `NFF`;
+- leading-spectrum interactions: `DRS`, `DRU`, `NDS`, `NDU`;
+- orbit flips: `OFS`, `OFU` when the required normalized adjoint data are available.
+
+`TLS`, `TLU`, `NCH`, `SH`, and `BT` remain visible as raw diagnostics, matching HBK's numerical
+surface, but are not automatically labeled as localized points. In the audited HBK 0.2.1 source,
+the ordered `TLS`/`TLU` gaps are one-sided and the `NCH`/`SH`/`BT` values are one-sided until the
+selected eigenvalue disappears at loss of hyperbolicity; its sign-crossing event handler therefore
+cannot normally bracket them either. Robust markers require eigenvalue-identity tracking and, for
+`TLS`/`TLU`, a touching-root localizer.
+
+The point inspector in web and CLI shows each test value together with availability and a reason when
+a channel does not apply to the current real/focus configuration. `IFS` and `IFU` are reported as
+unsupported rather than as numerical zeros because HBK 0.2.1 also leaves these inclination-flip
+channels as placeholders. Fork uses `Re(lambda1) - Re(lambda3)` for the raw `TLU` diagnostic;
+HBK 0.2.1's literal plus sign cannot vanish while both leading rates remain unstable.
 
 ### Frozen-variable subsystem invariants (extension)
 
@@ -212,6 +270,9 @@ Reproducible Method 1/2 settings and Method 4 CLI/WASM target settings:
 Expected diagnostics:
 
 - The core Method 1 result produces the seed plus three accepted points; the CLI intentionally discards the large-cycle approximation seed and persists the three accepted points.
+- Standard-shooting Method 1 uses eight shooting intervals with 64 integration steps per segment
+  in the menu smoke and likewise persists the three corrected points after discarding its sampled
+  collocation seed.
 - Method 2, restarted from the first accepted Method 1 point, produces the seed plus three accepted points.
 - Method 4, initialized from a homoclinic-ready StageD profile encoded with the staged workflow's source flags, produces the seed plus three accepted points.
 - The core StageD conversion helper, which retains the StageD `T`/`eps1` free flags, also accepts all three requested steps; the CLI/WASM regression additionally changes the target to the `T`-only layout above.
@@ -224,12 +285,12 @@ cargo test -p fork_core --test homoclinic_reference
 cd cli && npm run test:wasm && npm run test:homoclinic-menu
 ```
 
-The menu smoke drives the actual Method 1, 2, and 4 configuration menus, edits the certified
-settings above through `inquirer`, crosses the Node-WASM bridge, and verifies the resulting branches
-are persisted with more than one point. Method 1 requires a uniform source-cycle mesh. Method 2
-requires the source branch's packed layout and fixed-scalar context. Method 4 requires a corrected
-StageD-compatible profile encoded with its source free/fixed flags; changing the target flags happens
-only after decoding that source layout.
+The menu smoke drives the actual Method 1, 2, and 4 configuration menus, including collocation,
+standard shooting, nonuniform source meshes, and shooting restart. It edits the certified settings
+above through `inquirer`, crosses the Node-WASM bridge, and verifies the resulting branches are
+persisted with more than one point. Method 2 requires the source branch's packed layout, exact mesh
+or shooting metadata, and fixed-scalar context. Method 4 requires a corrected StageD-compatible profile encoded with its
+source free/fixed flags; changing the target flags happens only after decoding that source layout.
 
 The Method 4 fixture certifies StageD decoding, conversion, and continuation independently of StageD generation: it re-encodes an accepted homoclinic connection using the fixed StageD source layout (`T` and `eps1` free, `eps0` fixed). Conversion must decode that source layout before applying the target free/fixed choices. The heuristic Method 3 stage-generation path is not used as evidence that an arbitrary StageD profile is already a corrected homoclinic connection.
 
@@ -241,6 +302,7 @@ The Method 4 fixture certifies StageD decoding, conversion, and continuation ind
 | Continuation seems to vary mostly one parameter | Chosen parameter pair has weak sensitivity in current region | 1) Confirm both parameters are distinct and active 2) Restart from same point with a different parameter pair |
 | Frequent correction failures after a few points | Step growth too aggressive or local curvature high | 1) Lower max step size 2) Increase corrector steps 3) Tighten tolerances |
 | Branch is noisy or has poor geometric quality | Mesh too coarse for orbit shape | Increase `NTST` first, then `NCOL` if needed |
+| Standard shooting corrector fails near the seed | Too few shooting segments or insufficient segment integration resolution | 1) Increase shooting intervals 2) Increase integration steps per segment 3) Reduce the initial continuation step |
 | Method 3 does not reach StageD | Seed scaling/time window mismatched | 1) Increase `T` 2) Reduce `eps0`/`eps1` modestly 3) Increase max points |
 | Extension fails but branch itself is valid | Current branch settings/mesh not good for farther region | Create explicit restart (Method 2 or Method 4 path) with remeshed `NTST/NCOL` and then continue |
 | First extension point jumps far in parameter space | Local endpoint tangent/step was not appropriate | 1) Reduce initial step size 2) Ensure extension uses a branch with valid endpoint history 3) Re-seed via explicit Method 2 if needed |

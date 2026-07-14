@@ -5,9 +5,13 @@ import App from './App'
 import { AppProvider } from './state/appState'
 import { MemorySystemStore, type SystemStore } from './system/store'
 import {
+  HOMOCLINIC_PRODUCT_E2E_FIXTURE,
+  HOMOCLINIC_PRODUCT_E2E_SYSTEM_NAME,
+  HomoclinicProductE2EClient,
   createAxisPickerMapSystem,
   createAxisPickerSystem,
   createDemoSystem,
+  createHomoclinicProductE2ESystem,
   createLimitCycleManifoldSystem,
   createPeriodDoublingSystem,
 } from './system/fixtures'
@@ -47,6 +51,8 @@ async function bootstrap() {
   const deterministic = deterministicFromUrl || deterministicFromEnv
   const fixture = params.get('fixture')
   const useMock = params.has('mock') || Boolean(fixture)
+  const useHomoclinicProductFixture =
+    import.meta.env.DEV && fixture === HOMOCLINIC_PRODUCT_E2E_FIXTURE
 
   if (deterministic) {
     // Deterministic mode keeps tests repeatable by avoiding persisted state.
@@ -84,6 +90,25 @@ async function bootstrap() {
     const { system } = createAxisPickerMapSystem()
     await memory.save(system)
     store = memory
+  } else if (useHomoclinicProductFixture) {
+    // Unlike the in-memory visual fixtures, this product fixture deliberately
+    // uses browser storage so its create/extend results can be verified after
+    // reload. Session storage prevents the reload itself from reseeding it.
+    const selection = await createBrowserSystemStore({
+      deterministic: false,
+      warnOnMemory: false,
+    })
+    store = selection.store
+    initialError = selection.warning
+    const seededThisTab = window.sessionStorage.getItem(HOMOCLINIC_PRODUCT_E2E_FIXTURE) === '1'
+    if (!seededThisTab) {
+      const existing = (await store.list()).filter(
+        (system) => system.name === HOMOCLINIC_PRODUCT_E2E_SYSTEM_NAME
+      )
+      for (const system of existing) await store.remove(system.id)
+      await store.save(createHomoclinicProductE2ESystem().system)
+      window.sessionStorage.setItem(HOMOCLINIC_PRODUCT_E2E_FIXTURE, '1')
+    }
   } else {
     const selection = await createBrowserSystemStore({
       deterministic,
@@ -100,7 +125,12 @@ async function bootstrap() {
       )
     }
   })
-  const client = useMock ? new MockForkCoreClient() : new WasmForkCoreClient(queue)
+  const client =
+    useHomoclinicProductFixture
+      ? new HomoclinicProductE2EClient()
+      : useMock
+        ? new MockForkCoreClient()
+        : new WasmForkCoreClient(queue)
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

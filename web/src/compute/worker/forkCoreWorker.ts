@@ -62,6 +62,11 @@ import { discardHomoclinicInitialApproximationPoint } from '../../system/continu
 import { periodicPeriodsForConfig } from '../../system/periodicity'
 import type { SystemConfig } from '../../system/types'
 import {
+  DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT,
+  DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS,
+  homoclinicShootingSettingsError,
+} from '../../system/homoclinicExtras'
+import {
   runAdaptiveSteppedRunnerToCompletion,
   runSteppedRunnerToCompletion,
 } from './steppedRunner'
@@ -74,8 +79,20 @@ import type {
   WorkerResponse,
 } from '../computeProtocol'
 
-type WasmModule = typeof import('@fork-wasm')
-type GeneratedWasmSystem = InstanceType<WasmModule['WasmSystem']>
+type GeneratedWasmModule = typeof import('@fork-wasm')
+type GeneratedHomoclinicRunner = InstanceType<GeneratedWasmModule['WasmHomoclinicRunner']>
+type WasmModule = GeneratedWasmModule & {
+  WasmHomoclinicShootingRunner?: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    setup: unknown,
+    settings: unknown,
+    forward: boolean
+  ) => GeneratedHomoclinicRunner
+}
+type GeneratedWasmSystem = InstanceType<GeneratedWasmModule['WasmSystem']>
 type WasmSystem = Omit<
   GeneratedWasmSystem,
   | 'compute_event_series_from_orbit'
@@ -88,6 +105,58 @@ type WasmSystem = Omit<
   computeEventSeriesFromSamples?: GeneratedWasmSystem['compute_event_series_from_samples']
   compute_isocline?: GeneratedWasmSystem['compute_isocline']
   computeIsocline?: GeneratedWasmSystem['compute_isocline']
+  init_homoclinic_shooting_from_collocation?: (
+    setup: unknown,
+    intervals: number,
+    integrationStepsPerSegment: number
+  ) => unknown
+  init_homoclinic_shooting_from_shooting?: (
+    pointState: Float64Array,
+    sourceIntervals: number,
+    sourceFreeTime: boolean,
+    sourceFreeEps0: boolean,
+    sourceFreeEps1: boolean,
+    sourceFixedTime: number,
+    sourceFixedEps0: number,
+    sourceFixedEps1: number,
+    parameterName: string,
+    param2Name: string,
+    targetIntervals: number,
+    integrationStepsPerSegment: number,
+    freeTime: boolean,
+    freeEps0: boolean,
+    freeEps1: boolean
+  ) => unknown
+  init_homoclinic_from_large_cycle_on_mesh?: (
+    lcState: Float64Array,
+    sourceNcol: number,
+    sourceNormalizedMesh: Float64Array,
+    parameterName: string,
+    param2Name: string,
+    targetNtst: number,
+    targetNcol: number,
+    freeTime: boolean,
+    freeEps0: boolean,
+    freeEps1: boolean
+  ) => unknown
+  init_homoclinic_from_homoclinic_on_mesh?: (
+    pointState: Float64Array,
+    sourceNcol: number,
+    sourceNormalizedMesh: Float64Array,
+    sourceFreeTime: boolean,
+    sourceFreeEps0: boolean,
+    sourceFreeEps1: boolean,
+    sourceFixedTime: number,
+    sourceFixedEps0: number,
+    sourceFixedEps1: number,
+    parameterName: string,
+    param2Name: string,
+    targetNcol: number,
+    targetNormalizedMesh: Float64Array,
+    freeTime: boolean,
+    freeEps0: boolean,
+    freeEps1: boolean
+  ) => unknown
 }
 
 const pendingControllers = new Map<string, AbortController>()
@@ -1139,12 +1208,47 @@ async function runCodim2BranchSwitch(
       request.ncol,
       request.tolerance
     )
-    const runner = new wasm.WasmHomoclinicRunner(
+    const discretization = request.homoclinicDiscretization ?? 'collocation'
+    const shootingIntervals = request.shootingIntervals ?? request.ntst
+    const integrationStepsPerSegment =
+      request.integrationStepsPerSegment ??
+      DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+    const shootingSettingsError = homoclinicShootingSettingsError(
+      discretization,
+      shootingIntervals,
+      integrationStepsPerSegment
+    )
+    if (shootingSettingsError) throw new Error(shootingSettingsError)
+    let continuationSetup = seed.setup
+    if (discretization === 'shooting') {
+      const initShooting = system.init_homoclinic_shooting_from_collocation
+      if (typeof initShooting !== 'function') {
+        throw new Error(
+          'Bogdanov-Takens standard-shooting switching is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+        )
+      }
+      continuationSetup = initShooting.call(
+        system,
+        seed.setup,
+        shootingIntervals,
+        integrationStepsPerSegment
+      )
+    }
+    const Runner =
+      discretization === 'shooting'
+        ? wasm.WasmHomoclinicShootingRunner
+        : wasm.WasmHomoclinicRunner
+    if (typeof Runner !== 'function') {
+      throw new Error(
+        'Requested homoclinic continuation method is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+      )
+    }
+    const runner = new Runner(
       request.system.equations,
       new Float64Array(request.system.params),
       request.system.paramNames,
       request.system.varNames,
-      seed.setup,
+      continuationSetup,
       settings,
       request.forward
     )
@@ -1486,27 +1590,98 @@ async function runHomoclinicFromLargeCycle(
   const wasm = await loadWasm()
   const system = createWasmSystem(wasm, request.system)
 
-  const initHomoclinicFromLargeCycle = system.init_homoclinic_from_large_cycle
-  if (typeof initHomoclinicFromLargeCycle !== 'function') {
-    throw new Error(
-      'Homoclinic initialization from large cycle is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+  const sourceMesh = request.sourceNormalizedMesh
+  const initOnMesh = system.init_homoclinic_from_large_cycle_on_mesh
+  const setup = (() => {
+    if (sourceMesh && sourceMesh.length === request.sourceNtst + 1) {
+      if (typeof initOnMesh !== 'function') {
+        throw new Error(
+          'Nonuniform large-cycle homoclinic initialization is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+        )
+      }
+      return initOnMesh.call(
+        system,
+        new Float64Array(request.lcState),
+        request.sourceNcol,
+        new Float64Array(sourceMesh),
+        request.parameterName,
+        request.param2Name,
+        request.targetNtst,
+        request.targetNcol,
+        request.freeTime,
+        request.freeEps0,
+        request.freeEps1
+      )
+    }
+    const initHomoclinicFromLargeCycle = system.init_homoclinic_from_large_cycle
+    if (typeof initHomoclinicFromLargeCycle !== 'function') {
+      throw new Error(
+        'Homoclinic initialization from large cycle is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+      )
+    }
+    return initHomoclinicFromLargeCycle.call(
+      system,
+      new Float64Array(request.lcState),
+      request.sourceNtst,
+      request.sourceNcol,
+      request.parameterName,
+      request.param2Name,
+      request.targetNtst,
+      request.targetNcol,
+      request.freeTime,
+      request.freeEps0,
+      request.freeEps1
     )
-  }
-  const setup = initHomoclinicFromLargeCycle.call(
-    system,
-    new Float64Array(request.lcState),
-    request.sourceNtst,
-    request.sourceNcol,
-    request.parameterName,
-    request.param2Name,
-    request.targetNtst,
-    request.targetNcol,
-    request.freeTime,
-    request.freeEps0,
-    request.freeEps1
-  )
+  })()
 
   const settings = { ...request.settings }
+  const discretization = request.discretization ?? 'collocation'
+  const shootingIntervals =
+    request.shootingIntervals ?? DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS
+  const integrationStepsPerSegment =
+    request.integrationStepsPerSegment ?? DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+  const shootingSettingsError = homoclinicShootingSettingsError(
+    discretization,
+    shootingIntervals,
+    integrationStepsPerSegment
+  )
+  if (shootingSettingsError) {
+    throw new Error(shootingSettingsError)
+  }
+
+  if (discretization === 'shooting') {
+    const initShooting = system.init_homoclinic_shooting_from_collocation
+    if (typeof initShooting !== 'function') {
+      throw new Error(
+        'Homoclinic standard shooting is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+      )
+    }
+    const ShootingRunner = wasm.WasmHomoclinicShootingRunner
+    if (typeof ShootingRunner !== 'function') {
+      throw new Error(
+        'Homoclinic standard-shooting continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+      )
+    }
+    const shootingSetup = initShooting.call(
+      system,
+      setup,
+      shootingIntervals,
+      integrationStepsPerSegment
+    )
+    const runner = new ShootingRunner(
+      request.system.equations,
+      new Float64Array(request.system.params),
+      request.system.paramNames,
+      request.system.varNames,
+      shootingSetup,
+      settings,
+      request.forward
+    )
+    return discardHomoclinicInitialApproximationPoint(
+      runSteppedRunnerToCompletion(runner, signal, onProgress)
+    )
+  }
+
   const HomoclinicRunner = wasm.WasmHomoclinicRunner
   if (typeof HomoclinicRunner !== 'function') {
     throw new Error(
@@ -1537,33 +1712,141 @@ async function runHomoclinicFromHomoclinic(
   const wasm = await loadWasm()
   const system = createWasmSystem(wasm, request.system)
 
-  const initHomoclinicFromHomoclinic = system.init_homoclinic_from_homoclinic
-  if (typeof initHomoclinicFromHomoclinic !== 'function') {
+  const settings = { ...request.settings }
+  const sourceDiscretization =
+    request.sourceDiscretization ?? (request.sourceNcol === 0 ? 'shooting' : 'collocation')
+  const discretization = request.discretization ?? sourceDiscretization
+  const shootingIntervals = request.shootingIntervals ?? request.targetNtst
+  const integrationStepsPerSegment =
+    request.integrationStepsPerSegment ?? DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+  const shootingSettingsError = homoclinicShootingSettingsError(
+    discretization,
+    shootingIntervals,
+    integrationStepsPerSegment
+  )
+  if (shootingSettingsError) throw new Error(shootingSettingsError)
+  if (sourceDiscretization === 'shooting' && discretization !== 'shooting') {
     throw new Error(
-      'Homoclinic reinitialization is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+      'Restarting a standard-shooting homoclinic branch as collocation is not yet supported. Keep Method set to Standard Shooting.'
     )
   }
-  const setup = initHomoclinicFromHomoclinic.call(
-    system,
-    new Float64Array(request.pointState),
-    request.sourceNtst,
-    request.sourceNcol,
-    request.sourceFreeTime,
-    request.sourceFreeEps0,
-    request.sourceFreeEps1,
-    request.sourceFixedTime,
-    request.sourceFixedEps0,
-    request.sourceFixedEps1,
-    request.parameterName,
-    request.param2Name,
-    request.targetNtst,
-    request.targetNcol,
-    request.freeTime,
-    request.freeEps0,
-    request.freeEps1
-  )
 
-  const settings = { ...request.settings }
+  let setup: unknown
+  if (sourceDiscretization === 'shooting') {
+    const initShootingFromShooting = system.init_homoclinic_shooting_from_shooting
+    if (typeof initShootingFromShooting !== 'function') {
+      throw new Error(
+        'Homoclinic shooting restart is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+      )
+    }
+    setup = initShootingFromShooting.call(
+      system,
+      new Float64Array(request.pointState),
+      request.sourceNtst,
+      request.sourceFreeTime,
+      request.sourceFreeEps0,
+      request.sourceFreeEps1,
+      request.sourceFixedTime,
+      request.sourceFixedEps0,
+      request.sourceFixedEps1,
+      request.parameterName,
+      request.param2Name,
+      shootingIntervals,
+      integrationStepsPerSegment,
+      request.freeTime,
+      request.freeEps0,
+      request.freeEps1
+    )
+  } else {
+    const sourceMesh = request.sourceNormalizedMesh
+    if (sourceMesh && sourceMesh.length === request.sourceNtst + 1) {
+      const initOnMesh = system.init_homoclinic_from_homoclinic_on_mesh
+      if (typeof initOnMesh !== 'function') {
+        throw new Error(
+          'Nonuniform homoclinic restart is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+        )
+      }
+      setup = initOnMesh.call(
+        system,
+        new Float64Array(request.pointState),
+        request.sourceNcol,
+        new Float64Array(sourceMesh),
+        request.sourceFreeTime,
+        request.sourceFreeEps0,
+        request.sourceFreeEps1,
+        request.sourceFixedTime,
+        request.sourceFixedEps0,
+        request.sourceFixedEps1,
+        request.parameterName,
+        request.param2Name,
+        request.targetNcol,
+        new Float64Array(resolvedCycleMesh(request.targetNtst)),
+        request.freeTime,
+        request.freeEps0,
+        request.freeEps1
+      )
+    } else {
+      const initHomoclinicFromHomoclinic = system.init_homoclinic_from_homoclinic
+      if (typeof initHomoclinicFromHomoclinic !== 'function') {
+        throw new Error(
+          'Homoclinic reinitialization is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+        )
+      }
+      setup = initHomoclinicFromHomoclinic.call(
+        system,
+        new Float64Array(request.pointState),
+        request.sourceNtst,
+        request.sourceNcol,
+        request.sourceFreeTime,
+        request.sourceFreeEps0,
+        request.sourceFreeEps1,
+        request.sourceFixedTime,
+        request.sourceFixedEps0,
+        request.sourceFixedEps1,
+        request.parameterName,
+        request.param2Name,
+        request.targetNtst,
+        request.targetNcol,
+        request.freeTime,
+        request.freeEps0,
+        request.freeEps1
+      )
+    }
+    if (discretization === 'shooting') {
+      const initShooting = system.init_homoclinic_shooting_from_collocation
+      if (typeof initShooting !== 'function') {
+        throw new Error(
+          'Homoclinic standard shooting is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+        )
+      }
+      setup = initShooting.call(
+        system,
+        setup,
+        shootingIntervals,
+        integrationStepsPerSegment
+      )
+    }
+  }
+
+  if (discretization === 'shooting') {
+    const ShootingRunner = wasm.WasmHomoclinicShootingRunner
+    if (typeof ShootingRunner !== 'function') {
+      throw new Error(
+        'Homoclinic standard-shooting continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+      )
+    }
+    const runner = new ShootingRunner(
+      request.system.equations,
+      new Float64Array(request.system.params),
+      request.system.paramNames,
+      request.system.varNames,
+      setup,
+      settings,
+      request.forward
+    )
+    return runSteppedRunnerToCompletion(runner, signal, onProgress)
+  }
+
   const HomoclinicRunner = wasm.WasmHomoclinicRunner
   if (typeof HomoclinicRunner !== 'function') {
     throw new Error(

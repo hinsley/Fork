@@ -276,6 +276,7 @@ impl WasmFoldCurveRunner {
             stability: fork_core::continuation::BifurcationType::Fold,
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let runner = OwnedContinuationRunner::new(
@@ -763,6 +764,7 @@ impl WasmHopfCurveRunner {
             },
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let runner = OwnedContinuationRunner::new(
@@ -1004,6 +1006,7 @@ impl WasmLPCCurveRunner {
             stability: fork_core::continuation::BifurcationType::CycleFold,
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let runner = OwnedContinuationRunner::new(
@@ -1225,6 +1228,7 @@ impl WasmIsoperiodicCurveRunner {
             stability: fork_core::continuation::BifurcationType::None,
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let runner = OwnedContinuationRunner::new(
@@ -1415,6 +1419,7 @@ impl WasmPDCurveRunner {
             stability: fork_core::continuation::BifurcationType::PeriodDoubling,
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let runner = OwnedContinuationRunner::new(
@@ -1633,6 +1638,7 @@ impl WasmNSCurveRunner {
             stability: fork_core::continuation::BifurcationType::NeimarkSacker,
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let runner = OwnedContinuationRunner::new(

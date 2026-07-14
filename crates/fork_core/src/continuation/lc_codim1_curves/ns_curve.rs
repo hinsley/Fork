@@ -1692,6 +1692,7 @@ mod tests {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
         let settings = ContinuationSettings {
             step_size: 1e-3,

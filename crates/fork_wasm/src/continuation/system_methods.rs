@@ -21,16 +21,17 @@ use fork_core::continuation::{
     continue_manifold_eq_2d_with_progress, continue_with_problem, extend_limit_cycle_collocation,
     extend_limit_cycle_manifold_2d_with_progress, extend_manifold_eq_2d_with_progress,
     generalized_hopf_lpc_seed, homoclinic_setup_from_homoclinic_point_with_source_extras,
+    homoclinic_setup_from_homoclinic_point_with_source_extras_on_mesh,
     homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
-    homotopy_saddle_setup_from_equilibrium, limit_cycle_setup_from_hopf,
-    limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, limit_cycle_setup_from_pd_on_mesh,
-    uniform_normalized_mesh, BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType,
-    Codim2Bifurcation, Codim2BifurcationType, CollocationConfig, ContinuationBranch,
-    ContinuationSettings, FloquetBackend, FoldCurveProblem, HomoclinicExtraFlags,
-    HomoclinicFixedScalars, HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem,
-    IsoperiodicCurveProblem, LPCCurveProblem, LimitCycleSetup, Manifold1DSettings,
-    Manifold2DSettings, ManifoldCycle2DSettings, ManifoldGeometry, ManifoldSurfaceResumeState,
-    NSCurveProblem, OrbitTimeMode, PDCurveProblem, StepResult,
+    homoclinic_setup_from_large_cycle_on_mesh, homotopy_saddle_setup_from_equilibrium,
+    limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd,
+    limit_cycle_setup_from_pd_on_mesh, uniform_normalized_mesh, BranchType, Codim1CurveBranch,
+    Codim1CurvePoint, Codim1CurveType, Codim2Bifurcation, Codim2BifurcationType, CollocationConfig,
+    ContinuationBranch, ContinuationSettings, FloquetBackend, FoldCurveProblem,
+    HomoclinicExtraFlags, HomoclinicFixedScalars, HomoclinicSetup, HomotopySaddleSetup,
+    HopfCurveProblem, IsoperiodicCurveProblem, LPCCurveProblem, LimitCycleSetup,
+    Manifold1DSettings, Manifold2DSettings, ManifoldCycle2DSettings, ManifoldGeometry,
+    ManifoldSurfaceResumeState, NSCurveProblem, OrbitTimeMode, PDCurveProblem, StepResult,
 };
 use fork_core::equilibrium::{compute_jacobian, compute_system_jacobian, SystemKind};
 use fork_core::traits::DynamicalSystem;
@@ -1228,6 +1229,61 @@ impl WasmSystem {
         to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
+    /// Nonuniform-mesh counterpart of `init_homoclinic_from_large_cycle`.
+    /// `source_normalized_mesh` contains the source LC interval boundaries;
+    /// source NTST is inferred from its length.
+    pub fn init_homoclinic_from_large_cycle_on_mesh(
+        &mut self,
+        lc_state: Vec<f64>,
+        source_ncol: u32,
+        source_normalized_mesh: Vec<f64>,
+        parameter_name: &str,
+        param2_name: &str,
+        target_ntst: u32,
+        target_ncol: u32,
+        free_time: bool,
+        free_eps0: bool,
+        free_eps1: bool,
+    ) -> Result<JsValue, JsValue> {
+        let param1_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+        let base_params = self.system.params.clone();
+
+        let setup = homoclinic_setup_from_large_cycle_on_mesh(
+            &mut self.system,
+            &lc_state,
+            source_ncol as usize,
+            source_normalized_mesh,
+            target_ntst as usize,
+            target_ncol as usize,
+            &base_params,
+            param1_index,
+            param2_index,
+            parameter_name,
+            param2_name,
+            HomoclinicExtraFlags {
+                free_time,
+                free_eps0,
+                free_eps1,
+            },
+        )
+        .map_err(|e| {
+            JsValue::from_str(&format!(
+                "Failed to initialize homoclinic setup from nonuniform large cycle: {}",
+                e
+            ))
+        })?;
+
+        to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
     pub fn init_homoclinic_from_homoclinic(
         &mut self,
         point_state: Vec<f64>,
@@ -1299,6 +1355,78 @@ impl WasmSystem {
         })?;
 
         to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    /// Mesh-aware Method 2 initializer for restarting an adaptive homoclinic
+    /// collocation point without first pretending its source mesh is uniform.
+    #[allow(clippy::too_many_arguments)]
+    pub fn init_homoclinic_from_homoclinic_on_mesh(
+        &mut self,
+        point_state: Vec<f64>,
+        source_ncol: u32,
+        source_normalized_mesh: Vec<f64>,
+        source_free_time: bool,
+        source_free_eps0: bool,
+        source_free_eps1: bool,
+        source_fixed_time: f64,
+        source_fixed_eps0: f64,
+        source_fixed_eps1: f64,
+        parameter_name: &str,
+        param2_name: &str,
+        target_ncol: u32,
+        target_normalized_mesh: Vec<f64>,
+        free_time: bool,
+        free_eps0: bool,
+        free_eps1: bool,
+    ) -> Result<JsValue, JsValue> {
+        let param1_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+        let base_params = self.system.params.clone();
+        let source_extras = HomoclinicExtraFlags {
+            free_time: source_free_time,
+            free_eps0: source_free_eps0,
+            free_eps1: source_free_eps1,
+        };
+        let target_extras = HomoclinicExtraFlags {
+            free_time,
+            free_eps0,
+            free_eps1,
+        };
+        let source_fixed = HomoclinicFixedScalars {
+            time: source_fixed_time,
+            eps0: source_fixed_eps0,
+            eps1: source_fixed_eps1,
+        };
+        let setup = homoclinic_setup_from_homoclinic_point_with_source_extras_on_mesh(
+            &mut self.system,
+            &point_state,
+            source_ncol as usize,
+            source_normalized_mesh,
+            target_ncol as usize,
+            target_normalized_mesh,
+            &base_params,
+            param1_index,
+            param2_index,
+            parameter_name,
+            param2_name,
+            target_extras,
+            source_extras,
+            Some(source_fixed),
+        )
+        .map_err(|error| {
+            JsValue::from_str(&format!(
+                "Failed to initialize homoclinic setup from nonuniform homoclinic point: {error}"
+            ))
+        })?;
+        to_value(&setup)
+            .map_err(|error| JsValue::from_str(&format!("Serialization error: {error}")))
     }
 
     pub fn init_homotopy_saddle_from_equilibrium(
@@ -1514,6 +1642,7 @@ impl WasmSystem {
             stability: fork_core::continuation::BifurcationType::Fold,
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         // Run continuation
@@ -1702,6 +1831,7 @@ impl WasmSystem {
             },
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         // Run continuation
@@ -1900,6 +2030,7 @@ impl WasmSystem {
             stability: fork_core::continuation::BifurcationType::None,
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
@@ -2027,6 +2158,7 @@ impl WasmSystem {
             stability: fork_core::continuation::BifurcationType::CycleFold,
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
@@ -2172,6 +2304,7 @@ impl WasmSystem {
             stability: fork_core::continuation::BifurcationType::PeriodDoubling,
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
@@ -2282,6 +2415,7 @@ impl WasmSystem {
             stability: fork_core::continuation::BifurcationType::NeimarkSacker,
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
@@ -2439,9 +2573,10 @@ mod pd_output_layout_tests {
 mod tests {
     use crate::system::WasmSystem;
     use fork_core::continuation::{
-        BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, ContinuationSettings,
+        pack_homoclinic_state, BifurcationType, BranchType, ContinuationBranch, ContinuationPoint,
+        ContinuationSettings, HomoclinicSetup, HomoclinicShootingSetup, HomotopySaddleSetup,
     };
-    use serde_wasm_bindgen::to_value;
+    use serde_wasm_bindgen::{from_value, to_value};
     use wasm_bindgen::JsValue;
     use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -2467,6 +2602,18 @@ mod tests {
             "flow",
         )
         .expect("system should build")
+    }
+
+    fn build_homoclinic_system() -> WasmSystem {
+        WasmSystem::new(
+            vec!["y".to_string(), "x".to_string()],
+            vec![0.2, 0.1],
+            vec!["mu".to_string(), "nu".to_string()],
+            vec!["x".to_string(), "y".to_string()],
+            "rk4",
+            "flow",
+        )
+        .expect("homoclinic system should build")
     }
 
     fn build_two_dim_map_with_param() -> WasmSystem {
@@ -2504,6 +2651,153 @@ mod tests {
 
         let message = err.as_string().unwrap_or_default();
         assert!(message.contains("not divisible"));
+    }
+
+    #[wasm_bindgen_test]
+    fn homoclinic_wasm_initializers_preserve_core_validation_errors() {
+        let mut system = build_homoclinic_system();
+        let duplicate = system
+            .init_homotopy_saddle_from_equilibrium(
+                vec![0.0, 0.0],
+                "mu",
+                "mu",
+                6,
+                2,
+                0.01,
+                0.02,
+                5.0,
+                1e-3,
+            )
+            .expect_err("duplicate parameters must fail");
+        assert!(duplicate
+            .as_string()
+            .unwrap_or_default()
+            .contains("two distinct parameters"));
+
+        let invalid_time = system
+            .init_homotopy_saddle_from_equilibrium(
+                vec![0.0, 0.0],
+                "mu",
+                "nu",
+                6,
+                2,
+                0.01,
+                0.02,
+                0.0,
+                1e-3,
+            )
+            .expect_err("non-positive time must fail");
+        assert!(invalid_time
+            .as_string()
+            .unwrap_or_default()
+            .contains("strictly positive"));
+
+        let too_many_extras = system
+            .init_homoclinic_from_large_cycle(Vec::new(), 3, 1, "mu", "nu", 3, 1, true, true, true)
+            .expect_err("three free extras must fail");
+        assert!(too_many_extras
+            .as_string()
+            .unwrap_or_default()
+            .contains("at most two"));
+
+        let invalid_source_mesh = system
+            .init_homoclinic_from_large_cycle_on_mesh(
+                Vec::new(),
+                1,
+                vec![0.0, 0.7, 0.6, 1.0],
+                "mu",
+                "nu",
+                3,
+                1,
+                false,
+                true,
+                true,
+            )
+            .expect_err("nonmonotone source mesh must fail");
+        assert!(invalid_source_mesh
+            .as_string()
+            .unwrap_or_default()
+            .contains("strictly increasing"));
+
+        let invalid_restart_mesh = system
+            .init_homoclinic_from_homoclinic_on_mesh(
+                Vec::new(),
+                1,
+                vec![0.0, 0.8, 0.7, 1.0],
+                true,
+                false,
+                false,
+                1.0,
+                0.01,
+                0.01,
+                "mu",
+                "nu",
+                1,
+                vec![0.0, 0.2, 0.6, 1.0],
+                true,
+                false,
+                false,
+            )
+            .expect_err("nonmonotone homoclinic restart mesh must fail");
+        assert!(invalid_restart_mesh
+            .as_string()
+            .unwrap_or_default()
+            .contains("strictly increasing"));
+    }
+
+    #[wasm_bindgen_test]
+    fn homoclinic_wasm_setup_round_trips_preserve_seed_trust() {
+        let mut system = build_homoclinic_system();
+        let staged_value = system
+            .init_homotopy_saddle_from_equilibrium(
+                vec![0.0, 0.0],
+                "mu",
+                "nu",
+                6,
+                2,
+                0.01,
+                0.02,
+                5.0,
+                1e-3,
+            )
+            .expect("staged homoclinic setup");
+        let staged: HomotopySaddleSetup =
+            from_value(staged_value.clone()).expect("decode staged setup");
+        assert!(!staged.setup.initial_seed_is_corrected);
+
+        let approximate_shooting: HomoclinicShootingSetup = from_value(
+            system
+                .init_homoclinic_shooting_from_collocation(staged_value, 4, 32)
+                .expect("shooting from approximate staged setup"),
+        )
+        .expect("decode approximate shooting setup");
+        assert!(!approximate_shooting.initial_seed_is_corrected);
+
+        let method_4_value = system
+            .init_homoclinic_from_homotopy_saddle(
+                pack_homoclinic_state(&staged.setup),
+                staged.setup.ntst as u32,
+                staged.setup.ncol as u32,
+                "mu",
+                "nu",
+                staged.setup.ntst as u32,
+                staged.setup.ncol as u32,
+                true,
+                false,
+                false,
+            )
+            .expect("Method 4 setup from staged heuristic endpoint");
+        let method_4: HomoclinicSetup =
+            from_value(method_4_value.clone()).expect("decode Method 4 setup");
+        assert!(!method_4.initial_seed_is_corrected);
+
+        let method_4_shooting: HomoclinicShootingSetup = from_value(
+            system
+                .init_homoclinic_shooting_from_collocation(method_4_value, 4, 32)
+                .expect("shooting from Method 4 setup"),
+        )
+        .expect("decode Method 4 shooting setup");
+        assert!(!method_4_shooting.initial_seed_is_corrected);
     }
 
     #[wasm_bindgen_test]
@@ -2549,6 +2843,7 @@ mod tests {
                 stability: BifurcationType::None,
                 eigenvalues: Vec::new(),
                 cycle_points: None,
+                homoclinic_events: None,
             }],
             bifurcations: Vec::new(),
             indices: vec![0],
@@ -2603,6 +2898,7 @@ mod tests {
                 stability: BifurcationType::None,
                 eigenvalues: Vec::new(),
                 cycle_points: None,
+                homoclinic_events: None,
             }],
             bifurcations: Vec::new(),
             indices: vec![0],

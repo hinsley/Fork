@@ -61,6 +61,10 @@ import type {
 import { JobQueue } from './jobQueue'
 import { normalizeBranchEigenvalues } from '../system/continuation'
 import { isDeterministicMode } from '../utils/determinism'
+import {
+  DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT,
+  DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS,
+} from '../system/homoclinicExtras'
 
 function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -1705,10 +1709,31 @@ export class MockForkCoreClient implements ForkCoreClient {
           current_param: paramValue + request.settings.step_size,
         })
 
-        const state =
-          request.lcState.length > 0
-            ? request.lcState
-            : new Array(request.system.varNames.length + 1).fill(0)
+        const shooting = request.discretization === 'shooting'
+        const outputNtst = shooting
+          ? request.shootingIntervals ?? DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS
+          : request.targetNtst
+        const outputNcol = shooting ? 0 : request.targetNcol
+        const state = (() => {
+          if (!shooting) {
+            return request.lcState.length > 0
+              ? request.lcState
+              : new Array(request.system.varNames.length + 1).fill(0)
+          }
+          const dim = Math.max(1, request.system.varNames.length)
+          const firstNode = request.lcState.slice(0, dim)
+          while (firstNode.length < dim) firstNode.push(0)
+          const nodes = Array.from({ length: outputNtst + 1 }, () => firstNode).flat()
+          const param2Index = request.system.paramNames.indexOf(request.param2Name)
+          const param2Value =
+            param2Index >= 0 ? request.system.params[param2Index] ?? 0 : 0
+          const extras = [
+            ...(request.freeTime ? [1] : []),
+            ...(request.freeEps0 ? [0.01] : []),
+            ...(request.freeEps1 ? [0.01] : []),
+          ]
+          return [...nodes, ...firstNode, param2Value, ...extras, 0, 0]
+        })()
         return normalizeBranchEigenvalues({
           points: [
             { state, param_value: paramValue, stability: 'None', eigenvalues: [] },
@@ -1723,13 +1748,21 @@ export class MockForkCoreClient implements ForkCoreClient {
           indices: [0, 1],
           branch_type: {
             type: 'HomoclinicCurve',
-            ntst: request.targetNtst,
-            ncol: request.targetNcol,
+            ntst: outputNtst,
+            ncol: outputNcol,
             param1_name: request.parameterName,
             param2_name: request.param2Name,
             free_time: request.freeTime,
             free_eps0: request.freeEps0,
             free_eps1: request.freeEps1,
+            discretization: shooting
+              ? {
+                  type: 'shooting',
+                  integration_steps_per_segment:
+                    request.integrationStepsPerSegment ??
+                    DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT,
+                }
+              : { type: 'collocation' },
           },
         })
       },

@@ -48,6 +48,12 @@ type ManifoldEq1DBranchMetadata = {
   map_iterations?: number;
 };
 
+export function supportsContinuationBranchExtension(
+  branchType: ContinuationObject['branchType']
+): boolean {
+  return branchType !== 'homotopy_saddle_curve';
+}
+
 async function extendEquilibriumManifold1D(
   sysName: string,
   branch: ContinuationObject
@@ -443,6 +449,12 @@ export async function extendBranch(
   }
   if (branch.branchType === 'eq_manifold_2d' || branch.branchType === 'cycle_manifold_2d') {
     return extendManifold2D(sysName, branch);
+  }
+  if (!supportsContinuationBranchExtension(branch.branchType)) {
+    printError(
+      'Homotopy-saddle branches use staged continuation and cannot be extended with the generic branch action.'
+    );
+    return;
   }
   const sysConfig = Storage.loadSystem(sysName);
   const defaults = branch.settings || {};

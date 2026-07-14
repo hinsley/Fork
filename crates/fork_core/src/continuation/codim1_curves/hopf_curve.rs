@@ -1242,6 +1242,7 @@ mod tests {
             stability: BifurcationType::Hopf,
             eigenvalues: hopf_point.eigenvalues.clone(),
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let curve_settings = ContinuationSettings {

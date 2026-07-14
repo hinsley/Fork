@@ -1,12 +1,164 @@
 import { addBranch, addObject, addScene, createSystem } from './model'
 import { nowIso } from '../utils/determinism'
+import { normalizeBranchEigenvalues } from './continuation'
+import { MockForkCoreClient } from '../compute/mockClient'
+import type {
+  ContinuationExtensionRequest,
+  ContinuationExtensionResult,
+  ContinuationProgress,
+  HomoclinicContinuationResult,
+  HomoclinicFromLargeCycleRequest,
+} from '../compute/ForkCoreClient'
 import type {
   ContinuationObject,
+  ContinuationPoint,
   ContinuationSettings,
+  HomoclinicEventDiagnostics,
   LimitCycleObject,
   OrbitObject,
   System,
 } from './types'
+
+export const HOMOCLINIC_PRODUCT_E2E_FIXTURE = 'homoclinic-product'
+export const HOMOCLINIC_PRODUCT_E2E_SYSTEM_NAME = 'Homoclinic_Product_E2E'
+
+function homoclinicFixtureDiagnostics(
+  primary: 'NNS' | 'NSF'
+): HomoclinicEventDiagnostics {
+  const neutralSaddle = primary === 'NNS'
+  return {
+    stable_dimension: 1,
+    unstable_dimension: 1,
+    discarded_eigenvalues: 0,
+    events: [
+      {
+        kind: primary,
+        name: neutralSaddle ? 'Neutral saddle' : 'Neutral saddle-focus',
+        value: neutralSaddle ? -0.125 : 0.03125,
+        status: 'available',
+        reason: null,
+      },
+      {
+        kind: neutralSaddle ? 'IFU' : 'IFS',
+        name: neutralSaddle
+          ? 'Inclination flip (unstable manifold)'
+          : 'Inclination flip (stable manifold)',
+        value: null,
+        status: 'unsupported',
+        reason: 'adjoint continuation is unavailable',
+      },
+    ],
+  }
+}
+
+/**
+ * Deterministic UI-only client for the homoclinic Playwright fixture.
+ *
+ * The real numerical boundary remains the analytic Duffing Node-WASM smoke in
+ * `cli/tests/wasm-smoke.ts`. This client exists only behind the explicit
+ * `?fixture=homoclinic-product` URL and makes browser persistence, rendering,
+ * extension, and diagnostic presentation reproducible.
+ */
+export class HomoclinicProductE2EClient extends MockForkCoreClient {
+  override async runHomoclinicFromLargeCycle(
+    request: HomoclinicFromLargeCycleRequest,
+    opts?: {
+      signal?: AbortSignal
+      onProgress?: (progress: ContinuationProgress) => void
+    }
+  ): Promise<HomoclinicContinuationResult> {
+    const branch = await super.runHomoclinicFromLargeCycle(request, opts)
+    const param2Index = request.system.paramNames.indexOf(request.param2Name)
+    const param2Value = param2Index >= 0 ? request.system.params[param2Index] ?? 0 : 0
+    branch.points = branch.points.map((point, index) => ({
+      ...point,
+      param2_value: param2Value,
+      ...(index === branch.points.length - 1
+        ? {
+            stability: 'HomoclinicNeutralSaddle',
+            homoclinic_events: homoclinicFixtureDiagnostics('NNS'),
+          }
+        : {}),
+    }))
+    branch.bifurcations = branch.points.length > 0 ? [branch.points.length - 1] : []
+    branch.homoc_context = {
+      base_params: [...request.system.params],
+      param1_index: request.system.paramNames.indexOf(request.parameterName),
+      param2_index: param2Index,
+      basis: {
+        stable_q: [1, 0, 0, 1],
+        unstable_q: [1, 0, 0, 1],
+        dim: 2,
+        nneg: 1,
+        npos: 1,
+      },
+      fixed_time: 1,
+      fixed_eps0: 0.01,
+      fixed_eps1: 0.01,
+      projector_refresh_interval: 2,
+    }
+    return branch
+  }
+
+  override async runContinuationExtension(
+    request: ContinuationExtensionRequest,
+    opts?: {
+      signal?: AbortSignal
+      onProgress?: (progress: ContinuationProgress) => void
+    }
+  ): Promise<ContinuationExtensionResult> {
+    if (opts?.signal?.aborted) {
+      const error = new Error('cancelled')
+      error.name = 'AbortError'
+      throw error
+    }
+
+    const branch = normalizeBranchEigenvalues(structuredClone(request.branchData))
+    const endpoint = request.forward ? branch.points.at(-1) : branch.points[0]
+    if (!endpoint) return branch
+
+    opts?.onProgress?.({
+      done: false,
+      current_step: 0,
+      max_steps: request.settings.max_steps,
+      points_computed: branch.points.length,
+      bifurcations_found: branch.bifurcations.length,
+      current_param: endpoint.param_value,
+    })
+
+    const step = Math.abs(request.settings.step_size || 0.01)
+    const nextPoint: ContinuationPoint = {
+      ...endpoint,
+      state: endpoint.state.map((value, index) => (index === 0 ? value + 0.1 : value)),
+      param_value: endpoint.param_value + (request.forward ? step : -step),
+      stability: 'HomoclinicNeutralSaddleFocus',
+      homoclinic_events: homoclinicFixtureDiagnostics('NSF'),
+    }
+    const nextLogicalIndex = request.forward
+      ? Math.max(...branch.indices, -1) + 1
+      : Math.min(...branch.indices, 1) - 1
+    if (request.forward) {
+      const nextArrayIndex = branch.points.length
+      branch.points.push(nextPoint)
+      branch.indices.push(nextLogicalIndex)
+      branch.bifurcations.push(nextArrayIndex)
+    } else {
+      branch.points.unshift(nextPoint)
+      branch.indices.unshift(nextLogicalIndex)
+      branch.bifurcations = [0, ...branch.bifurcations.map((index) => index + 1)]
+    }
+
+    opts?.onProgress?.({
+      done: true,
+      current_step: 1,
+      max_steps: request.settings.max_steps,
+      points_computed: branch.points.length,
+      bifurcations_found: branch.bifurcations.length,
+      current_param: nextPoint.param_value,
+    })
+    return branch
+  }
+}
 
 export function createDemoSystem(): {
   system: System
@@ -231,6 +383,100 @@ export function createLimitCycleManifoldSystem(): { system: System } {
 
   const added = addObject(system, limitCycle)
   system = added.system
+  return { system }
+}
+
+/** Seed-only half of the deterministic homoclinic product E2E fixture. */
+export function createHomoclinicProductE2ESystem(): { system: System } {
+  let system = createSystem({
+    name: HOMOCLINIC_PRODUCT_E2E_SYSTEM_NAME,
+    config: {
+      name: HOMOCLINIC_PRODUCT_E2E_SYSTEM_NAME,
+      equations: ['y', 'x-x^3+(mu-nu)*y'],
+      params: [0, 0],
+      paramNames: ['mu', 'nu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    },
+  })
+
+  const ntst = 4
+  const ncol = 2
+  const period = 12
+  const normalizedMesh = Array.from({ length: ntst + 1 }, (_, index) => index / ntst)
+  const state: number[] = []
+  for (let interval = 0; interval < ntst; interval += 1) {
+    const theta = (interval / ntst) * Math.PI * 2
+    state.push(1.35 * Math.cos(theta), 1.35 * Math.sin(theta))
+  }
+  for (let interval = 0; interval < ntst; interval += 1) {
+    for (let stage = 0; stage < ncol; stage += 1) {
+      const fraction = (stage + 1) / (ncol + 1)
+      const theta = ((interval + fraction) / ntst) * Math.PI * 2
+      state.push(1.35 * Math.cos(theta), 1.35 * Math.sin(theta))
+    }
+  }
+  state.push(period)
+
+  const cycle: LimitCycleObject = {
+    type: 'limit_cycle',
+    name: 'Duffing_Large_Cycle',
+    systemName: system.config.name,
+    origin: { type: 'orbit', orbitName: 'Duffing_Seed' },
+    ntst,
+    ncol,
+    period,
+    state,
+    parameters: [...system.config.params],
+    parameterName: 'mu',
+    paramValue: 0,
+    createdAt: nowIso(),
+  }
+  const cycleResult = addObject(system, cycle)
+  system = cycleResult.system
+
+  const settings: ContinuationSettings = {
+    step_size: 0.001,
+    min_step_size: 1e-7,
+    max_step_size: 0.01,
+    max_steps: 3,
+    corrector_steps: 16,
+    corrector_tolerance: 1e-9,
+    step_tolerance: 1e-9,
+  }
+  const sourceBranch: ContinuationObject = {
+    type: 'continuation',
+    name: 'duffing_large_cycle',
+    systemName: system.config.name,
+    parameterName: 'mu',
+    parentObject: cycle.name,
+    startObject: cycle.name,
+    branchType: 'limit_cycle',
+    data: {
+      points: [
+        {
+          state,
+          param_value: 0,
+          stability: 'None',
+          eigenvalues: [],
+        },
+      ],
+      bifurcations: [],
+      indices: [0],
+      branch_type: {
+        type: 'LimitCycle',
+        ntst,
+        ncol,
+        normalized_mesh: normalizedMesh,
+      },
+    },
+    settings,
+    timestamp: nowIso(),
+    params: [...system.config.params],
+  }
+  system = addBranch(system, sourceBranch, cycleResult.nodeId).system
+  system = addScene(system, 'Homoclinic Scene').system
   return { system }
 }
 

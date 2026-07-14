@@ -15,6 +15,9 @@ import { normalizeBranchEigenvalues } from './serialization';
 import { getBranchParams, isValidName } from './utils';
 import { runHomotopySaddleContinuationWithProgress } from './progress';
 
+export const HOMOTOPY_SADDLE_MENU_TITLE =
+  'Method 3: Homotopy-Saddle from Equilibrium';
+
 type HomotopyBranchTypeData = {
   type: 'HomotopySaddleCurve';
   ntst: number;
@@ -74,12 +77,12 @@ export async function initiateHomotopySaddleFromEquilibrium(
   }
 
   if (branch.branchType !== 'equilibrium') {
-    printError('Method 4 requires an equilibrium branch point.');
+    printError('Method 3 requires an equilibrium branch point.');
     return null;
   }
 
   if (sysConfig.paramNames.length < 2) {
-    printError('Method 4 requires at least two system parameters.');
+    printError('Method 3 requires at least two system parameters.');
     return null;
   }
 
@@ -365,7 +368,7 @@ export async function initiateHomotopySaddleFromEquilibrium(
     }
   ];
 
-  const menuResult = await runConfigMenu('Method 4: Homotopy-Saddle from Equilibrium', entries);
+  const menuResult = await runConfigMenu(HOMOTOPY_SADDLE_MENU_TITLE, entries);
   if (menuResult === 'back') {
     return null;
   }
@@ -465,7 +468,7 @@ export async function initiateHomotopySaddleFromEquilibrium(
 
     return newBranch;
   } catch (error) {
-    printError(`Method 4 failed: ${error}`);
+    printError(`Method 3 failed: ${error}`);
     return null;
   }
 }

@@ -301,7 +301,7 @@ export function limitCycleProfileNormalizedCoordinates(
   ncol: number,
   normalizedMesh?: number[]
 ): number[] | null {
-  if (!Number.isInteger(ntst) || ntst < 1 || !Number.isInteger(ncol) || ncol < 1) {
+  if (!Number.isInteger(ntst) || ntst < 1 || !Number.isInteger(ncol) || ncol < 0) {
     return null
   }
   const mesh = normalizedMesh === undefined || normalizedMesh.length === 0
@@ -314,6 +314,9 @@ export function limitCycleProfileNormalizedCoordinates(
     mesh.some((value, index) => !Number.isFinite(value) || (index > 0 && value <= mesh[index - 1]))
   ) {
     return null
+  }
+  if (ncol === 0) {
+    return mesh
   }
   const nodes = gaussLegendreNormalizedNodes(ncol)
   if (nodes.length !== ncol) return null
@@ -486,7 +489,7 @@ function resolveHomoclinicPackedOffsets(
   }
   const ntst = branchType.ntst
   const ncol = branchType.ncol
-  if (!Number.isInteger(ntst) || !Number.isInteger(ncol) || ntst <= 0 || ncol <= 0) {
+  if (!Number.isInteger(ntst) || !Number.isInteger(ncol) || ntst <= 0 || ncol < 0) {
     return null
   }
   const dim = Math.max(1, Math.round(stateDimension))
@@ -846,6 +849,20 @@ const BIFURCATION_TYPE_LABELS: Record<string, string> = {
   Resonance1_2: 'Resonance 1:2',
   Resonance1_3: 'Resonance 1:3',
   Resonance1_4: 'Resonance 1:4',
+  HomoclinicNeutralSaddle: 'NNS - Neutral Saddle',
+  HomoclinicNeutralSaddleFocus: 'NSF - Neutral Saddle-Focus',
+  HomoclinicNeutralBiFocus: 'NFF - Neutral Bi-Focus',
+  HomoclinicDoubleRealStable: 'DRS - Double Real Stable',
+  HomoclinicDoubleRealUnstable: 'DRU - Double Real Unstable',
+  HomoclinicNeutrallyDivergentStable: 'NDS - Neutrally Divergent Stable',
+  HomoclinicNeutrallyDivergentUnstable: 'NDU - Neutrally Divergent Unstable',
+  HomoclinicThreeLeadingStable: 'TLS - Three Leading Stable',
+  HomoclinicThreeLeadingUnstable: 'TLU - Three Leading Unstable',
+  HomoclinicNonCentral: 'NCH - Non-Central Homoclinic',
+  HomoclinicShilnikovHopf: 'SH - Shilnikov-Hopf',
+  HomoclinicBogdanovTakens: 'BT - Bogdanov-Takens',
+  HomoclinicOrbitFlipUnstable: 'OFU - Orbit Flip Unstable',
+  HomoclinicOrbitFlipStable: 'OFS - Orbit Flip Stable',
 }
 
 export function formatBifurcationType(value?: ContinuationPoint['stability']): string {

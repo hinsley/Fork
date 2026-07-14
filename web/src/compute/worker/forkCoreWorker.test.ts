@@ -15,6 +15,18 @@ const wasmState = {
   throwMode: 'none' as 'none' | 'validate' | 'abort',
   useCamelCaseIsoclineMethod: false,
   disableHomoclinicLargeCycleInit: false,
+  disableHomoclinicShootingInit: false,
+  disableHomoclinicShootingRunner: false,
+  homoclinicLargeCycleInitCalls: 0,
+  homoclinicLargeCycleMesh: null as number[] | null,
+  homoclinicRestartSourceMesh: null as number[] | null,
+  homoclinicShootingInitArgs: null as null | { intervals: number; steps: number },
+  homoclinicShootingRestartArgs: null as null | {
+    sourceIntervals: number
+    targetIntervals: number
+    steps: number
+  },
+  lastHomoclinicRunner: null as null | 'collocation' | 'shooting',
   disableIsoperiodicRunner: false,
   isoperiodicFallbackCalls: 0,
   lastRunStepsArg: null as number | null,
@@ -93,6 +105,11 @@ beforeAll(async () => {
         if (wasmState.disableHomoclinicLargeCycleInit) {
           ;(this as { init_homoclinic_from_large_cycle?: unknown }).init_homoclinic_from_large_cycle =
             undefined
+        }
+        if (wasmState.disableHomoclinicShootingInit) {
+          ;(
+            this as { init_homoclinic_shooting_from_collocation?: unknown }
+          ).init_homoclinic_shooting_from_collocation = undefined
         }
         if (wasmState.throwMode !== 'validate') return
         if (equations.length > 1) {
@@ -215,10 +232,36 @@ beforeAll(async () => {
         }
       }
       init_homoclinic_from_large_cycle() {
-        return {}
+        wasmState.homoclinicLargeCycleInitCalls += 1
+        return { discretization: 'collocation' }
+      }
+      init_homoclinic_from_large_cycle_on_mesh(...args: unknown[]) {
+        wasmState.homoclinicLargeCycleInitCalls += 1
+        wasmState.homoclinicLargeCycleMesh = Array.from(args[2] as Float64Array)
+        return { discretization: 'collocation' }
+      }
+      init_homoclinic_shooting_from_collocation(
+        _setup: unknown,
+        intervals: number,
+        steps: number
+      ) {
+        wasmState.homoclinicShootingInitArgs = { intervals, steps }
+        return { discretization: 'shooting', intervals, steps }
       }
       init_homoclinic_from_homoclinic() {
         return {}
+      }
+      init_homoclinic_from_homoclinic_on_mesh(...args: unknown[]) {
+        wasmState.homoclinicRestartSourceMesh = Array.from(args[2] as Float64Array)
+        return {}
+      }
+      init_homoclinic_shooting_from_shooting(...args: unknown[]) {
+        wasmState.homoclinicShootingRestartArgs = {
+          sourceIntervals: args[1] as number,
+          targetIntervals: args[10] as number,
+          steps: args[11] as number,
+        }
+        return { discretization: 'shooting' }
       }
       init_homotopy_saddle_from_equilibrium() {
         return {}
@@ -305,7 +348,7 @@ beforeAll(async () => {
       points: MockRunnerPoint[]
       bifurcations?: number[]
       indices?: number[]
-      branch_type?: { type: string }
+      branch_type?: { type: string; [key: string]: unknown }
       homoc_context?: {
         base_params: number[]
         param1_index: number
@@ -483,6 +526,11 @@ beforeAll(async () => {
     }
 
     class MockHomoclinicRunner extends MockContinuationRunner {
+      constructor() {
+        super()
+        wasmState.lastHomoclinicRunner = 'collocation'
+      }
+
       override get_result(): MockRunnerResult {
         return {
           points: [
@@ -535,6 +583,30 @@ beforeAll(async () => {
       }
     }
 
+    class MockHomoclinicShootingRunner extends MockHomoclinicRunner {
+      constructor() {
+        super()
+        wasmState.lastHomoclinicRunner = 'shooting'
+      }
+
+      override get_result(): MockRunnerResult {
+        return {
+          ...super.get_result(),
+          branch_type: {
+            type: 'HomoclinicCurve',
+            ntst: 6,
+            ncol: 0,
+            param1_name: 'mu',
+            param2_name: 'nu',
+            free_time: true,
+            free_eps0: true,
+            free_eps1: false,
+            discretization: { type: 'shooting', integration_steps_per_segment: 96 },
+          },
+        }
+      }
+    }
+
     class MockLimitCycleRunner extends MockContinuationRunner {
       constructor(...args: unknown[]) {
         super()
@@ -561,6 +633,11 @@ beforeAll(async () => {
       },
       WasmLimitCycleRunner: MockLimitCycleRunner,
       WasmHomoclinicRunner: MockHomoclinicRunner,
+      get WasmHomoclinicShootingRunner() {
+        return wasmState.disableHomoclinicShootingRunner
+          ? undefined
+          : MockHomoclinicShootingRunner
+      },
       WasmHomotopySaddleRunner: MockContinuationRunner,
       WasmContinuationExtensionRunner: MockContinuationRunner,
       WasmCodim1CurveExtensionRunner: MockContinuationRunner,
@@ -579,6 +656,14 @@ beforeEach(() => {
   wasmState.throwMode = 'none'
   wasmState.useCamelCaseIsoclineMethod = false
   wasmState.disableHomoclinicLargeCycleInit = false
+  wasmState.disableHomoclinicShootingInit = false
+  wasmState.disableHomoclinicShootingRunner = false
+  wasmState.homoclinicLargeCycleInitCalls = 0
+  wasmState.homoclinicLargeCycleMesh = null
+  wasmState.homoclinicRestartSourceMesh = null
+  wasmState.homoclinicShootingInitArgs = null
+  wasmState.homoclinicShootingRestartArgs = null
+  wasmState.lastHomoclinicRunner = null
   wasmState.disableIsoperiodicRunner = false
   wasmState.isoperiodicFallbackCalls = 0
   wasmState.lastRunStepsArg = null
@@ -886,6 +971,9 @@ describe('forkCoreWorker', () => {
     expect(h1Response?.result?.resume_state?.max_index_seed?.endpoint_index).toBe(1)
     expect(h1Response?.result?.resume_state?.max_index_seed?.step_size).toBe(0.01)
     expect(h1Response?.result?.homoc_context?.basis?.dim).toBe(2)
+    expect(wasmState.homoclinicLargeCycleInitCalls).toBe(1)
+    expect(wasmState.homoclinicShootingInitArgs).toBeNull()
+    expect(wasmState.lastHomoclinicRunner).toBe('collocation')
 
     workerScope.postMessage.mockClear()
 
@@ -898,6 +986,7 @@ describe('forkCoreWorker', () => {
           pointState: new Array(80).fill(0),
           sourceNtst: 8,
           sourceNcol: 2,
+          sourceNormalizedMesh: [0, 0.04, 0.12, 0.24, 0.4, 0.6, 0.78, 0.91, 1],
           sourceFreeTime: true,
           sourceFreeEps0: true,
           sourceFreeEps1: false,
@@ -935,6 +1024,9 @@ describe('forkCoreWorker', () => {
     expect(h2Response?.result?.points?.length).toBe(3)
     expect(h2Response?.result?.indices).toEqual([10, 11, 12])
     expect(h2Response?.result?.bifurcations).toEqual([0, 1, 2])
+    expect(wasmState.homoclinicRestartSourceMesh).toEqual([
+      0, 0.04, 0.12, 0.24, 0.4, 0.6, 0.78, 0.91, 1,
+    ])
 
     workerScope.postMessage.mockClear()
 
@@ -1007,6 +1099,185 @@ describe('forkCoreWorker', () => {
     expect(h4Response?.result?.points?.length).toBe(3)
     expect(h4Response?.result?.indices).toEqual([10, 11, 12])
     expect(h4Response?.result?.bifurcations).toEqual([0, 1, 2])
+  })
+
+  it('converts the Method 1 collocation seed and runs standard shooting', async () => {
+    const handler = requireHandler()
+
+    await handler({
+      data: {
+        id: 'job-h1-shooting',
+        kind: 'runHomoclinicFromLargeCycle',
+        payload: {
+          system: {
+            ...baseSystem,
+            params: [0.2, 0.1],
+            paramNames: ['mu', 'nu'],
+          },
+          lcState: [0, 1, 1, 0, 2],
+          sourceNtst: 4,
+          sourceNcol: 2,
+          parameterName: 'mu',
+          param2Name: 'nu',
+          targetNtst: 8,
+          targetNcol: 2,
+          discretization: 'shooting',
+          shootingIntervals: 6,
+          integrationStepsPerSegment: 96,
+          freeTime: true,
+          freeEps0: true,
+          freeEps1: false,
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.homoclinicLargeCycleInitCalls).toBe(1)
+    expect(wasmState.homoclinicShootingInitArgs).toEqual({ intervals: 6, steps: 96 })
+    expect(wasmState.lastHomoclinicRunner).toBe('shooting')
+    const response = workerScope.postMessage.mock.calls
+      .map(([payload]) => payload as { id?: string; ok?: boolean; result?: Record<string, unknown> })
+      .find((payload) => payload.id === 'job-h1-shooting' && payload.ok === true)
+    expect(response?.result?.branch_type).toMatchObject({
+      type: 'HomoclinicCurve',
+      ntst: 6,
+      ncol: 0,
+      discretization: { type: 'shooting', integration_steps_per_segment: 96 },
+    })
+  })
+
+  it('passes the exact nonuniform source mesh to Method 1 initialization', async () => {
+    const handler = requireHandler()
+    await handler({
+      data: {
+        id: 'job-h1-nonuniform',
+        kind: 'runHomoclinicFromLargeCycle',
+        payload: {
+          system: {
+            ...baseSystem,
+            params: [0.2, 0.1],
+            paramNames: ['mu', 'nu'],
+          },
+          lcState: [0, 1, 1, 0, 2],
+          sourceNtst: 2,
+          sourceNcol: 2,
+          sourceNormalizedMesh: [0, 0.2, 1],
+          parameterName: 'mu',
+          param2Name: 'nu',
+          targetNtst: 8,
+          targetNcol: 2,
+          freeTime: true,
+          freeEps0: true,
+          freeEps1: false,
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.homoclinicLargeCycleMesh).toEqual([0, 0.2, 1])
+    expect(workerScope.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({
+      id: 'job-h1-nonuniform',
+      ok: true,
+    })
+  })
+
+  it('restarts a standard-shooting homoclinic branch with a new shooting mesh', async () => {
+    const handler = requireHandler()
+    await handler({
+      data: {
+        id: 'job-h2-shooting',
+        kind: 'runHomoclinicFromHomoclinic',
+        payload: {
+          system: {
+            ...baseSystem,
+            params: [0.2, 0.1],
+            paramNames: ['mu', 'nu'],
+          },
+          pointState: new Array(40).fill(0),
+          sourceNtst: 6,
+          sourceNcol: 0,
+          sourceDiscretization: 'shooting',
+          sourceFreeTime: true,
+          sourceFreeEps0: true,
+          sourceFreeEps1: false,
+          sourceFixedTime: 20,
+          sourceFixedEps0: 0.01,
+          sourceFixedEps1: 0.1,
+          parameterName: 'mu',
+          param2Name: 'nu',
+          targetNtst: 8,
+          targetNcol: 2,
+          discretization: 'shooting',
+          shootingIntervals: 9,
+          integrationStepsPerSegment: 72,
+          freeTime: true,
+          freeEps0: true,
+          freeEps1: false,
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.homoclinicShootingRestartArgs).toEqual({
+      sourceIntervals: 6,
+      targetIntervals: 9,
+      steps: 72,
+    })
+    expect(wasmState.lastHomoclinicRunner).toBe('shooting')
+    expect(workerScope.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({
+      id: 'job-h2-shooting',
+      ok: true,
+      result: {
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ncol: 0,
+          discretization: { type: 'shooting' },
+        },
+      },
+    })
+  })
+
+  it('reports an actionable error when the shooting binding is unavailable', async () => {
+    const handler = requireHandler()
+    wasmState.disableHomoclinicShootingInit = true
+
+    await handler({
+      data: {
+        id: 'job-h1-shooting-missing',
+        kind: 'runHomoclinicFromLargeCycle',
+        payload: {
+          system: {
+            ...baseSystem,
+            params: [0.2, 0.1],
+            paramNames: ['mu', 'nu'],
+          },
+          lcState: [0, 1, 1, 0, 2],
+          sourceNtst: 4,
+          sourceNcol: 2,
+          parameterName: 'mu',
+          param2Name: 'nu',
+          targetNtst: 8,
+          targetNcol: 2,
+          discretization: 'shooting',
+          shootingIntervals: 6,
+          integrationStepsPerSegment: 96,
+          freeTime: true,
+          freeEps0: true,
+          freeEps1: false,
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    const response = workerScope.postMessage.mock.calls
+      .map(([payload]) => payload as { id?: string; ok?: boolean; error?: string })
+      .find((payload) => payload.id === 'job-h1-shooting-missing' && payload.ok === false)
+    expect(response?.error).toContain('standard shooting')
+    expect(response?.error).toContain('Rebuild fork_wasm pkg-web')
   })
 
   it('returns a clear error when homoclinic methods are missing from the wasm build', async () => {

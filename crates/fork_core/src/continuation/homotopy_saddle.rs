@@ -103,6 +103,7 @@ fn state_to_point(setup: &HomotopySaddleSetup) -> ContinuationPoint {
         stability: BifurcationType::None,
         eigenvalues: Vec::new(),
         cycle_points: Some(setup.setup.guess.mesh_states.clone()),
+        homoclinic_events: None,
     }
 }
 
@@ -235,11 +236,7 @@ fn normalize_or_basis_direction(candidate: &[f64], fallback: Vec<f64>) -> Vec<f6
 }
 
 fn first_basis_vector(flat: &[f64], dim: usize) -> Vec<f64> {
-    let mut out = vec![0.0; dim];
-    for i in 0..dim {
-        out[i] = flat[i * dim];
-    }
-    out
+    flat.iter().take(dim).copied().collect()
 }
 
 fn add_scaled(base: &[f64], direction: &[f64], scale: f64) -> Vec<f64> {
@@ -292,6 +289,21 @@ mod tests {
         system
     }
 
+    fn non_diagonal_saddle_system() -> EquationSystem {
+        let eq1 = Bytecode {
+            ops: vec![OpCode::LoadVar(1)],
+        };
+        let eq2 = Bytecode {
+            ops: vec![OpCode::LoadVar(0)],
+        };
+        let mut system = EquationSystem::new(vec![eq1, eq2], vec![0.2, 0.1]);
+        system.param_map.insert("mu".to_string(), 0);
+        system.param_map.insert("nu".to_string(), 1);
+        system.var_map.insert("x".to_string(), 0);
+        system.var_map.insert("y".to_string(), 1);
+        system
+    }
+
     fn settings() -> ContinuationSettings {
         ContinuationSettings {
             step_size: 0.01,
@@ -327,6 +339,36 @@ mod tests {
         setup.s_params = vec![1e-5, 1e-5];
         advance_stage(&mut setup, 0.01).expect("advance");
         assert_eq!(setup.stage, HomotopyStage::StageB);
+    }
+
+    #[test]
+    fn endpoint_reshape_uses_first_basis_columns_for_non_diagonal_saddle() {
+        let mut system = non_diagonal_saddle_system();
+        let mut setup = homotopy_saddle_setup_from_equilibrium(
+            &mut system,
+            &[0.0, 0.0],
+            &[0.2, 0.1],
+            0,
+            1,
+            "mu",
+            "nu",
+            6,
+            2,
+            0.01,
+            0.02,
+            5.0,
+            1e-3,
+        )
+        .expect("non-diagonal setup");
+        setup.setup.guess.mesh_states[0] = setup.setup.guess.x0.clone();
+        let last = setup.setup.guess.mesh_states.len() - 1;
+        setup.setup.guess.mesh_states[last] = setup.setup.guess.x0.clone();
+
+        reshape_endpoint_distances(&mut setup.setup).expect("reshape endpoints");
+        let start = &setup.setup.guess.mesh_states[0];
+        let end = setup.setup.guess.mesh_states.last().expect("end point");
+        assert!((start[1] - start[0]).abs() < 1e-10, "start={start:?}");
+        assert!((end[1] + end[0]).abs() < 1e-10, "end={end:?}");
     }
 
     #[test]

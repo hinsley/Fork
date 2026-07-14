@@ -6,6 +6,9 @@
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 
+use super::homoclinic_events::HomoclinicEventDiagnostics;
+use super::periodic::{CollocationAdaptationReport, CollocationAdaptivitySettings};
+
 fn default_homoclinic_time() -> f64 {
     1.0
 }
@@ -589,6 +592,34 @@ pub enum BifurcationType {
     CycleFold,
     PeriodDoubling,
     NeimarkSacker,
+    /// Neutral saddle homoclinic event (`NNS` in HclinicBifurcationKit).
+    HomoclinicNeutralSaddle,
+    /// Neutral saddle-focus homoclinic event (`NSF`).
+    HomoclinicNeutralSaddleFocus,
+    /// Neutral bi-focus homoclinic event (`NFF`).
+    HomoclinicNeutralBiFocus,
+    /// Double-real transition in the leading stable spectrum (`DRS`).
+    HomoclinicDoubleRealStable,
+    /// Double-real transition in the leading unstable spectrum (`DRU`).
+    HomoclinicDoubleRealUnstable,
+    /// Neutrally-divergent stable-side saddle-focus event (`NDS`).
+    HomoclinicNeutrallyDivergentStable,
+    /// Neutrally-divergent unstable-side saddle-focus event (`NDU`).
+    HomoclinicNeutrallyDivergentUnstable,
+    /// Three-leading-eigenvalue stable collision (`TLS`).
+    HomoclinicThreeLeadingStable,
+    /// Three-leading-eigenvalue unstable collision (`TLU`).
+    HomoclinicThreeLeadingUnstable,
+    /// Non-central homoclinic to saddle-node event (`NCH`).
+    HomoclinicNonCentral,
+    /// Shilnikov-Hopf event (`SH`).
+    HomoclinicShilnikovHopf,
+    /// Bogdanov-Takens limit of the homoclinic curve (`BT`).
+    HomoclinicBogdanovTakens,
+    /// Orbit flip with respect to the unstable manifold (`OFU`).
+    HomoclinicOrbitFlipUnstable,
+    /// Orbit flip with respect to the stable manifold (`OFS`).
+    HomoclinicOrbitFlipStable,
 }
 
 /// A single point on a continuation branch.
@@ -601,6 +632,10 @@ pub struct ContinuationPoint {
     pub eigenvalues: Vec<Complex<f64>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cycle_points: Option<Vec<Vec<f64>>>,
+    /// HBK-style homoclinic special-point test values evaluated at this exact
+    /// serialized state. Non-homoclinic points omit the payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homoclinic_events: Option<HomoclinicEventDiagnostics>,
 }
 
 /// Type of continuation branch.
@@ -619,6 +654,19 @@ pub enum BranchType {
     HomoclinicCurve {
         ntst: usize,
         ncol: usize,
+        #[serde(default)]
+        discretization: HomoclinicDiscretization,
+        /// Persistent normalized collocation interval boundaries. Empty is
+        /// the legacy uniform-mesh representation and is also used by the
+        /// separate standard-shooting path (`ncol == 0`).
+        #[serde(default)]
+        normalized_mesh: Vec<f64>,
+        /// Defect-control settings used by the collocation branch.
+        #[serde(default)]
+        collocation_adaptivity: CollocationAdaptivitySettings,
+        /// Cumulative fixed-NTST redistribution provenance.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        collocation_adaptation: Option<CollocationAdaptationReport>,
         param1_name: String,
         param2_name: String,
         free_time: bool,
@@ -681,6 +729,17 @@ pub enum HomotopyStage {
     StageD,
 }
 
+/// Numerical discretization used for a homoclinic branch.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum HomoclinicDiscretization {
+    #[default]
+    Collocation,
+    Shooting {
+        integration_steps_per_segment: usize,
+    },
+}
+
 /// A complete continuation branch containing multiple points.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContinuationBranch {
@@ -731,6 +790,14 @@ pub struct HomoclinicResumeContext {
     pub fixed_eps0: f64,
     #[serde(default = "default_homoclinic_eps")]
     pub fixed_eps1: f64,
+    /// Accepted-step cadence for chart-safe projector refreshes. Legacy
+    /// contexts inherit HBK's default cadence of 2.
+    #[serde(default = "default_projector_refresh_interval")]
+    pub projector_refresh_interval: usize,
+}
+
+fn default_projector_refresh_interval() -> usize {
+    2
 }
 
 /// Resume seed for a specific branch endpoint.

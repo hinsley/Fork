@@ -1,4 +1,6 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { isHomoclinicExtraSelectionDisabled } from '../../../../system/homoclinicExtras'
+import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 
 export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -18,6 +20,10 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
     suggestDefaultName,
   } = scope
   if (!branch) return null
+  const sourceType = branch.data.branch_type
+  const sourceUsesShooting =
+    sourceType?.type === 'HomoclinicCurve' &&
+    (sourceType.discretization?.type === 'shooting' || sourceType.ncol === 0)
   return <>
 {showHomoclinicFromHomoclinic ? (
                   <InspectorDisclosure
@@ -107,37 +113,108 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                           </label>
                           <div className="inspector-divider">Initialization</div>
                           <label>
-                            Target NTST
-                            <input
-                              type="number"
-                              value={homoclinicFromHomoclinicDraft.targetNtst}
+                            Method
+                            <select
+                              value={homoclinicFromHomoclinicDraft.discretization}
                               onChange={(event) =>
                                 setHomoclinicFromHomoclinicDraft((prev) => ({
                                   ...prev,
-                                  targetNtst: event.target.value,
+                                  discretization:
+                                    event.target.value === 'shooting'
+                                      ? 'shooting'
+                                      : 'collocation',
                                 }))
                               }
-                              data-testid="homoclinic-from-homoclinic-ntst"
-                            />
+                              data-testid="homoclinic-from-homoclinic-discretization"
+                            >
+                              <option value="collocation" disabled={sourceUsesShooting}>
+                                Orthogonal Collocation
+                              </option>
+                              <option value="shooting">Standard Shooting</option>
+                            </select>
                           </label>
-                          <label>
-                            Target NCOL
-                            <input
-                              type="number"
-                              value={homoclinicFromHomoclinicDraft.targetNcol}
-                              onChange={(event) =>
-                                setHomoclinicFromHomoclinicDraft((prev) => ({
-                                  ...prev,
-                                  targetNcol: event.target.value,
-                                }))
-                              }
-                              data-testid="homoclinic-from-homoclinic-ncol"
-                            />
-                          </label>
+                          {sourceUsesShooting ? (
+                            <p className="field-help">
+                              A standard-shooting source restarts with standard shooting.
+                            </p>
+                          ) : null}
+                          {homoclinicFromHomoclinicDraft.discretization === 'collocation' ? (
+                            <>
+                              <label>
+                                Target NTST
+                                <input
+                                  type="number"
+                                  value={homoclinicFromHomoclinicDraft.targetNtst}
+                                  onChange={(event) =>
+                                    setHomoclinicFromHomoclinicDraft((prev) => ({
+                                      ...prev,
+                                      targetNtst: event.target.value,
+                                    }))
+                                  }
+                                  data-testid="homoclinic-from-homoclinic-ntst"
+                                />
+                              </label>
+                              <label>
+                                Target NCOL
+                                <input
+                                  type="number"
+                                  value={homoclinicFromHomoclinicDraft.targetNcol}
+                                  onChange={(event) =>
+                                    setHomoclinicFromHomoclinicDraft((prev) => ({
+                                      ...prev,
+                                      targetNcol: event.target.value,
+                                    }))
+                                  }
+                                  data-testid="homoclinic-from-homoclinic-ncol"
+                                />
+                              </label>
+                            </>
+                          ) : (
+                            <>
+                              <label>
+                                Shooting intervals
+                                <input
+                                  type="number"
+                                  min={1}
+                                  step={1}
+                                  value={homoclinicFromHomoclinicDraft.shootingIntervals}
+                                  onChange={(event) =>
+                                    setHomoclinicFromHomoclinicDraft((prev) => ({
+                                      ...prev,
+                                      shootingIntervals: event.target.value,
+                                    }))
+                                  }
+                                  data-testid="homoclinic-from-homoclinic-shooting-intervals"
+                                />
+                              </label>
+                              <label>
+                                Integration steps per segment
+                                <input
+                                  type="number"
+                                  min={1}
+                                  step={1}
+                                  value={
+                                    homoclinicFromHomoclinicDraft.integrationStepsPerSegment
+                                  }
+                                  onChange={(event) =>
+                                    setHomoclinicFromHomoclinicDraft((prev) => ({
+                                      ...prev,
+                                      integrationStepsPerSegment: event.target.value,
+                                    }))
+                                  }
+                                  data-testid="homoclinic-from-homoclinic-integration-steps"
+                                />
+                              </label>
+                            </>
+                          )}
                           <label>
                             <input
                               type="checkbox"
                               checked={homoclinicFromHomoclinicDraft.freeTime}
+                              disabled={isHomoclinicExtraSelectionDisabled(
+                                homoclinicFromHomoclinicDraft,
+                                'freeTime'
+                              )}
                               onChange={(event) =>
                                 setHomoclinicFromHomoclinicDraft((prev) => ({
                                   ...prev,
@@ -152,6 +229,10 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                             <input
                               type="checkbox"
                               checked={homoclinicFromHomoclinicDraft.freeEps0}
+                              disabled={isHomoclinicExtraSelectionDisabled(
+                                homoclinicFromHomoclinicDraft,
+                                'freeEps0'
+                              )}
                               onChange={(event) =>
                                 setHomoclinicFromHomoclinicDraft((prev) => ({
                                   ...prev,
@@ -166,6 +247,10 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                             <input
                               type="checkbox"
                               checked={homoclinicFromHomoclinicDraft.freeEps1}
+                              disabled={isHomoclinicExtraSelectionDisabled(
+                                homoclinicFromHomoclinicDraft,
+                                'freeEps1'
+                              )}
                               onChange={(event) =>
                                 setHomoclinicFromHomoclinicDraft((prev) => ({
                                   ...prev,
@@ -296,6 +381,18 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                               data-testid="homoclinic-from-homoclinic-step-tolerance"
                             />
                           </label>
+                          {homoclinicFromHomoclinicDraft.discretization === 'collocation' ? (
+                            <CollocationAdaptivityFields
+                              draft={homoclinicFromHomoclinicDraft}
+                              onChange={(patch) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  ...patch,
+                                }))
+                              }
+                              testIdPrefix="homoclinic-from-homoclinic"
+                            />
+                          ) : null}
                           {homoclinicFromHomoclinicError ? (
                             <div className="field-error">{homoclinicFromHomoclinicError}</div>
                           ) : null}

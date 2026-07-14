@@ -25,7 +25,7 @@ import {
 } from './labels';
 
 import { createEquilibriumBranchForObject, createLimitCycleBranchForObject } from './continuation/create';
-import { extendBranch } from './continuation/extend';
+import { extendBranch, supportsContinuationBranchExtension } from './continuation/extend';
 import { inspectBranch } from './continuation/inspect';
 import { initiateLCFromOrbit } from './continuation/initiate-lc-from-orbit';
 
@@ -908,14 +908,16 @@ async function manageBranch(
             message: 'Branch Actions',
             choices: [
                 { name: 'Inspect Data', value: 'Inspect Data' },
-                {
-                    name: branch.branchType === 'eq_manifold_1d' ||
-                        branch.branchType === 'eq_manifold_2d' ||
-                        branch.branchType === 'cycle_manifold_2d'
-                        ? 'Extend Manifold'
-                        : 'Extend Branch',
-                    value: 'Extend Branch'
-                },
+                ...(supportsContinuationBranchExtension(branch.branchType)
+                    ? [{
+                        name: branch.branchType === 'eq_manifold_1d' ||
+                            branch.branchType === 'eq_manifold_2d' ||
+                            branch.branchType === 'cycle_manifold_2d'
+                            ? 'Extend Manifold'
+                            : 'Extend Branch',
+                        value: 'Extend Branch'
+                    }]
+                    : []),
                 new inquirer.Separator(),
                 { name: 'Rename Branch', value: 'Rename Branch' },
                 { name: 'Delete Branch', value: 'Delete Branch' },

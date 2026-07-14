@@ -238,6 +238,7 @@ fn mlfast_reference_on_grid(
         stability: BifurcationType::CycleFold,
         eigenvalues: lpc.eigenvalues,
         cycle_points: None,
+        homoclinic_events: None,
     };
     let curve = continue_with_problem(
         &mut { problem },
@@ -417,6 +418,7 @@ fn steinmetz_reference_on_grid(
         stability: BifurcationType::NeimarkSacker,
         eigenvalues: ns.eigenvalues,
         cycle_points: None,
+        homoclinic_events: None,
     };
     let curve = continue_with_problem(
         &mut problem,

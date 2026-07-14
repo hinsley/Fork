@@ -1133,7 +1133,14 @@ function runDuffingHomoclinic(setup: any, params: number[]): any {
 
 function duffingPointParams(setup: any, point: any): [number, number] {
   const dim = 2;
-  const param2Index = (setup.ntst + 1) * dim + setup.ntst * setup.ncol * dim + dim;
+  const freeScalarCount = Number(setup.extras.free_time)
+    + Number(setup.extras.free_eps0)
+    + Number(setup.extras.free_eps1);
+  const fixedStateCount = 2 * dim + 1 + freeScalarCount
+    + setup.guess.yu.length + setup.guess.ys.length;
+  const ntst = (point.state.length - fixedStateCount) / (dim * (setup.ncol + 1));
+  assert.ok(Number.isInteger(ntst) && ntst > 0, 'Duffing point has an invalid adaptive mesh layout');
+  const param2Index = (ntst + 1) * dim + ntst * setup.ncol * dim + dim;
   return [point.param_value, point.state[param2Index]];
 }
 
@@ -1188,6 +1195,17 @@ assertDuffingHomoclinicBranch('Method 1', duffingMethod1Setup, duffingMethod1Bra
 
 const duffingSourcePoint = duffingMethod1Branch.points[1];
 const duffingSourceParams = duffingPointParams(duffingMethod1Setup, duffingSourcePoint);
+const duffingSourceBranchType = duffingMethod1Branch.branch_type;
+assert.equal(duffingSourceBranchType.type, 'HomoclinicCurve');
+assert.equal(duffingSourceBranchType.discretization.type, 'collocation');
+assert.equal(
+  duffingSourceBranchType.normalized_mesh.length,
+  duffingSourceBranchType.ntst + 1
+);
+const duffingTargetMesh = Array.from(
+  { length: duffingTargetNtst + 1 },
+  (_, index) => index / duffingTargetNtst
+);
 const duffingRestartSystem = new wasm.WasmSystem(
   duffingEquations,
   new Float64Array(duffingSourceParams),
@@ -1196,20 +1214,20 @@ const duffingRestartSystem = new wasm.WasmSystem(
   'rk4',
   'flow'
 );
-const duffingMethod2Setup = duffingRestartSystem.init_homoclinic_from_homoclinic(
+const duffingMethod2Setup = duffingRestartSystem.init_homoclinic_from_homoclinic_on_mesh(
   new Float64Array(duffingSourcePoint.state),
-  duffingTargetNtst,
-  duffingTargetNcol,
-  true,
-  false,
-  false,
+  duffingSourceBranchType.ncol,
+  new Float64Array(duffingSourceBranchType.normalized_mesh),
+  duffingSourceBranchType.free_time,
+  duffingSourceBranchType.free_eps0,
+  duffingSourceBranchType.free_eps1,
   duffingMethod1Setup.guess.time,
   duffingMethod1Setup.guess.eps0,
   duffingMethod1Setup.guess.eps1,
   'mu',
   'nu',
-  duffingTargetNtst,
   duffingTargetNcol,
+  new Float64Array(duffingTargetMesh),
   true,
   false,
   false
@@ -1217,20 +1235,20 @@ const duffingMethod2Setup = duffingRestartSystem.init_homoclinic_from_homoclinic
 const duffingMethod2Branch = runDuffingHomoclinic(duffingMethod2Setup, duffingSourceParams);
 assertDuffingHomoclinicBranch('Method 2', duffingMethod2Setup, duffingMethod2Branch);
 
-const duffingStageDSetup = duffingRestartSystem.init_homoclinic_from_homoclinic(
+const duffingStageDSetup = duffingRestartSystem.init_homoclinic_from_homoclinic_on_mesh(
   new Float64Array(duffingSourcePoint.state),
-  duffingTargetNtst,
-  duffingTargetNcol,
-  true,
-  false,
-  false,
+  duffingSourceBranchType.ncol,
+  new Float64Array(duffingSourceBranchType.normalized_mesh),
+  duffingSourceBranchType.free_time,
+  duffingSourceBranchType.free_eps0,
+  duffingSourceBranchType.free_eps1,
   duffingMethod1Setup.guess.time,
   duffingMethod1Setup.guess.eps0,
   duffingMethod1Setup.guess.eps1,
   'mu',
   'nu',
-  duffingTargetNtst,
   duffingTargetNcol,
+  new Float64Array(duffingTargetMesh),
   true,
   false,
   true

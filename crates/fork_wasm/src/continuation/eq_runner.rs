@@ -75,6 +75,7 @@ impl WasmEquilibriumRunner {
             stability: fork_core::continuation::BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let problem = OwnedEquilibriumContinuationProblem::new_with_periodicity(

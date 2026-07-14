@@ -1,11 +1,28 @@
+import { useState } from 'react'
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { InspectorSubDisclosure } from '../../selectionSession'
+import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
+import {
+  buildCollocationAdaptivitySettings,
+  type CollocationAdaptivityDraft,
+} from '../../collocationAdaptivity'
 
 function formatAdaptationTermination(reason: string): string {
   return reason.replaceAll('_', ' ')
 }
 
 export function BranchDataSections({ scope }: { scope: InspectorSelectionController }) {
+  const [btHomoclinicDraft, setBtHomoclinicDraft] = useState<
+    CollocationAdaptivityDraft & {
+      discretization: 'collocation' | 'shooting'
+      shootingIntervals: string
+      integrationStepsPerSegment: string
+    }
+  >({
+    discretization: 'collocation',
+    shootingIntervals: '8',
+    integrationStepsPerSegment: '64',
+  })
   const {
     BranchNavigatorContent,
     InspectorDisclosure,
@@ -869,6 +886,47 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                                 { label: 'Stability', value: selectedBranchPoint.stability },
                               ]}
                             />
+                            {selectedBranchPoint.homoclinic_events ? (
+                              <div data-testid="homoclinic-event-diagnostics">
+                                <h4 className="inspector-subheading">
+                                  Homoclinic event diagnostics
+                                </h4>
+                                <InspectorMetrics
+                                  rows={[
+                                    {
+                                      label: 'Stable dimension',
+                                      value:
+                                        selectedBranchPoint.homoclinic_events
+                                          .stable_dimension,
+                                    },
+                                    {
+                                      label: 'Unstable dimension',
+                                      value:
+                                        selectedBranchPoint.homoclinic_events
+                                          .unstable_dimension,
+                                    },
+                                    {
+                                      label: 'Discarded eigenvalues',
+                                      value:
+                                        selectedBranchPoint.homoclinic_events
+                                          .discarded_eigenvalues,
+                                    },
+                                  ]}
+                                />
+                                <InspectorMetrics
+                                  rows={selectedBranchPoint.homoclinic_events.events.map(
+                                    (event) => ({
+                                      label: `${event.kind} · ${event.name}`,
+                                      value: `${event.status}${
+                                        event.value === null
+                                          ? ' · value unavailable'
+                                          : ` · value ${formatScientific(event.value, 6)}`
+                                      } · reason ${event.reason ?? '—'}`,
+                                    })
+                                  )}
+                                />
+                              </div>
+                            ) : null}
                             {selectedBranchPoint.codim2 ? (
                               <>
                                 <h4 className="inspector-subheading">
@@ -1084,6 +1142,77 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                                         </button>
                                       ) : (
                                         <>
+                                          <label>
+                                            Homoclinic method
+                                            <select
+                                              value={btHomoclinicDraft.discretization}
+                                              onChange={(event) =>
+                                                setBtHomoclinicDraft((prev) => ({
+                                                  ...prev,
+                                                  discretization:
+                                                    event.target.value === 'shooting'
+                                                      ? 'shooting'
+                                                      : 'collocation',
+                                                }))
+                                              }
+                                              data-testid="codim2-switch-homoclinic-method"
+                                            >
+                                              <option value="collocation">
+                                                Orthogonal Collocation
+                                              </option>
+                                              <option value="shooting">Standard Shooting</option>
+                                            </select>
+                                          </label>
+                                          {btHomoclinicDraft.discretization === 'shooting' ? (
+                                            <>
+                                              <label>
+                                                Shooting intervals
+                                                <input
+                                                  type="number"
+                                                  min={1}
+                                                  step={1}
+                                                  value={btHomoclinicDraft.shootingIntervals}
+                                                  onChange={(event) =>
+                                                    setBtHomoclinicDraft((prev) => ({
+                                                      ...prev,
+                                                      shootingIntervals: event.target.value,
+                                                    }))
+                                                  }
+                                                  data-testid="codim2-switch-homoclinic-shooting-intervals"
+                                                />
+                                              </label>
+                                              <label>
+                                                Integration steps per segment
+                                                <input
+                                                  type="number"
+                                                  min={1}
+                                                  step={1}
+                                                  value={
+                                                    btHomoclinicDraft.integrationStepsPerSegment
+                                                  }
+                                                  onChange={(event) =>
+                                                    setBtHomoclinicDraft((prev) => ({
+                                                      ...prev,
+                                                      integrationStepsPerSegment:
+                                                        event.target.value,
+                                                    }))
+                                                  }
+                                                  data-testid="codim2-switch-homoclinic-integration-steps"
+                                                />
+                                              </label>
+                                            </>
+                                          ) : (
+                                            <CollocationAdaptivityFields
+                                              draft={btHomoclinicDraft}
+                                              onChange={(patch) =>
+                                                setBtHomoclinicDraft((prev) => ({
+                                                  ...prev,
+                                                  ...patch,
+                                                }))
+                                              }
+                                              testIdPrefix="codim2-switch-homoclinic"
+                                            />
+                                          )}
                                           <button
                                             type="button"
                                             onClick={() => void handleCreateCodim2Branch('Fold')}
@@ -1100,10 +1229,33 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                                           </button>
                                           <button
                                             type="button"
-                                            onClick={() => void handleCreateCodim2Branch('Homoclinic')}
+                                            onClick={() =>
+                                              void handleCreateCodim2Branch('Homoclinic', {
+                                                discretization: btHomoclinicDraft.discretization,
+                                                collocationAdaptivity:
+                                                  btHomoclinicDraft.discretization === 'collocation'
+                                                    ? buildCollocationAdaptivitySettings(
+                                                        btHomoclinicDraft
+                                                      ) ?? undefined
+                                                    : undefined,
+                                                shootingIntervals:
+                                                  btHomoclinicDraft.discretization === 'shooting'
+                                                    ? Number(
+                                                        btHomoclinicDraft.shootingIntervals
+                                                      )
+                                                    : undefined,
+                                                integrationStepsPerSegment:
+                                                  btHomoclinicDraft.discretization === 'shooting'
+                                                    ? Number(
+                                                        btHomoclinicDraft.integrationStepsPerSegment
+                                                      )
+                                                    : undefined,
+                                              })
+                                            }
                                             data-testid="codim2-switch-homoclinic"
                                           >
-                                            Start homoclinic branch
+                                            Start homoclinic (
+                                            {btHomoclinicDraft.discretization})
                                           </button>
                                         </>
                                       )}

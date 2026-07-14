@@ -18,6 +18,7 @@ import type {
   PeriodicOrbitNormalForm,
   ZeroHopfNormalForm,
 } from './normalFormTypes'
+import type { HomoclinicDiscretization } from '../system/homoclinicExtras'
 
 export type {
   ComputedNormalForm,
@@ -448,6 +449,9 @@ export type Codim2BranchSwitchRequest = {
   perturbation: number
   ntst: number
   ncol: number
+  homoclinicDiscretization?: HomoclinicDiscretization
+  shootingIntervals?: number
+  integrationStepsPerSegment?: number
   tolerance: number
   settings: ContinuationSettings
   forward: boolean
@@ -595,10 +599,14 @@ export type HomoclinicFromLargeCycleRequest = {
   lcState: number[]
   sourceNtst: number
   sourceNcol: number
+  sourceNormalizedMesh?: number[]
   parameterName: string
   param2Name: string
   targetNtst: number
   targetNcol: number
+  discretization?: HomoclinicDiscretization
+  shootingIntervals?: number
+  integrationStepsPerSegment?: number
   freeTime: boolean
   freeEps0: boolean
   freeEps1: boolean
@@ -611,16 +619,21 @@ export type HomoclinicFromHomoclinicRequest = {
   pointState: number[]
   sourceNtst: number
   sourceNcol: number
+  sourceNormalizedMesh?: number[]
   sourceFreeTime: boolean
   sourceFreeEps0: boolean
   sourceFreeEps1: boolean
   sourceFixedTime: number
   sourceFixedEps0: number
   sourceFixedEps1: number
+  sourceDiscretization?: HomoclinicDiscretization
   parameterName: string
   param2Name: string
   targetNtst: number
   targetNcol: number
+  discretization?: HomoclinicDiscretization
+  shootingIntervals?: number
+  integrationStepsPerSegment?: number
   freeTime: boolean
   freeEps0: boolean
   freeEps1: boolean

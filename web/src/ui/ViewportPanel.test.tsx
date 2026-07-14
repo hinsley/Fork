@@ -1248,7 +1248,7 @@ describe('ViewportPanel view state wiring', () => {
     expect(trace?.y).toEqual([0, 0, null])
   })
 
-  it('renders limit cycle object traces from homoclinic branch render targets', () => {
+  it('renders limit cycle object traces from standard-shooting homoclinic branch targets', () => {
     let system = createSystem({
       name: 'LC_Render_Homoc',
       config: {
@@ -1287,7 +1287,7 @@ describe('ViewportPanel view state wiring', () => {
         points: [
           {
             state: [
-              0, 0, 1, 0, 2, 0, 0.5, 0, 1.5, 0, 0, 0, 0.25, 8, 0.02, 0, 0
+              0, 0, 1, 0, 2, 0, 0, 0, 0.25, 8, 0, 0
             ],
             param_value: 0.2,
             stability: 'None',
@@ -1299,7 +1299,7 @@ describe('ViewportPanel view state wiring', () => {
         branch_type: {
           type: 'HomoclinicCurve',
           ntst: 2,
-          ncol: 1,
+          ncol: 0,
           param1_name: 'mu',
           param2_name: 'nu',
           free_time: true,

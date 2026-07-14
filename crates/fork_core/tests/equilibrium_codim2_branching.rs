@@ -161,6 +161,7 @@ fn continue_equilibrium_seed(
                     stability: BifurcationType::Fold,
                     eigenvalues: vec![],
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 short_curve_settings(),
                 seed.perturbation > 0.0,
@@ -188,6 +189,7 @@ fn continue_equilibrium_seed(
                     stability: BifurcationType::Hopf,
                     eigenvalues: vec![],
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 short_curve_settings(),
                 seed.perturbation > 0.0,
@@ -305,6 +307,7 @@ fn continue_ns_seed(
             stability: BifurcationType::None,
             eigenvalues: vec![],
             cycle_points: None,
+            homoclinic_events: None,
         },
         ContinuationSettings {
             step_size: 0.002,
@@ -422,6 +425,7 @@ fn refined_zero_hopf_point_retains_full_normal_form_diagnostics() {
         stability: BifurcationType::Hopf,
         eigenvalues: vec![],
         cycle_points: None,
+        homoclinic_events: None,
     };
     let mut problem =
         HopfCurveProblem::new(&mut flow, SystemKind::Flow, &[-0.05, 0.0, 0.0], 1.0, 0, 1)
@@ -473,6 +477,7 @@ fn fold_side_zero_hopf_refinement_retains_the_same_normal_form_metadata() {
         stability: BifurcationType::Fold,
         eigenvalues: vec![],
         cycle_points: None,
+        homoclinic_events: None,
     };
     let mut problem = FoldCurveProblem::new(&mut flow, SystemKind::Flow, &[0.0; 3], 0, 1)
         .expect("fold problem around Zero-Hopf");
@@ -513,6 +518,7 @@ fn refined_hopf_hopf_point_retains_both_ns_unfoldings() {
         stability: BifurcationType::Hopf,
         eigenvalues: vec![],
         cycle_points: None,
+        homoclinic_events: None,
     };
     let mut problem = HopfCurveProblem::new(&mut flow, SystemKind::Flow, &[0.0; 4], 1.7, 0, 1)
         .expect("Hopf problem around Hopf-Hopf");

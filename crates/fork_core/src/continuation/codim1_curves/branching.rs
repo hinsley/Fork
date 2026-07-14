@@ -4,7 +4,7 @@ use super::{FoldCurveProblem, HopfCurveProblem};
 use crate::continuation::homoclinic::HomoclinicProblem;
 use crate::continuation::homoclinic_init::{
     compute_homoclinic_basis, decode_homoclinic_state_with_basis, pack_homoclinic_state,
-    HomoclinicExtraFlags, HomoclinicGuess, HomoclinicSetup,
+    validate_homoclinic_parameter_plane, HomoclinicExtraFlags, HomoclinicGuess, HomoclinicSetup,
 };
 use crate::continuation::periodic::{limit_cycle_setup_from_hopf, CollocationCoefficients};
 use crate::continuation::{
@@ -440,6 +440,7 @@ pub fn bogdanov_takens_homoclinic_seed(
     ncol: usize,
     tolerance: f64,
 ) -> Result<HomoclinicBranchSeed> {
+    validate_homoclinic_parameter_plane(system.params.len(), param1_index, param2_index)?;
     if ntst < 2 || ncol == 0 {
         bail!("Bogdanov-Takens homoclinic mesh is invalid");
     }
@@ -524,8 +525,13 @@ pub fn bogdanov_takens_homoclinic_seed(
             yu: vec![0.0; riccati_size],
             ys: vec![0.0; riccati_size],
         },
+        initial_seed_is_corrected: false,
         ntst,
         ncol,
+        normalized_mesh: Vec::new(),
+        collocation_adaptivity: Default::default(),
+        collocation_adaptation: None,
+        projector_refresh_interval: 1,
         param1_index,
         param2_index,
         param1_name: param1_name.to_string(),
@@ -1166,6 +1172,11 @@ mod tests {
         assert!(seed.setup.guess.time > 0.0);
         assert!(seed.setup.guess.eps0 > 0.0);
         assert!(seed.setup.guess.eps1 > 0.0);
+        assert!(
+            !seed.setup.initial_seed_is_corrected,
+            "the BT normal-form orbit remains an approximate homoclinic seed"
+        );
+        assert_eq!(seed.setup.projector_refresh_interval, 1);
         assert!(seed.corrected_residual.is_finite());
         assert!(seed.corrected_residual < 1e-6, "seed residuals: {seed:?}");
         assert!(

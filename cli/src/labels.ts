@@ -70,3 +70,25 @@ export function formatBranchTypeLabel(
   }
   return branch.branchType.replace(/_/g, ' ')
 }
+
+const BIFURCATION_TYPE_LABELS: Record<string, string> = {
+  HomoclinicNeutralSaddle: 'NNS - Neutral Saddle',
+  HomoclinicNeutralSaddleFocus: 'NSF - Neutral Saddle-Focus',
+  HomoclinicNeutralBiFocus: 'NFF - Neutral Bi-Focus',
+  HomoclinicDoubleRealStable: 'DRS - Double Real Stable',
+  HomoclinicDoubleRealUnstable: 'DRU - Double Real Unstable',
+  HomoclinicNeutrallyDivergentStable: 'NDS - Neutrally Divergent Stable',
+  HomoclinicNeutrallyDivergentUnstable: 'NDU - Neutrally Divergent Unstable',
+  HomoclinicThreeLeadingStable: 'TLS - Three Leading Stable',
+  HomoclinicThreeLeadingUnstable: 'TLU - Three Leading Unstable',
+  HomoclinicNonCentral: 'NCH - Non-Central Homoclinic',
+  HomoclinicShilnikovHopf: 'SH - Shilnikov-Hopf',
+  HomoclinicBogdanovTakens: 'BT - Bogdanov-Takens',
+  HomoclinicOrbitFlipUnstable: 'OFU - Orbit Flip Unstable',
+  HomoclinicOrbitFlipStable: 'OFS - Orbit Flip Stable',
+}
+
+export function formatBifurcationType(value?: string): string {
+  if (!value || value === 'None') return 'Unknown'
+  return BIFURCATION_TYPE_LABELS[value] ?? value
+}

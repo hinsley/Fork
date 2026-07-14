@@ -14,8 +14,26 @@ import {
 import { printError, printInfo, printSuccess } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { getBranchParams, isValidName } from './utils';
-import { runHomoclinicContinuationWithProgress } from './progress';
-import { isUniformNormalizedCollocationMesh } from './collocation-adaptivity';
+import {
+  runHomoclinicContinuationWithProgress,
+  runHomoclinicShootingContinuationWithProgress
+} from './progress';
+import {
+  DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT,
+  DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS,
+  homoclinicExtraSelectionError,
+  homoclinicShootingSettingsError,
+  type HomoclinicDiscretization
+} from './homoclinic-extras';
+import {
+  buildCollocationAdaptivitySettings,
+  collocationAdaptivityEntries,
+  conditionalCollocationAdaptivityEntries,
+  defaultCollocationAdaptivityInputs
+} from './collocation-adaptivity';
+
+export const HOMOCLINIC_FROM_HOMOTOPY_MENU_TITLE =
+  'Method 4: Homoclinic from Homotopy-Saddle';
 
 type HomoclinicBranchTypeData = {
   type: 'HomoclinicCurve';
@@ -26,6 +44,10 @@ type HomoclinicBranchTypeData = {
   free_time: boolean;
   free_eps0: boolean;
   free_eps1: boolean;
+  discretization?:
+    | { type: 'collocation' }
+    | { type: 'shooting'; integration_steps_per_segment: number };
+  normalized_mesh?: number[];
 };
 
 type HomotopyBranchTypeData = {
@@ -322,12 +344,6 @@ export async function initiateHomoclinicFromLargeCycle(
   }
 
   const mesh = resolveLimitCycleMesh(branch);
-  if (!isUniformNormalizedCollocationMesh(mesh.normalizedMesh)) {
-    printError(
-      'Homoclinic initialization from a large cycle does not yet support a nonuniform collocation mesh. Recontinue the source cycle on a uniform mesh first.'
-    );
-    return null;
-  }
   const branchParams = getBranchParams(sysName, branch, sysConfig);
 
   let curveName = `homoc_${branch.name}`;
@@ -337,6 +353,10 @@ export async function initiateHomoclinicFromLargeCycle(
     sysConfig.paramNames.find((name) => name !== param1Name) || sysConfig.paramNames[0];
   let targetNtstInput = `${Math.max(mesh.ntst, 40)}`;
   let targetNcolInput = `${mesh.ncol}`;
+  let discretization: HomoclinicDiscretization = 'collocation';
+  let shootingIntervalsInput = `${DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS}`;
+  let integrationStepsPerSegmentInput =
+    `${DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT}`;
   let freeTime = false;
   let freeEps0 = true;
   let freeEps1 = true;
@@ -348,6 +368,7 @@ export async function initiateHomoclinicFromLargeCycle(
   let correctorToleranceInput = '1e-8';
   let stepToleranceInput = '1e-8';
   let directionForward = true;
+  const adaptivityInputs = defaultCollocationAdaptivityInputs();
 
   const directionLabel = (forward: boolean) => (forward ? 'Forward' : 'Backward');
 
@@ -407,6 +428,27 @@ export async function initiateHomoclinicFromLargeCycle(
       }
     },
     {
+      id: 'discretization',
+      label: 'Method',
+      section: 'Initialization',
+      getDisplay: () =>
+        discretization === 'shooting' ? 'Standard Shooting' : 'Orthogonal Collocation',
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Homoclinic discretization method:',
+          choices: [
+            { name: 'Orthogonal Collocation', value: 'collocation' },
+            { name: 'Standard Shooting', value: 'shooting' }
+          ],
+          default: discretization === 'shooting' ? 1 : 0,
+          pageSize: MENU_PAGE_SIZE
+        });
+        discretization = value;
+      }
+    },
+    {
       id: 'targetNtst',
       label: 'Target NTST',
       section: 'Initialization',
@@ -432,6 +474,40 @@ export async function initiateHomoclinicFromLargeCycle(
           default: targetNcolInput
         });
         targetNcolInput = value;
+      }
+    },
+    {
+      id: 'shootingIntervals',
+      label: 'Shooting intervals',
+      section: 'Standard Shooting',
+      getDisplay: () =>
+        discretization === 'shooting'
+          ? formatUnset(shootingIntervalsInput)
+          : `${formatUnset(shootingIntervalsInput)} (inactive)`,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Shooting intervals:',
+          default: shootingIntervalsInput
+        });
+        shootingIntervalsInput = value;
+      }
+    },
+    {
+      id: 'integrationStepsPerSegment',
+      label: 'Integration steps per segment',
+      section: 'Standard Shooting',
+      getDisplay: () =>
+        discretization === 'shooting'
+          ? formatUnset(integrationStepsPerSegmentInput)
+          : `${formatUnset(integrationStepsPerSegmentInput)} (inactive)`,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Integration steps per shooting segment:',
+          default: integrationStepsPerSegmentInput
+        });
+        integrationStepsPerSegmentInput = value;
       }
     },
     {
@@ -610,10 +686,23 @@ export async function initiateHomoclinicFromLargeCycle(
     }
   ];
 
+  entries.push(
+    ...conditionalCollocationAdaptivityEntries(
+      adaptivityInputs,
+      () => discretization === 'collocation'
+    )
+  );
+
   const menuResult = await runConfigMenu('Method 1: Homoclinic from Large Cycle', entries);
   if (menuResult === 'back') {
     return null;
   }
+
+  // `discretization` is mutated by the menu callbacks above. Normalize it
+  // after the menu returns so TypeScript does not retain its initial literal
+  // value when narrowing the continuation path below.
+  const selectedDiscretization: HomoclinicDiscretization =
+    String(discretization) === 'shooting' ? 'shooting' : 'collocation';
 
   const nameValidation = isValidName(curveName);
   if (nameValidation !== true) {
@@ -631,14 +720,27 @@ export async function initiateHomoclinicFromLargeCycle(
     return null;
   }
 
-  if (!freeTime && !freeEps0 && !freeEps1) {
-    printError('At least one of T, eps0, or eps1 must be free.');
+  const extraSelectionError = homoclinicExtraSelectionError(freeTime, freeEps0, freeEps1);
+  if (extraSelectionError) {
+    printError(extraSelectionError);
     return null;
   }
 
   const targetNtst = Math.max(parseIntOrDefault(targetNtstInput, 40), 2);
   const targetNcol = Math.max(parseIntOrDefault(targetNcolInput, 4), 1);
-  const continuationSettings = continuationSettingsFromInputs({
+  const shootingIntervals = Number(shootingIntervalsInput);
+  const integrationStepsPerSegment = Number(integrationStepsPerSegmentInput);
+  const shootingSettingsError = homoclinicShootingSettingsError(
+    selectedDiscretization,
+    shootingIntervals,
+    integrationStepsPerSegment
+  );
+  if (shootingSettingsError) {
+    printError(shootingSettingsError);
+    return null;
+  }
+  const continuationSettings = {
+    ...continuationSettingsFromInputs({
     stepSizeInput,
     maxStepsInput,
     minStepSizeInput,
@@ -646,7 +748,11 @@ export async function initiateHomoclinicFromLargeCycle(
     correctorStepsInput,
     correctorToleranceInput,
     stepToleranceInput
-  });
+    }),
+    ...(selectedDiscretization === 'collocation'
+      ? { collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs) }
+      : {})
+  };
 
   printInfo(`Initializing homoclinic setup from branch point ${pointIndex}...`);
 
@@ -660,10 +766,10 @@ export async function initiateHomoclinicFromLargeCycle(
     }
 
     const bridge = new WasmBridge(runConfig);
-    const setup = bridge.initHomoclinicFromLargeCycle(
+    const setup = bridge.initHomoclinicFromLargeCycleOnMesh(
       point.state,
-      mesh.ntst,
       mesh.ncol,
+      mesh.normalizedMesh,
       param1Name,
       param2Name,
       targetNtst,
@@ -673,25 +779,45 @@ export async function initiateHomoclinicFromLargeCycle(
       freeEps1
     );
 
-    const rawData = runHomoclinicContinuationWithProgress(
-      bridge,
-      setup,
-      continuationSettings,
-      directionForward,
-      'Homoclinic Continuation'
-    );
+    const rawData =
+      selectedDiscretization === 'shooting'
+        ? runHomoclinicShootingContinuationWithProgress(
+            bridge,
+            bridge.initHomoclinicShootingFromCollocation(
+              setup,
+              shootingIntervals,
+              integrationStepsPerSegment
+            ),
+            continuationSettings,
+            directionForward,
+            'Homoclinic Shooting Continuation'
+          )
+        : runHomoclinicContinuationWithProgress(
+            bridge,
+            setup,
+            continuationSettings,
+            directionForward,
+            'Homoclinic Continuation'
+          );
 
     const branchData = ensureHomoclinicBranchType(
       discardInitialApproximationPoint(normalizeBranchEigenvalues(rawData)),
       {
         type: 'HomoclinicCurve',
-        ntst: targetNtst,
-        ncol: targetNcol,
+        ntst: selectedDiscretization === 'shooting' ? shootingIntervals : targetNtst,
+        ncol: selectedDiscretization === 'shooting' ? 0 : targetNcol,
         param1_name: param1Name,
         param2_name: param2Name,
         free_time: freeTime,
         free_eps0: freeEps0,
-        free_eps1: freeEps1
+        free_eps1: freeEps1,
+        discretization:
+          selectedDiscretization === 'shooting'
+            ? {
+                type: 'shooting',
+                integration_steps_per_segment: integrationStepsPerSegment
+              }
+            : { type: 'collocation' }
       }
     );
 
@@ -704,7 +830,16 @@ export async function initiateHomoclinicFromLargeCycle(
       startObject: branch.name,
       branchType: 'homoclinic_curve',
       data: branchData,
-      settings: continuationSettings,
+      settings: {
+        ...continuationSettings,
+        homoclinic_discretization: selectedDiscretization,
+        ...(selectedDiscretization === 'shooting'
+          ? {
+              shooting_intervals: shootingIntervals,
+              integration_steps_per_segment: integrationStepsPerSegment
+            }
+          : {})
+      },
       timestamp: new Date().toISOString(),
       params: [...runConfig.params]
     };
@@ -748,10 +883,21 @@ export async function initiateHomoclinicFromHomoclinic(
   }
 
   const branchParams = getBranchParams(sysName, branch, sysConfig);
+  const sourceDiscretization: HomoclinicDiscretization =
+    source.discretization?.type === 'shooting' || source.ncol === 0
+      ? 'shooting'
+      : 'collocation';
 
   let curveName = `homoc_${branch.name}_from_homoc`;
   let targetNtstInput = `${source.ntst}`;
-  let targetNcolInput = `${source.ncol}`;
+  let targetNcolInput = `${Math.max(source.ncol, 1)}`;
+  let discretization: HomoclinicDiscretization = sourceDiscretization;
+  let shootingIntervalsInput = `${source.ntst}`;
+  let integrationStepsPerSegmentInput = `${
+    source.discretization?.type === 'shooting'
+      ? source.discretization.integration_steps_per_segment
+      : DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+  }`;
   let parameterName =
     sysConfig.paramNames.includes(source.param1_name)
       ? source.param1_name
@@ -774,6 +920,7 @@ export async function initiateHomoclinicFromHomoclinic(
   let correctorToleranceInput = '1e-7';
   let stepToleranceInput = '1e-7';
   let directionForward = true;
+  const adaptivityInputs = defaultCollocationAdaptivityInputs();
 
   const directionLabel = (forward: boolean) => (forward ? 'Forward' : 'Backward');
 
@@ -845,10 +992,46 @@ export async function initiateHomoclinicFromHomoclinic(
       }
     },
     {
+      id: 'discretization',
+      label: 'Method',
+      section: 'Initialization',
+      getDisplay: () =>
+        discretization === 'shooting' ? 'Standard Shooting' : 'Orthogonal Collocation',
+      edit: async () => {
+        const choices =
+          sourceDiscretization === 'shooting'
+            ? [
+                {
+                  name: 'Standard Shooting (required for a shooting source)',
+                  value: 'shooting'
+                }
+              ]
+            : [
+                { name: 'Orthogonal Collocation', value: 'collocation' },
+                { name: 'Standard Shooting', value: 'shooting' }
+              ];
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Homoclinic discretization method:',
+          choices,
+          default: Math.max(
+            0,
+            choices.findIndex((choice) => choice.value === discretization)
+          ),
+          pageSize: MENU_PAGE_SIZE
+        });
+        discretization = value;
+      }
+    },
+    {
       id: 'targetNtst',
       label: 'Target NTST',
       section: 'Initialization',
-      getDisplay: () => formatUnset(targetNtstInput),
+      getDisplay: () =>
+        discretization === 'collocation'
+          ? formatUnset(targetNtstInput)
+          : `${formatUnset(targetNtstInput)} (inactive)`,
       edit: async () => {
         const { value } = await inquirer.prompt({
           name: 'value',
@@ -862,7 +1045,10 @@ export async function initiateHomoclinicFromHomoclinic(
       id: 'targetNcol',
       label: 'Target NCOL',
       section: 'Initialization',
-      getDisplay: () => formatUnset(targetNcolInput),
+      getDisplay: () =>
+        discretization === 'collocation'
+          ? formatUnset(targetNcolInput)
+          : `${formatUnset(targetNcolInput)} (inactive)`,
       edit: async () => {
         const { value } = await inquirer.prompt({
           name: 'value',
@@ -870,6 +1056,40 @@ export async function initiateHomoclinicFromHomoclinic(
           default: targetNcolInput
         });
         targetNcolInput = value;
+      }
+    },
+    {
+      id: 'shootingIntervals',
+      label: 'Shooting intervals',
+      section: 'Standard Shooting',
+      getDisplay: () =>
+        discretization === 'shooting'
+          ? formatUnset(shootingIntervalsInput)
+          : `${formatUnset(shootingIntervalsInput)} (inactive)`,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Shooting intervals:',
+          default: shootingIntervalsInput
+        });
+        shootingIntervalsInput = value;
+      }
+    },
+    {
+      id: 'integrationStepsPerSegment',
+      label: 'Integration steps per segment',
+      section: 'Standard Shooting',
+      getDisplay: () =>
+        discretization === 'shooting'
+          ? formatUnset(integrationStepsPerSegmentInput)
+          : `${formatUnset(integrationStepsPerSegmentInput)} (inactive)`,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Integration steps per shooting segment:',
+          default: integrationStepsPerSegmentInput
+        });
+        integrationStepsPerSegmentInput = value;
       }
     },
     {
@@ -1048,10 +1268,20 @@ export async function initiateHomoclinicFromHomoclinic(
     }
   ];
 
+  entries.push(
+    ...conditionalCollocationAdaptivityEntries(
+      adaptivityInputs,
+      () => discretization === 'collocation'
+    )
+  );
+
   const menuResult = await runConfigMenu('Method 2: Homoclinic from Homoclinic', entries);
   if (menuResult === 'back') {
     return null;
   }
+
+  const selectedDiscretization: HomoclinicDiscretization =
+    String(discretization) === 'shooting' ? 'shooting' : 'collocation';
 
   const nameValidation = isValidName(curveName);
   if (nameValidation !== true) {
@@ -1076,14 +1306,33 @@ export async function initiateHomoclinicFromHomoclinic(
     return null;
   }
 
-  if (!freeTime && !freeEps0 && !freeEps1) {
-    printError('At least one of T, eps0, or eps1 must be free.');
+  const extraSelectionError = homoclinicExtraSelectionError(freeTime, freeEps0, freeEps1);
+  if (extraSelectionError) {
+    printError(extraSelectionError);
     return null;
   }
 
   const targetNtst = Math.max(parseIntOrDefault(targetNtstInput, source.ntst), 2);
-  const targetNcol = Math.max(parseIntOrDefault(targetNcolInput, source.ncol), 1);
-  const continuationSettings = continuationSettingsFromInputs({
+  const targetNcol = Math.max(parseIntOrDefault(targetNcolInput, Math.max(source.ncol, 1)), 1);
+  const shootingIntervals = Number(shootingIntervalsInput);
+  const integrationStepsPerSegment = Number(integrationStepsPerSegmentInput);
+  if (sourceDiscretization === 'shooting' && selectedDiscretization !== 'shooting') {
+    printError(
+      'Restarting a standard-shooting homoclinic branch as collocation is not yet supported. Keep Method set to Standard Shooting.'
+    );
+    return null;
+  }
+  const shootingSettingsError = homoclinicShootingSettingsError(
+    selectedDiscretization,
+    shootingIntervals,
+    integrationStepsPerSegment
+  );
+  if (shootingSettingsError) {
+    printError(shootingSettingsError);
+    return null;
+  }
+  const continuationSettings = {
+    ...continuationSettingsFromInputs({
     stepSizeInput,
     maxStepsInput,
     minStepSizeInput,
@@ -1091,7 +1340,11 @@ export async function initiateHomoclinicFromHomoclinic(
     correctorStepsInput,
     correctorToleranceInput,
     stepToleranceInput
-  });
+    }),
+    ...(selectedDiscretization === 'collocation'
+      ? { collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs) }
+      : {})
+  };
 
   printInfo(`Re-initializing homoclinic setup from point ${pointIndex}...`);
 
@@ -1143,44 +1396,109 @@ export async function initiateHomoclinicFromHomoclinic(
     }
 
     const bridge = new WasmBridge(runConfig);
-    const setup = bridge.initHomoclinicFromHomoclinic(
-      point.state,
-      source.ntst,
-      source.ncol,
-      source.free_time,
-      source.free_eps0,
-      source.free_eps1,
-      Number.isFinite(sourceFixedTime) ? sourceFixedTime : 1.0,
-      sourceFixedEps0,
-      sourceFixedEps1,
-      parameterName,
-      param2Name,
-      targetNtst,
-      targetNcol,
-      freeTime,
-      freeEps0,
-      freeEps1
-    );
+    let setup: any;
+    if (sourceDiscretization === 'shooting') {
+      setup = bridge.initHomoclinicShootingFromShooting(
+        point.state,
+        source.ntst,
+        source.free_time,
+        source.free_eps0,
+        source.free_eps1,
+        Number.isFinite(sourceFixedTime) ? sourceFixedTime : 1.0,
+        sourceFixedEps0,
+        sourceFixedEps1,
+        parameterName,
+        param2Name,
+        shootingIntervals,
+        integrationStepsPerSegment,
+        freeTime,
+        freeEps0,
+        freeEps1
+      );
+    } else {
+      const sourceMesh = source.normalized_mesh;
+      setup =
+        Array.isArray(sourceMesh) && sourceMesh.length === source.ntst + 1
+          ? bridge.initHomoclinicFromHomoclinicOnMesh(
+              point.state,
+              source.ncol,
+              sourceMesh,
+              source.free_time,
+              source.free_eps0,
+              source.free_eps1,
+              Number.isFinite(sourceFixedTime) ? sourceFixedTime : 1.0,
+              sourceFixedEps0,
+              sourceFixedEps1,
+              parameterName,
+              param2Name,
+              targetNcol,
+              Array.from({ length: targetNtst + 1 }, (_, index) => index / targetNtst),
+              freeTime,
+              freeEps0,
+              freeEps1
+            )
+          : bridge.initHomoclinicFromHomoclinic(
+              point.state,
+              source.ntst,
+              source.ncol,
+              source.free_time,
+              source.free_eps0,
+              source.free_eps1,
+              Number.isFinite(sourceFixedTime) ? sourceFixedTime : 1.0,
+              sourceFixedEps0,
+              sourceFixedEps1,
+              parameterName,
+              param2Name,
+              targetNtst,
+              targetNcol,
+              freeTime,
+              freeEps0,
+              freeEps1
+            );
+      if (selectedDiscretization === 'shooting') {
+        setup = bridge.initHomoclinicShootingFromCollocation(
+          setup,
+          shootingIntervals,
+          integrationStepsPerSegment
+        );
+      }
+    }
 
-    const rawData = runHomoclinicContinuationWithProgress(
-      bridge,
-      setup,
-      continuationSettings,
-      directionForward,
-      'Homoclinic Continuation'
-    );
+    const rawData =
+      selectedDiscretization === 'shooting'
+        ? runHomoclinicShootingContinuationWithProgress(
+            bridge,
+            setup,
+            continuationSettings,
+            directionForward,
+            'Homoclinic Shooting Continuation'
+          )
+        : runHomoclinicContinuationWithProgress(
+            bridge,
+            setup,
+            continuationSettings,
+            directionForward,
+            'Homoclinic Continuation'
+          );
 
     const branchData = ensureHomoclinicBranchType(
       normalizeBranchEigenvalues(rawData),
       {
         type: 'HomoclinicCurve',
-        ntst: targetNtst,
-        ncol: targetNcol,
+        ntst: selectedDiscretization === 'shooting' ? shootingIntervals : targetNtst,
+        ncol: selectedDiscretization === 'shooting' ? 0 : targetNcol,
         param1_name: parameterName,
         param2_name: param2Name,
         free_time: freeTime,
         free_eps0: freeEps0,
-        free_eps1: freeEps1
+        free_eps1: freeEps1,
+        discretization:
+          selectedDiscretization === 'shooting'
+            ? {
+                type: 'shooting',
+                integration_steps_per_segment: integrationStepsPerSegment
+              }
+            : { type: 'collocation' }
       }
     );
 
@@ -1193,7 +1511,16 @@ export async function initiateHomoclinicFromHomoclinic(
       startObject: branch.name,
       branchType: 'homoclinic_curve',
       data: branchData,
-      settings: continuationSettings,
+      settings: {
+        ...continuationSettings,
+        homoclinic_discretization: selectedDiscretization,
+        ...(selectedDiscretization === 'shooting'
+          ? {
+              shooting_intervals: shootingIntervals,
+              integration_steps_per_segment: integrationStepsPerSegment
+            }
+          : {})
+      },
       timestamp: new Date().toISOString(),
       params: [...runConfig.params]
     };
@@ -1253,6 +1580,7 @@ export async function initiateHomoclinicFromHomotopySaddle(
   let correctorToleranceInput = '1e-8';
   let stepToleranceInput = '1e-8';
   let directionForward = true;
+  const adaptivityInputs = defaultCollocationAdaptivityInputs();
 
   const directionLabel = (forward: boolean) => (forward ? 'Forward' : 'Backward');
 
@@ -1476,7 +1804,9 @@ export async function initiateHomoclinicFromHomotopySaddle(
     }
   ];
 
-  const menuResult = await runConfigMenu('Method 4: Homoclinic from Homotopy-Saddle', entries);
+  entries.push(...collocationAdaptivityEntries(adaptivityInputs));
+
+  const menuResult = await runConfigMenu(HOMOCLINIC_FROM_HOMOTOPY_MENU_TITLE, entries);
   if (menuResult === 'back') {
     return null;
   }
@@ -1492,14 +1822,16 @@ export async function initiateHomoclinicFromHomotopySaddle(
     return null;
   }
 
-  if (!freeTime && !freeEps0 && !freeEps1) {
-    printError('At least one of T, eps0, or eps1 must be free.');
+  const extraSelectionError = homoclinicExtraSelectionError(freeTime, freeEps0, freeEps1);
+  if (extraSelectionError) {
+    printError(extraSelectionError);
     return null;
   }
 
   const targetNtst = Math.max(parseIntOrDefault(targetNtstInput, source.ntst), 2);
   const targetNcol = Math.max(parseIntOrDefault(targetNcolInput, source.ncol), 1);
-  const continuationSettings = continuationSettingsFromInputs({
+  const continuationSettings = {
+    ...continuationSettingsFromInputs({
     stepSizeInput,
     maxStepsInput,
     minStepSizeInput,
@@ -1507,7 +1839,9 @@ export async function initiateHomoclinicFromHomotopySaddle(
     correctorStepsInput,
     correctorToleranceInput,
     stepToleranceInput
-  });
+    }),
+    collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs)
+  };
 
   printInfo(`Initializing homoclinic setup from StageD point ${pointIndex}...`);
 

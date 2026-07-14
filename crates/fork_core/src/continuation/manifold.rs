@@ -575,6 +575,7 @@ fn build_eq_1d_branch(
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         })
         .collect();
     let geometry = ManifoldGeometry::Curve(ManifoldCurveGeometry {
@@ -1285,6 +1286,7 @@ fn merge_manifold_surface_extension(
                 stability: BifurcationType::None,
                 eigenvalues: Vec::new(),
                 cycle_points: None,
+                homoclinic_events: None,
             });
             branch
                 .indices
@@ -6942,6 +6944,7 @@ fn surface_points_to_branch_points(
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         });
     }
     points
@@ -8033,6 +8036,7 @@ fn merge_manifold_curve_extension(
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         });
         branch
             .indices

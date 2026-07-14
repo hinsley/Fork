@@ -69,8 +69,21 @@ export type EquilibriumSolverRunner = {
     get_result(): EquilibriumSolution;
 };
 
-export type ForkWasmModule = typeof import("../../crates/fork_wasm/pkg/fork_wasm");
-export type GeneratedWasmSystem = InstanceType<ForkWasmModule["WasmSystem"]>;
+type HomoclinicShootingRunnerConstructor = new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    setup: unknown,
+    settings: unknown,
+    forward: boolean
+) => ContinuationRunner;
+
+type GeneratedForkWasmModule = typeof import("../../crates/fork_wasm/pkg/fork_wasm");
+export type ForkWasmModule = GeneratedForkWasmModule & {
+    WasmHomoclinicShootingRunner?: HomoclinicShootingRunnerConstructor;
+};
+export type GeneratedWasmSystem = InstanceType<GeneratedForkWasmModule["WasmSystem"]>;
 type WasmSystem = GeneratedWasmSystem & {
     continue_limit_cycle_from_hopf?: (
         hopfState: Float64Array,
@@ -87,6 +100,11 @@ type WasmSystem = GeneratedWasmSystem & {
         meta: LimitCycleMeta,
         settings: unknown,
         forward: boolean
+    ) => unknown;
+    init_homoclinic_shooting_from_collocation?: (
+        setup: unknown,
+        intervals: number,
+        integrationStepsPerSegment: number
     ) => unknown;
 };
 
@@ -381,6 +399,30 @@ export class WasmBridge {
             settings,
             forward
         ) as ContinuationRunner;
+    }
+
+    createHomoclinicShootingContinuationRunner(
+        setup: any,
+        settings: any,
+        forward: boolean
+    ): ContinuationRunner {
+        if (!wasmModule) throw new Error("WASM module not loaded");
+        const Runner = wasmModule.WasmHomoclinicShootingRunner;
+        if (typeof Runner !== 'function') {
+            throw new Error(
+                "Homoclinic standard-shooting runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+
+        return new Runner(
+            this.config.equations,
+            new Float64Array(this.config.params),
+            this.config.paramNames,
+            this.config.varNames,
+            setup,
+            settings,
+            forward
+        );
     }
 
     createHomotopySaddleContinuationRunner(
@@ -1128,6 +1170,101 @@ export class WasmBridge {
         );
     }
 
+    initHomoclinicFromLargeCycleOnMesh(
+        lcState: number[],
+        sourceNcol: number,
+        sourceNormalizedMesh: number[],
+        parameterName: string,
+        param2Name: string,
+        targetNtst: number,
+        targetNcol: number,
+        freeTime: boolean,
+        freeEps0: boolean,
+        freeEps1: boolean
+    ): any {
+        const init = this.instance.init_homoclinic_from_large_cycle_on_mesh;
+        if (typeof init !== 'function') {
+            throw new Error(
+                "Nonuniform large-cycle homoclinic initialization is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+        return init.call(
+            this.instance,
+            new Float64Array(lcState),
+            sourceNcol,
+            new Float64Array(sourceNormalizedMesh),
+            parameterName,
+            param2Name,
+            targetNtst,
+            targetNcol,
+            freeTime,
+            freeEps0,
+            freeEps1
+        );
+    }
+
+    initHomoclinicShootingFromCollocation(
+        setup: any,
+        intervals: number,
+        integrationStepsPerSegment: number
+    ): any {
+        const init = this.instance.init_homoclinic_shooting_from_collocation;
+        if (typeof init !== 'function') {
+            throw new Error(
+                "Homoclinic standard-shooting initialization is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+        return init.call(
+            this.instance,
+            setup,
+            intervals,
+            integrationStepsPerSegment
+        );
+    }
+
+    initHomoclinicShootingFromShooting(
+        pointState: number[],
+        sourceIntervals: number,
+        sourceFreeTime: boolean,
+        sourceFreeEps0: boolean,
+        sourceFreeEps1: boolean,
+        sourceFixedTime: number,
+        sourceFixedEps0: number,
+        sourceFixedEps1: number,
+        parameterName: string,
+        param2Name: string,
+        targetIntervals: number,
+        integrationStepsPerSegment: number,
+        freeTime: boolean,
+        freeEps0: boolean,
+        freeEps1: boolean
+    ): any {
+        const init = this.instance.init_homoclinic_shooting_from_shooting;
+        if (typeof init !== 'function') {
+            throw new Error(
+                "Homoclinic shooting restart is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+        return init.call(
+            this.instance,
+            new Float64Array(pointState),
+            sourceIntervals,
+            sourceFreeTime,
+            sourceFreeEps0,
+            sourceFreeEps1,
+            sourceFixedTime,
+            sourceFixedEps0,
+            sourceFixedEps1,
+            parameterName,
+            param2Name,
+            targetIntervals,
+            integrationStepsPerSegment,
+            freeTime,
+            freeEps0,
+            freeEps1
+        );
+    }
+
     initHomoclinicFromHomoclinic(
         pointState: number[],
         sourceNtst: number,
@@ -1160,6 +1297,51 @@ export class WasmBridge {
             param2Name,
             targetNtst,
             targetNcol,
+            freeTime,
+            freeEps0,
+            freeEps1
+        );
+    }
+
+    initHomoclinicFromHomoclinicOnMesh(
+        pointState: number[],
+        sourceNcol: number,
+        sourceNormalizedMesh: number[],
+        sourceFreeTime: boolean,
+        sourceFreeEps0: boolean,
+        sourceFreeEps1: boolean,
+        sourceFixedTime: number,
+        sourceFixedEps0: number,
+        sourceFixedEps1: number,
+        parameterName: string,
+        param2Name: string,
+        targetNcol: number,
+        targetNormalizedMesh: number[],
+        freeTime: boolean,
+        freeEps0: boolean,
+        freeEps1: boolean
+    ): any {
+        const init = this.instance.init_homoclinic_from_homoclinic_on_mesh;
+        if (typeof init !== 'function') {
+            throw new Error(
+                "Nonuniform homoclinic restart is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+        return init.call(
+            this.instance,
+            new Float64Array(pointState),
+            sourceNcol,
+            new Float64Array(sourceNormalizedMesh),
+            sourceFreeTime,
+            sourceFreeEps0,
+            sourceFreeEps1,
+            sourceFixedTime,
+            sourceFixedEps0,
+            sourceFixedEps1,
+            parameterName,
+            param2Name,
+            targetNcol,
+            new Float64Array(targetNormalizedMesh),
             freeTime,
             freeEps0,
             freeEps1

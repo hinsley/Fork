@@ -5272,7 +5272,8 @@ describe('InspectorDetailsPanel', () => {
     ).toBeNull()
   })
 
-  it('hides "Limit Cycle from Hopf" for limit-cycle and homoclinic branches', () => {
+  it('hides "Limit Cycle from Hopf" and renders event diagnostics for homoclinic branches', async () => {
+    const user = userEvent.setup()
     const config: SystemConfig = {
       name: 'Flow_Menu_Non_Hopf_Branches',
       equations: ['x', '-x'],
@@ -5343,6 +5344,27 @@ describe('InspectorDetailsPanel', () => {
             param2_value: 0.1,
             stability: 'None',
             eigenvalues: [],
+            homoclinic_events: {
+              stable_dimension: 1,
+              unstable_dimension: 1,
+              discarded_eigenvalues: 0,
+              events: [
+                {
+                  kind: 'NNS',
+                  name: 'Neutral saddle',
+                  value: -0.125,
+                  status: 'available',
+                  reason: null,
+                },
+                {
+                  kind: 'IFU',
+                  name: 'Inclination flip (unstable manifold)',
+                  value: null,
+                  status: 'unsupported',
+                  reason: 'adjoint continuation is unavailable',
+                },
+              ],
+            },
           },
         ],
         bifurcations: [0],
@@ -5429,6 +5451,18 @@ describe('InspectorDetailsPanel', () => {
       />
     )
     expect(screen.queryByTestId('limit-cycle-from-hopf-toggle')).toBeNull()
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-bifurcation-0'))
+    await user.click(screen.getByTestId('branch-point-details-toggle'))
+    expect(screen.getByTestId('homoclinic-event-diagnostics')).toHaveTextContent(
+      'NNS · Neutral saddle'
+    )
+    expect(screen.getByTestId('homoclinic-event-diagnostics')).toHaveTextContent(
+      'available · value -1.250000e-1 · reason —'
+    )
+    expect(screen.getByTestId('homoclinic-event-diagnostics')).toHaveTextContent(
+      'unsupported · value unavailable · reason adjoint continuation is unavailable'
+    )
   })
 
   it('renders map cycle menu titles for equilibrium branches', () => {
@@ -6849,6 +6883,28 @@ describe('InspectorDetailsPanel', () => {
     await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
     await user.click(screen.getByTestId('homoclinic-from-large-cycle-toggle'))
+    expect(screen.getByTestId('homoclinic-from-large-cycle-free-time')).toBeDisabled()
+    expect(screen.getByTestId('homoclinic-from-large-cycle-method')).toHaveValue('collocation')
+    expect(
+      screen.getByTestId('homoclinic-from-large-cycle-adaptive-collocation-enabled')
+    ).toBeVisible()
+    expect(screen.queryByTestId('homoclinic-from-large-cycle-shooting-intervals')).toBeNull()
+    await user.selectOptions(
+      screen.getByTestId('homoclinic-from-large-cycle-method'),
+      'shooting'
+    )
+    expect(
+      screen.queryByTestId('homoclinic-from-large-cycle-adaptive-collocation-enabled')
+    ).toBeNull()
+    await user.clear(screen.getByTestId('homoclinic-from-large-cycle-shooting-intervals'))
+    await user.type(screen.getByTestId('homoclinic-from-large-cycle-shooting-intervals'), '6')
+    await user.clear(
+      screen.getByTestId('homoclinic-from-large-cycle-integration-steps-per-segment')
+    )
+    await user.type(
+      screen.getByTestId('homoclinic-from-large-cycle-integration-steps-per-segment'),
+      '96'
+    )
     await user.click(screen.getByTestId('homoclinic-from-large-cycle-submit'))
 
     expect(onCreate).toHaveBeenCalledWith(
@@ -6857,6 +6913,9 @@ describe('InspectorDetailsPanel', () => {
         pointIndex: 0,
         parameterName: 'mu',
         param2Name: 'nu',
+        discretization: 'shooting',
+        shootingIntervals: 6,
+        integrationStepsPerSegment: 96,
       })
     )
   })
@@ -6956,6 +7015,24 @@ describe('InspectorDetailsPanel', () => {
       'Continue from Point'
     )
     await user.click(screen.getByTestId('homoclinic-from-homoclinic-toggle'))
+    expect(screen.getByTestId('homoclinic-from-homoclinic-free-eps1')).toBeDisabled()
+    expect(screen.getByTestId('homoclinic-from-homoclinic-discretization')).toHaveValue(
+      'collocation'
+    )
+    expect(
+      screen.getByTestId('homoclinic-from-homoclinic-adaptive-collocation-enabled')
+    ).toBeVisible()
+    await user.selectOptions(
+      screen.getByTestId('homoclinic-from-homoclinic-discretization'),
+      'shooting'
+    )
+    await user.clear(screen.getByTestId('homoclinic-from-homoclinic-shooting-intervals'))
+    await user.type(screen.getByTestId('homoclinic-from-homoclinic-shooting-intervals'), '9')
+    await user.clear(screen.getByTestId('homoclinic-from-homoclinic-integration-steps'))
+    await user.type(screen.getByTestId('homoclinic-from-homoclinic-integration-steps'), '72')
+    expect(
+      screen.queryByTestId('homoclinic-from-homoclinic-adaptive-collocation-enabled')
+    ).toBeNull()
     await user.selectOptions(
       screen.getByTestId('homoclinic-from-homoclinic-parameter'),
       'nu'
@@ -6968,6 +7045,9 @@ describe('InspectorDetailsPanel', () => {
         pointIndex: 0,
         parameterName: 'nu',
         param2Name: 'mu',
+        discretization: 'shooting',
+        shootingIntervals: 9,
+        integrationStepsPerSegment: 72,
       })
     )
   })
@@ -7264,6 +7344,7 @@ describe('InspectorDetailsPanel', () => {
     await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
     await user.click(screen.getByTestId('homoclinic-from-homotopy-saddle-toggle'))
+    expect(screen.getByTestId('homoclinic-from-homotopy-saddle-free-time')).toBeDisabled()
     await user.click(screen.getByTestId('homoclinic-from-homotopy-saddle-submit'))
 
     expect(onCreate).toHaveBeenCalledWith(

@@ -112,6 +112,10 @@ async function run() {
   const metrics = require('../src/continuation/metrics') as typeof import('../src/continuation/metrics');
   const lcFromOrbit = require('../src/continuation/initiate-lc-from-orbit') as typeof import('../src/continuation/initiate-lc-from-orbit');
   const homocInit = require('../src/continuation/initiate-homoclinic') as typeof import('../src/continuation/initiate-homoclinic');
+  const homocExtras = require('../src/continuation/homoclinic-extras') as typeof import('../src/continuation/homoclinic-extras');
+  const homotopyInit = require('../src/continuation/initiate-homotopy-saddle') as typeof import('../src/continuation/initiate-homotopy-saddle');
+  const branchExtension = require('../src/continuation/extend') as typeof import('../src/continuation/extend');
+  const wasmBridge = require('../src/wasm') as typeof import('../src/wasm');
   const utils = require('../src/continuation/utils') as typeof import('../src/continuation/utils');
   const format = require('../src/format') as typeof import('../src/format');
   const labels = require('../src/labels') as typeof import('../src/labels');
@@ -121,6 +125,136 @@ async function run() {
   const chalk = require('chalk');
 
   chalk.level = 0;
+
+  test('homoclinic forms require one or two free extras', () => {
+    assert.equal(homocExtras.homoclinicExtraSelectionError(false, true, false), null);
+    assert.equal(homocExtras.homoclinicExtraSelectionError(true, false, true), null);
+    assert.match(
+      homocExtras.homoclinicExtraSelectionError(false, false, false) ?? '',
+      /at least one/i
+    );
+    assert.match(
+      homocExtras.homoclinicExtraSelectionError(true, true, true) ?? '',
+      /at most two/i
+    );
+  });
+
+  test('homoclinic standard-shooting controls require positive integer counts', () => {
+    assert.equal(
+      homocExtras.homoclinicShootingSettingsError('collocation', 0, 0),
+      null
+    );
+    assert.equal(
+      homocExtras.homoclinicShootingSettingsError('shooting', 6, 96),
+      null
+    );
+    assert.match(
+      homocExtras.homoclinicShootingSettingsError('shooting', 0, 96) ?? '',
+      /intervals.*positive integer/i
+    );
+    assert.match(
+      homocExtras.homoclinicShootingSettingsError('shooting', 6, 1.5) ?? '',
+      /integration steps.*positive integer/i
+    );
+  });
+
+  test('CLI bridge exposes standard-shooting initialization and runner creation', () => {
+    assert.equal(
+      typeof wasmBridge.WasmBridge.prototype.initHomoclinicShootingFromCollocation,
+      'function'
+    );
+    assert.equal(
+      typeof wasmBridge.WasmBridge.prototype.createHomoclinicShootingContinuationRunner,
+      'function'
+    );
+  });
+
+  test('CLI diagnostics decode standard-shooting homoclinic packed states', () => {
+    const point = {
+      state: [
+        0, 0, 1, 0, 2, 0,
+        0.1, -0.2,
+        0.37,
+        8,
+        0, 0,
+      ],
+      param_value: 0.2,
+      stability: 'None',
+      eigenvalues: []
+    } as import('../src/types').ContinuationPoint;
+    const decoded = inspect.decodePackedHomoclinicPoint(
+      point,
+      2,
+      2,
+      0,
+      true,
+      false,
+      false
+    );
+    assert.ok(decoded);
+    assert.equal(decoded.time, 8);
+    assert.ok(Math.abs((decoded.startDistance ?? 0) - Math.hypot(0.1, -0.2)) < 1e-12);
+    assert.ok(Math.abs((decoded.endDistance ?? 0) - Math.hypot(1.9, 0.2)) < 1e-12);
+  });
+
+  test('CLI homoclinic diagnostics display persisted HBK values, statuses, and reasons', () => {
+    const point = {
+      homoclinic_events: {
+        stable_dimension: 2,
+        unstable_dimension: 1,
+        discarded_eigenvalues: 1,
+        events: [
+          {
+            kind: 'NNS',
+            name: 'Neutral saddle',
+            value: -0.125,
+            status: 'available',
+            reason: null,
+          },
+          {
+            kind: 'IFU',
+            name: 'Inclination flip (unstable manifold)',
+            value: null,
+            status: 'unsupported',
+            reason: 'adjoint continuation is unavailable',
+          },
+        ],
+      },
+    } as Pick<import('../src/types').ContinuationPoint, 'homoclinic_events'>;
+    const lines = inspect.formatHomoclinicEventDiagnosticLines(point);
+    assert.match(lines[0], /stable=2.*unstable=1.*discarded eigenvalues=1/);
+    assert.match(lines[1], /NNS.*status=available.*value=-0\.125.*reason=—/);
+    assert.match(
+      lines[2],
+      /IFU.*status=unsupported.*value=unavailable.*adjoint continuation is unavailable/
+    );
+
+    const serialized = serialization.serializeBranchDataForWasm({
+      points: [
+        {
+          state: [0],
+          param_value: 0,
+          stability: 'None',
+          eigenvalues: [],
+          ...point,
+        },
+      ],
+      bifurcations: [],
+      indices: [0],
+    });
+    assert.deepEqual(serialized.points[0].homoclinic_events, point.homoclinic_events);
+  });
+
+  test('homoclinic CLI method labels match the documented numbering', () => {
+    assert.match(homotopyInit.HOMOTOPY_SADDLE_MENU_TITLE, /^Method 3:/);
+    assert.match(homocInit.HOMOCLINIC_FROM_HOMOTOPY_MENU_TITLE, /^Method 4:/);
+  });
+
+  test('homotopy-saddle branches do not expose unsupported extension', () => {
+    assert.equal(branchExtension.supportsContinuationBranchExtension('homotopy_saddle_curve'), false);
+    assert.equal(branchExtension.supportsContinuationBranchExtension('homoclinic_curve'), true);
+    assert.equal(branchExtension.supportsContinuationBranchExtension('limit_cycle'), true);
+  });
 
   test('periodic codim2 menu exposes only available adjacent curve switches', () => {
     const point = {
@@ -548,6 +682,18 @@ async function run() {
 
     assert.equal(labels.formatBranchTypeLabel('flow', homoc), 'homoclinic curve');
     assert.equal(labels.formatBranchTypeLabel('flow', homotopy), 'homotopy saddle curve');
+  });
+
+  test('labels homoclinic events with HclinicBifurcationKit codes', () => {
+    assert.equal(
+      labels.formatBifurcationType('HomoclinicNeutralSaddle'),
+      'NNS - Neutral Saddle'
+    );
+    assert.equal(
+      labels.formatBifurcationType('HomoclinicOrbitFlipStable'),
+      'OFS - Orbit Flip Stable'
+    );
+    assert.equal(labels.formatBifurcationType('None'), 'Unknown');
   });
 
   test('utils selects branch params', () => {

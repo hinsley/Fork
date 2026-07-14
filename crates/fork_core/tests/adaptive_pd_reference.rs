@@ -189,6 +189,7 @@ fn stable_orbit_reaches_matcont_pd_and_continues_the_pd_curve() {
         stability: BifurcationType::PeriodDoubling,
         eigenvalues: pd.eigenvalues,
         cycle_points: None,
+        homoclinic_events: None,
     };
     let pd_settings = ContinuationSettings {
         step_size: 1.0e-3,

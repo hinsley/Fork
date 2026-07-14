@@ -265,6 +265,46 @@ describe('continuation helpers', () => {
     expect(profilePoints[profilePoints.length - 1]).toEqual([2, 0])
   })
 
+  it('decodes and samples packed standard-shooting homoclinic states', () => {
+    const dim = 2
+    const ntst = 2
+    const ncol = 0
+    const x0 = [0.1, -0.2]
+    const p2 = 0.37
+    const packed = [
+      // M + 1 shooting nodes
+      0, 0, 1, 0, 2, 0,
+      // equilibrium, secondary parameter, free T, and Riccati tail
+      ...x0, p2, 8, 0, 0,
+    ]
+    const branchType = {
+      type: 'HomoclinicCurve' as const,
+      ntst,
+      ncol,
+      param1_name: 'mu',
+      param2_name: 'nu',
+      free_time: true,
+      free_eps0: false,
+      free_eps1: false,
+    }
+
+    const { profilePoints } = extractLimitCycleProfile(packed, dim, ntst, ncol, {
+      layout: 'mesh-first',
+      allowPackedTail: true,
+    })
+
+    expect(profilePoints).toEqual([[0, 0], [1, 0], [2, 0]])
+    expect(resolveContinuationPointEquilibriumState({ state: packed }, branchType, dim)).toEqual(x0)
+    expect(
+      resolveContinuationPointParam2Value(
+        { state: packed, param2_value: undefined },
+        branchType,
+        dim
+      )
+    ).toBeCloseTo(p2, 12)
+    expect(limitCycleProfileNormalizedCoordinates(ntst, ncol)).toEqual([0, 0.5, 1])
+  })
+
   it('serializes branch data for WASM consumers', () => {
     const branch: ContinuationObject = {
       ...baseBranch,
@@ -366,6 +406,45 @@ describe('continuation helpers', () => {
     const serialized = serializeBranchDataForWasm(branch)
 
     expect(serialized.indices).toEqual([5, 6])
+  })
+
+  it('preserves persisted homoclinic event diagnostics during normalization and serialization', () => {
+    const homoclinic_events = {
+      stable_dimension: 2,
+      unstable_dimension: 1,
+      discarded_eigenvalues: 0,
+      events: [
+        {
+          kind: 'NNS' as const,
+          name: 'Neutral saddle',
+          value: -0.25,
+          status: 'available' as const,
+          reason: null,
+        },
+        {
+          kind: 'IFS' as const,
+          name: 'Inclination flip (stable manifold)',
+          value: null,
+          status: 'unsupported' as const,
+          reason: 'adjoint continuation is unavailable',
+        },
+      ],
+    }
+    const normalized = normalizeBranchEigenvalues({
+      points: [{ ...basePoint, homoclinic_events }],
+      bifurcations: [],
+      indices: [0],
+    })
+    expect(normalized.points[0].homoclinic_events).toEqual(homoclinic_events)
+
+    const branch: ContinuationObject = {
+      ...baseBranch,
+      branchType: 'homoclinic_curve',
+      data: normalized,
+    }
+    expect(serializeBranchDataForWasm(branch).points[0].homoclinic_events).toEqual(
+      homoclinic_events
+    )
   })
 
   it('rejects missing limit-cycle branch metadata', () => {
@@ -486,6 +565,12 @@ describe('continuation helpers', () => {
       'Generalized Period Doubling'
     )
     expect(formatBifurcationType('FooBar')).toBe('Foo Bar')
+    expect(formatBifurcationType('HomoclinicNeutralSaddle')).toBe(
+      'NNS - Neutral Saddle'
+    )
+    expect(formatBifurcationType('HomoclinicOrbitFlipStable')).toBe(
+      'OFS - Orbit Flip Stable'
+    )
     expect(formatBifurcationType('None')).toBe('Unknown')
     expect(formatBifurcationLabel(3, 'Hopf')).toBe('Index 3 - Hopf')
   })

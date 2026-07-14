@@ -198,6 +198,7 @@ pub fn continue_parameter(
         stability: BifurcationType::None,
         eigenvalues: Vec::new(),
         cycle_points: None,
+        homoclinic_events: None,
     };
 
     continue_with_problem(&mut problem, initial_point, settings, forward)

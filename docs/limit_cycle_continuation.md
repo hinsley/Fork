@@ -632,10 +632,11 @@ historical transfers are not replayed. Report-returning core and WASM entrypoint
 and current normalized meshes, local trigger defects, every redistribution/refinement, and a
 structured disabled/budget/cap/stalled termination. Web and CLI branches store this report; their
 controls expose enablement, redistribution, defect tolerance, retry budget, and mesh cap, while the
-Inspector/CLI summary shows the resulting provenance. Homoclinic defining systems remain on their
-own fixed truncation mesh. The large-cycle homoclinic initializer is still uniform-source-only; web
-and CLI reject a nonuniform source and ask the user to recontinue the cycle on a uniform mesh before
-calling that legacy initializer. Discrete maps do not use flow collocation. All flow-cycle
+Inspector/CLI summary shows the resulting provenance. Large-cycle homoclinic initialization now
+consumes the source cycle's exact normalized mesh, removes the selected seam interval with the
+corresponding period scaling, and transfers the open profile to either adaptive homoclinic
+collocation or standard shooting. Homoclinic restarts likewise decode their source mesh before
+remeshing. Discrete maps do not use flow collocation. All flow-cycle
 collocation paths require at least two mesh intervals because a one-interval periodic layout aliases
 the current and next mesh blocks needed by Floquet condensation.
 

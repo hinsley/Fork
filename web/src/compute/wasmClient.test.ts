@@ -228,6 +228,9 @@ describe('WasmForkCoreClient', () => {
       param2Name: 'nu',
       targetNtst: 8,
       targetNcol: 2,
+      discretization: 'shooting',
+      shootingIntervals: 6,
+      integrationStepsPerSegment: 96,
       freeTime: true,
       freeEps0: true,
       freeEps1: false,
@@ -280,8 +283,13 @@ describe('WasmForkCoreClient', () => {
     const p1 = client.runHomoclinicFromLargeCycle(method1Request)
     await flushQueue()
     const worker = MockWorker.instances[0]
-    let message = worker.posted.at(-1) as { id: string; kind: string }
+    let message = worker.posted.at(-1) as { id: string; kind: string; payload?: unknown }
     expect(message.kind).toBe('runHomoclinicFromLargeCycle')
+    expect(message.payload).toMatchObject({
+      discretization: 'shooting',
+      shootingIntervals: 6,
+      integrationStepsPerSegment: 96,
+    })
     worker.emit({ id: message.id, ok: true, result: { points: [], bifurcations: [], indices: [] } })
     await expect(p1).resolves.toEqual({ points: [], bifurcations: [], indices: [] })
 

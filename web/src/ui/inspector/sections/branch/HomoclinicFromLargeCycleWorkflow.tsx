@@ -1,4 +1,6 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { isHomoclinicExtraSelectionDisabled } from '../../../../system/homoclinicExtras'
+import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 
 export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -109,6 +111,25 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                                 ))}
                             </select>
                           </label>
+                          <label>
+                            Method
+                            <select
+                              value={homoclinicFromLargeCycleDraft.discretization}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  discretization:
+                                    event.target.value === 'shooting'
+                                      ? 'shooting'
+                                      : 'collocation',
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-method"
+                            >
+                              <option value="collocation">Orthogonal Collocation</option>
+                              <option value="shooting">Standard Shooting</option>
+                            </select>
+                          </label>
                           <div className="inspector-divider">Initialization</div>
                           <label>
                             Target NTST
@@ -138,10 +159,52 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                               data-testid="homoclinic-from-large-cycle-ncol"
                             />
                           </label>
+                          {homoclinicFromLargeCycleDraft.discretization === 'shooting' ? (
+                            <>
+                              <label>
+                                Shooting intervals
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="1"
+                                  value={homoclinicFromLargeCycleDraft.shootingIntervals}
+                                  onChange={(event) =>
+                                    setHomoclinicFromLargeCycleDraft((prev) => ({
+                                      ...prev,
+                                      shootingIntervals: event.target.value,
+                                    }))
+                                  }
+                                  data-testid="homoclinic-from-large-cycle-shooting-intervals"
+                                />
+                              </label>
+                              <label>
+                                Integration steps per segment
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="1"
+                                  value={
+                                    homoclinicFromLargeCycleDraft.integrationStepsPerSegment
+                                  }
+                                  onChange={(event) =>
+                                    setHomoclinicFromLargeCycleDraft((prev) => ({
+                                      ...prev,
+                                      integrationStepsPerSegment: event.target.value,
+                                    }))
+                                  }
+                                  data-testid="homoclinic-from-large-cycle-integration-steps-per-segment"
+                                />
+                              </label>
+                            </>
+                          ) : null}
                           <label>
                             <input
                               type="checkbox"
                               checked={homoclinicFromLargeCycleDraft.freeTime}
+                              disabled={isHomoclinicExtraSelectionDisabled(
+                                homoclinicFromLargeCycleDraft,
+                                'freeTime'
+                              )}
                               onChange={(event) =>
                                 setHomoclinicFromLargeCycleDraft((prev) => ({
                                   ...prev,
@@ -156,6 +219,10 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                             <input
                               type="checkbox"
                               checked={homoclinicFromLargeCycleDraft.freeEps0}
+                              disabled={isHomoclinicExtraSelectionDisabled(
+                                homoclinicFromLargeCycleDraft,
+                                'freeEps0'
+                              )}
                               onChange={(event) =>
                                 setHomoclinicFromLargeCycleDraft((prev) => ({
                                   ...prev,
@@ -170,6 +237,10 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                             <input
                               type="checkbox"
                               checked={homoclinicFromLargeCycleDraft.freeEps1}
+                              disabled={isHomoclinicExtraSelectionDisabled(
+                                homoclinicFromLargeCycleDraft,
+                                'freeEps1'
+                              )}
                               onChange={(event) =>
                                 setHomoclinicFromLargeCycleDraft((prev) => ({
                                   ...prev,
@@ -300,6 +371,18 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                               data-testid="homoclinic-from-large-cycle-step-tolerance"
                             />
                           </label>
+                          {homoclinicFromLargeCycleDraft.discretization === 'collocation' ? (
+                            <CollocationAdaptivityFields
+                              draft={homoclinicFromLargeCycleDraft}
+                              onChange={(patch) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  ...patch,
+                                }))
+                              }
+                              testIdPrefix="homoclinic-from-large-cycle"
+                            />
+                          ) : null}
                           {homoclinicFromLargeCycleError ? (
                             <div className="field-error">{homoclinicFromLargeCycleError}</div>
                           ) : null}

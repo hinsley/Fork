@@ -287,6 +287,7 @@ mod tests_additional {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
         let aug = continuation_point_to_aug(&point);
         assert_eq!(aug.as_slice(), &[3.0, 1.0, 2.0]);
@@ -374,6 +375,7 @@ mod tests {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let aug = continuation_point_to_aug(&point);

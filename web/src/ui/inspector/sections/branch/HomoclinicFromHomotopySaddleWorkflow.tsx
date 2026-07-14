@@ -1,4 +1,6 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { isHomoclinicExtraSelectionDisabled } from '../../../../system/homoclinicExtras'
+import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 
 export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -94,6 +96,10 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                             <input
                               type="checkbox"
                               checked={homoclinicFromHomotopySaddleDraft.freeTime}
+                              disabled={isHomoclinicExtraSelectionDisabled(
+                                homoclinicFromHomotopySaddleDraft,
+                                'freeTime'
+                              )}
                               onChange={(event) =>
                                 setHomoclinicFromHomotopySaddleDraft((prev) => ({
                                   ...prev,
@@ -108,6 +114,10 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                             <input
                               type="checkbox"
                               checked={homoclinicFromHomotopySaddleDraft.freeEps0}
+                              disabled={isHomoclinicExtraSelectionDisabled(
+                                homoclinicFromHomotopySaddleDraft,
+                                'freeEps0'
+                              )}
                               onChange={(event) =>
                                 setHomoclinicFromHomotopySaddleDraft((prev) => ({
                                   ...prev,
@@ -122,6 +132,10 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                             <input
                               type="checkbox"
                               checked={homoclinicFromHomotopySaddleDraft.freeEps1}
+                              disabled={isHomoclinicExtraSelectionDisabled(
+                                homoclinicFromHomotopySaddleDraft,
+                                'freeEps1'
+                              )}
                               onChange={(event) =>
                                 setHomoclinicFromHomotopySaddleDraft((prev) => ({
                                   ...prev,
@@ -252,6 +266,16 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                               data-testid="homoclinic-from-homotopy-saddle-step-tolerance"
                             />
                           </label>
+                          <CollocationAdaptivityFields
+                            draft={homoclinicFromHomotopySaddleDraft}
+                            onChange={(patch) =>
+                              setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                ...prev,
+                                ...patch,
+                              }))
+                            }
+                            testIdPrefix="homoclinic-from-homotopy-saddle"
+                          />
                           {homoclinicFromHomotopySaddleError ? (
                             <div className="field-error">{homoclinicFromHomotopySaddleError}</div>
                           ) : null}

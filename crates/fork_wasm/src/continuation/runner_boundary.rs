@@ -152,10 +152,6 @@ impl<P: ContinuationProblem + 'static> OwnedContinuationRunner<P> {
         self.runner.get_progress_js()
     }
 
-    pub(crate) fn take_result(&mut self) -> Result<ContinuationBranch, JsValue> {
-        self.runner.take_result().map_err(runner_error_to_js)
-    }
-
     pub(crate) fn take_result_with_problem(&mut self) -> Result<(ContinuationBranch, P), JsValue> {
         self.runner
             .take_result_with_problem()
@@ -232,6 +228,7 @@ mod tests {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
         let runner = ContinuationRunner::new(problem, initial_point, settings(max_steps), true)
             .expect("runner");

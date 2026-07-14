@@ -308,6 +308,7 @@ fn initial_point(
         stability,
         eigenvalues: Vec::new(),
         cycle_points: None,
+        homoclinic_events: None,
     }
 }
 

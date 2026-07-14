@@ -128,6 +128,23 @@ export function runHomoclinicContinuationWithProgress(
   return runContinuationRunnerWithProgress(runner, label);
 }
 
+/** Continue a standard-shooting homoclinic curve with stepped progress updates. */
+export function runHomoclinicShootingContinuationWithProgress(
+  bridge: WasmBridge,
+  setup: any,
+  settings: any,
+  forward: boolean,
+  label: string
+): ContinuationBranchData {
+  const runner = bridge.createHomoclinicShootingContinuationRunner(
+    setup,
+    settings,
+    forward
+  );
+
+  return runContinuationRunnerWithProgress(runner, label);
+}
+
 /**
  * Continue a homotopy-saddle curve with stepped progress updates.
  */

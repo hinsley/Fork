@@ -2243,6 +2243,17 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
         Ok(transferred)
     }
 
+    fn refresh_persisted_point_after_state_transfer(
+        &self,
+        point: &mut ContinuationPoint,
+    ) -> Result<()> {
+        // Limit-cycle rendering decodes the authoritative packed collocation
+        // state using BranchType mesh metadata. A legacy auxiliary payload is
+        // tied to the old mesh, so retaining it would expose stale geometry.
+        point.cycle_points = None;
+        Ok(())
+    }
+
     fn update_after_step(&mut self, aug_state: &DVector<f64>) -> Result<()> {
         self.set_phase_reference(aug_state)
     }
@@ -3499,7 +3510,11 @@ pub(crate) fn meshes_materially_different(left: &[f64], right: &[f64]) -> bool {
             .any(|(lhs, rhs)| (lhs - rhs).abs() > 1e-8)
 }
 
-fn interpolate_local_profile(local_nodes: &[f64], local_values: &[f64], tau: f64) -> Result<f64> {
+pub(crate) fn interpolate_local_profile(
+    local_nodes: &[f64],
+    local_values: &[f64],
+    tau: f64,
+) -> Result<f64> {
     if local_nodes.len() != local_values.len() || local_nodes.is_empty() {
         bail!("Collocation profile interpolation layout mismatch");
     }
@@ -4316,7 +4331,7 @@ fn legendre_eval(n: usize, x: f64) -> (f64, f64) {
     (p1, dp)
 }
 
-fn lagrange_coefficients(nodes: &[f64]) -> Result<Vec<Vec<f64>>> {
+pub(crate) fn lagrange_coefficients(nodes: &[f64]) -> Result<Vec<Vec<f64>>> {
     let degree = nodes.len();
     let mut vandermonde = DMatrix::zeros(degree, degree);
     for (i, &node) in nodes.iter().enumerate() {
@@ -4342,7 +4357,7 @@ fn lagrange_coefficients(nodes: &[f64]) -> Result<Vec<Vec<f64>>> {
     Ok(coeffs)
 }
 
-fn integrate_polynomial(coeffs: &[f64], upper: f64) -> f64 {
+pub(crate) fn integrate_polynomial(coeffs: &[f64], upper: f64) -> f64 {
     let mut sum = 0.0;
     for (deg, &c) in coeffs.iter().enumerate() {
         let power = upper.powi((deg + 1) as i32);
@@ -4509,6 +4524,7 @@ pub fn continue_limit_cycle_collocation_with_report(
         stability: BifurcationType::None,
         eigenvalues: Vec::new(),
         cycle_points: None,
+        homoclinic_events: None,
     };
 
     let mut branch = continue_with_problem(&mut problem, point, settings, forward)?;
@@ -5821,7 +5837,8 @@ mod tests {
                 param_value: parameter,
                 stability: BifurcationType::None,
                 eigenvalues: Vec::new(),
-                cycle_points: None,
+                cycle_points: Some(vec![vec![-999.0; 2]]),
+                homoclinic_events: None,
             }
         };
         let branch = ContinuationBranch {
@@ -5880,6 +5897,14 @@ mod tests {
             .points
             .iter()
             .all(|point| point.state.len() == expected_state_len));
+        assert!(
+            result
+                .branch
+                .points
+                .iter()
+                .all(|point| point.cycle_points.is_none()),
+            "mesh transfer must discard legacy cycle geometry tied to the old layout"
+        );
         assert_eq!(
             result.branch.branch_type,
             BranchType::LimitCycle {

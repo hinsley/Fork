@@ -118,6 +118,9 @@ export interface ContinuationSettings {
   corrector_tolerance: number
   step_tolerance: number
   collocation_adaptivity?: CollocationAdaptivitySettings
+  homoclinic_discretization?: 'collocation' | 'shooting'
+  shooting_intervals?: number
+  integration_steps_per_segment?: number
 }
 
 export interface CollocationAdaptivitySettings {
@@ -205,6 +208,41 @@ export interface Codim2Certification {
   reason?: string
 }
 
+export type HomoclinicEventKind =
+  | 'NNS'
+  | 'NSF'
+  | 'NFF'
+  | 'DRS'
+  | 'DRU'
+  | 'NDS'
+  | 'NDU'
+  | 'TLS'
+  | 'TLU'
+  | 'NCH'
+  | 'SH'
+  | 'BT'
+  | 'OFU'
+  | 'OFS'
+  | 'IFU'
+  | 'IFS'
+
+export type HomoclinicEventStatus = 'available' | 'unavailable' | 'unsupported'
+
+export interface HomoclinicEventValue {
+  kind: HomoclinicEventKind
+  name: string
+  value: number | null
+  status: HomoclinicEventStatus
+  reason: string | null
+}
+
+export interface HomoclinicEventDiagnostics {
+  events: HomoclinicEventValue[]
+  stable_dimension: number
+  unstable_dimension: number
+  discarded_eigenvalues: number
+}
+
 export interface ContinuationPoint {
   state: number[]
   param_value: number
@@ -225,6 +263,7 @@ export interface ContinuationPoint {
   codim2?: Codim2PointData
   codim2_events?: Codim2PointData[]
   normal_form?: NormalFormProvenance
+  homoclinic_events?: HomoclinicEventDiagnostics
 }
 
 export type ManifoldStability = 'Stable' | 'Unstable'
@@ -493,7 +532,12 @@ export interface HomoclinicResumeContext {
   fixed_time: number
   fixed_eps0: number
   fixed_eps1: number
+  projector_refresh_interval?: number
 }
+
+export type HomoclinicBranchDiscretization =
+  | { type: 'collocation' }
+  | { type: 'shooting'; integration_steps_per_segment: number }
 
 export type BranchType =
   | { type: 'Equilibrium' }
@@ -509,6 +553,10 @@ export type BranchType =
       free_time: boolean
       free_eps0: boolean
       free_eps1: boolean
+      discretization?: HomoclinicBranchDiscretization
+      normalized_mesh?: number[]
+      collocation_adaptivity?: CollocationAdaptivitySettings
+      collocation_adaptation?: CollocationAdaptationReport
     }
   | {
       type: 'HomotopySaddleCurve'

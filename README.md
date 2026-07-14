@@ -82,9 +82,14 @@ Map cycles are represented as fixed points of an iterated map, <code>F<sup>k</su
 
 | Connection | Status | Current capability |
 | --- | --- | --- |
-| Homoclinic to a saddle equilibrium | **Experimental; analytic reference validated** | Open-orbit collocation with equilibrium, endpoint-distance, invariant-subspace, and Riccati constraints. A Duffing reference validates large-cycle initialization, restart continuation, and conversion from a corrected Stage-D seed through core and Node WASM. Heuristic Stage-D generation itself is not yet certified as a corrected connection. |
-| Homoclinic to a saddle-focus | **Experimental and not benchmarked** | The generic saddle-equilibrium formulation can construct real invariant-subspace bases from complex eigenvectors, but dedicated saddle-focus benchmark coverage is still missing. |
+| Homoclinic to a saddle equilibrium | **Available; HBK 0.2.1 numerical parity** | Projection boundary conditions, chart-safe Riccati coordinates, adaptive nonuniform orthogonal collocation, and standard single/multiple shooting are available from long cycles and Bogdanov-Takens points. Restarts and extensions preserve the discretization, mesh, invariant-subspace chart, and fixed scalar context. A Duffing reference certifies collocation and shooting through core, Node WASM, CLI, and web workflows. Fork's separate heuristic Method 3 Stage-D generation is not used as parity evidence and still needs an independent model certification. |
+| Homoclinic to a saddle-focus | **Available; analytic reference validated** | Rank-revealing real invariant-subspace construction handles complex conjugate and repeated eigenvalues without double-counting. A four-dimensional Duffing-plus-focus reference certifies both collocation and multiple shooting and exercises the neutral saddle-focus diagnostic. |
+| Heteroclinic between distinct equilibria | **Not implemented; beyond HBK 0.2.1** | HBK's HomHS formulation uses the same saddle at both endpoints. A genuine heteroclinic implementation needs independent source/target equilibria, Jacobians, invariant splittings, and boundary conditions and is tracked separately from strict HBK parity. |
 | Homoclinic to a periodic orbit | **Not implemented** | No periodic-orbit endpoint and invariant-bundle defining system is present. |
+
+See [the HclinicBifurcationKit parity matrix](docs/hclinic-parity.md) and the
+[homoclinic workflow guide](docs/homoclinic-methods.md) for the audited scope,
+initializers, discretizations, event codes, and numerical acceptance tests.
 
 ### Codimension-two points
 

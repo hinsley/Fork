@@ -9,6 +9,7 @@ import type {
   FloquetBackend,
   ContinuationObject,
   ContinuationPoint,
+  ContinuationSettings,
   EquilibriumEigenvectorRenderStyle,
   EquilibriumObject,
   IsoclineObject,
@@ -78,6 +79,13 @@ import type {
 } from '../branchPointSelection'
 import { validateSystemConfig } from '../../state/systemValidation'
 import { hasCustomObjectParams } from '../../system/parameters'
+import {
+  DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT,
+  DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS,
+  homoclinicExtraSelectionError,
+  homoclinicShootingSettingsError,
+  type HomoclinicDiscretization,
+} from '../../system/homoclinicExtras'
 import {
   makeSurfaceProfileDefaults,
   toManifold2DProfile,
@@ -352,12 +360,15 @@ type LimitCycleFromPDDraft = CollocationAdaptivityDraft & {
   forward: boolean
 }
 
-type HomoclinicFromLargeCycleDraft = {
+type HomoclinicFromLargeCycleDraft = CollocationAdaptivityDraft & {
   name: string
   parameterName: string
   param2Name: string
   targetNtst: string
   targetNcol: string
+  discretization: HomoclinicDiscretization
+  shootingIntervals: string
+  integrationStepsPerSegment: string
   freeTime: boolean
   freeEps0: boolean
   freeEps1: boolean
@@ -371,12 +382,15 @@ type HomoclinicFromLargeCycleDraft = {
   forward: boolean
 }
 
-type HomoclinicRestartDraft = {
+type HomoclinicRestartDraft = CollocationAdaptivityDraft & {
   name: string
   parameterName: string
   param2Name: string
   targetNtst: string
   targetNcol: string
+  discretization: HomoclinicDiscretization
+  shootingIntervals: string
+  integrationStepsPerSegment: string
   freeTime: boolean
   freeEps0: boolean
   freeEps1: boolean
@@ -1270,6 +1284,11 @@ function makeHomoclinicFromLargeCycleDraft(
     param2Name,
     targetNtst: '40',
     targetNcol: '4',
+    discretization: 'collocation',
+    shootingIntervals: String(DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS),
+    integrationStepsPerSegment: String(
+      DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+    ),
     freeTime: false,
     freeEps0: true,
     freeEps1: true,
@@ -1294,6 +1313,11 @@ function makeHomoclinicRestartDraft(system: SystemConfig): HomoclinicRestartDraf
     param2Name,
     targetNtst: '40',
     targetNcol: '4',
+    discretization: 'collocation',
+    shootingIntervals: String(DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS),
+    integrationStepsPerSegment: String(
+      DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+    ),
     freeTime: false,
     freeEps0: true,
     freeEps1: true,
@@ -3715,7 +3739,38 @@ function useInspectorSelectionController({
         sourceType.type === 'HomoclinicCurve'
           ? sourceType.free_eps1
           : prev.freeEps1
-      return { ...prev, name, parameterName, param2Name, freeTime, freeEps0, freeEps1 }
+      const sourceIsShooting =
+        sourceType?.type === 'HomoclinicCurve' &&
+        (sourceType.discretization?.type === 'shooting' || sourceType.ncol === 0)
+      const discretization: HomoclinicDiscretization = sourceIsShooting
+        ? 'shooting'
+        : prev.discretization
+      const sourceIntegrationSteps =
+        sourceType?.type === 'HomoclinicCurve' &&
+        sourceType.discretization?.type === 'shooting'
+          ? sourceType.discretization.integration_steps_per_segment
+          : DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+      return {
+        ...prev,
+        name,
+        parameterName,
+        param2Name,
+        targetNtst:
+          sourceType?.type === 'HomoclinicCurve' ? String(sourceType.ntst) : prev.targetNtst,
+        targetNcol:
+          sourceType?.type === 'HomoclinicCurve'
+            ? String(Math.max(sourceType.ncol, 1))
+            : prev.targetNcol,
+        discretization,
+        shootingIntervals:
+          sourceType?.type === 'HomoclinicCurve'
+            ? String(sourceType.ntst)
+            : prev.shootingIntervals,
+        integrationStepsPerSegment: String(sourceIntegrationSteps),
+        freeTime,
+        freeEps0,
+        freeEps1,
+      }
     })
     setHomotopySaddleFromEquilibriumDraft((prev) => {
       const suggestedName = suggestDefaultName('homotopySaddle', {
@@ -6209,7 +6264,13 @@ function useInspectorSelectionController({
   }
 
   const handleCreateCodim2Branch = async (
-    target: Codim2BranchCreationRequest['target']
+    target: Codim2BranchCreationRequest['target'],
+    homoclinicOptions?: {
+      discretization: HomoclinicDiscretization
+      shootingIntervals?: number
+      integrationStepsPerSegment?: number
+      collocationAdaptivity?: NonNullable<ContinuationSettings['collocation_adaptivity']>
+    }
   ) => {
     if (!branch || !selectedNodeId || !selectedBranchPoint || branchPointIndex === null) return
     const nameKind = target === 'Fold'
@@ -6224,6 +6285,7 @@ function useInspectorSelectionController({
       pointIndex: branchPointIndex,
       existingNames: existingBranchNames,
     })
+    const homoclinicDiscretization = homoclinicOptions?.discretization ?? 'collocation'
     await onCreateCodim2BranchFromPoint({
       branchId: selectedNodeId,
       pointIndex: branchPointIndex,
@@ -6232,6 +6294,17 @@ function useInspectorSelectionController({
       perturbation: target === 'LimitPointCycle' ? 0.05 : 0.02,
       ntst: 20,
       ncol: 4,
+      homoclinicDiscretization:
+        target === 'Homoclinic' ? homoclinicDiscretization : undefined,
+      shootingIntervals:
+        target === 'Homoclinic' && homoclinicDiscretization === 'shooting'
+          ? homoclinicOptions?.shootingIntervals ?? DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS
+          : undefined,
+      integrationStepsPerSegment:
+        target === 'Homoclinic' && homoclinicDiscretization === 'shooting'
+          ? homoclinicOptions?.integrationStepsPerSegment ??
+            DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+          : undefined,
       tolerance: 1e-7,
       settings: {
         step_size: 0.01,
@@ -6241,6 +6314,18 @@ function useInspectorSelectionController({
         corrector_steps: 10,
         corrector_tolerance: 1e-8,
         step_tolerance: 1e-8,
+        ...(target === 'Homoclinic' && homoclinicDiscretization === 'collocation'
+          ? {
+              collocation_adaptivity:
+                homoclinicOptions?.collocationAdaptivity ?? {
+                  enabled: true,
+                  redistribution_enabled: true,
+                  defect_tolerance: 0.025,
+                  max_refinements: 3,
+                  max_mesh_points: 512,
+                },
+            }
+          : {}),
       },
       forward: true,
     })
@@ -6862,12 +6947,28 @@ function useInspectorSelectionController({
       setHomoclinicFromLargeCycleError('Target NCOL must be a positive integer.')
       return
     }
-    if (
-      !homoclinicFromLargeCycleDraft.freeTime &&
-      !homoclinicFromLargeCycleDraft.freeEps0 &&
-      !homoclinicFromLargeCycleDraft.freeEps1
-    ) {
-      setHomoclinicFromLargeCycleError('At least one of T, eps0, or eps1 must be free.')
+    const shootingIntervals = parseInteger(
+      homoclinicFromLargeCycleDraft.shootingIntervals
+    )
+    const integrationStepsPerSegment = parseInteger(
+      homoclinicFromLargeCycleDraft.integrationStepsPerSegment
+    )
+    const shootingSettingsError = homoclinicShootingSettingsError(
+      homoclinicFromLargeCycleDraft.discretization,
+      shootingIntervals ?? Number.NaN,
+      integrationStepsPerSegment ?? Number.NaN
+    )
+    if (shootingSettingsError) {
+      setHomoclinicFromLargeCycleError(shootingSettingsError)
+      return
+    }
+    const extraSelectionError = homoclinicExtraSelectionError(
+      homoclinicFromLargeCycleDraft.freeTime,
+      homoclinicFromLargeCycleDraft.freeEps0,
+      homoclinicFromLargeCycleDraft.freeEps1
+    )
+    if (extraSelectionError) {
+      setHomoclinicFromLargeCycleError(extraSelectionError)
       return
     }
 
@@ -6887,6 +6988,16 @@ function useInspectorSelectionController({
       setHomoclinicFromLargeCycleError(error ?? 'Invalid continuation settings.')
       return
     }
+    if (homoclinicFromLargeCycleDraft.discretization === 'collocation') {
+      const collocationAdaptivity = buildCollocationAdaptivitySettings(
+        homoclinicFromLargeCycleDraft
+      )
+      if (collocationAdaptivity === null) {
+        setHomoclinicFromLargeCycleError('Invalid collocation adaptivity settings.')
+        return
+      }
+      settings.collocation_adaptivity = collocationAdaptivity
+    }
 
     setHomoclinicFromLargeCycleError(null)
     await onCreateHomoclinicFromLargeCycle({
@@ -6897,6 +7008,15 @@ function useInspectorSelectionController({
       param2Name: homoclinicFromLargeCycleDraft.param2Name,
       targetNtst,
       targetNcol,
+      discretization: homoclinicFromLargeCycleDraft.discretization,
+      shootingIntervals:
+        homoclinicFromLargeCycleDraft.discretization === 'shooting'
+          ? shootingIntervals ?? undefined
+          : undefined,
+      integrationStepsPerSegment:
+        homoclinicFromLargeCycleDraft.discretization === 'shooting'
+          ? integrationStepsPerSegment ?? undefined
+          : undefined,
       freeTime: homoclinicFromLargeCycleDraft.freeTime,
       freeEps0: homoclinicFromLargeCycleDraft.freeEps0,
       freeEps1: homoclinicFromLargeCycleDraft.freeEps1,
@@ -6983,12 +7103,41 @@ function useInspectorSelectionController({
       setHomoclinicFromHomoclinicError('Target NCOL must be a positive integer.')
       return
     }
-    if (
-      !homoclinicFromHomoclinicDraft.freeTime &&
-      !homoclinicFromHomoclinicDraft.freeEps0 &&
-      !homoclinicFromHomoclinicDraft.freeEps1
-    ) {
-      setHomoclinicFromHomoclinicError('At least one of T, eps0, or eps1 must be free.')
+    const sourceType = branch.data.branch_type
+    const sourceDiscretization: HomoclinicDiscretization =
+      sourceType?.type === 'HomoclinicCurve' &&
+      (sourceType.discretization?.type === 'shooting' || sourceType.ncol === 0)
+        ? 'shooting'
+        : 'collocation'
+    const discretization = homoclinicFromHomoclinicDraft.discretization
+    if (sourceDiscretization === 'shooting' && discretization !== 'shooting') {
+      setHomoclinicFromHomoclinicError(
+        'Restarting a standard-shooting homoclinic branch as collocation is not yet supported. Keep Method set to Standard Shooting.'
+      )
+      return
+    }
+    const shootingIntervals = parseInteger(
+      homoclinicFromHomoclinicDraft.shootingIntervals
+    ) ?? Number.NaN
+    const integrationStepsPerSegment = parseInteger(
+      homoclinicFromHomoclinicDraft.integrationStepsPerSegment
+    ) ?? Number.NaN
+    const shootingSettingsError = homoclinicShootingSettingsError(
+      discretization,
+      shootingIntervals,
+      integrationStepsPerSegment
+    )
+    if (shootingSettingsError) {
+      setHomoclinicFromHomoclinicError(shootingSettingsError)
+      return
+    }
+    const extraSelectionError = homoclinicExtraSelectionError(
+      homoclinicFromHomoclinicDraft.freeTime,
+      homoclinicFromHomoclinicDraft.freeEps0,
+      homoclinicFromHomoclinicDraft.freeEps1
+    )
+    if (extraSelectionError) {
+      setHomoclinicFromHomoclinicError(extraSelectionError)
       return
     }
 
@@ -7008,6 +7157,16 @@ function useInspectorSelectionController({
       setHomoclinicFromHomoclinicError(error ?? 'Invalid continuation settings.')
       return
     }
+    if (discretization === 'collocation') {
+      const collocationAdaptivity = buildCollocationAdaptivitySettings(
+        homoclinicFromHomoclinicDraft
+      )
+      if (collocationAdaptivity === null) {
+        setHomoclinicFromHomoclinicError('Invalid collocation adaptivity settings.')
+        return
+      }
+      settings.collocation_adaptivity = collocationAdaptivity
+    }
 
     setHomoclinicFromHomoclinicError(null)
     await onCreateHomoclinicFromHomoclinic({
@@ -7018,6 +7177,9 @@ function useInspectorSelectionController({
       param2Name: homoclinicFromHomoclinicDraft.param2Name,
       targetNtst,
       targetNcol,
+      discretization,
+      shootingIntervals,
+      integrationStepsPerSegment,
       freeTime: homoclinicFromHomoclinicDraft.freeTime,
       freeEps0: homoclinicFromHomoclinicDraft.freeEps0,
       freeEps1: homoclinicFromHomoclinicDraft.freeEps1,
@@ -7224,12 +7386,13 @@ function useInspectorSelectionController({
       setHomoclinicFromHomotopySaddleError('Target NCOL must be a positive integer.')
       return
     }
-    if (
-      !homoclinicFromHomotopySaddleDraft.freeTime &&
-      !homoclinicFromHomotopySaddleDraft.freeEps0 &&
-      !homoclinicFromHomotopySaddleDraft.freeEps1
-    ) {
-      setHomoclinicFromHomotopySaddleError('At least one of T, eps0, or eps1 must be free.')
+    const extraSelectionError = homoclinicExtraSelectionError(
+      homoclinicFromHomotopySaddleDraft.freeTime,
+      homoclinicFromHomotopySaddleDraft.freeEps0,
+      homoclinicFromHomotopySaddleDraft.freeEps1
+    )
+    if (extraSelectionError) {
+      setHomoclinicFromHomotopySaddleError(extraSelectionError)
       return
     }
 
@@ -7249,6 +7412,14 @@ function useInspectorSelectionController({
       setHomoclinicFromHomotopySaddleError(error ?? 'Invalid continuation settings.')
       return
     }
+    const collocationAdaptivity = buildCollocationAdaptivitySettings(
+      homoclinicFromHomotopySaddleDraft
+    )
+    if (collocationAdaptivity === null) {
+      setHomoclinicFromHomotopySaddleError('Invalid collocation adaptivity settings.')
+      return
+    }
+    settings.collocation_adaptivity = collocationAdaptivity
 
     setHomoclinicFromHomotopySaddleError(null)
     await onCreateHomoclinicFromHomotopySaddle({

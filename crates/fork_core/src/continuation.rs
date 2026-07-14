@@ -28,8 +28,14 @@ pub mod lc_codim1_curves;
 #[path = "continuation/homoclinic.rs"]
 pub mod homoclinic;
 
+#[path = "continuation/homoclinic_events.rs"]
+pub mod homoclinic_events;
+
 #[path = "continuation/homoclinic_init.rs"]
 pub mod homoclinic_init;
+
+#[path = "continuation/homoclinic_shooting.rs"]
+pub mod homoclinic_shooting;
 
 #[path = "continuation/homotopy_saddle.rs"]
 pub mod homotopy_saddle;
@@ -57,13 +63,25 @@ pub use codim1_curves::{
     RefinedCodim2Event, ZeroHopfNormalForm,
 };
 pub use homoclinic::continue_homoclinic_curve;
+pub use homoclinic_events::{
+    compute_homoclinic_event_diagnostics, HomoclinicEventDiagnostics, HomoclinicEventKind,
+    HomoclinicEventStatus, HomoclinicEventValue, HomoclinicOrbitFlipData, OrbitFlipSideData,
+};
 pub use homoclinic_init::{
     compute_homoclinic_basis, decode_homoclinic_state, homoclinic_setup_from_homoclinic_point,
+    homoclinic_setup_from_homoclinic_point_on_mesh,
     homoclinic_setup_from_homoclinic_point_with_source_extras,
+    homoclinic_setup_from_homoclinic_point_with_source_extras_on_mesh,
     homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
-    homotopy_saddle_setup_from_equilibrium, pack_homoclinic_state, DecodedHomoclinicState,
-    HomoclinicBasis, HomoclinicExtraFlags, HomoclinicFixedScalars, HomoclinicGuess,
-    HomoclinicSetup, HomotopySaddleSetup,
+    homoclinic_setup_from_large_cycle_on_mesh, homotopy_saddle_setup_from_equilibrium,
+    pack_homoclinic_state, DecodedHomoclinicState, HomoclinicBasis, HomoclinicExtraFlags,
+    HomoclinicFixedScalars, HomoclinicGuess, HomoclinicSetup, HomotopySaddleSetup,
+};
+pub use homoclinic_shooting::{
+    continue_homoclinic_shooting_curve, decode_homoclinic_shooting_state,
+    homoclinic_shooting_setup_from_collocation, homoclinic_shooting_setup_from_point,
+    pack_homoclinic_shooting_state, DecodedHomoclinicShootingState, HomoclinicShootingGuess,
+    HomoclinicShootingProblem, HomoclinicShootingSettings, HomoclinicShootingSetup,
 };
 pub use homotopy_saddle::{continue_homotopy_saddle_curve, homotopy_stage_d_to_homoclinic};
 pub use lc_codim1_curves::{
@@ -110,16 +128,19 @@ pub use periodic_normal_forms::{
     PeriodicOrbitNormalFormConditioning, PeriodicOrbitNormalFormSettings,
     PeriodicOrbitNormalFormType, PeriodicOrbitPeriodDoublingNormalForm,
 };
-pub use problem::{PointDiagnostics, StepRejectionAction, TestFunctionValues};
+pub use problem::{
+    PointDiagnostics, PostCorrectorReparameterization, ReparameterizationSeed, StepRejectionAction,
+    TestFunctionValues,
+};
 pub use types::{
     BifurcationType, BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType,
     Codim2Bifurcation, Codim2BifurcationType, Codim2BranchSwitch, Codim2Certification,
     Codim2Coefficient, Codim2Conditioning, Codim2PointData, ContinuationBranch,
     ContinuationEndpointSeed, ContinuationPoint, ContinuationResumeState, ContinuationSettings,
-    HomoclinicBasisSnapshot, HomoclinicResumeContext, HomotopyStage, Manifold1DSettings,
-    Manifold2DSettings, ManifoldBounds, ManifoldCurveGeometry, ManifoldCurveResumeState,
-    ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind, ManifoldGeometry,
-    ManifoldHkoFiberResumeState, ManifoldMapDomainCursor, ManifoldRingDiagnostic,
+    HomoclinicBasisSnapshot, HomoclinicDiscretization, HomoclinicResumeContext, HomotopyStage,
+    Manifold1DSettings, Manifold2DSettings, ManifoldBounds, ManifoldCurveGeometry,
+    ManifoldCurveResumeState, ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind,
+    ManifoldGeometry, ManifoldHkoFiberResumeState, ManifoldMapDomainCursor, ManifoldRingDiagnostic,
     ManifoldStability, ManifoldSurfaceGeometry, ManifoldSurfaceResumeState,
     ManifoldTerminationCaps, StepResult,
 };
@@ -161,6 +182,12 @@ pub fn continue_with_problem<P: ContinuationProblem>(
     // Initialize branch with starting point
     let initial_diag = problem.diagnostics(&prev_aug)?;
     let mut prev_diag = initial_diag.clone();
+    let initial_homoclinic_events = if problem.detect_homoclinic_events_from_initial_seed() {
+        problem.homoclinic_event_diagnostics(&prev_aug)?
+    } else {
+        None
+    };
+    let mut prev_homoclinic_events = initial_homoclinic_events.clone();
     let mut branch = ContinuationBranch {
         points: vec![ContinuationPoint {
             state: initial_point.state.clone(),
@@ -168,6 +195,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             stability: BifurcationType::None,
             eigenvalues: initial_diag.eigenvalues,
             cycle_points: initial_diag.cycle_points.clone(),
+            homoclinic_events: initial_homoclinic_events,
         }],
         bifurcations: Vec::new(),
         indices: vec![0],
@@ -229,6 +257,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
                     &mut prev_aug,
                     &mut prev_tangent,
                     &mut prev_diag,
+                    &mut prev_homoclinic_events,
                     &mut branch,
                     &corrected_aug,
                 )? {
@@ -249,6 +278,17 @@ pub fn continue_with_problem<P: ContinuationProblem>(
                     }
                 }
             }
+
+            let (corrected_aug, _) = apply_post_corrector_reparameterization(
+                problem,
+                &mut prev_aug,
+                &mut prev_tangent,
+                &mut prev_diag,
+                &mut prev_homoclinic_events,
+                &mut branch,
+                corrected_aug,
+                &[],
+            )?;
 
             // Update gauges/reference data before computing the next tangent;
             // the tangent must belong to the Jacobian used on the next step.
@@ -280,56 +320,26 @@ pub fn continue_with_problem<P: ContinuationProblem>(
 
             // Compute diagnostics for the new point
             let diagnostics = problem.diagnostics(&corrected_aug)?;
+            let homoclinic_events = problem.homoclinic_event_diagnostics(&corrected_aug)?;
 
             // Bifurcation detection via test function sign changes
-            let prev_tests = &prev_diag.test_values;
-            let new_tests = &diagnostics.test_values;
-
-            // Detect limit cycle bifurcations
-            let cycle_fold_crossed =
-                scalar_test_crossed_or_reached(prev_tests.cycle_fold, new_tests.cycle_fold);
-            let period_doubling_crossed = scalar_test_crossed_or_reached(
-                prev_tests.period_doubling,
-                new_tests.period_doubling,
+            let detected_type = detect_bifurcation_type(
+                &prev_diag,
+                &diagnostics,
+                prev_homoclinic_events.as_ref(),
+                homoclinic_events.as_ref(),
             );
-            let neimark_sacker_crossed =
-                neimark_sacker_crossed_with_complex_pairs(&prev_diag, &diagnostics);
-
-            // Detect equilibrium bifurcations
-            let fold_crossed = scalar_test_crossed_or_reached(prev_tests.fold, new_tests.fold);
-            let branch_point_crossed =
-                scalar_test_crossed_or_reached(prev_tests.branch_point, new_tests.branch_point);
-            let hopf_crossed = hopf_crossed_with_complex_pairs(&prev_diag, &diagnostics);
-            let neutral_saddle_crossed =
-                neutral_saddle_crossed_with_real_pairs(&prev_diag, &diagnostics);
-
-            // Prioritize: Fold > Hopf > CycleFold > PeriodDoubling > NeimarkSacker
-            let detected_type = if fold_crossed {
-                BifurcationType::Fold
-            } else if branch_point_crossed {
-                BifurcationType::BranchPoint
-            } else if hopf_crossed {
-                BifurcationType::Hopf
-            } else if cycle_fold_crossed {
-                BifurcationType::CycleFold
-            } else if period_doubling_crossed {
-                BifurcationType::PeriodDoubling
-            } else if neimark_sacker_crossed {
-                BifurcationType::NeimarkSacker
-            } else if neutral_saddle_crossed {
-                BifurcationType::NeutralSaddle
-            } else {
-                BifurcationType::None
-            };
 
             // Refine bifurcation point if detected
             let (final_aug, final_diag) = if detected_type != BifurcationType::None {
                 match refine_bifurcation_bisection(
                     problem,
                     &prev_aug,
-                    prev_tests,
+                    &prev_diag,
+                    prev_homoclinic_events.as_ref(),
                     &corrected_aug,
-                    new_tests,
+                    &diagnostics,
+                    homoclinic_events.as_ref(),
                     detected_type,
                     &prev_tangent,
                     settings.corrector_steps,
@@ -351,6 +361,11 @@ pub fn continue_with_problem<P: ContinuationProblem>(
 
             let output_aug = final_aug;
             let output_diag = final_diag;
+            let output_homoclinic_events = if output_aug == corrected_aug {
+                homoclinic_events.clone()
+            } else {
+                problem.homoclinic_event_diagnostics(&output_aug)?
+            };
             let (continuation_aug, continuation_diag) = if bifurcation_type != BifurcationType::None
             {
                 (corrected_aug.clone(), diagnostics.clone())
@@ -366,6 +381,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
                 stability: bifurcation_type,
                 eigenvalues: output_diag.eigenvalues.clone(),
                 cycle_points: output_diag.cycle_points.clone(),
+                homoclinic_events: output_homoclinic_events,
             };
 
             // Record bifurcation if detected
@@ -383,6 +399,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             prev_aug = continuation_aug;
             prev_tangent = normalize_tangent_or_compute(problem, &prev_aug, consistent_tangent)?;
             prev_diag = continuation_diag;
+            prev_homoclinic_events = homoclinic_events;
         } else {
             // Failed to converge, reduce step size
             consecutive_failures += 1;
@@ -429,11 +446,43 @@ enum RejectedTrialDisposition {
     Terminate,
 }
 
+/// Replace persisted packed states after a discretization or coordinate-chart
+/// transfer, then refresh any point payloads derived from those states.
+///
+/// Preparation happens on clones so a failed problem-specific refresh cannot
+/// leave a branch with only part of its history converted.
+pub fn apply_transferred_branch_states<P: ContinuationProblem>(
+    problem: &P,
+    points: &mut [ContinuationPoint],
+    branch_states: Vec<Vec<f64>>,
+) -> Result<()> {
+    if branch_states.len() != points.len()
+        || branch_states
+            .iter()
+            .any(|state| state.len() != problem.dimension())
+    {
+        bail!("Discretization transfer returned incompatible branch-state layouts");
+    }
+
+    let mut refreshed = Vec::with_capacity(points.len());
+    for (point, state) in points.iter().zip(branch_states) {
+        let mut point = point.clone();
+        point.state = state;
+        problem.refresh_persisted_point_after_state_transfer(&mut point)?;
+        refreshed.push(point);
+    }
+    for (point, refreshed) in points.iter_mut().zip(refreshed) {
+        *point = refreshed;
+    }
+    Ok(())
+}
+
 fn handle_rejected_trial<P: ContinuationProblem>(
     problem: &mut P,
     prev_aug: &mut DVector<f64>,
     prev_tangent: &mut DVector<f64>,
     prev_diag: &mut PointDiagnostics,
+    prev_homoclinic_events: &mut Option<HomoclinicEventDiagnostics>,
     branch: &mut ContinuationBranch,
     rejected_aug: &DVector<f64>,
 ) -> Result<RejectedTrialDisposition> {
@@ -460,16 +509,7 @@ fn handle_rejected_trial<P: ContinuationProblem>(
                     expected_aug_len
                 );
             }
-            if branch_states.len() != branch.points.len()
-                || branch_states
-                    .iter()
-                    .any(|state| state.len() != problem.dimension())
-            {
-                bail!("Discretization refinement returned incompatible branch-state layouts");
-            }
-            for (point, state) in branch.points.iter_mut().zip(branch_states) {
-                point.state = state;
-            }
+            apply_transferred_branch_states(problem, &mut branch.points, branch_states)?;
             if let Some(branch_type) = branch_type {
                 branch.branch_type = branch_type;
             }
@@ -486,13 +526,122 @@ fn handle_rejected_trial<P: ContinuationProblem>(
             }
             *prev_tangent = refined_tangent;
             *prev_diag = problem.diagnostics(prev_aug)?;
-            if let Some(frontier) = branch.points.last_mut() {
-                frontier.eigenvalues = prev_diag.eigenvalues.clone();
-                frontier.cycle_points = prev_diag.cycle_points.clone();
+            if prev_homoclinic_events.is_some()
+                || problem.detect_homoclinic_events_from_initial_seed()
+            {
+                *prev_homoclinic_events = problem.homoclinic_event_diagnostics(prev_aug)?;
             }
             Ok(RejectedTrialDisposition::RetryTransferredStep)
         }
     }
+}
+
+fn apply_post_corrector_reparameterization<P: ContinuationProblem>(
+    problem: &mut P,
+    prev_aug: &mut DVector<f64>,
+    prev_tangent: &mut DVector<f64>,
+    prev_diag: &mut PointDiagnostics,
+    prev_homoclinic_events: &mut Option<HomoclinicEventDiagnostics>,
+    branch: &mut ContinuationBranch,
+    corrected_aug: DVector<f64>,
+    active_seeds: &[ReparameterizationSeed],
+) -> Result<(DVector<f64>, Vec<ReparameterizationSeed>)> {
+    let active_seed_count = active_seeds.len();
+    let mut carried_seeds = active_seeds.to_vec();
+    let mut carried_min_resume = false;
+    let mut carried_max_resume = false;
+    if let Some(resume) = branch.resume_state.as_ref() {
+        if let Some(seed) = resume.min_index_seed.as_ref() {
+            carried_seeds.push(ReparameterizationSeed {
+                aug_state: DVector::from_vec(seed.aug_state.clone()),
+                tangent: DVector::from_vec(seed.tangent.clone()),
+            });
+            carried_min_resume = true;
+        }
+        if let Some(seed) = resume.max_index_seed.as_ref() {
+            carried_seeds.push(ReparameterizationSeed {
+                aug_state: DVector::from_vec(seed.aug_state.clone()),
+                tangent: DVector::from_vec(seed.tangent.clone()),
+            });
+            carried_max_resume = true;
+        }
+    }
+    let branch_states = branch
+        .points
+        .iter()
+        .map(|point| point.state.clone())
+        .collect::<Vec<_>>();
+    let Some(change) = problem.reparameterize_after_step(
+        prev_aug,
+        &corrected_aug,
+        prev_tangent,
+        &branch_states,
+        &carried_seeds,
+    )?
+    else {
+        return Ok((corrected_aug, active_seeds.to_vec()));
+    };
+
+    let expected_aug_len = problem.dimension() + 1;
+    if change.previous_aug.len() != expected_aug_len
+        || change.corrected_aug.len() != expected_aug_len
+        || change.previous_tangent.len() != expected_aug_len
+    {
+        bail!("Post-corrector reparameterization returned an incompatible frontier layout");
+    }
+    if change.branch_states.len() != branch.points.len()
+        || change
+            .branch_states
+            .iter()
+            .any(|state| state.len() != problem.dimension())
+    {
+        bail!("Post-corrector reparameterization returned incompatible branch-state layouts");
+    }
+    if change.active_seeds.len() != carried_seeds.len()
+        || change.active_seeds.iter().any(|seed| {
+            seed.aug_state.len() != expected_aug_len || seed.tangent.len() != expected_aug_len
+        })
+    {
+        bail!("Post-corrector reparameterization returned incompatible endpoint seeds");
+    }
+
+    apply_transferred_branch_states(problem, &mut branch.points, change.branch_states)?;
+    *prev_aug = change.previous_aug;
+    *prev_tangent = normalize_tangent_or_compute(problem, prev_aug, change.previous_tangent)?;
+
+    let mut seed_iter = change.active_seeds.into_iter();
+    let transformed_active = seed_iter
+        .by_ref()
+        .take(active_seed_count)
+        .collect::<Vec<_>>();
+    if let Some(resume) = branch.resume_state.as_mut() {
+        if carried_min_resume {
+            let transformed = seed_iter
+                .next()
+                .ok_or_else(|| anyhow!("Missing transformed minimum resume seed"))?;
+            if let Some(seed) = resume.min_index_seed.as_mut() {
+                seed.aug_state = transformed.aug_state.iter().copied().collect();
+                seed.tangent = transformed.tangent.iter().copied().collect();
+            }
+        }
+        if carried_max_resume {
+            let transformed = seed_iter
+                .next()
+                .ok_or_else(|| anyhow!("Missing transformed maximum resume seed"))?;
+            if let Some(seed) = resume.max_index_seed.as_mut() {
+                seed.aug_state = transformed.aug_state.iter().copied().collect();
+                seed.tangent = transformed.tangent.iter().copied().collect();
+            }
+        }
+    }
+
+    // The problem chart has changed. Recompute the previous endpoint's
+    // diagnostics in that chart before any sign-change test or bisection.
+    *prev_diag = problem.diagnostics(prev_aug)?;
+    if prev_homoclinic_events.is_some() || problem.detect_homoclinic_events_from_initial_seed() {
+        *prev_homoclinic_events = problem.homoclinic_event_diagnostics(prev_aug)?;
+    }
+    Ok((change.corrected_aug, transformed_active))
 }
 
 fn clamp_step_size(step_size: f64, settings: ContinuationSettings) -> f64 {
@@ -627,6 +776,7 @@ pub struct ContinuationRunner<P: ContinuationProblem> {
     initial_tangent: DVector<f64>,
     initial_step_size: f64,
     prev_diag: PointDiagnostics,
+    prev_homoclinic_events: Option<HomoclinicEventDiagnostics>,
     step_size: f64,
     current_index: i32,
     index_step: i32,
@@ -644,8 +794,17 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
         problem: &mut P,
         prev_aug: &DVector<f64>,
         dim: usize,
-    ) -> Result<(PointDiagnostics, ContinuationBranch)> {
+    ) -> Result<(
+        PointDiagnostics,
+        Option<HomoclinicEventDiagnostics>,
+        ContinuationBranch,
+    )> {
         let initial_diag = problem.diagnostics(prev_aug)?;
+        let initial_homoclinic_events = if problem.detect_homoclinic_events_from_initial_seed() {
+            problem.homoclinic_event_diagnostics(prev_aug)?
+        } else {
+            None
+        };
         let branch = ContinuationBranch {
             points: vec![ContinuationPoint {
                 state: prev_aug.rows(1, dim).iter().cloned().collect(),
@@ -653,6 +812,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                 stability: BifurcationType::None,
                 eigenvalues: initial_diag.eigenvalues.clone(),
                 cycle_points: initial_diag.cycle_points.clone(),
+                homoclinic_events: initial_homoclinic_events.clone(),
             }],
             bifurcations: Vec::new(),
             indices: vec![0],
@@ -662,7 +822,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             resume_state: None,
             manifold_geometry: None,
         };
-        Ok((initial_diag, branch))
+        Ok((initial_diag, initial_homoclinic_events, branch))
     }
 
     /// Create a new continuation runner initialized from a starting point.
@@ -683,7 +843,8 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             }
         }
 
-        let (prev_diag, branch) = Self::init_branch_from_aug(&mut problem, &prev_aug, dim)?;
+        let (prev_diag, prev_homoclinic_events, branch) =
+            Self::init_branch_from_aug(&mut problem, &prev_aug, dim)?;
 
         // Compute initial tangent and orient it based on requested parameter direction.
         let mut prev_tangent = compute_tangent_from_problem(&mut problem, &prev_aug)?;
@@ -705,6 +866,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             initial_tangent: prev_tangent,
             initial_step_size: step_size,
             prev_diag,
+            prev_homoclinic_events,
             step_size,
             current_index: 0,
             index_step,
@@ -739,7 +901,8 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             }
         }
 
-        let (prev_diag, branch) = Self::init_branch_from_aug(&mut problem, &prev_aug, dim)?;
+        let (prev_diag, prev_homoclinic_events, branch) =
+            Self::init_branch_from_aug(&mut problem, &prev_aug, dim)?;
         let prev_tangent = normalize_tangent_or_compute(&mut problem, &prev_aug, initial_tangent)?;
 
         let step_size = clamp_step_size(settings.step_size, settings);
@@ -752,6 +915,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             initial_tangent: prev_tangent,
             initial_step_size: step_size,
             prev_diag,
+            prev_homoclinic_events,
             step_size,
             current_index: 0,
             index_step: 1,
@@ -795,7 +959,8 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
         let prev_aug = DVector::from_vec(aug_state);
         let seed_tangent = DVector::from_vec(tangent);
         let prev_tangent = normalize_tangent_or_compute(&mut problem, &prev_aug, seed_tangent)?;
-        let (prev_diag, branch) = Self::init_branch_from_aug(&mut problem, &prev_aug, dim)?;
+        let (prev_diag, prev_homoclinic_events, branch) =
+            Self::init_branch_from_aug(&mut problem, &prev_aug, dim)?;
 
         let step_size = clamp_step_size(seed_step_size, settings);
 
@@ -807,6 +972,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             initial_tangent: prev_tangent,
             initial_step_size: step_size,
             prev_diag,
+            prev_homoclinic_events,
             step_size,
             current_index: 0,
             index_step: 1,
@@ -893,6 +1059,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                     &mut self.prev_aug,
                     &mut self.prev_tangent,
                     &mut self.prev_diag,
+                    &mut self.prev_homoclinic_events,
                     &mut self.branch,
                     &corrected_aug,
                 )? {
@@ -918,6 +1085,25 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                         return Ok(SingleStepOutcome::Retry);
                     }
                 }
+            }
+
+            let active_seeds = [ReparameterizationSeed {
+                aug_state: self.initial_aug.clone(),
+                tangent: self.initial_tangent.clone(),
+            }];
+            let (corrected_aug, transformed_seeds) = apply_post_corrector_reparameterization(
+                &mut self.problem,
+                &mut self.prev_aug,
+                &mut self.prev_tangent,
+                &mut self.prev_diag,
+                &mut self.prev_homoclinic_events,
+                &mut self.branch,
+                corrected_aug,
+                &active_seeds,
+            )?;
+            if let Some(seed) = transformed_seeds.into_iter().next() {
+                self.initial_aug = seed.aug_state;
+                self.initial_tangent = seed.tangent;
             }
             // Update gauges/reference data before computing the next tangent;
             // the tangent must belong to the Jacobian used on the next step.
@@ -954,55 +1140,26 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
 
             // Compute diagnostics for the new point
             let diagnostics = self.problem.diagnostics(&corrected_aug)?;
+            let homoclinic_events = self.problem.homoclinic_event_diagnostics(&corrected_aug)?;
 
             // Bifurcation detection via test function sign changes
-            let prev_tests = &self.prev_diag.test_values;
-            let new_tests = &diagnostics.test_values;
-
-            // Detect limit cycle bifurcations
-            let cycle_fold_crossed =
-                scalar_test_crossed_or_reached(prev_tests.cycle_fold, new_tests.cycle_fold);
-            let period_doubling_crossed = scalar_test_crossed_or_reached(
-                prev_tests.period_doubling,
-                new_tests.period_doubling,
+            let detected_type = detect_bifurcation_type(
+                &self.prev_diag,
+                &diagnostics,
+                self.prev_homoclinic_events.as_ref(),
+                homoclinic_events.as_ref(),
             );
-            let neimark_sacker_crossed =
-                neimark_sacker_crossed_with_complex_pairs(&self.prev_diag, &diagnostics);
-
-            // Detect equilibrium bifurcations
-            let fold_crossed = scalar_test_crossed_or_reached(prev_tests.fold, new_tests.fold);
-            let branch_point_crossed =
-                scalar_test_crossed_or_reached(prev_tests.branch_point, new_tests.branch_point);
-            let hopf_crossed = hopf_crossed_with_complex_pairs(&self.prev_diag, &diagnostics);
-            let neutral_saddle_crossed =
-                neutral_saddle_crossed_with_real_pairs(&self.prev_diag, &diagnostics);
-
-            let detected_type = if fold_crossed {
-                BifurcationType::Fold
-            } else if branch_point_crossed {
-                BifurcationType::BranchPoint
-            } else if hopf_crossed {
-                BifurcationType::Hopf
-            } else if cycle_fold_crossed {
-                BifurcationType::CycleFold
-            } else if period_doubling_crossed {
-                BifurcationType::PeriodDoubling
-            } else if neimark_sacker_crossed {
-                BifurcationType::NeimarkSacker
-            } else if neutral_saddle_crossed {
-                BifurcationType::NeutralSaddle
-            } else {
-                BifurcationType::None
-            };
 
             // Refine bifurcation point if detected
             let (final_aug, final_diag) = if detected_type != BifurcationType::None {
                 match refine_bifurcation_bisection(
                     &mut self.problem,
                     &self.prev_aug,
-                    prev_tests,
+                    &self.prev_diag,
+                    self.prev_homoclinic_events.as_ref(),
                     &corrected_aug,
-                    new_tests,
+                    &diagnostics,
+                    homoclinic_events.as_ref(),
                     detected_type,
                     &self.prev_tangent,
                     self.settings.corrector_steps,
@@ -1025,6 +1182,11 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
 
             let output_aug = final_aug;
             let output_diag = final_diag;
+            let output_homoclinic_events = if output_aug == corrected_aug {
+                homoclinic_events.clone()
+            } else {
+                self.problem.homoclinic_event_diagnostics(&output_aug)?
+            };
             let (continuation_aug, continuation_diag) = if bifurcation_type != BifurcationType::None
             {
                 (corrected_aug.clone(), diagnostics.clone())
@@ -1040,6 +1202,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                 stability: bifurcation_type,
                 eigenvalues: output_diag.eigenvalues.clone(),
                 cycle_points: output_diag.cycle_points.clone(),
+                homoclinic_events: output_homoclinic_events,
             };
 
             // Record bifurcation if detected
@@ -1060,6 +1223,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                 consistent_tangent,
             )?;
             self.prev_diag = continuation_diag;
+            self.prev_homoclinic_events = homoclinic_events;
             return Ok(SingleStepOutcome::Accepted);
         } else {
             // Failed to converge, reduce step size
@@ -1509,6 +1673,7 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
             stability: endpoint.stability,
             eigenvalues: endpoint.eigenvalues.clone(),
             cycle_points: endpoint.cycle_points.clone(),
+            homoclinic_events: None,
         };
         continue_with_initial_tangent(
             problem,
@@ -1539,30 +1704,64 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
             stability: endpoint.stability,
             eigenvalues: endpoint.eigenvalues.clone(),
             cycle_points: endpoint.cycle_points.clone(),
+            homoclinic_events: None,
         };
 
         continue_with_initial_tangent(problem, initial_point, tangent.clone(), settings)?
     };
 
-    if branch
+    let external_states = branch
         .points
         .iter()
-        .any(|point| point.state.len() != problem.dimension())
-    {
-        let external_states = branch
-            .points
+        .map(|point| point.state.clone())
+        .collect::<Vec<_>>();
+    let transferred = problem.transfer_branch_states_to_current_discretization(&external_states)?;
+    if transferred.len() != branch.points.len()
+        || transferred
             .iter()
-            .map(|point| point.state.clone())
-            .collect::<Vec<_>>();
-        let transferred =
-            problem.transfer_branch_states_to_current_discretization(&external_states)?;
-        if transferred.len() != branch.points.len() {
-            bail!("Discretization refinement lost external branch points during extension");
+            .any(|state| state.len() != problem.dimension())
+    {
+        bail!("Continuation transfer lost or corrupted external branch points during extension");
+    }
+    apply_transferred_branch_states(problem, &mut branch.points, transferred)?;
+
+    if let Some(resume) = branch.resume_state.as_mut() {
+        let mut seeds = Vec::new();
+        let has_min = resume.min_index_seed.is_some();
+        let has_max = resume.max_index_seed.is_some();
+        if let Some(seed) = resume.min_index_seed.as_ref() {
+            seeds.push(ReparameterizationSeed {
+                aug_state: DVector::from_vec(seed.aug_state.clone()),
+                tangent: DVector::from_vec(seed.tangent.clone()),
+            });
         }
-        for (point, state) in branch.points.iter_mut().zip(transferred) {
-            point.state = state;
+        if let Some(seed) = resume.max_index_seed.as_ref() {
+            seeds.push(ReparameterizationSeed {
+                aug_state: DVector::from_vec(seed.aug_state.clone()),
+                tangent: DVector::from_vec(seed.tangent.clone()),
+            });
         }
-        branch.resume_state = None;
+        let mut transferred_seeds = problem
+            .transfer_endpoint_seeds_to_current_coordinates(&seeds)?
+            .into_iter();
+        if has_min {
+            let transformed = transferred_seeds
+                .next()
+                .ok_or_else(|| anyhow!("Continuation transfer lost the minimum endpoint seed"))?;
+            if let Some(seed) = resume.min_index_seed.as_mut() {
+                seed.aug_state = transformed.aug_state.iter().copied().collect();
+                seed.tangent = transformed.tangent.iter().copied().collect();
+            }
+        }
+        if has_max {
+            let transformed = transferred_seeds
+                .next()
+                .ok_or_else(|| anyhow!("Continuation transfer lost the maximum endpoint seed"))?;
+            if let Some(seed) = resume.max_index_seed.as_mut() {
+                seed.aug_state = transformed.aug_state.iter().copied().collect();
+                seed.tangent = transformed.tangent.iter().copied().collect();
+            }
+        }
     }
 
     if extension.branch_type != BranchType::Equilibrium {
@@ -1644,6 +1843,12 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
 
     let initial_diag = problem.diagnostics(&prev_aug)?;
     let mut prev_diag = initial_diag.clone();
+    let initial_homoclinic_events = if problem.detect_homoclinic_events_from_initial_seed() {
+        problem.homoclinic_event_diagnostics(&prev_aug)?
+    } else {
+        None
+    };
+    let mut prev_homoclinic_events = initial_homoclinic_events.clone();
     let mut branch = ContinuationBranch {
         points: vec![ContinuationPoint {
             state: initial_point.state.clone(),
@@ -1651,6 +1856,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             stability: BifurcationType::None,
             eigenvalues: initial_diag.eigenvalues,
             cycle_points: initial_diag.cycle_points.clone(),
+            homoclinic_events: initial_homoclinic_events,
         }],
         bifurcations: Vec::new(),
         indices: vec![0],
@@ -1702,6 +1908,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
                     &mut prev_aug,
                     &mut prev_tangent,
                     &mut prev_diag,
+                    &mut prev_homoclinic_events,
                     &mut branch,
                     &corrected_aug,
                 )? {
@@ -1724,6 +1931,17 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             }
             consecutive_failures = 0;
 
+            let (corrected_aug, _) = apply_post_corrector_reparameterization(
+                problem,
+                &mut prev_aug,
+                &mut prev_tangent,
+                &mut prev_diag,
+                &mut prev_homoclinic_events,
+                &mut branch,
+                corrected_aug,
+                &[],
+            )?;
+
             // Update gauges/reference data before computing the next tangent;
             // the tangent must belong to the Jacobian used on the next step.
             problem.update_after_step(&corrected_aug)?;
@@ -1736,55 +1954,26 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
 
             // Compute diagnostics
             let diag = problem.diagnostics(&corrected_aug)?;
+            let homoclinic_events = problem.homoclinic_event_diagnostics(&corrected_aug)?;
 
             // Bifurcation detection via test function sign changes
-            let prev_tests = &prev_diag.test_values;
-            let new_tests = &diag.test_values;
-
-            // Detect limit cycle bifurcations
-            let cycle_fold_crossed =
-                scalar_test_crossed_or_reached(prev_tests.cycle_fold, new_tests.cycle_fold);
-            let period_doubling_crossed = scalar_test_crossed_or_reached(
-                prev_tests.period_doubling,
-                new_tests.period_doubling,
+            let detected_type = detect_bifurcation_type(
+                &prev_diag,
+                &diag,
+                prev_homoclinic_events.as_ref(),
+                homoclinic_events.as_ref(),
             );
-            let neimark_sacker_crossed =
-                neimark_sacker_crossed_with_complex_pairs(&prev_diag, &diag);
-
-            // Detect equilibrium bifurcations
-            let fold_crossed = scalar_test_crossed_or_reached(prev_tests.fold, new_tests.fold);
-            let branch_point_crossed =
-                scalar_test_crossed_or_reached(prev_tests.branch_point, new_tests.branch_point);
-            let hopf_crossed = hopf_crossed_with_complex_pairs(&prev_diag, &diag);
-            let neutral_saddle_crossed = neutral_saddle_crossed_with_real_pairs(&prev_diag, &diag);
-
-            // Prioritize: Fold > Hopf > CycleFold > PeriodDoubling > NeimarkSacker
-            let detected_type = if fold_crossed {
-                BifurcationType::Fold
-            } else if branch_point_crossed {
-                BifurcationType::BranchPoint
-            } else if hopf_crossed {
-                BifurcationType::Hopf
-            } else if cycle_fold_crossed {
-                BifurcationType::CycleFold
-            } else if period_doubling_crossed {
-                BifurcationType::PeriodDoubling
-            } else if neimark_sacker_crossed {
-                BifurcationType::NeimarkSacker
-            } else if neutral_saddle_crossed {
-                BifurcationType::NeutralSaddle
-            } else {
-                BifurcationType::None
-            };
 
             // Refine bifurcation point if detected
             let (final_aug, final_diag) = if detected_type != BifurcationType::None {
                 match refine_bifurcation_bisection(
                     problem,
                     &prev_aug,
-                    prev_tests,
+                    &prev_diag,
+                    prev_homoclinic_events.as_ref(),
                     &corrected_aug,
-                    new_tests,
+                    &diag,
+                    homoclinic_events.as_ref(),
                     detected_type,
                     &prev_tangent,
                     settings.corrector_steps,
@@ -1806,6 +1995,11 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
 
             let output_aug = final_aug;
             let output_diag = final_diag;
+            let output_homoclinic_events = if output_aug == corrected_aug {
+                homoclinic_events.clone()
+            } else {
+                problem.homoclinic_event_diagnostics(&output_aug)?
+            };
             let (continuation_aug, continuation_diag) = if bifurcation_type != BifurcationType::None
             {
                 (corrected_aug.clone(), diag.clone())
@@ -1820,6 +2014,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
                 stability: bifurcation_type,
                 eigenvalues: output_diag.eigenvalues.clone(),
                 cycle_points: output_diag.cycle_points.clone(),
+                homoclinic_events: output_homoclinic_events,
             };
 
             // Record bifurcation if detected
@@ -1835,6 +2030,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             prev_aug = continuation_aug;
             prev_tangent = normalize_tangent_or_compute(problem, &prev_aug, new_tangent)?;
             prev_diag = continuation_diag;
+            prev_homoclinic_events = homoclinic_events;
 
             // Adaptive step size
             step_size = (step_size * 1.2).min(settings.max_step_size);
@@ -1867,9 +2063,11 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
 fn refine_bifurcation_bisection<P: ContinuationProblem>(
     problem: &mut P,
     prev_aug: &DVector<f64>,
-    prev_tests: &problem::TestFunctionValues,
+    prev_diag: &problem::PointDiagnostics,
+    prev_homoclinic: Option<&HomoclinicEventDiagnostics>,
     new_aug: &DVector<f64>,
-    new_tests: &problem::TestFunctionValues,
+    new_diag: &problem::PointDiagnostics,
+    new_homoclinic: Option<&HomoclinicEventDiagnostics>,
     bif_type: BifurcationType,
     tangent: &DVector<f64>,
     corrector_steps: usize,
@@ -1881,21 +2079,35 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
 
     let mut lo_aug = prev_aug.clone();
     let mut hi_aug = new_aug.clone();
-    let mut lo_test = prev_tests.value_for(bif_type);
-    let mut hi_test = new_tests.value_for(bif_type);
+    let mut lo_diag = prev_diag.clone();
+    let mut hi_diag = new_diag.clone();
+    let mut lo_test = bifurcation_test_value(prev_diag, prev_homoclinic, bif_type)
+        .ok_or_else(|| anyhow!("Previous bifurcation test value is unavailable"))?;
+    let mut hi_test = bifurcation_test_value(new_diag, new_homoclinic, bif_type)
+        .ok_or_else(|| anyhow!("Current bifurcation test value is unavailable"))?;
+
+    if lo_test.abs() < TEST_TOLERANCE {
+        return Ok((lo_aug, lo_diag));
+    }
+    if hi_test.abs() < TEST_TOLERANCE {
+        return Ok((hi_aug, hi_diag));
+    }
+    if lo_test * hi_test >= 0.0 {
+        bail!("Bifurcation refinement requires a finite sign-changing bracket");
+    }
 
     // Ensure lo_test < 0, hi_test > 0 for consistent bisection
     if lo_test > hi_test {
         std::mem::swap(&mut lo_aug, &mut hi_aug);
+        std::mem::swap(&mut lo_diag, &mut hi_diag);
         std::mem::swap(&mut lo_test, &mut hi_test);
     }
 
-    let mut best_aug = if lo_test.abs() < hi_test.abs() {
-        lo_aug.clone()
+    let (mut best_aug, mut best_diag, mut best_abs) = if lo_test.abs() < hi_test.abs() {
+        (lo_aug.clone(), lo_diag.clone(), lo_test.abs())
     } else {
-        hi_aug.clone()
+        (hi_aug.clone(), hi_diag.clone(), hi_test.abs())
     };
-    let mut best_diag = problem.diagnostics(&best_aug)?;
 
     for _ in 0..MAX_BISECTION_ITERS {
         // Linear interpolation to estimate zero crossing
@@ -1929,7 +2141,11 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
 
         // Compute diagnostics at corrected point
         let diag = problem.diagnostics(&corrected_aug)?;
-        let mid_test = diag.test_values.value_for(bif_type);
+        let homoclinic = problem.homoclinic_event_diagnostics(&corrected_aug)?;
+        let mid_test =
+            bifurcation_test_value(&diag, homoclinic.as_ref(), bif_type).ok_or_else(|| {
+                anyhow!("Bifurcation test value became unavailable during refinement")
+            })?;
 
         // Check convergence
         if mid_test.abs() < TEST_TOLERANCE {
@@ -1946,9 +2162,10 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
         }
 
         // Track best (closest to zero)
-        if mid_test.abs() < best_diag.test_values.value_for(bif_type).abs() {
+        if mid_test.abs() < best_abs {
             best_aug = corrected_aug;
             best_diag = diag;
+            best_abs = mid_test.abs();
         }
     }
 
@@ -2368,6 +2585,7 @@ fn extend_branch_legacy(
                 stability: BifurcationType::None,
                 eigenvalues: diagnostics.eigenvalues.clone(),
                 cycle_points: diagnostics.cycle_points.clone(),
+                homoclinic_events: None,
             };
 
             let prev_tests = prev_diag.test_values;
@@ -2519,6 +2737,7 @@ pub fn continue_parameter(
             stability: BifurcationType::None,
             eigenvalues: initial_diag.eigenvalues,
             cycle_points: initial_diag.cycle_points,
+            homoclinic_events: None,
         }],
         bifurcations: Vec::new(),
         indices: vec![0],
@@ -2607,6 +2826,7 @@ fn refine_fold_point(
         stability: BifurcationType::Fold,
         eigenvalues: diagnostics.eigenvalues.clone(),
         cycle_points: diagnostics.cycle_points.clone(),
+        homoclinic_events: None,
     };
 
     Ok((point, diagnostics, tangent))
@@ -2656,6 +2876,7 @@ fn refine_hopf_point(
         stability: BifurcationType::Hopf,
         eigenvalues: diagnostics.eigenvalues.clone(),
         cycle_points: diagnostics.cycle_points.clone(),
+        homoclinic_events: None,
     };
 
     Ok((point, diagnostics, tangent))
@@ -2843,6 +3064,181 @@ fn scalar_test_reached(prev: f64, new: f64) -> bool {
 
 fn scalar_test_crossed_or_reached(prev: f64, new: f64) -> bool {
     prev.is_finite() && new.is_finite() && (prev * new < 0.0 || scalar_test_reached(prev, new))
+}
+
+fn map_homoclinic_event_to_bifurcation(event: HomoclinicEventKind) -> Option<BifurcationType> {
+    match event {
+        HomoclinicEventKind::NeutralSaddle => Some(BifurcationType::HomoclinicNeutralSaddle),
+        HomoclinicEventKind::NeutralSaddleFocus => {
+            Some(BifurcationType::HomoclinicNeutralSaddleFocus)
+        }
+        HomoclinicEventKind::NeutralBiFocus => Some(BifurcationType::HomoclinicNeutralBiFocus),
+        HomoclinicEventKind::DoubleRealStable => Some(BifurcationType::HomoclinicDoubleRealStable),
+        HomoclinicEventKind::DoubleRealUnstable => {
+            Some(BifurcationType::HomoclinicDoubleRealUnstable)
+        }
+        HomoclinicEventKind::NeutrallyDivergentStable => {
+            Some(BifurcationType::HomoclinicNeutrallyDivergentStable)
+        }
+        HomoclinicEventKind::NeutrallyDivergentUnstable => {
+            Some(BifurcationType::HomoclinicNeutrallyDivergentUnstable)
+        }
+        // HBK exposes these five ordered spectral scalars, but they are
+        // one-sided (or disappear when hyperbolicity is lost). Its continuous
+        // event handler, like Fork's, requires a sign bracket or an exact zero,
+        // so mapping them to automatic markers would advertise localization
+        // that the scalar cannot normally provide. Keep the raw diagnostics;
+        // localization needs continuation-aware eigenvalue identity tracking.
+        HomoclinicEventKind::ThreeLeadingStable
+        | HomoclinicEventKind::ThreeLeadingUnstable
+        | HomoclinicEventKind::NonCentralHomoclinic
+        | HomoclinicEventKind::ShilnikovHopf
+        | HomoclinicEventKind::BogdanovTakens => None,
+        HomoclinicEventKind::OrbitFlipUnstable => {
+            Some(BifurcationType::HomoclinicOrbitFlipUnstable)
+        }
+        HomoclinicEventKind::OrbitFlipStable => Some(BifurcationType::HomoclinicOrbitFlipStable),
+        HomoclinicEventKind::InclinationFlipUnstable
+        | HomoclinicEventKind::InclinationFlipStable => None,
+    }
+}
+
+fn homoclinic_event_for_bifurcation(bifurcation: BifurcationType) -> Option<HomoclinicEventKind> {
+    match bifurcation {
+        BifurcationType::HomoclinicNeutralSaddle => Some(HomoclinicEventKind::NeutralSaddle),
+        BifurcationType::HomoclinicNeutralSaddleFocus => {
+            Some(HomoclinicEventKind::NeutralSaddleFocus)
+        }
+        BifurcationType::HomoclinicNeutralBiFocus => Some(HomoclinicEventKind::NeutralBiFocus),
+        BifurcationType::HomoclinicDoubleRealStable => Some(HomoclinicEventKind::DoubleRealStable),
+        BifurcationType::HomoclinicDoubleRealUnstable => {
+            Some(HomoclinicEventKind::DoubleRealUnstable)
+        }
+        BifurcationType::HomoclinicNeutrallyDivergentStable => {
+            Some(HomoclinicEventKind::NeutrallyDivergentStable)
+        }
+        BifurcationType::HomoclinicNeutrallyDivergentUnstable => {
+            Some(HomoclinicEventKind::NeutrallyDivergentUnstable)
+        }
+        BifurcationType::HomoclinicThreeLeadingStable => {
+            Some(HomoclinicEventKind::ThreeLeadingStable)
+        }
+        BifurcationType::HomoclinicThreeLeadingUnstable => {
+            Some(HomoclinicEventKind::ThreeLeadingUnstable)
+        }
+        BifurcationType::HomoclinicNonCentral => Some(HomoclinicEventKind::NonCentralHomoclinic),
+        BifurcationType::HomoclinicShilnikovHopf => Some(HomoclinicEventKind::ShilnikovHopf),
+        BifurcationType::HomoclinicBogdanovTakens => Some(HomoclinicEventKind::BogdanovTakens),
+        BifurcationType::HomoclinicOrbitFlipUnstable => {
+            Some(HomoclinicEventKind::OrbitFlipUnstable)
+        }
+        BifurcationType::HomoclinicOrbitFlipStable => Some(HomoclinicEventKind::OrbitFlipStable),
+        BifurcationType::None
+        | BifurcationType::Fold
+        | BifurcationType::BranchPoint
+        | BifurcationType::Hopf
+        | BifurcationType::NeutralSaddle
+        | BifurcationType::CycleFold
+        | BifurcationType::PeriodDoubling
+        | BifurcationType::NeimarkSacker => None,
+    }
+}
+
+fn available_homoclinic_event_value(
+    diagnostics: &HomoclinicEventDiagnostics,
+    kind: HomoclinicEventKind,
+) -> Option<f64> {
+    diagnostics
+        .events
+        .iter()
+        .find(|event| event.kind == kind && event.status == HomoclinicEventStatus::Available)
+        .and_then(|event| event.value)
+        .filter(|value| value.is_finite())
+}
+
+fn homoclinic_event_crossing(
+    previous: Option<&HomoclinicEventDiagnostics>,
+    current: Option<&HomoclinicEventDiagnostics>,
+) -> Option<BifurcationType> {
+    let (Some(previous), Some(current)) = (previous, current) else {
+        return None;
+    };
+    HomoclinicEventKind::ALL.into_iter().find_map(|kind| {
+        let bifurcation = map_homoclinic_event_to_bifurcation(kind)?;
+        let previous = available_homoclinic_event_value(previous, kind)?;
+        let current = available_homoclinic_event_value(current, kind)?;
+        scalar_test_crossed_or_reached(previous, current).then_some(bifurcation)
+    })
+}
+
+fn detect_bifurcation_type(
+    previous: &PointDiagnostics,
+    current: &PointDiagnostics,
+    previous_homoclinic: Option<&HomoclinicEventDiagnostics>,
+    current_homoclinic: Option<&HomoclinicEventDiagnostics>,
+) -> BifurcationType {
+    let previous_tests = &previous.test_values;
+    let current_tests = &current.test_values;
+
+    if scalar_test_crossed_or_reached(previous_tests.fold, current_tests.fold) {
+        BifurcationType::Fold
+    } else if scalar_test_crossed_or_reached(
+        previous_tests.branch_point,
+        current_tests.branch_point,
+    ) {
+        BifurcationType::BranchPoint
+    } else if hopf_crossed_with_complex_pairs(previous, current) {
+        BifurcationType::Hopf
+    } else if scalar_test_crossed_or_reached(previous_tests.cycle_fold, current_tests.cycle_fold) {
+        BifurcationType::CycleFold
+    } else if scalar_test_crossed_or_reached(
+        previous_tests.period_doubling,
+        current_tests.period_doubling,
+    ) {
+        BifurcationType::PeriodDoubling
+    } else if neimark_sacker_crossed_with_complex_pairs(previous, current) {
+        BifurcationType::NeimarkSacker
+    } else if neutral_saddle_crossed_with_real_pairs(previous, current) {
+        BifurcationType::NeutralSaddle
+    } else {
+        homoclinic_event_crossing(previous_homoclinic, current_homoclinic)
+            .unwrap_or(BifurcationType::None)
+    }
+}
+
+fn bifurcation_test_value(
+    diagnostics: &PointDiagnostics,
+    homoclinic: Option<&HomoclinicEventDiagnostics>,
+    bifurcation: BifurcationType,
+) -> Option<f64> {
+    if let Some(kind) = homoclinic_event_for_bifurcation(bifurcation) {
+        return homoclinic.and_then(|events| available_homoclinic_event_value(events, kind));
+    }
+    let value = match bifurcation {
+        BifurcationType::Fold => diagnostics.test_values.fold,
+        BifurcationType::BranchPoint => diagnostics.test_values.branch_point,
+        BifurcationType::Hopf => diagnostics.test_values.hopf,
+        BifurcationType::NeutralSaddle => diagnostics.test_values.neutral_saddle,
+        BifurcationType::CycleFold => diagnostics.test_values.cycle_fold,
+        BifurcationType::PeriodDoubling => diagnostics.test_values.period_doubling,
+        BifurcationType::NeimarkSacker => diagnostics.test_values.neimark_sacker,
+        BifurcationType::None
+        | BifurcationType::HomoclinicNeutralSaddle
+        | BifurcationType::HomoclinicNeutralSaddleFocus
+        | BifurcationType::HomoclinicNeutralBiFocus
+        | BifurcationType::HomoclinicDoubleRealStable
+        | BifurcationType::HomoclinicDoubleRealUnstable
+        | BifurcationType::HomoclinicNeutrallyDivergentStable
+        | BifurcationType::HomoclinicNeutrallyDivergentUnstable
+        | BifurcationType::HomoclinicThreeLeadingStable
+        | BifurcationType::HomoclinicThreeLeadingUnstable
+        | BifurcationType::HomoclinicNonCentral
+        | BifurcationType::HomoclinicShilnikovHopf
+        | BifurcationType::HomoclinicBogdanovTakens
+        | BifurcationType::HomoclinicOrbitFlipUnstable
+        | BifurcationType::HomoclinicOrbitFlipStable => return None,
+    };
+    value.is_finite().then_some(value)
 }
 
 fn hopf_crossed_with_complex_pairs(
@@ -3095,6 +3491,9 @@ fn solve_palc(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::continuation::homoclinic_events::{
+        compute_homoclinic_event_diagnostics, HomoclinicEventKind, DEFAULT_FOCUS_TOLERANCE,
+    };
     use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
     use nalgebra::{DMatrix, DVector};
 
@@ -3680,6 +4079,388 @@ mod tests {
         }
     }
 
+    struct SyntheticHomoclinicEventProblem {
+        detect_from_initial_seed: bool,
+    }
+
+    impl Default for SyntheticHomoclinicEventProblem {
+        fn default() -> Self {
+            Self {
+                detect_from_initial_seed: true,
+            }
+        }
+    }
+
+    impl ContinuationProblem for SyntheticHomoclinicEventProblem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            out[0] = aug_state[1] - aug_state[0];
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            Ok(DMatrix::from_row_slice(1, 2, &[-1.0, 1.0]))
+        }
+
+        fn diagnostics(&mut self, aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: vec![
+                    Complex::new(-1.0, 0.0),
+                    Complex::new(1.0 + aug_state[0], 0.0),
+                ],
+                cycle_points: None,
+            })
+        }
+
+        fn homoclinic_event_diagnostics(
+            &mut self,
+            aug_state: &DVector<f64>,
+        ) -> Result<Option<crate::continuation::homoclinic_events::HomoclinicEventDiagnostics>>
+        {
+            Ok(Some(compute_homoclinic_event_diagnostics(
+                &[
+                    Complex::new(-1.0, 0.0),
+                    Complex::new(1.0 + aug_state[0], 0.0),
+                ],
+                None,
+                DEFAULT_FOCUS_TOLERANCE,
+            )))
+        }
+
+        fn detect_homoclinic_events_from_initial_seed(&self) -> bool {
+            self.detect_from_initial_seed
+        }
+    }
+
+    fn homoclinic_event_initial_point() -> ContinuationPoint {
+        ContinuationPoint {
+            state: vec![-0.1],
+            param_value: -0.1,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+            homoclinic_events: None,
+        }
+    }
+
+    fn homoclinic_event_settings() -> ContinuationSettings {
+        ContinuationSettings {
+            step_size: 0.4,
+            min_step_size: 0.4,
+            max_step_size: 0.4,
+            max_steps: 1,
+            corrector_steps: 8,
+            corrector_tolerance: 1.0e-11,
+            step_tolerance: 1.0e-11,
+        }
+    }
+
+    fn assert_localized_homoclinic_neutral_saddle(branch: &ContinuationBranch) {
+        assert_eq!(branch.points.len(), 2);
+        assert_eq!(branch.bifurcations, vec![1]);
+        let event = &branch.points[1];
+        assert_eq!(event.stability, BifurcationType::HomoclinicNeutralSaddle);
+        assert!(
+            event.param_value.abs() < 1.0e-6,
+            "homoclinic event was not localized: {}",
+            event.param_value
+        );
+
+        let diagnostics = event
+            .homoclinic_events
+            .as_ref()
+            .expect("localized point should persist exact homoclinic diagnostics");
+        assert_eq!(diagnostics.events.len(), HomoclinicEventKind::ALL.len());
+
+        let neutral_saddle = diagnostics.event(HomoclinicEventKind::NeutralSaddle);
+        assert_eq!(neutral_saddle.status, HomoclinicEventStatus::Available);
+        let neutral_saddle_value = neutral_saddle
+            .value
+            .expect("neutral-saddle test function should be available");
+        assert!(
+            neutral_saddle_value.abs() < 1.0e-6,
+            "localized NNS value was not near zero: {neutral_saddle_value}"
+        );
+        assert!(
+            (neutral_saddle_value - event.param_value).abs() < 1.0e-12,
+            "persisted NNS value must be evaluated at the localized point"
+        );
+
+        for kind in [
+            HomoclinicEventKind::InclinationFlipUnstable,
+            HomoclinicEventKind::InclinationFlipStable,
+        ] {
+            let inclination_flip = diagnostics.event(kind);
+            assert_eq!(inclination_flip.status, HomoclinicEventStatus::Unsupported);
+            assert_eq!(inclination_flip.value, None);
+        }
+    }
+
+    fn diagnostics_with_single_homoclinic_event(
+        kind: HomoclinicEventKind,
+        value: f64,
+    ) -> HomoclinicEventDiagnostics {
+        HomoclinicEventDiagnostics {
+            events: HomoclinicEventKind::ALL
+                .into_iter()
+                .map(|candidate| {
+                    let available = candidate == kind;
+                    HomoclinicEventValue {
+                        kind: candidate,
+                        name: candidate.name().to_owned(),
+                        value: available.then_some(value),
+                        status: if available {
+                            HomoclinicEventStatus::Available
+                        } else if matches!(
+                            candidate,
+                            HomoclinicEventKind::InclinationFlipUnstable
+                                | HomoclinicEventKind::InclinationFlipStable
+                        ) {
+                            HomoclinicEventStatus::Unsupported
+                        } else {
+                            HomoclinicEventStatus::Unavailable
+                        },
+                        reason: (!available).then(|| "not active in this test".to_owned()),
+                    }
+                })
+                .collect(),
+            stable_dimension: 3,
+            unstable_dimension: 3,
+            discarded_eigenvalues: 0,
+        }
+    }
+
+    #[test]
+    fn homoclinic_event_mappings_only_localize_signed_crossing_channels() {
+        let mappings = [
+            (
+                HomoclinicEventKind::NeutralSaddle,
+                BifurcationType::HomoclinicNeutralSaddle,
+            ),
+            (
+                HomoclinicEventKind::NeutralSaddleFocus,
+                BifurcationType::HomoclinicNeutralSaddleFocus,
+            ),
+            (
+                HomoclinicEventKind::NeutralBiFocus,
+                BifurcationType::HomoclinicNeutralBiFocus,
+            ),
+            (
+                HomoclinicEventKind::DoubleRealStable,
+                BifurcationType::HomoclinicDoubleRealStable,
+            ),
+            (
+                HomoclinicEventKind::DoubleRealUnstable,
+                BifurcationType::HomoclinicDoubleRealUnstable,
+            ),
+            (
+                HomoclinicEventKind::NeutrallyDivergentStable,
+                BifurcationType::HomoclinicNeutrallyDivergentStable,
+            ),
+            (
+                HomoclinicEventKind::NeutrallyDivergentUnstable,
+                BifurcationType::HomoclinicNeutrallyDivergentUnstable,
+            ),
+            (
+                HomoclinicEventKind::OrbitFlipUnstable,
+                BifurcationType::HomoclinicOrbitFlipUnstable,
+            ),
+            (
+                HomoclinicEventKind::OrbitFlipStable,
+                BifurcationType::HomoclinicOrbitFlipStable,
+            ),
+        ];
+
+        for (event, stability) in mappings {
+            assert_eq!(map_homoclinic_event_to_bifurcation(event), Some(stability));
+            assert_eq!(homoclinic_event_for_bifurcation(stability), Some(event));
+
+            let point = PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            };
+            let before = diagnostics_with_single_homoclinic_event(event, -1.0);
+            let after = diagnostics_with_single_homoclinic_event(event, 1.0);
+            assert_eq!(
+                detect_bifurcation_type(&point, &point, Some(&before), Some(&after)),
+                stability,
+                "failed to detect the {} channel",
+                event.code()
+            );
+        }
+
+        // These are useful HBK-compatible raw diagnostics, but their ordered
+        // formulas are one-sided (or become unavailable at loss of
+        // hyperbolicity). A two-point sign bracket cannot honestly localize
+        // them. Keep them out of automatic marker creation until continuation-
+        // aware eigenvalue tracking supplies a signed scalar.
+        for event in [
+            HomoclinicEventKind::ThreeLeadingStable,
+            HomoclinicEventKind::ThreeLeadingUnstable,
+            HomoclinicEventKind::NonCentralHomoclinic,
+            HomoclinicEventKind::ShilnikovHopf,
+            HomoclinicEventKind::BogdanovTakens,
+        ] {
+            assert_eq!(map_homoclinic_event_to_bifurcation(event), None);
+            let point = PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            };
+            let before = diagnostics_with_single_homoclinic_event(event, -1.0);
+            let after = diagnostics_with_single_homoclinic_event(event, 1.0);
+            assert_eq!(
+                detect_bifurcation_type(&point, &point, Some(&before), Some(&after)),
+                BifurcationType::None,
+                "diagnostic-only {} must not create a false localized marker",
+                event.code()
+            );
+        }
+        assert_eq!(
+            map_homoclinic_event_to_bifurcation(HomoclinicEventKind::InclinationFlipUnstable),
+            None
+        );
+        assert_eq!(
+            map_homoclinic_event_to_bifurcation(HomoclinicEventKind::InclinationFlipStable),
+            None
+        );
+        assert_eq!(
+            homoclinic_event_for_bifurcation(BifurcationType::Fold),
+            None
+        );
+    }
+
+    #[test]
+    fn continue_with_problem_localizes_homoclinic_events() {
+        let mut problem = SyntheticHomoclinicEventProblem::default();
+        let branch = continue_with_problem(
+            &mut problem,
+            homoclinic_event_initial_point(),
+            homoclinic_event_settings(),
+            true,
+        )
+        .expect("homoclinic event continuation");
+        assert_localized_homoclinic_neutral_saddle(&branch);
+    }
+
+    #[test]
+    fn localized_homoclinic_event_diagnostics_survive_json_round_trip() {
+        let mut problem = SyntheticHomoclinicEventProblem::default();
+        let branch = continue_with_problem(
+            &mut problem,
+            homoclinic_event_initial_point(),
+            homoclinic_event_settings(),
+            true,
+        )
+        .expect("homoclinic event continuation");
+
+        let serialized = serde_json::to_string(&branch).expect("serialize continuation branch");
+        let serialized_value: serde_json::Value =
+            serde_json::from_str(&serialized).expect("inspect serialized continuation branch");
+        assert_eq!(
+            serialized_value["points"][1]["homoclinic_events"]["events"]
+                .as_array()
+                .expect("serialized homoclinic event array")
+                .len(),
+            HomoclinicEventKind::ALL.len()
+        );
+
+        let reloaded: ContinuationBranch =
+            serde_json::from_str(&serialized).expect("reload continuation branch");
+        assert_localized_homoclinic_neutral_saddle(&reloaded);
+        assert_eq!(
+            reloaded.points[1].homoclinic_events,
+            branch.points[1].homoclinic_events
+        );
+
+        let mut legacy_point =
+            serde_json::to_value(&branch.points[1]).expect("serialize continuation point");
+        legacy_point
+            .as_object_mut()
+            .expect("continuation point object")
+            .remove("homoclinic_events");
+        let legacy_point: ContinuationPoint =
+            serde_json::from_value(legacy_point).expect("load legacy continuation point");
+        assert!(legacy_point.homoclinic_events.is_none());
+    }
+
+    #[test]
+    fn stepped_runner_localizes_homoclinic_events() {
+        let mut runner = ContinuationRunner::new(
+            SyntheticHomoclinicEventProblem::default(),
+            homoclinic_event_initial_point(),
+            homoclinic_event_settings(),
+            true,
+        )
+        .expect("homoclinic event runner");
+        runner.run_steps(1).expect("homoclinic event step");
+        assert_localized_homoclinic_neutral_saddle(&runner.take_result());
+    }
+
+    #[test]
+    fn initial_tangent_runner_localizes_homoclinic_events() {
+        let mut problem = SyntheticHomoclinicEventProblem::default();
+        let branch = continue_with_initial_tangent(
+            &mut problem,
+            homoclinic_event_initial_point(),
+            DVector::from_vec(vec![1.0, 1.0]),
+            homoclinic_event_settings(),
+        )
+        .expect("initial-tangent homoclinic event continuation");
+        assert_localized_homoclinic_neutral_saddle(&branch);
+    }
+
+    #[test]
+    fn trusted_saved_endpoint_localizes_and_persists_a_first_step_homoclinic_event() {
+        let initial = homoclinic_event_initial_point();
+        let mut runner = ContinuationRunner::new_from_seed(
+            SyntheticHomoclinicEventProblem {
+                detect_from_initial_seed: true,
+            },
+            vec![initial.param_value, initial.state[0]],
+            vec![1.0, 1.0],
+            homoclinic_event_settings().step_size,
+            homoclinic_event_settings(),
+        )
+        .expect("trusted saved-endpoint runner");
+        runner
+            .run_steps(1)
+            .expect("trusted saved-endpoint first step");
+        let branch = runner.take_result();
+        assert!(
+            branch.points[0].homoclinic_events.is_some(),
+            "trusted corrected endpoints must persist their starting diagnostics"
+        );
+        assert_localized_homoclinic_neutral_saddle(&branch);
+    }
+
+    #[test]
+    fn homoclinic_event_hook_can_skip_only_the_initial_seed_transition() {
+        let mut problem = SyntheticHomoclinicEventProblem {
+            detect_from_initial_seed: false,
+        };
+        let branch = continue_with_problem(
+            &mut problem,
+            homoclinic_event_initial_point(),
+            homoclinic_event_settings(),
+            true,
+        )
+        .expect("suppressed initial homoclinic event continuation");
+        assert_eq!(branch.points.len(), 2);
+        assert!(branch.bifurcations.is_empty());
+        assert!(
+            branch.points[0].homoclinic_events.is_none(),
+            "an untrusted approximate seed must not persist diagnostics"
+        );
+        assert_eq!(branch.points[1].stability, BifurcationType::None);
+        assert!(branch.points[1].param_value > 0.0);
+    }
+
     #[test]
     fn test_runner_indices_ignore_tangent_sign_flips() {
         let settings = ContinuationSettings {
@@ -3698,6 +4479,7 @@ mod tests {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let mut runner = ContinuationRunner::new(
@@ -3742,6 +4524,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![0.0],
@@ -3749,6 +4532,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -3794,6 +4578,7 @@ mod tests {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
         let runner =
             ContinuationRunner::new(SimpleFoldProblem, initial_point, constant_settings(1), true)
@@ -3842,6 +4627,7 @@ mod tests {
                 stability: BifurcationType::None,
                 eigenvalues: Vec::new(),
                 cycle_points: None,
+                homoclinic_events: None,
             };
             let mut problem = AveragedProfileProblem { dimension };
             let branch =
@@ -3966,6 +4752,7 @@ mod tests {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
         let mut problem = RejectingStepProblem {
             rejected_steps: 0,
@@ -3999,6 +4786,7 @@ mod tests {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
         let problem = RejectingStepProblem {
             rejected_steps: 0,
@@ -4057,6 +4845,7 @@ mod tests {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
         let problem = UpdatingGaugeProblem {
             anchor_x: 0.0,
@@ -4117,6 +4906,7 @@ mod tests {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let mut runner = ContinuationRunner::new(
@@ -4161,6 +4951,7 @@ mod tests {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let mut runner = ContinuationRunner::new(
@@ -4199,6 +4990,7 @@ mod tests {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         // Deliberately choose an initial tangent that is not tangent to x = p.
@@ -4255,6 +5047,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![0.0],
@@ -4262,6 +5055,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -4312,6 +5106,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![0.0],
@@ -4319,6 +5114,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -4391,6 +5187,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![1.01],
@@ -4398,6 +5195,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -4450,6 +5248,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![1.01],
@@ -4457,6 +5256,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -4488,6 +5288,7 @@ mod tests {
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
             cycle_points: None,
+            homoclinic_events: None,
         };
 
         let mut full_problem = LinearRelationProblem::default();
@@ -4608,6 +5409,7 @@ mod tests {
                 stability: BifurcationType::None,
                 eigenvalues: Vec::new(),
                 cycle_points: None,
+                homoclinic_events: None,
             };
 
             let mut init_problem = LinearRelationProblem::default();

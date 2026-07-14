@@ -109,17 +109,58 @@ Ordinary flow-cycle seed correction, continuation, and extension adapt automatic
 NS, and isoperiodic cycle-curve defining systems use the same redistribution/refinement policy with
 layout-specific profile and border transfer. WASM, web, and CLI preserve exact meshes and cumulative
 reports; the web Inspector and CLI expose enable/redistribution/tolerance/retry/cap controls plus a
-concise provenance summary. Homoclinic defining systems and discrete-map cycles remain fixed-layout:
-homoclinic continuation has its own truncation mesh, while maps do not use flow collocation. The
-legacy large-cycle-to-homoclinic initializer also assumes a uniform source cycle, so web and CLI
-reject a nonuniform adaptive source with instructions to recontinue on a uniform mesh instead of
-silently interpreting it on the wrong interval coordinates.
+concise provenance summary. This paragraph's original fixed-layout limitation for homoclinic
+continuation was superseded by the HBK-parity decision below. Discrete maps still do not use flow
+collocation.
 References:
 `crates/fork_core/src/continuation/problem.rs`,
 `crates/fork_core/src/continuation/periodic.rs`,
 `crates/fork_core/src/continuation/lc_codim1_curves/`,
 `crates/fork_wasm/src/continuation/extension_runner.rs`,
 `docs/limit_cycle_continuation.md`
+
+---
+
+### 2026-07-14: Match HBK's HomHS formulations and keep true heteroclinics separate
+Context:
+HclinicBifurcationKit 0.2.1 follows a truncated orbit whose two endpoints approach the same
+hyperbolic saddle. Its package name does not imply a two-distinct-equilibrium heteroclinic defining
+system. Fork's earlier homoclinic path also used a fixed uniform collocation layout and stale
+invariant-subspace bases, and it did not expose HBK's shooting or special-point data.
+Decision:
+Treat strict HBK parity as one-saddle HomHS continuation. Support defect-controlled nonuniform
+orthogonal collocation and standard single/multiple shooting with the same saddle, endpoint-radius,
+projection, phase, and Riccati equations. Refresh stable and unstable projectors in a chart-safe way:
+transform the Riccati coordinates, accepted history, tangents, and resume seeds so the represented
+physical subspaces do not change. Preserve nonuniform source meshes in long-cycle initialization and
+restart. Evaluate, serialize, and display the implemented HBK spectral and orbit-flip tests, and
+localize the channels with genuine signed brackets. Keep HBK's one-sided `TLS`, `TLU`, `NCH`, `SH`,
+and `BT` values as diagnostics rather than manufacturing event markers from an absent bracket;
+report inclination flips as unsupported because HBK only supplies placeholders. Use the
+stable-side-symmetric difference for the raw `TLU` diagnostic, rather than HBK 0.2.1's literal sum
+of positive unstable rates.
+Why:
+Numerical parity requires equivalent defining systems, initialization, mesh transfer, restart
+coordinates, and observable event data—not merely similarly named UI actions. Separating genuine
+heteroclinics prevents one-saddle metadata from being silently reused for a mathematically different
+two-equilibrium connection.
+Impact:
+Core, WASM, CLI, and web support long-cycle and Bogdanov-Takens HomHS continuation with collocation
+or shooting, adaptive collocation restarts/extensions, localized signed-bracket special points,
+raw one-sided HBK diagnostics, and exact discretization metadata. A two-saddle heteroclinic schema
+remains an explicit beyond-parity task. Continuation-aware eigenvalue tracking and touching-root
+localization are required before `TLS`, `TLU`, `NCH`, `SH`, or `BT` can be promoted from diagnostics
+to robust automatic markers.
+Fork's heuristic equilibrium-to-Stage-D Method 3 is also tracked independently and is not counted as
+HBK parity evidence.
+References:
+`crates/fork_core/src/continuation/homoclinic.rs`,
+`crates/fork_core/src/continuation/homoclinic_shooting.rs`,
+`crates/fork_core/src/continuation/homoclinic_events.rs`,
+`crates/fork_core/src/continuation/homoclinic_init.rs`,
+`crates/fork_wasm/src/continuation/`,
+`docs/hclinic-parity.md`,
+`docs/homoclinic-methods.md`
 
 ---
 

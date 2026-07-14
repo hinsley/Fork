@@ -124,6 +124,25 @@ export function collocationAdaptivityEntries(
   ];
 }
 
+export function conditionalCollocationAdaptivityEntries(
+  inputs: CollocationAdaptivityInputs,
+  isActive: () => boolean
+): ConfigEntry[] {
+  return collocationAdaptivityEntries(inputs).map((entry) => {
+    const getDisplay = entry.getDisplay;
+    const edit = entry.edit;
+    return {
+      ...entry,
+      getDisplay: () =>
+        isActive() ? getDisplay() : `${getDisplay()} (inactive for standard shooting)`,
+      edit: async () => {
+        if (!isActive()) return;
+        await edit();
+      },
+    };
+  });
+}
+
 export function buildCollocationAdaptivitySettings(inputs: CollocationAdaptivityInputs) {
   if (!inputs.enabled) {
     return {

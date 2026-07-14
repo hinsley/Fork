@@ -34,7 +34,7 @@ import {
   formatArray,
   summarizeEigenvalues
 } from './utils';
-import { formatEquilibriumLabel } from '../labels';
+import { formatBifurcationType, formatEquilibriumLabel } from '../labels';
 import {
   initiateLCBranchFromPoint,
   initiateLCFromPD,
@@ -510,7 +510,7 @@ export function buildSummaryChoices(branch: ContinuationObject, indices: number[
   const formatEntry = (label: string, arrayIdx: number) => {
     const logicalIdx = indices[arrayIdx];
     const paramVal = formatNumber(pts[arrayIdx].param_value);
-    const stability = pts[arrayIdx].stability;
+    const stability = formatBifurcationType(pts[arrayIdx].stability);
     const periodText = includePeriod ? formatPeriod(arrayIdx) : null;
     const text = `${label} • Index ${logicalIdx} • ${pName}=${paramVal}${periodText ? ` • ${periodText}` : ''} • ${stability}`;
     return { name: text, value: `POINT:${arrayIdx}` };
@@ -533,7 +533,7 @@ export function buildSummaryChoices(branch: ContinuationObject, indices: number[
 
   bifEntries.forEach((entry, idx) => {
     const label = chalk.red(
-      `Bifurcation ${idx + 1} • Index ${entry.logicalIdx} • ${pName}=${entry.param}${entry.period ? ` • ${entry.period}` : ''} • ${entry.stability}`
+      `Bifurcation ${idx + 1} • Index ${entry.logicalIdx} • ${pName}=${entry.param}${entry.period ? ` • ${entry.period}` : ''} • ${formatBifurcationType(entry.stability)}`
     );
     choices.push({ name: label, value: `POINT:${entry.arrayIdx}` });
   });
@@ -571,7 +571,7 @@ export function formatPointRow(
   const pt = branch.data.points[arrayIdx];
   const logicalIdx = indices[arrayIdx];
   const descriptor = summarizeEigenvalues(pt, branch.branchType);
-  const typeLabel = pt.stability && pt.stability !== 'None' ? ` [${pt.stability}]` : '';
+  const typeLabel = pt.stability && pt.stability !== 'None' ? ` [${formatBifurcationType(pt.stability)}]` : '';
 
   // Format parameter display based on branch type
   let paramDisplay: string;
@@ -636,7 +636,7 @@ function l2Distance(a: number[], b: number[]): number {
   return Math.sqrt(sum);
 }
 
-function decodePackedHomoclinicPoint(
+export function decodePackedHomoclinicPoint(
   point: ContinuationPoint,
   dim: number,
   ntst: number,
@@ -651,7 +651,7 @@ function decodePackedHomoclinicPoint(
   startDistance: number | null;
   endDistance: number | null;
 } | null {
-  if (dim <= 0 || ntst < 1 || ncol < 1) return null;
+  if (dim <= 0 || ntst < 1 || ncol < 0) return null;
 
   const state = point.state;
   const meshLen = (ntst + 1) * dim;
@@ -706,6 +706,11 @@ function printHomoclinicDiagnostics(
     free_eps1: boolean;
   }
 ) {
+  const eventLines = formatHomoclinicEventDiagnosticLines(point);
+  if (eventLines.length > 0) {
+    console.log(chalk.white('HBK event test functions:'));
+    eventLines.forEach((line) => console.log(`  ${line}`));
+  }
   const decoded = decodePackedHomoclinicPoint(
     point,
     dim,
@@ -737,6 +742,24 @@ function printHomoclinicDiagnostics(
       )
     );
   }
+}
+
+export function formatHomoclinicEventDiagnosticLines(
+  point: Pick<ContinuationPoint, 'homoclinic_events'>
+): string[] {
+  const diagnostics = point.homoclinic_events;
+  if (!diagnostics) return [];
+  const lines = [
+    `dimensions: stable=${diagnostics.stable_dimension}, unstable=${diagnostics.unstable_dimension}, discarded eigenvalues=${diagnostics.discarded_eigenvalues}`,
+  ];
+  for (const event of diagnostics.events) {
+    const value =
+      event.value === null ? 'unavailable' : formatNumberFullPrecision(event.value);
+    lines.push(
+      `${event.kind} · ${event.name}: status=${event.status}; value=${value}; reason=${event.reason ?? '—'}`
+    );
+  }
+  return lines;
 }
 
 /**
@@ -863,7 +886,7 @@ export async function showPointDetails(
 
   console.log('');
   const headerSuffix = isBifurcation
-    ? ` [Bifurcation${pt.stability && pt.stability !== 'None' ? ': ' + pt.stability : ''}]`
+    ? ` [Bifurcation${pt.stability && pt.stability !== 'None' ? ': ' + formatBifurcationType(pt.stability) : ''}]`
     : '';
   const typeLabel = branchType === 'limit_cycle' ? ' [Limit Cycle]' : '';
   console.log(chalk.yellow(`Point ${logicalIdx} (Array ${arrayIdx})${headerSuffix}${typeLabel}`));
@@ -956,7 +979,7 @@ export async function showPointDetails(
     const metrics = computeLCMetrics(profilePoints, period);
     let stabilityLabel = interpretLCStability(pt.eigenvalues);
     if (pt.stability && pt.stability !== 'None') {
-      stabilityLabel = pt.stability;
+      stabilityLabel = formatBifurcationType(pt.stability);
     }
 
     console.log(chalk.cyan(`Period: ${formatNumber(metrics.period)}`));
@@ -994,7 +1017,7 @@ export async function showPointDetails(
     }
   } else {
     // Equilibrium display (unchanged)
-    console.log(`Stability: ${pt.stability}`);
+    console.log(`Stability: ${formatBifurcationType(pt.stability)}`);
     console.log('Eigenvalues:');
     if (pt.eigenvalues?.length) {
       pt.eigenvalues.forEach((eig, idx) => {
@@ -1112,7 +1135,7 @@ export async function showPointDetails(
         });
       }
       choices.push({
-        name: 'Continue Homotopy-Saddle (Method 4)',
+        name: 'Continue Homotopy-Saddle (Method 3)',
         value: 'CONTINUE_HOMOTOPY_SADDLE'
       });
     }
@@ -1168,7 +1191,7 @@ export async function showPointDetails(
     const stage = (branch.data.branch_type as any)?.stage;
     if (stage === 'StageD') {
       choices.push({
-        name: 'Continue Homoclinic Curve (Method 3)',
+        name: 'Continue Homoclinic Curve (Method 4)',
         value: 'CONTINUE_HOMOCLINIC_FROM_HOMOTOPY'
       });
     }

@@ -10,11 +10,15 @@ use fork_core::continuation::periodic::{
     PeriodicOrbitCollocationProblem,
 };
 use fork_core::continuation::{
-    homoclinic_setup_from_homoclinic_point, orient_problem_tangent, pack_homoclinic_state,
-    palc_norm, BranchType, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
-    ContinuationProblem, ContinuationResumeState, ContinuationRunner, ContinuationSettings,
-    HomoclinicBasis, HomoclinicBasisSnapshot, HomoclinicExtraFlags, HomoclinicResumeContext,
-    HomoclinicSetup,
+    decode_homoclinic_shooting_state, homoclinic_setup_from_homoclinic_point,
+    homoclinic_setup_from_homoclinic_point_with_source_extras_on_mesh,
+    homoclinic_shooting_setup_from_point, orient_problem_tangent, pack_homoclinic_shooting_state,
+    pack_homoclinic_state, palc_norm, BranchType, ContinuationBranch, ContinuationEndpointSeed,
+    ContinuationPoint, ContinuationProblem, ContinuationResumeState, ContinuationRunner,
+    ContinuationSettings, HomoclinicBasis, HomoclinicBasisSnapshot, HomoclinicDiscretization,
+    HomoclinicExtraFlags, HomoclinicFixedScalars, HomoclinicResumeContext, HomoclinicSetup,
+    HomoclinicShootingProblem, HomoclinicShootingSettings, HomoclinicShootingSetup,
+    ReparameterizationSeed,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::SystemKind;
@@ -30,6 +34,54 @@ fn validate_limit_cycle_extension_system_type(system_type: &str) -> Result<(), &
     } else {
         Err("Limit-cycle collocation is available for flow systems only.")
     }
+}
+
+fn transfer_external_resume_state<P: ContinuationProblem>(
+    problem: &P,
+    resume_state: &mut Option<ContinuationResumeState>,
+) -> Result<(), JsValue> {
+    let Some(resume) = resume_state.as_mut() else {
+        return Ok(());
+    };
+    let mut locations = Vec::new();
+    let mut seeds = Vec::new();
+    for (is_min, seed) in [
+        (true, resume.min_index_seed.as_ref()),
+        (false, resume.max_index_seed.as_ref()),
+    ] {
+        if let Some(seed) = seed {
+            locations.push(is_min);
+            seeds.push(ReparameterizationSeed {
+                aug_state: DVector::from_vec(seed.aug_state.clone()),
+                tangent: DVector::from_vec(seed.tangent.clone()),
+            });
+        }
+    }
+    let transferred = problem
+        .transfer_endpoint_seeds_to_current_coordinates(&seeds)
+        .map_err(|error| {
+            JsValue::from_str(&format!(
+                "Failed to transfer homoclinic endpoint resume seeds: {}",
+                error
+            ))
+        })?;
+    if transferred.len() != locations.len() {
+        return Err(JsValue::from_str(
+            "Homoclinic coordinate transfer changed the number of endpoint resume seeds",
+        ));
+    }
+    for (is_min, transferred) in locations.into_iter().zip(transferred) {
+        let target = if is_min {
+            resume.min_index_seed.as_mut()
+        } else {
+            resume.max_index_seed.as_mut()
+        };
+        if let Some(target) = target {
+            target.aug_state = transferred.aug_state.as_slice().to_vec();
+            target.tangent = transferred.tangent.as_slice().to_vec();
+        }
+    }
+    Ok(())
 }
 
 struct ExtensionMergeContext {
@@ -78,6 +130,11 @@ enum ExtensionRunnerKind {
     Homoclinic {
         _system: Box<EquationSystem>,
         runner: ContinuationRunner<HomoclinicProblem<'static>>,
+        merge: ExtensionMergeContext,
+    },
+    HomoclinicShooting {
+        _system: Box<EquationSystem>,
+        runner: ContinuationRunner<HomoclinicShootingProblem<'static>>,
         merge: ExtensionMergeContext,
     },
 }
@@ -408,58 +465,187 @@ fn homoc_context_from_setup(setup: &HomoclinicSetup) -> HomoclinicResumeContext 
         fixed_time: setup.guess.time,
         fixed_eps0: setup.guess.eps0,
         fixed_eps1: setup.guess.eps1,
+        projector_refresh_interval: setup.projector_refresh_interval,
     }
+}
+
+fn homoc_context_from_shooting_setup(setup: &HomoclinicShootingSetup) -> HomoclinicResumeContext {
+    HomoclinicResumeContext {
+        base_params: setup.base_params.clone(),
+        param1_index: setup.param1_index,
+        param2_index: setup.param2_index,
+        basis: HomoclinicBasisSnapshot {
+            stable_q: setup.basis.stable_q.clone(),
+            unstable_q: setup.basis.unstable_q.clone(),
+            dim: setup.basis.dim,
+            nneg: setup.basis.nneg,
+            npos: setup.basis.npos,
+        },
+        fixed_time: setup.guess.time,
+        fixed_eps0: setup.guess.eps0,
+        fixed_eps1: setup.guess.eps1,
+        projector_refresh_interval: setup.projector_refresh_interval,
+    }
+}
+
+fn homoclinic_basis_from_context(
+    context: &HomoclinicResumeContext,
+    dim: usize,
+    expected_param1_index: usize,
+    expected_param2_index: usize,
+    expected_param_count: usize,
+    expected_y_size: usize,
+) -> Option<HomoclinicBasis> {
+    if context.param1_index != expected_param1_index
+        || context.param2_index != expected_param2_index
+        || context.param1_index >= context.base_params.len()
+        || context.param2_index >= context.base_params.len()
+        || context.base_params.len() != expected_param_count
+    {
+        return None;
+    }
+    if context.basis.dim != dim
+        || context.basis.stable_q.len() != dim * dim
+        || context.basis.unstable_q.len() != dim * dim
+        || context
+            .basis
+            .stable_q
+            .iter()
+            .chain(&context.basis.unstable_q)
+            .any(|value| !value.is_finite())
+    {
+        return None;
+    }
+    if context.basis.nneg == 0
+        || context.basis.npos == 0
+        || context.basis.nneg + context.basis.npos != dim
+        || context.basis.nneg * context.basis.npos != expected_y_size
+    {
+        return None;
+    }
+    if !context.fixed_time.is_finite()
+        || context.fixed_time <= 0.0
+        || !context.fixed_eps0.is_finite()
+        || context.fixed_eps0 <= 0.0
+        || !context.fixed_eps1.is_finite()
+        || context.fixed_eps1 <= 0.0
+    {
+        return None;
+    }
+
+    Some(HomoclinicBasis {
+        stable_q: context.basis.stable_q.clone(),
+        unstable_q: context.basis.unstable_q.clone(),
+        dim: context.basis.dim,
+        nneg: context.basis.nneg,
+        npos: context.basis.npos,
+    })
 }
 
 fn apply_homoc_context_to_setup(
     setup: &mut HomoclinicSetup,
     context: &HomoclinicResumeContext,
 ) -> bool {
-    if context.param1_index >= context.base_params.len()
-        || context.param2_index >= context.base_params.len()
-    {
-        return false;
-    }
     let dim = setup.guess.x0.len();
-    if context.basis.dim != dim {
+    if setup.guess.yu.len() != setup.guess.ys.len() {
         return false;
     }
-    if context.basis.stable_q.len() != dim * dim || context.basis.unstable_q.len() != dim * dim {
+    let Some(basis) = homoclinic_basis_from_context(
+        context,
+        dim,
+        setup.param1_index,
+        setup.param2_index,
+        setup.base_params.len(),
+        setup.guess.yu.len(),
+    ) else {
         return false;
-    }
-    if context.basis.nneg == 0
-        || context.basis.npos == 0
-        || context.basis.nneg + context.basis.npos != dim
-    {
-        return false;
-    }
-    if !context.fixed_time.is_finite() || context.fixed_time <= 0.0 {
-        return false;
-    }
-    if !context.fixed_eps0.is_finite() || context.fixed_eps0 <= 0.0 {
-        return false;
-    }
-    if !context.fixed_eps1.is_finite() || context.fixed_eps1 <= 0.0 {
-        return false;
-    }
-    let y_size = context.basis.nneg * context.basis.npos;
-    if setup.guess.yu.len() != y_size || setup.guess.ys.len() != y_size {
-        return false;
-    }
+    };
 
     setup.base_params = context.base_params.clone();
-    setup.param1_index = context.param1_index;
-    setup.param2_index = context.param2_index;
-    setup.basis = HomoclinicBasis {
-        stable_q: context.basis.stable_q.clone(),
-        unstable_q: context.basis.unstable_q.clone(),
-        dim: context.basis.dim,
-        nneg: context.basis.nneg,
-        npos: context.basis.npos,
-    };
+    setup.basis = basis;
     setup.guess.time = context.fixed_time;
     setup.guess.eps0 = context.fixed_eps0;
     setup.guess.eps1 = context.fixed_eps1;
+    setup.projector_refresh_interval = context.projector_refresh_interval;
+    true
+}
+
+fn apply_homoc_context_to_shooting_setup(
+    setup: &mut HomoclinicShootingSetup,
+    context: &HomoclinicResumeContext,
+) -> bool {
+    let dim = setup.guess.x0.len();
+    if setup.guess.yu.len() != setup.guess.ys.len() {
+        return false;
+    }
+    let Some(basis) = homoclinic_basis_from_context(
+        context,
+        dim,
+        setup.param1_index,
+        setup.param2_index,
+        setup.base_params.len(),
+        setup.guess.yu.len(),
+    ) else {
+        return false;
+    };
+
+    setup.base_params = context.base_params.clone();
+    setup.basis = basis;
+    setup.guess.time = context.fixed_time;
+    setup.guess.eps0 = context.fixed_eps0;
+    setup.guess.eps1 = context.fixed_eps1;
+    setup.projector_refresh_interval = context.projector_refresh_interval;
+    true
+}
+
+fn hydrate_homoclinic_shooting_setup_from_endpoint(
+    setup: &mut HomoclinicShootingSetup,
+    endpoint_state: &[f64],
+) -> bool {
+    let Ok(decoded) = decode_homoclinic_shooting_state(endpoint_state, setup) else {
+        return false;
+    };
+    setup.guess.nodes = decoded.nodes;
+    setup.guess.x0 = decoded.x0;
+    setup.guess.param2_value = decoded.param2_value;
+    setup.guess.time = decoded.time;
+    setup.guess.eps0 = decoded.eps0;
+    setup.guess.eps1 = decoded.eps1;
+    setup.guess.yu = decoded.yu;
+    setup.guess.ys = decoded.ys;
+    true
+}
+
+/// Restore the exact defining-system chart persisted with the branch before
+/// interpreting its endpoint coordinates. A projector refresh can leave the
+/// final accepted point in the chart installed on the preceding step, so a
+/// fresh eigenspace calculation at that endpoint is not an equivalent decoder.
+fn restore_homoclinic_extension_setup(
+    setup: &mut HomoclinicSetup,
+    context: &HomoclinicResumeContext,
+    endpoint_state: &[f64],
+    dim: usize,
+) -> bool {
+    if !apply_homoc_context_to_setup(setup, context)
+        || !hydrate_homoclinic_setup_from_endpoint(setup, endpoint_state, dim)
+    {
+        return false;
+    }
+    setup.initial_seed_is_corrected = true;
+    true
+}
+
+fn restore_homoclinic_shooting_extension_setup(
+    setup: &mut HomoclinicShootingSetup,
+    context: &HomoclinicResumeContext,
+    endpoint_state: &[f64],
+) -> bool {
+    if !apply_homoc_context_to_shooting_setup(setup, context)
+        || !hydrate_homoclinic_shooting_setup_from_endpoint(setup, endpoint_state)
+    {
+        return false;
+    }
+    setup.initial_seed_is_corrected = true;
     true
 }
 
@@ -574,6 +760,367 @@ fn extract_homoclinic_param2_from_packed_state(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn homoclinic_shooting_setup_for_point(
+    system: &mut EquationSystem,
+    point: &ContinuationPoint,
+    source_intervals: usize,
+    shooting: HomoclinicShootingSettings,
+    base_params: &[f64],
+    param1_index: usize,
+    param2_index: usize,
+    param1_name: &str,
+    param2_name: &str,
+    extras: HomoclinicExtraFlags,
+    fixed: HomoclinicFixedScalars,
+) -> anyhow::Result<HomoclinicShootingSetup> {
+    let mut point_params = base_params.to_vec();
+    if param1_index >= point_params.len() {
+        anyhow::bail!("Homoclinic shooting parameter index out of range");
+    }
+    point_params[param1_index] = point.param_value;
+    homoclinic_shooting_setup_from_point(
+        system,
+        &point.state,
+        source_intervals,
+        shooting,
+        &point_params,
+        param1_index,
+        param2_index,
+        param1_name,
+        param2_name,
+        extras,
+        extras,
+        fixed,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_homoclinic_shooting_extension(
+    mut system: EquationSystem,
+    merge: ExtensionMergeContext,
+    endpoint: ContinuationPoint,
+    endpoint_idx: usize,
+    neighbor_idx: Option<usize>,
+    last_index: i32,
+    forward: bool,
+    intervals: usize,
+    integration_steps_per_segment: usize,
+    param1_name: &str,
+    param2_name: &str,
+    free_time: bool,
+    free_eps0: bool,
+    free_eps1: bool,
+    settings: ContinuationSettings,
+) -> Result<ExtensionRunnerKind, JsValue> {
+    let param1_index = *system
+        .param_map
+        .get(param1_name)
+        .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
+    let param2_index = *system
+        .param_map
+        .get(param2_name)
+        .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+    let context = merge.branch.homoc_context.clone().ok_or_else(|| {
+        JsValue::from_str(
+            "Homoclinic shooting extension needs saved fixed time/endpoint-distance metadata. Recompute the branch with the current build and try extending again.",
+        )
+    })?;
+    let mut base_params = context.base_params.clone();
+    if param1_index >= base_params.len() || param2_index >= base_params.len() {
+        return Err(JsValue::from_str(
+            "Homoclinic shooting parameter index out of range",
+        ));
+    }
+    base_params[param1_index] = endpoint.param_value;
+    if let Some(param2_value) = extract_homoclinic_param2_from_packed_state(
+        &endpoint.state,
+        intervals,
+        0,
+        system.equations.len(),
+    ) {
+        base_params[param2_index] = param2_value;
+    }
+
+    let extras = HomoclinicExtraFlags {
+        free_time,
+        free_eps0,
+        free_eps1,
+    };
+    let fixed = HomoclinicFixedScalars {
+        time: context.fixed_time,
+        eps0: context.fixed_eps0,
+        eps1: context.fixed_eps1,
+    };
+    if !fixed.time.is_finite()
+        || fixed.time <= 0.0
+        || !fixed.eps0.is_finite()
+        || fixed.eps0 <= 0.0
+        || !fixed.eps1.is_finite()
+        || fixed.eps1 <= 0.0
+    {
+        return Err(JsValue::from_str(
+            "Homoclinic shooting extension has invalid fixed time/endpoint-distance metadata.",
+        ));
+    }
+    let shooting = HomoclinicShootingSettings {
+        intervals,
+        integration_steps_per_segment,
+    };
+
+    let mut setup = homoclinic_shooting_setup_for_point(
+        &mut system,
+        &endpoint,
+        intervals,
+        shooting,
+        &base_params,
+        param1_index,
+        param2_index,
+        param1_name,
+        param2_name,
+        extras,
+        fixed,
+    )
+    .map_err(|error| {
+        JsValue::from_str(&format!(
+            "Failed to initialize homoclinic shooting extension: {}",
+            error
+        ))
+    })?;
+    if !restore_homoclinic_shooting_extension_setup(&mut setup, &context, &endpoint.state) {
+        return Err(JsValue::from_str(
+            "Saved homoclinic shooting chart is incompatible with the branch endpoint. Recompute the branch with the current build and try extending again.",
+        ));
+    }
+    let packed_initial_state = pack_homoclinic_shooting_state(&setup);
+    let extension_context = homoc_context_from_shooting_setup(&setup);
+
+    let canonical_neighbor_state = neighbor_idx.and_then(|neighbor_pos| {
+        merge.branch.points.get(neighbor_pos).and_then(|neighbor| {
+            homoclinic_shooting_setup_for_point(
+                &mut system,
+                neighbor,
+                intervals,
+                shooting,
+                &base_params,
+                param1_index,
+                param2_index,
+                param1_name,
+                param2_name,
+                extras,
+                fixed,
+            )
+            .ok()
+            .and_then(|mut setup| {
+                restore_homoclinic_shooting_extension_setup(&mut setup, &context, &neighbor.state)
+                    .then(|| pack_homoclinic_shooting_state(&setup))
+            })
+        })
+    });
+    let second_neighbor_idx = if merge.branch.points.len() > 2 {
+        let candidates = merge
+            .branch
+            .indices
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != endpoint_idx && Some(*index) != neighbor_idx);
+        if forward {
+            candidates
+                .max_by_key(|(_, &index)| index)
+                .map(|(index, _)| index)
+        } else {
+            candidates
+                .min_by_key(|(_, &index)| index)
+                .map(|(index, _)| index)
+        }
+    } else {
+        None
+    };
+    let canonical_second_neighbor_state = second_neighbor_idx.and_then(|neighbor_pos| {
+        merge.branch.points.get(neighbor_pos).and_then(|neighbor| {
+            homoclinic_shooting_setup_for_point(
+                &mut system,
+                neighbor,
+                intervals,
+                shooting,
+                &base_params,
+                param1_index,
+                param2_index,
+                param1_name,
+                param2_name,
+                extras,
+                fixed,
+            )
+            .ok()
+            .and_then(|mut setup| {
+                restore_homoclinic_shooting_extension_setup(&mut setup, &context, &neighbor.state)
+                    .then(|| pack_homoclinic_shooting_state(&setup))
+            })
+        })
+    });
+
+    let system_dim = system.equations.len();
+    let mut boxed_system = Box::new(system);
+    let mut problem = HomoclinicShootingProblem::new(static_system_ref(&mut boxed_system), setup)
+        .map_err(|error| {
+        JsValue::from_str(&format!(
+            "Failed to create homoclinic shooting extension problem: {}",
+            error
+        ))
+    })?;
+    let dimension = problem.dimension();
+    if packed_initial_state.len() != dimension {
+        return Err(JsValue::from_str(&format!(
+            "Dimension mismatch: branch point state has length {}, problem expects {}",
+            packed_initial_state.len(),
+            dimension
+        )));
+    }
+
+    let mut end_aug = DVector::zeros(dimension + 1);
+    end_aug[0] = endpoint.param_value;
+    for (index, value) in packed_initial_state.iter().copied().enumerate() {
+        end_aug[index + 1] = value;
+    }
+    let resume_seed = select_resume_seed(&merge.branch, forward, last_index, &end_aug);
+    let mut secant_direction = None;
+    let mut secant_norm = None;
+    let mut secant_param_norm = None;
+    let mut bootstrap_direction = None;
+    let p2_aug_index = 1 + (intervals + 1) * system_dim + system_dim;
+
+    if let (Some(neighbor_pos), Some(neighbor_state)) =
+        (neighbor_idx, canonical_neighbor_state.as_ref())
+    {
+        let neighbor = &merge.branch.points[neighbor_pos];
+        let mut neighbor_aug = DVector::zeros(dimension + 1);
+        neighbor_aug[0] = neighbor.param_value;
+        for (index, value) in neighbor_state.iter().copied().enumerate() {
+            neighbor_aug[index + 1] = value;
+        }
+        let secant = &end_aug - &neighbor_aug;
+        let (direction, norm) =
+            normalized_problem_secant(&problem, &end_aug, secant).map_err(|error| {
+                JsValue::from_str(&format!(
+                    "Failed to measure homoclinic shooting extension secant: {}",
+                    error
+                ))
+            })?;
+        secant_direction = direction;
+        secant_norm = norm;
+        bootstrap_direction = secant_direction.clone();
+        if p2_aug_index < neighbor_aug.len() {
+            let dp1 = end_aug[0] - neighbor_aug[0];
+            let dp2 = end_aug[p2_aug_index] - neighbor_aug[p2_aug_index];
+            secant_param_norm = Some((dp1 * dp1 + dp2 * dp2).sqrt());
+        }
+
+        if let (Some(second_pos), Some(second_state)) = (
+            second_neighbor_idx,
+            canonical_second_neighbor_state.as_ref(),
+        ) {
+            let second = &merge.branch.points[second_pos];
+            let mut second_aug = DVector::zeros(dimension + 1);
+            second_aug[0] = second.param_value;
+            for (index, value) in second_state.iter().copied().enumerate() {
+                second_aug[index + 1] = value;
+            }
+            let d1 = &end_aug - &neighbor_aug;
+            let d2 = &neighbor_aug - &second_aug;
+            let extrapolated = d1 * 1.5 - d2 * 0.5;
+            if extrapolated.norm() > 1e-12 {
+                bootstrap_direction = Some(extrapolated.normalize());
+            }
+        }
+    }
+
+    let mut settings = settings;
+    cap_extension_step_size(&mut settings, secant_norm);
+    problem.update_after_step(&end_aug).map_err(|error| {
+        JsValue::from_str(&format!(
+            "Failed to prepare homoclinic shooting extension phase reference: {}",
+            error
+        ))
+    })?;
+    let mut runner = if let Some(seed) = resume_seed {
+        let mut resume_step_size = bounded_resume_step_size(&seed, settings);
+        let (resume_aug, resume_tangent) =
+            prepare_resume_seed_for_extension(seed, &end_aug, secant_direction.as_ref(), forward);
+        let mut resume_tangent = DVector::from_vec(resume_tangent);
+        if homoclinic_tangent_is_nonlocal_in_parameter_plane(
+            &resume_tangent,
+            secant_direction.as_ref(),
+            secant_param_norm,
+            p2_aug_index,
+            resume_step_size,
+        ) {
+            if let Some(secant) = secant_direction.as_ref() {
+                resume_tangent = secant.clone();
+            }
+        }
+        cap_homoclinic_step_size_in_parameter_plane(
+            &mut settings,
+            &resume_tangent,
+            secant_param_norm,
+            p2_aug_index,
+        );
+        resume_step_size = resume_step_size.min(settings.step_size);
+        ContinuationRunner::new_from_seed(
+            problem,
+            resume_aug,
+            resume_tangent.iter().copied().collect(),
+            resume_step_size,
+            settings,
+        )
+        .map_err(|error| JsValue::from_str(&format!("Continuation init failed: {}", error)))?
+    } else {
+        if neighbor_idx.is_none() {
+            return Err(JsValue::from_str(
+                "Homoclinic shooting extension needs at least two branch points when resume metadata is unavailable.",
+            ));
+        }
+        if canonical_neighbor_state.is_none() {
+            return Err(JsValue::from_str(
+                "Failed to decode neighboring homoclinic shooting point for local extension seed.",
+            ));
+        }
+        let mut tangent = if let Some(bootstrap) = bootstrap_direction {
+            bootstrap
+        } else if let Some(secant) = secant_direction.as_ref() {
+            secant.clone()
+        } else {
+            compute_tangent_from_problem(&mut problem, &end_aug)
+                .map_err(|error| JsValue::from_str(&format!("{}", error)))?
+        };
+        orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+        cap_homoclinic_step_size_in_parameter_plane(
+            &mut settings,
+            &tangent,
+            secant_param_norm,
+            p2_aug_index,
+        );
+        let initial_point = ContinuationPoint {
+            state: packed_initial_state,
+            param_value: endpoint.param_value,
+            stability: endpoint.stability,
+            eigenvalues: endpoint.eigenvalues,
+            cycle_points: endpoint.cycle_points,
+            homoclinic_events: None,
+        };
+        ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
+            .map_err(|error| JsValue::from_str(&format!("Continuation init failed: {}", error)))?
+    };
+    runner.set_branch_type(merge.branch.branch_type.clone());
+    runner.set_upoldp(merge.branch.upoldp.clone());
+    runner.set_homoc_context(Some(extension_context));
+
+    Ok(ExtensionRunnerKind::HomoclinicShooting {
+        _system: boxed_system,
+        runner,
+        merge,
+    })
+}
+
 #[wasm_bindgen]
 pub struct WasmContinuationExtensionRunner {
     runner: Option<ExtensionRunnerKind>,
@@ -677,7 +1224,8 @@ impl WasmContinuationExtensionRunner {
             .get(parameter_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
 
-        let runner_kind = match &merge.branch.branch_type {
+        let branch_type = merge.branch.branch_type.clone();
+        let runner_kind = match &branch_type {
             BranchType::Equilibrium => {
                 let kind = match system_type {
                     "map" => SystemKind::Map {
@@ -755,6 +1303,7 @@ impl WasmContinuationExtensionRunner {
                         stability: endpoint.stability.clone(),
                         eigenvalues: endpoint.eigenvalues.clone(),
                         cycle_points: endpoint.cycle_points.clone(),
+                        homoclinic_events: None,
                     };
 
                     ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
@@ -921,6 +1470,7 @@ impl WasmContinuationExtensionRunner {
                         stability: endpoint.stability.clone(),
                         eigenvalues: endpoint.eigenvalues.clone(),
                         cycle_points: endpoint.cycle_points.clone(),
+                        homoclinic_events: None,
                     };
 
                     ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
@@ -939,7 +1489,43 @@ impl WasmContinuationExtensionRunner {
             }
             BranchType::HomoclinicCurve {
                 ntst,
+                ncol: _,
+                discretization:
+                    HomoclinicDiscretization::Shooting {
+                        integration_steps_per_segment,
+                    },
+                normalized_mesh: _,
+                collocation_adaptivity: _,
+                collocation_adaptation: _,
+                param1_name,
+                param2_name,
+                free_time,
+                free_eps0,
+                free_eps1,
+            } => build_homoclinic_shooting_extension(
+                system,
+                merge,
+                endpoint,
+                endpoint_idx,
+                neighbor_idx,
+                last_index,
+                forward,
+                *ntst,
+                *integration_steps_per_segment,
+                param1_name,
+                param2_name,
+                *free_time,
+                *free_eps0,
+                *free_eps1,
+                settings,
+            )?,
+            BranchType::HomoclinicCurve {
+                ntst,
                 ncol,
+                discretization: HomoclinicDiscretization::Collocation,
+                normalized_mesh,
+                collocation_adaptivity,
+                collocation_adaptation,
                 param1_name,
                 param2_name,
                 free_time,
@@ -989,38 +1575,72 @@ impl WasmContinuationExtensionRunner {
                         extras,
                     )
                 });
+                if let Some(context) = homoc_context.as_ref() {
+                    base_params = context.base_params.clone();
+                    if param1_index >= base_params.len() || param2_index >= base_params.len() {
+                        return Err(JsValue::from_str(
+                            "Saved homoclinic context has an incompatible parameter vector.",
+                        ));
+                    }
+                    base_params[param1_index] = endpoint.param_value;
+                    if let Some(param2_value) = extract_homoclinic_param2_from_packed_state(
+                        &endpoint.state,
+                        *ntst,
+                        *ncol,
+                        system.equations.len(),
+                    ) {
+                        base_params[param2_index] = param2_value;
+                    }
+                }
 
-                let mut setup = homoclinic_setup_from_homoclinic_point(
+                let source_mesh = if normalized_mesh.is_empty() {
+                    uniform_normalized_mesh(*ntst)
+                } else {
+                    normalized_mesh.clone()
+                };
+                let source_fixed = homoc_context
+                    .as_ref()
+                    .map(|context| HomoclinicFixedScalars {
+                        time: context.fixed_time,
+                        eps0: context.fixed_eps0,
+                        eps1: context.fixed_eps1,
+                    });
+                let system_dim = system.equations.len();
+                let mut setup = homoclinic_setup_from_homoclinic_point_with_source_extras_on_mesh(
                     &mut system,
                     &endpoint.state,
-                    *ntst,
                     *ncol,
-                    *ntst,
+                    source_mesh.clone(),
                     *ncol,
+                    source_mesh,
                     &base_params,
                     param1_index,
                     param2_index,
                     param1_name,
                     param2_name,
                     extras,
+                    extras,
+                    source_fixed,
                 )
                 .map_err(|e| {
                     JsValue::from_str(&format!("Failed to initialize homoclinic extension: {}", e))
                 })?;
-                let system_dim = system.equations.len();
-                if !hydrate_homoclinic_setup_from_endpoint(&mut setup, &endpoint.state, system_dim)
-                {
-                    return Err(JsValue::from_str(
-                        "Failed to decode the homoclinic endpoint state for extension. Use explicit Homoclinic from Homoclinic with a valid packed point.",
-                    ));
-                }
                 if let Some(context) = homoc_context.as_ref() {
-                    if !apply_homoc_context_to_setup(&mut setup, context) {
+                    if !restore_homoclinic_extension_setup(
+                        &mut setup,
+                        context,
+                        &endpoint.state,
+                        system_dim,
+                    ) {
                         return Err(JsValue::from_str(
-                            "Homoclinic extension context is incompatible with this endpoint state. Recompute the branch from the original initialization and try extending again.",
+                            "Saved homoclinic collocation chart is incompatible with the branch endpoint. Recompute the branch with the current build and try extending again.",
                         ));
                     }
+                } else {
+                    setup.initial_seed_is_corrected = true;
                 }
+                setup.collocation_adaptivity = *collocation_adaptivity;
+                setup.collocation_adaptation = collocation_adaptation.clone();
                 let packed_initial_state = pack_homoclinic_state(&setup);
                 let secant_template = setup.clone();
 
@@ -1199,6 +1819,7 @@ impl WasmContinuationExtensionRunner {
                         stability: endpoint.stability.clone(),
                         eigenvalues: endpoint.eigenvalues.clone(),
                         cycle_points: endpoint.cycle_points.clone(),
+                        homoclinic_events: None,
                     };
 
                     ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
@@ -1242,6 +1863,7 @@ impl WasmContinuationExtensionRunner {
             Some(ExtensionRunnerKind::Equilibrium { runner, .. }) => runner.is_done(),
             Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => runner.is_done(),
             Some(ExtensionRunnerKind::Homoclinic { runner, .. }) => runner.is_done(),
+            Some(ExtensionRunnerKind::HomoclinicShooting { runner, .. }) => runner.is_done(),
             None => true,
         }
     }
@@ -1257,6 +1879,9 @@ impl WasmContinuationExtensionRunner {
             Some(ExtensionRunnerKind::Homoclinic { runner, .. }) => runner
                 .run_steps(batch_size as usize)
                 .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+            Some(ExtensionRunnerKind::HomoclinicShooting { runner, .. }) => runner
+                .run_steps(batch_size as usize)
+                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
             None => return Err(JsValue::from_str("Runner not initialized")),
         };
 
@@ -1268,6 +1893,7 @@ impl WasmContinuationExtensionRunner {
             Some(ExtensionRunnerKind::Equilibrium { runner, .. }) => runner.step_result(),
             Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => runner.step_result(),
             Some(ExtensionRunnerKind::Homoclinic { runner, .. }) => runner.step_result(),
+            Some(ExtensionRunnerKind::HomoclinicShooting { runner, .. }) => runner.step_result(),
             None => return Err(JsValue::from_str("Runner not initialized")),
         };
 
@@ -1280,6 +1906,11 @@ impl WasmContinuationExtensionRunner {
                 to_value(runner.problem().adaptation_report())
                     .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
             }
+            Some(ExtensionRunnerKind::Homoclinic { runner, .. }) => {
+                to_value(runner.problem().adaptation_report())
+                    .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+            }
+            Some(ExtensionRunnerKind::HomoclinicShooting { .. }) => Ok(JsValue::NULL),
             _ => Ok(JsValue::NULL),
         }
     }
@@ -1339,9 +1970,17 @@ impl WasmContinuationExtensionRunner {
                         "Adaptive LC extension changed the persisted branch length",
                     ));
                 }
-                for (point, state) in merge.branch.points.iter_mut().zip(transferred) {
-                    point.state = state;
-                }
+                fork_core::continuation::apply_transferred_branch_states(
+                    &problem,
+                    &mut merge.branch.points,
+                    transferred,
+                )
+                .map_err(|error| {
+                    JsValue::from_str(&format!(
+                        "Failed to refresh existing LC extension history: {}",
+                        error
+                    ))
+                })?;
                 let final_branch_type = BranchType::LimitCycle {
                     ntst: final_ntst,
                     ncol: final_ncol,
@@ -1358,7 +1997,110 @@ impl WasmContinuationExtensionRunner {
                 merge.collocation_adaptation = Some(report);
                 (extension, merge)
             }
-            ExtensionRunnerKind::Homoclinic { runner, merge, .. } => (runner.take_result(), merge),
+            ExtensionRunnerKind::Homoclinic {
+                runner, mut merge, ..
+            } => {
+                let (mut extension, problem) = runner.take_result_with_problem();
+                let external_states = merge
+                    .branch
+                    .points
+                    .iter()
+                    .map(|point| point.state.clone())
+                    .collect::<Vec<_>>();
+                let transferred = problem
+                    .transfer_branch_states_to_current_discretization(&external_states)
+                    .map_err(|error| {
+                        JsValue::from_str(&format!(
+                            "Failed to transfer existing homoclinic extension history: {}",
+                            error
+                        ))
+                    })?;
+                if transferred.len() != merge.branch.points.len() {
+                    return Err(JsValue::from_str(
+                        "Adaptive homoclinic extension changed the persisted branch length",
+                    ));
+                }
+                fork_core::continuation::apply_transferred_branch_states(
+                    &problem,
+                    &mut merge.branch.points,
+                    transferred,
+                )
+                .map_err(|error| {
+                    JsValue::from_str(&format!(
+                        "Failed to refresh existing homoclinic extension history: {}",
+                        error
+                    ))
+                })?;
+                transfer_external_resume_state(&problem, &mut merge.branch.resume_state)?;
+                let context = problem.resume_context();
+                let final_branch_type = problem.branch_type_metadata();
+                extension.branch_type = final_branch_type.clone();
+                extension.homoc_context = Some(context.clone());
+                merge.branch.branch_type = final_branch_type;
+                merge.branch.homoc_context = Some(context);
+                let report = problem.adaptation_report().clone();
+                merge.collocation_adaptation = Some(report);
+                (extension, merge)
+            }
+            ExtensionRunnerKind::HomoclinicShooting {
+                runner, mut merge, ..
+            } => {
+                let (mut extension, problem) = runner.take_result_with_problem();
+                let setup = problem.setup();
+                let external_states = merge
+                    .branch
+                    .points
+                    .iter()
+                    .map(|point| point.state.clone())
+                    .collect::<Vec<_>>();
+                let transferred = problem
+                    .transfer_branch_states_to_current_discretization(&external_states)
+                    .map_err(|error| {
+                        JsValue::from_str(&format!(
+                            "Failed to transfer existing shooting homoclinic extension history: {}",
+                            error
+                        ))
+                    })?;
+                if transferred.len() != merge.branch.points.len() {
+                    return Err(JsValue::from_str(
+                        "Shooting homoclinic extension changed the persisted branch length",
+                    ));
+                }
+                fork_core::continuation::apply_transferred_branch_states(
+                    &problem,
+                    &mut merge.branch.points,
+                    transferred,
+                )
+                .map_err(|error| {
+                    JsValue::from_str(&format!(
+                        "Failed to refresh existing shooting homoclinic extension history: {}",
+                        error
+                    ))
+                })?;
+                transfer_external_resume_state(&problem, &mut merge.branch.resume_state)?;
+                let final_branch_type = BranchType::HomoclinicCurve {
+                    ntst: setup.shooting.intervals,
+                    ncol: 0,
+                    discretization: HomoclinicDiscretization::Shooting {
+                        integration_steps_per_segment: setup.shooting.integration_steps_per_segment,
+                    },
+                    normalized_mesh: Vec::new(),
+                    collocation_adaptivity: CollocationAdaptivitySettings::default(),
+                    collocation_adaptation: None,
+                    param1_name: setup.param1_name.clone(),
+                    param2_name: setup.param2_name.clone(),
+                    free_time: setup.extras.free_time,
+                    free_eps0: setup.extras.free_eps0,
+                    free_eps1: setup.extras.free_eps1,
+                };
+                let context = problem.resume_context();
+                extension.branch_type = final_branch_type.clone();
+                extension.homoc_context = Some(context.clone());
+                merge.branch.branch_type = final_branch_type;
+                merge.branch.homoc_context = Some(context);
+                merge.collocation_adaptation = None;
+                (extension, merge)
+            }
         };
 
         let collocation_adaptation = merge.collocation_adaptation;
@@ -1477,6 +2219,7 @@ mod tests {
                 stability: BifurcationType::None,
                 eigenvalues: Vec::new(),
                 cycle_points: None,
+                homoclinic_events: None,
             }],
             bifurcations: Vec::new(),
             indices: vec![0],
@@ -1521,6 +2264,7 @@ mod tests {
                 stability: BifurcationType::None,
                 eigenvalues: Vec::new(),
                 cycle_points: None,
+                homoclinic_events: None,
             }],
             bifurcations: Vec::new(),
             indices: Vec::new(),
@@ -1563,6 +2307,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![1.1],
@@ -1570,6 +2315,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -1613,6 +2359,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![1.01],
@@ -1620,6 +2367,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -1687,6 +2435,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![0.21],
@@ -1694,6 +2443,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -1750,6 +2500,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![0.1],
@@ -1757,6 +2508,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![0.3],
@@ -1764,6 +2516,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -1822,12 +2575,17 @@ mod tests {
                 stability: BifurcationType::None,
                 eigenvalues: Vec::new(),
                 cycle_points: None,
+                homoclinic_events: None,
             }],
             bifurcations: Vec::new(),
             indices: vec![0],
             branch_type: BranchType::HomoclinicCurve {
                 ntst: 2,
                 ncol: 1,
+                discretization: fork_core::continuation::HomoclinicDiscretization::Collocation,
+                normalized_mesh: Vec::new(),
+                collocation_adaptivity: Default::default(),
+                collocation_adaptation: None,
                 param1_name: "a".to_string(),
                 param2_name: "b".to_string(),
                 free_time: false,
@@ -1881,6 +2639,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![2.0, 20.0, 3.0],
@@ -1888,6 +2647,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
                 ContinuationPoint {
                     state: vec![30.0, 300.0, 5.0],
@@ -1895,6 +2655,7 @@ mod tests {
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
                     cycle_points: None,
+                    homoclinic_events: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -1954,20 +2715,136 @@ mod orientation_tests {
     use super::{
         apply_homoc_context_to_setup, bounded_resume_step_size,
         canonicalize_homoclinic_point_state, cap_extension_step_size,
-        cap_homoclinic_step_size_in_parameter_plane,
-        homoclinic_tangent_is_nonlocal_in_parameter_plane, hydrate_homoclinic_setup_from_endpoint,
-        normalized_problem_secant, orient_extension_tangent, prepare_resume_seed_for_extension,
+        cap_homoclinic_step_size_in_parameter_plane, homoc_context_from_setup,
+        homoc_context_from_shooting_setup, homoclinic_tangent_is_nonlocal_in_parameter_plane,
+        hydrate_homoclinic_setup_from_endpoint, normalized_problem_secant,
+        orient_extension_tangent, prepare_resume_seed_for_extension,
+        restore_homoclinic_extension_setup, restore_homoclinic_shooting_extension_setup,
+        transfer_external_resume_state, HomoclinicProblem,
     };
     use fork_core::continuation::{
-        orient_problem_tangent, pack_homoclinic_state, BifurcationType, BranchType,
-        ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint, ContinuationProblem,
-        ContinuationResumeState, ContinuationSettings, HomoclinicBasis, HomoclinicBasisSnapshot,
-        HomoclinicExtraFlags, HomoclinicGuess, HomoclinicResumeContext, HomoclinicSetup,
-        PointDiagnostics, TestFunctionValues,
+        compute_homoclinic_basis, orient_problem_tangent, pack_homoclinic_shooting_state,
+        pack_homoclinic_state, BifurcationType, BranchType, ContinuationBranch,
+        ContinuationEndpointSeed, ContinuationPoint, ContinuationProblem, ContinuationResumeState,
+        ContinuationSettings, HomoclinicBasis, HomoclinicBasisSnapshot, HomoclinicExtraFlags,
+        HomoclinicGuess, HomoclinicResumeContext, HomoclinicSetup, HomoclinicShootingGuess,
+        HomoclinicShootingProblem, HomoclinicShootingSettings, HomoclinicShootingSetup,
+        PointDiagnostics, ReparameterizationSeed, TestFunctionValues,
     };
+    use fork_core::equation_engine::{Bytecode, EquationSystem, OpCode};
     use nalgebra::{DMatrix, DVector};
 
     struct WeightedMetricProblem;
+
+    fn moving_saddle_system() -> EquationSystem {
+        // A(a) = [1 a; 0 -1]. The stable eigenspace rotates with `a`, so a
+        // context saved on the previous (even) refresh step is intentionally
+        // different from a basis freshly computed at the following odd step.
+        let x = Bytecode {
+            ops: vec![
+                OpCode::LoadVar(0),
+                OpCode::LoadParam(0),
+                OpCode::LoadVar(1),
+                OpCode::Mul,
+                OpCode::Add,
+            ],
+        };
+        let y = Bytecode {
+            ops: vec![OpCode::LoadConst(-1.0), OpCode::LoadVar(1), OpCode::Mul],
+        };
+        let mut system = EquationSystem::new(vec![x, y], vec![1.0, 0.0]);
+        system.param_map.insert("a".to_string(), 0);
+        system.param_map.insert("b".to_string(), 1);
+        system.var_map.insert("x".to_string(), 0);
+        system.var_map.insert("y".to_string(), 1);
+        system
+    }
+
+    fn odd_step_saved_collocation_setup(system: &mut EquationSystem) -> HomoclinicSetup {
+        let basis = compute_homoclinic_basis(system, &[0.0, 0.0], &[0.0, 0.0])
+            .expect("saved even-step basis");
+        HomoclinicSetup {
+            guess: HomoclinicGuess {
+                mesh_states: vec![vec![0.1, 0.0], vec![0.05, 0.05], vec![0.0, 0.1]],
+                stage_states: vec![vec![vec![0.075, 0.025]], vec![vec![0.025, 0.075]]],
+                x0: vec![0.0, 0.0],
+                param1_value: 1.0,
+                param2_value: 0.0,
+                time: 2.0,
+                eps0: 0.1,
+                eps1: 0.1,
+                // This also forces an immediate angle-triggered refresh in
+                // the extension problem, independent of the cadence reset.
+                yu: vec![0.5],
+                ys: vec![-0.45],
+            },
+            ntst: 2,
+            ncol: 1,
+            normalized_mesh: vec![0.0, 0.5, 1.0],
+            collocation_adaptivity: Default::default(),
+            collocation_adaptation: None,
+            projector_refresh_interval: 2,
+            initial_seed_is_corrected: true,
+            param1_index: 0,
+            param2_index: 1,
+            param1_name: "a".to_string(),
+            param2_name: "b".to_string(),
+            base_params: vec![0.0, 0.0],
+            extras: HomoclinicExtraFlags {
+                free_time: true,
+                free_eps0: true,
+                free_eps1: false,
+            },
+            basis,
+        }
+    }
+
+    fn odd_step_saved_shooting_setup(system: &mut EquationSystem) -> HomoclinicShootingSetup {
+        let collocation = odd_step_saved_collocation_setup(system);
+        HomoclinicShootingSetup {
+            guess: HomoclinicShootingGuess {
+                nodes: collocation.guess.mesh_states.clone(),
+                x0: collocation.guess.x0.clone(),
+                param1_value: collocation.guess.param1_value,
+                param2_value: collocation.guess.param2_value,
+                time: collocation.guess.time,
+                eps0: collocation.guess.eps0,
+                eps1: collocation.guess.eps1,
+                yu: collocation.guess.yu.clone(),
+                ys: collocation.guess.ys.clone(),
+            },
+            shooting: HomoclinicShootingSettings {
+                intervals: 2,
+                integration_steps_per_segment: 8,
+            },
+            param1_index: collocation.param1_index,
+            param2_index: collocation.param2_index,
+            param1_name: collocation.param1_name,
+            param2_name: collocation.param2_name,
+            base_params: collocation.base_params,
+            extras: collocation.extras,
+            basis: collocation.basis,
+            projector_refresh_interval: collocation.projector_refresh_interval,
+            initial_seed_is_corrected: true,
+        }
+    }
+
+    fn augmented(parameter: f64, state: &[f64]) -> DVector<f64> {
+        let mut aug = DVector::zeros(state.len() + 1);
+        aug[0] = parameter;
+        aug.as_mut_slice()[1..].copy_from_slice(state);
+        aug
+    }
+
+    fn assert_vectors_close(actual: &[f64], expected: &[f64]) {
+        assert_eq!(actual.len(), expected.len());
+        let error = actual
+            .iter()
+            .zip(expected)
+            .map(|(lhs, rhs)| (lhs - rhs).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(error < 1e-10, "vector mismatch: max error={error:.3e}");
+    }
 
     impl ContinuationProblem for WeightedMetricProblem {
         fn dimension(&self) -> usize {
@@ -2105,6 +2982,11 @@ mod orientation_tests {
             },
             ntst: 2,
             ncol: 1,
+            normalized_mesh: Vec::new(),
+            collocation_adaptivity: Default::default(),
+            collocation_adaptation: None,
+            projector_refresh_interval: 2,
+            initial_seed_is_corrected: false,
             param1_index: 0,
             param2_index: 1,
             param1_name: "mu".to_string(),
@@ -2139,6 +3021,11 @@ mod orientation_tests {
             },
             ntst: setup.ntst,
             ncol: setup.ncol,
+            normalized_mesh: setup.normalized_mesh.clone(),
+            collocation_adaptivity: setup.collocation_adaptivity,
+            collocation_adaptation: setup.collocation_adaptation.clone(),
+            projector_refresh_interval: setup.projector_refresh_interval,
+            initial_seed_is_corrected: true,
             param1_index: setup.param1_index,
             param2_index: setup.param2_index,
             param1_name: setup.param1_name.clone(),
@@ -2184,6 +3071,11 @@ mod orientation_tests {
             },
             ntst: 2,
             ncol: 1,
+            normalized_mesh: Vec::new(),
+            collocation_adaptivity: Default::default(),
+            collocation_adaptation: None,
+            projector_refresh_interval: 2,
+            initial_seed_is_corrected: false,
             param1_index: 0,
             param2_index: 1,
             param1_name: "mu".to_string(),
@@ -2230,6 +3122,11 @@ mod orientation_tests {
             },
             ntst: setup.ntst,
             ncol: setup.ncol,
+            normalized_mesh: setup.normalized_mesh.clone(),
+            collocation_adaptivity: setup.collocation_adaptivity,
+            collocation_adaptation: setup.collocation_adaptation.clone(),
+            projector_refresh_interval: setup.projector_refresh_interval,
+            initial_seed_is_corrected: true,
             param1_index: setup.param1_index,
             param2_index: setup.param2_index,
             param1_name: setup.param1_name.clone(),
@@ -2272,6 +3169,11 @@ mod orientation_tests {
             },
             ntst: 2,
             ncol: 1,
+            normalized_mesh: Vec::new(),
+            collocation_adaptivity: Default::default(),
+            collocation_adaptation: None,
+            projector_refresh_interval: 2,
+            initial_seed_is_corrected: false,
             param1_index: 0,
             param2_index: 1,
             param1_name: "mu".to_string(),
@@ -2305,12 +3207,232 @@ mod orientation_tests {
             fixed_time: 42.0,
             fixed_eps0: 0.03,
             fixed_eps1: 0.04,
+            projector_refresh_interval: 1,
         };
 
         assert!(apply_homoc_context_to_setup(&mut setup, &context));
         assert_eq!(setup.guess.time, 42.0);
         assert_eq!(setup.guess.eps0, 0.03);
         assert_eq!(setup.guess.eps1, 0.04);
+        assert_eq!(setup.projector_refresh_interval, 1);
+    }
+
+    #[test]
+    fn collocation_extension_restores_odd_step_chart_and_transfers_retained_history_and_seed() {
+        let mut system = moving_saddle_system();
+        let saved_setup = odd_step_saved_collocation_setup(&mut system);
+        let context = homoc_context_from_setup(&saved_setup);
+        let endpoint_state = pack_homoclinic_state(&saved_setup);
+
+        // This is what endpoint reconstruction computes before the persisted
+        // chart is applied: the basis at a=1 differs from the saved a=0 chart.
+        let fresh_basis = compute_homoclinic_basis(&mut system, &[0.0, 0.0], &[1.0, 0.0])
+            .expect("fresh endpoint basis");
+        assert_ne!(fresh_basis.stable_q, saved_setup.basis.stable_q);
+        let mut reconstructed = saved_setup.clone();
+        reconstructed.basis = fresh_basis;
+        reconstructed.base_params = vec![1.0, 0.0];
+        reconstructed.guess.time = 99.0;
+        reconstructed.guess.yu.fill(0.0);
+        reconstructed.guess.ys.fill(0.0);
+
+        assert!(restore_homoclinic_extension_setup(
+            &mut reconstructed,
+            &context,
+            &endpoint_state,
+            2,
+        ));
+        assert_eq!(reconstructed.basis.stable_q, saved_setup.basis.stable_q);
+        assert_eq!(reconstructed.guess.yu, saved_setup.guess.yu);
+        assert_eq!(reconstructed.guess.ys, saved_setup.guess.ys);
+        assert_eq!(pack_homoclinic_state(&reconstructed), endpoint_state);
+
+        let mut history_setup = saved_setup.clone();
+        history_setup.guess.mesh_states[0][0] = 0.12;
+        history_setup.guess.stage_states[0][0][0] = 0.06;
+        history_setup.guess.yu[0] = 0.42;
+        history_setup.guess.ys[0] = -0.38;
+        let history_state = pack_homoclinic_state(&history_setup);
+        let endpoint_aug = augmented(1.0, &endpoint_state);
+        let history_aug = augmented(0.9, &history_state);
+        let mut tangent = DVector::zeros(endpoint_aug.len());
+        tangent[0] = 1.0;
+        tangent[endpoint_aug.len() - 2] = 0.2;
+        let seeds = vec![
+            ReparameterizationSeed {
+                aug_state: history_aug.clone(),
+                tangent: tangent.clone(),
+            },
+            ReparameterizationSeed {
+                aug_state: endpoint_aug.clone(),
+                tangent: tangent.clone(),
+            },
+        ];
+
+        let mut problem = HomoclinicProblem::new(&mut system, reconstructed)
+            .expect("restored collocation extension problem");
+        let reparameterized = problem
+            .reparameterize_after_step(
+                &endpoint_aug,
+                &endpoint_aug,
+                &tangent,
+                &[history_state.clone(), endpoint_state.clone()],
+                &seeds,
+            )
+            .expect("chart refresh")
+            .expect("angle-triggered odd-step chart refresh");
+        assert_eq!(problem.projector_refresh_count(), 1);
+
+        let transferred_history = problem
+            .transfer_branch_states_to_current_discretization(&[
+                history_state.clone(),
+                endpoint_state.clone(),
+            ])
+            .expect("transfer retained history");
+        assert_eq!(transferred_history, reparameterized.branch_states);
+        assert!(
+            transferred_history[0]
+                .iter()
+                .zip(&history_state)
+                .any(|(new, old)| (new - old).abs() > 1e-8),
+            "retained history must actually move into the refreshed chart"
+        );
+
+        let mut persisted_resume = Some(ContinuationResumeState {
+            min_index_seed: Some(ContinuationEndpointSeed {
+                endpoint_index: -4,
+                aug_state: history_aug.as_slice().to_vec(),
+                tangent: tangent.as_slice().to_vec(),
+                step_size: 0.01,
+            }),
+            max_index_seed: Some(ContinuationEndpointSeed {
+                endpoint_index: 3,
+                aug_state: endpoint_aug.as_slice().to_vec(),
+                tangent: tangent.as_slice().to_vec(),
+                step_size: 0.02,
+            }),
+        });
+        transfer_external_resume_state(&problem, &mut persisted_resume)
+            .expect("transfer both retained endpoint seeds");
+        let retained_opposite = persisted_resume
+            .expect("resume state")
+            .min_index_seed
+            .expect("opposite-side seed");
+        assert_eq!(retained_opposite.endpoint_index, -4);
+        assert_vectors_close(
+            &retained_opposite.aug_state,
+            reparameterized.active_seeds[0].aug_state.as_slice(),
+        );
+        assert_vectors_close(
+            &retained_opposite.tangent,
+            reparameterized.active_seeds[0].tangent.as_slice(),
+        );
+    }
+
+    #[test]
+    fn shooting_extension_restores_odd_step_chart_and_transfers_retained_history_and_seed() {
+        let mut system = moving_saddle_system();
+        let saved_setup = odd_step_saved_shooting_setup(&mut system);
+        let context = homoc_context_from_shooting_setup(&saved_setup);
+        let endpoint_state = pack_homoclinic_shooting_state(&saved_setup);
+
+        let fresh_basis = compute_homoclinic_basis(&mut system, &[0.0, 0.0], &[1.0, 0.0])
+            .expect("fresh endpoint basis");
+        assert_ne!(fresh_basis.stable_q, saved_setup.basis.stable_q);
+        let mut reconstructed = saved_setup.clone();
+        reconstructed.basis = fresh_basis;
+        reconstructed.base_params = vec![1.0, 0.0];
+        reconstructed.guess.time = 99.0;
+        reconstructed.guess.yu.fill(0.0);
+        reconstructed.guess.ys.fill(0.0);
+
+        assert!(restore_homoclinic_shooting_extension_setup(
+            &mut reconstructed,
+            &context,
+            &endpoint_state,
+        ));
+        assert_eq!(reconstructed.basis.stable_q, saved_setup.basis.stable_q);
+        assert_eq!(reconstructed.guess.yu, saved_setup.guess.yu);
+        assert_eq!(reconstructed.guess.ys, saved_setup.guess.ys);
+        assert_eq!(
+            pack_homoclinic_shooting_state(&reconstructed),
+            endpoint_state
+        );
+
+        let mut history_setup = saved_setup.clone();
+        history_setup.guess.nodes[0][0] = 0.12;
+        history_setup.guess.yu[0] = 0.42;
+        history_setup.guess.ys[0] = -0.38;
+        let history_state = pack_homoclinic_shooting_state(&history_setup);
+        let endpoint_aug = augmented(1.0, &endpoint_state);
+        let history_aug = augmented(0.9, &history_state);
+        let mut tangent = DVector::zeros(endpoint_aug.len());
+        tangent[0] = 1.0;
+        tangent[endpoint_aug.len() - 2] = 0.2;
+        let seeds = vec![
+            ReparameterizationSeed {
+                aug_state: history_aug.clone(),
+                tangent: tangent.clone(),
+            },
+            ReparameterizationSeed {
+                aug_state: endpoint_aug.clone(),
+                tangent: tangent.clone(),
+            },
+        ];
+
+        let mut problem = HomoclinicShootingProblem::new(&mut system, reconstructed)
+            .expect("restored shooting extension problem");
+        let reparameterized = problem
+            .reparameterize_after_step(
+                &endpoint_aug,
+                &endpoint_aug,
+                &tangent,
+                &[history_state.clone(), endpoint_state.clone()],
+                &seeds,
+            )
+            .expect("chart refresh")
+            .expect("angle-triggered odd-step chart refresh");
+        assert_eq!(problem.projector_refresh_count(), 1);
+
+        let transferred_history = problem
+            .transfer_branch_states_to_current_discretization(&[
+                history_state.clone(),
+                endpoint_state,
+            ])
+            .expect("transfer retained shooting history");
+        assert_eq!(transferred_history, reparameterized.branch_states);
+        assert!(
+            transferred_history[0]
+                .iter()
+                .zip(&history_state)
+                .any(|(new, old)| (new - old).abs() > 1e-8),
+            "retained shooting history must actually move into the refreshed chart"
+        );
+
+        let mut persisted_resume = Some(ContinuationResumeState {
+            min_index_seed: Some(ContinuationEndpointSeed {
+                endpoint_index: -6,
+                aug_state: history_aug.as_slice().to_vec(),
+                tangent: tangent.as_slice().to_vec(),
+                step_size: 0.01,
+            }),
+            max_index_seed: None,
+        });
+        transfer_external_resume_state(&problem, &mut persisted_resume)
+            .expect("transfer retained shooting endpoint seed");
+        let retained_opposite = persisted_resume
+            .expect("resume state")
+            .min_index_seed
+            .expect("opposite-side seed");
+        assert_eq!(retained_opposite.endpoint_index, -6);
+        assert_vectors_close(
+            &retained_opposite.aug_state,
+            reparameterized.active_seeds[0].aug_state.as_slice(),
+        );
+        assert_vectors_close(
+            &retained_opposite.tangent,
+            reparameterized.active_seeds[0].tangent.as_slice(),
+        );
     }
 
     #[test]
@@ -2330,6 +3452,11 @@ mod orientation_tests {
             },
             ntst: 2,
             ncol: 1,
+            normalized_mesh: Vec::new(),
+            collocation_adaptivity: Default::default(),
+            collocation_adaptation: None,
+            projector_refresh_interval: 2,
+            initial_seed_is_corrected: true,
             param1_index: 0,
             param2_index: 1,
             param1_name: "mu".to_string(),
@@ -2459,6 +3586,7 @@ mod orientation_tests {
                 stability: BifurcationType::None,
                 eigenvalues: Vec::new(),
                 cycle_points: None,
+                homoclinic_events: None,
             }],
             bifurcations: Vec::new(),
             indices: vec![3],

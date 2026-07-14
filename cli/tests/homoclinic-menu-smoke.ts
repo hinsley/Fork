@@ -73,7 +73,11 @@ function duffingStateAt(time: number, amplitude: number): number[] {
   return [x, y];
 }
 
-function duffingLargeCycleState(ntst: number, ncol: number): number[] {
+function duffingLargeCycleState(
+  ntst: number,
+  ncol: number,
+  normalizedMesh = Array.from({ length: ntst + 1 }, (_, index) => index / ntst)
+): number[] {
   assert.equal(ncol, 2, 'Duffing menu fixture uses two Gauss stages');
   const modulus = 0.99;
   const frequency = 1 / Math.sqrt(2 - modulus ** 2);
@@ -85,11 +89,13 @@ function duffingLargeCycleState(ntst: number, ncol: number): number[] {
   const nodes = [(1 - 1 / Math.sqrt(3)) / 2, (1 + 1 / Math.sqrt(3)) / 2];
   const state: number[] = [];
   for (let interval = 0; interval < ntst; interval += 1) {
-    state.push(...duffingStateAt(period * interval / ntst, amplitude));
+    state.push(...duffingStateAt(period * normalizedMesh[interval], amplitude));
   }
   for (let interval = 0; interval < ntst; interval += 1) {
     for (const node of nodes) {
-      state.push(...duffingStateAt(period * (interval + node) / ntst, amplitude));
+      const left = normalizedMesh[interval];
+      const right = normalizedMesh[interval + 1];
+      state.push(...duffingStateAt(period * (left + node * (right - left)), amplitude));
     }
   }
   state.push(period);
@@ -151,6 +157,10 @@ async function run(): Promise<void> {
     const sourceNcol = 2;
     const targetNtst = 8;
     const targetNcol = 2;
+    const sourceNormalizedMesh = Array.from(
+      { length: sourceNtst + 1 },
+      (_, index) => (index / sourceNtst) ** 1.2
+    );
     const config: SystemConfig = {
       name: systemName,
       equations: ['y', 'x-x^3+(mu-nu)*y'],
@@ -163,7 +173,7 @@ async function run(): Promise<void> {
     Storage.saveSystem(config);
 
     const largeCyclePoint: ContinuationPoint = {
-      state: duffingLargeCycleState(sourceNtst, sourceNcol),
+      state: duffingLargeCycleState(sourceNtst, sourceNcol, sourceNormalizedMesh),
       param_value: 0,
       stability: 'None',
       eigenvalues: []
@@ -184,10 +194,7 @@ async function run(): Promise<void> {
           type: 'LimitCycle',
           ntst: sourceNtst,
           ncol: sourceNcol,
-          normalized_mesh: Array.from(
-            { length: sourceNtst + 1 },
-            (_, index) => index / sourceNtst
-          )
+          normalized_mesh: sourceNormalizedMesh
         }
       } as ContinuationBranchData,
       settings: {},
@@ -200,6 +207,32 @@ async function run(): Promise<void> {
       () => initiateHomoclinicFromLargeCycle(systemName, limitCycleBranch, largeCyclePoint, 0)
     );
     assert.ok(method1, 'Method 1 menu run must create a branch');
+
+    const method1Shooting = await withConfigMenu(
+      [
+        ['curveName', 'duffing_homoclinic_shooting'],
+        ['discretization', 'shooting'],
+        ['targetNtst', `${targetNtst}`],
+        ['shootingIntervals', `${targetNtst}`],
+        ['integrationStepsPerSegment', '64'],
+        ...certifiedMenuEdits
+      ],
+      () => initiateHomoclinicFromLargeCycle(systemName, limitCycleBranch, largeCyclePoint, 0)
+    );
+    assert.ok(method1Shooting, 'Method 1 shooting menu run must create a branch');
+    assert.ok(
+      method1Shooting.data.points.length > 1,
+      'Method 1 shooting menu run must advance beyond its seed'
+    );
+    assert.equal(method1Shooting.data.branch_type?.type, 'HomoclinicCurve');
+    if (method1Shooting.data.branch_type?.type === 'HomoclinicCurve') {
+      assert.equal(method1Shooting.data.branch_type.ncol, 0);
+      assert.equal(method1Shooting.data.branch_type.ntst, targetNtst);
+      assert.deepEqual(method1Shooting.data.branch_type.discretization, {
+        type: 'shooting',
+        integration_steps_per_segment: 64
+      });
+    }
     assert.ok(method1.data.points.length > 1, 'Method 1 menu run must advance beyond its seed');
 
     const method1Point = method1.data.points[0];
@@ -210,27 +243,37 @@ async function run(): Promise<void> {
     assert.ok(method2, 'Method 2 menu run must create a branch');
     assert.ok(method2.data.points.length > 1, 'Method 2 menu run must advance beyond its seed');
 
-    const nu = homoclinicParam2(method1Point, targetNtst, targetNcol);
+    const method1Type = method1.data.branch_type;
+    assert.equal(method1Type?.type, 'HomoclinicCurve');
+    if (!method1Type || method1Type.type !== 'HomoclinicCurve') {
+      throw new Error('Method 1 must persist homoclinic branch metadata');
+    }
+    assert.ok(
+      Array.isArray(method1Type.normalized_mesh)
+        && method1Type.normalized_mesh.length === method1Type.ntst + 1,
+      'Method 1 must persist its adapted normalized mesh'
+    );
+    const nu = homoclinicParam2(method1Point, method1Type.ntst, method1Type.ncol);
     const sourceContext = method1.data.homoc_context;
     assert.ok(sourceContext, 'Method 1 must persist homoclinic fixed-scalar context');
     const stageBridge = new WasmBridge({
       ...config,
       params: [method1Point.param_value, nu]
     });
-    const stageSetup = stageBridge.initHomoclinicFromHomoclinic(
+    const stageSetup = stageBridge.initHomoclinicFromHomoclinicOnMesh(
       method1Point.state,
-      targetNtst,
-      targetNcol,
-      true,
-      false,
-      false,
+      method1Type.ncol,
+      method1Type.normalized_mesh,
+      method1Type.free_time,
+      method1Type.free_eps0,
+      method1Type.free_eps1,
       sourceContext.fixed_time ?? 1,
       sourceContext.fixed_eps0 ?? 1e-2,
       sourceContext.fixed_eps1 ?? 1e-2,
       'mu',
       'nu',
-      targetNtst,
       targetNcol,
+      Array.from({ length: targetNtst + 1 }, (_, index) => index / targetNtst),
       true,
       false,
       true
@@ -276,6 +319,7 @@ async function run(): Promise<void> {
 
     for (const [label, branch] of [
       ['Method 1', method1],
+      ['Method 1 Shooting', method1Shooting],
       ['Method 2', method2],
       ['Method 4', method4]
     ] as const) {
@@ -290,7 +334,7 @@ async function run(): Promise<void> {
       assert.equal(storedBranch.branchType, 'homoclinic_curve', `${label} persisted branch type`);
     }
 
-    console.log('PASS menu-driven homoclinic Methods 1, 2, and 4');
+    console.log('PASS menu-driven homoclinic Methods 1 (collocation and shooting), 2, and 4');
   } finally {
     process.chdir(originalCwd);
     fs.rmSync(tempRoot, { recursive: true, force: true });

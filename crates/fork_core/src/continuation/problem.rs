@@ -3,6 +3,8 @@ use nalgebra::{DMatrix, DVector};
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 
+use super::homoclinic_events::HomoclinicEventDiagnostics;
+use super::types::ContinuationPoint;
 use super::{BifurcationType, BranchType};
 
 /// Action requested by a continuation problem after a converged trial fails
@@ -23,6 +25,32 @@ pub enum StepRejectionAction {
         branch_type: Option<BranchType>,
     },
     Terminate,
+}
+
+/// An augmented continuation state and its tangent, carried outside the active
+/// frontier (for example the initial endpoint retained by a stepped runner).
+/// Both vectors must be reparameterized together when a problem changes an
+/// internal coordinate chart without changing its dimension.
+#[derive(Debug, Clone)]
+pub struct ReparameterizationSeed {
+    pub aug_state: DVector<f64>,
+    pub tangent: DVector<f64>,
+}
+
+/// Coordinate-equivalent continuation data returned after a converged point
+/// triggers an internal chart change.
+///
+/// Unlike [`StepRejectionAction::Refined`], this action follows an accepted
+/// corrector and does not retry the step.  It keeps the previous and current
+/// endpoints, PALC direction, published history, and any retained endpoint
+/// seeds in one coordinate chart before event localization begins.
+#[derive(Debug, Clone)]
+pub struct PostCorrectorReparameterization {
+    pub previous_aug: DVector<f64>,
+    pub corrected_aug: DVector<f64>,
+    pub previous_tangent: DVector<f64>,
+    pub branch_states: Vec<Vec<f64>>,
+    pub active_seeds: Vec<ReparameterizationSeed>,
 }
 
 /// Generic diagnostics reported by a continuation problem at a given point.
@@ -78,7 +106,21 @@ impl TestFunctionValues {
             BifurcationType::CycleFold => self.cycle_fold,
             BifurcationType::PeriodDoubling => self.period_doubling,
             BifurcationType::NeimarkSacker => self.neimark_sacker,
-            BifurcationType::None => 0.0,
+            BifurcationType::None
+            | BifurcationType::HomoclinicNeutralSaddle
+            | BifurcationType::HomoclinicNeutralSaddleFocus
+            | BifurcationType::HomoclinicNeutralBiFocus
+            | BifurcationType::HomoclinicDoubleRealStable
+            | BifurcationType::HomoclinicDoubleRealUnstable
+            | BifurcationType::HomoclinicNeutrallyDivergentStable
+            | BifurcationType::HomoclinicNeutrallyDivergentUnstable
+            | BifurcationType::HomoclinicThreeLeadingStable
+            | BifurcationType::HomoclinicThreeLeadingUnstable
+            | BifurcationType::HomoclinicNonCentral
+            | BifurcationType::HomoclinicShilnikovHopf
+            | BifurcationType::HomoclinicBogdanovTakens
+            | BifurcationType::HomoclinicOrbitFlipUnstable
+            | BifurcationType::HomoclinicOrbitFlipStable => 0.0,
         }
     }
 
@@ -116,6 +158,32 @@ pub trait ContinuationProblem {
 
     /// Return diagnostics (test functions, eigenvalues, etc.) for bifurcation detection.
     fn diagnostics(&mut self, aug_state: &DVector<f64>) -> Result<PointDiagnostics>;
+
+    /// Return homoclinic special-point test functions when this problem
+    /// represents a homoclinic orbit to a hyperbolic saddle.
+    ///
+    /// The continuation runner uses these diagnostics both to localize named
+    /// events and to serialize the exact test values on corrected homoclinic
+    /// points. Ordinary continuation problems return `None` and therefore do
+    /// not acquire a problem-specific payload.
+    fn homoclinic_event_diagnostics(
+        &mut self,
+        _aug_state: &DVector<f64>,
+    ) -> Result<Option<HomoclinicEventDiagnostics>> {
+        Ok(None)
+    }
+
+    /// Whether homoclinic special-point tests may bracket an event between the
+    /// supplied seed and the first corrected continuation point.
+    ///
+    /// The default supports already-corrected seeds and synthetic problems.
+    /// Homoclinic formulations initialized from approximate orbit profiles
+    /// should return `false`: their first correction can change the event test
+    /// functions discontinuously even though no event lies on the corrected
+    /// branch.
+    fn detect_homoclinic_events_from_initial_seed(&self) -> bool {
+        true
+    }
 
     /// Refine a candidate's semantic classification at its corrected location.
     ///
@@ -171,6 +239,56 @@ pub trait ContinuationProblem {
             anyhow::bail!("Continuation problem cannot transfer external branch-state layouts");
         }
         Ok(branch_states.to_vec())
+    }
+
+    /// Refresh derived payloads after a persisted point's packed state has
+    /// been transferred to the problem's current discretization or coordinate
+    /// chart.
+    ///
+    /// The default intentionally preserves every payload, because most
+    /// continuation problems either do not transfer states or store no
+    /// discretization-dependent point data. Problems whose rendered geometry
+    /// is derived from the packed state should override this hook so the two
+    /// representations cannot diverge after a transfer.
+    fn refresh_persisted_point_after_state_transfer(
+        &self,
+        _point: &mut ContinuationPoint,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Transfer externally retained endpoint seeds after any discretization or
+    /// coordinate-chart changes performed by an inner extension run.
+    fn transfer_endpoint_seeds_to_current_coordinates(
+        &self,
+        seeds: &[ReparameterizationSeed],
+    ) -> Result<Vec<ReparameterizationSeed>> {
+        let expected = self.dimension() + 1;
+        if seeds
+            .iter()
+            .any(|seed| seed.aug_state.len() != expected || seed.tangent.len() != expected)
+        {
+            anyhow::bail!("Continuation problem cannot transfer external endpoint-seed layouts");
+        }
+        Ok(seeds.to_vec())
+    }
+
+    /// Optionally replace an internal coordinate chart after a converged trial.
+    ///
+    /// Implementations must prepare the complete change transactionally and
+    /// mutate their chart only after every returned state and tangent has been
+    /// transformed successfully.  The continuation runner invokes this hook
+    /// before updating gauges, computing the new tangent, or localizing an
+    /// event; it is never called from the bisection corrector.
+    fn reparameterize_after_step(
+        &mut self,
+        _previous_aug: &DVector<f64>,
+        _corrected_aug: &DVector<f64>,
+        _previous_tangent: &DVector<f64>,
+        _branch_states: &[Vec<f64>],
+        _active_seeds: &[ReparameterizationSeed],
+    ) -> Result<Option<PostCorrectorReparameterization>> {
+        Ok(None)
     }
 
     /// Optional hook called after each successful continuation step.

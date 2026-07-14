@@ -84,7 +84,6 @@ import {
   normalizeEigenvalueArray,
   normalizeBranchEigenvalues,
   trimHomoclinicLargeCycleSeedPoint,
-  isUniformNormalizedCollocationMesh,
   resolveContinuationPointParam2Value,
   resolveNormalizedCollocationMesh,
   serializeBranchDataForWasm,
@@ -116,6 +115,13 @@ import {
 } from './systemTreeCommands'
 import { validateSystemConfig } from './systemValidation'
 import { isCliSafeName } from '../utils/naming'
+import {
+  DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT,
+  DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS,
+  homoclinicExtraSelectionError,
+  homoclinicShootingSettingsError,
+  type HomoclinicDiscretization,
+} from '../system/homoclinicExtras'
 
 function findObjectIdByName(system: System, name: string): string | null {
   const match = Object.entries(system.objects).find(([, obj]) => obj.name === name)
@@ -410,7 +416,7 @@ function inferHomoclinicFixedEpsFromPoint(
   ncol: number,
   dim: number
 ): { eps0: number; eps1: number } {
-  if (!Number.isInteger(ntst) || !Number.isInteger(ncol) || ntst <= 0 || ncol <= 0 || dim <= 0) {
+  if (!Number.isInteger(ntst) || !Number.isInteger(ncol) || ntst <= 0 || ncol < 0 || dim <= 0) {
     return { eps0: 1e-2, eps1: 1e-2 }
   }
   const meshLen = (ntst + 1) * dim
@@ -1319,6 +1325,9 @@ export type Codim2BranchCreationRequest = {
   perturbation: number
   ntst: number
   ncol: number
+  homoclinicDiscretization?: HomoclinicDiscretization
+  shootingIntervals?: number
+  integrationStepsPerSegment?: number
   tolerance: number
   orientation?: 'Negative' | 'Positive'
   mode?: 1 | 2
@@ -1416,6 +1425,9 @@ export type HomoclinicFromLargeCycleRequest = {
   param2Name: string
   targetNtst: number
   targetNcol: number
+  discretization?: HomoclinicDiscretization
+  shootingIntervals?: number
+  integrationStepsPerSegment?: number
   freeTime: boolean
   freeEps0: boolean
   freeEps1: boolean
@@ -1431,6 +1443,9 @@ export type HomoclinicFromHomoclinicRequest = {
   param2Name: string
   targetNtst: number
   targetNcol: number
+  discretization?: HomoclinicDiscretization
+  shootingIntervals?: number
+  integrationStepsPerSegment?: number
   freeTime: boolean
   freeEps0: boolean
   freeEps1: boolean
@@ -5503,6 +5518,9 @@ export function AppProvider({
             perturbation: request.perturbation,
             ntst: request.ntst,
             ncol: request.ncol,
+            homoclinicDiscretization: request.homoclinicDiscretization,
+            shootingIntervals: request.shootingIntervals,
+            integrationStepsPerSegment: request.integrationStepsPerSegment,
             tolerance: request.tolerance,
             settings: request.settings,
             forward: request.forward,
@@ -5639,7 +5657,21 @@ export function AppProvider({
           startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType: storedBranchType,
           data: branchData,
-          settings: request.settings,
+          settings:
+            request.target === 'Homoclinic'
+              ? {
+                  ...request.settings,
+                  homoclinic_discretization:
+                    request.homoclinicDiscretization ?? 'collocation',
+                  ...((request.homoclinicDiscretization ?? 'collocation') === 'shooting'
+                    ? {
+                        shooting_intervals: request.shootingIntervals,
+                        integration_steps_per_segment:
+                          request.integrationStepsPerSegment,
+                      }
+                    : {}),
+                }
+              : request.settings,
           timestamp: new Date().toISOString(),
           params: [...baseParams],
           subsystemSnapshot: snapshot,
@@ -7497,8 +7529,27 @@ export function AppProvider({
         ) {
           throw new Error('Target NCOL must be a positive integer.')
         }
-        if (!request.freeTime && !request.freeEps0 && !request.freeEps1) {
-          throw new Error('At least one of T, eps0, or eps1 must be free.')
+        const discretization = request.discretization ?? 'collocation'
+        const shootingIntervals =
+          request.shootingIntervals ?? DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS
+        const integrationStepsPerSegment =
+          request.integrationStepsPerSegment ??
+          DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT
+        const shootingSettingsError = homoclinicShootingSettingsError(
+          discretization,
+          shootingIntervals,
+          integrationStepsPerSegment
+        )
+        if (shootingSettingsError) {
+          throw new Error(shootingSettingsError)
+        }
+        const extraSelectionError = homoclinicExtraSelectionError(
+          request.freeTime,
+          request.freeEps0,
+          request.freeEps1
+        )
+        if (extraSelectionError) {
+          throw new Error(extraSelectionError)
         }
 
         let sourceNtst = 20
@@ -7512,12 +7563,6 @@ export function AppProvider({
           sourceNtst,
           sourceType?.type === 'LimitCycle' ? sourceType.normalized_mesh : undefined
         )
-        if (!isUniformNormalizedCollocationMesh(sourceNormalizedMesh)) {
-          throw new Error(
-            'Homoclinic initialization from a large cycle does not yet support a nonuniform collocation mesh. Recontinue the source cycle on a uniform mesh first.'
-          )
-        }
-
         const baseParams = getBranchParams(state.system, sourceBranch)
         let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
         runConfig = applyReducedParamOverrides(runConfig, {
@@ -7541,10 +7586,14 @@ export function AppProvider({
             ),
             sourceNtst,
             sourceNcol,
+            sourceNormalizedMesh,
             parameterName: param1Name,
             param2Name,
             targetNtst: Math.round(request.targetNtst),
             targetNcol: Math.round(request.targetNcol),
+            discretization,
+            shootingIntervals,
+            integrationStepsPerSegment,
             freeTime: request.freeTime,
             freeEps0: request.freeEps0,
             freeEps1: request.freeEps1,
@@ -7578,8 +7627,11 @@ export function AppProvider({
             branch_type:
               branchData.branch_type ?? {
                 type: 'HomoclinicCurve' as const,
-                ntst: Math.round(request.targetNtst),
-                ncol: Math.round(request.targetNcol),
+                ntst:
+                  discretization === 'shooting'
+                    ? shootingIntervals
+                    : Math.round(request.targetNtst),
+                ncol: discretization === 'shooting' ? 0 : Math.round(request.targetNcol),
                 param1_name: param1DisplayName,
                 param2_name: param2DisplayName,
                 param1_ref: param1Ref,
@@ -7587,6 +7639,13 @@ export function AppProvider({
                 free_time: request.freeTime,
                 free_eps0: request.freeEps0,
                 free_eps1: request.freeEps1,
+                discretization:
+                  discretization === 'shooting'
+                    ? {
+                        type: 'shooting',
+                        integration_steps_per_segment: integrationStepsPerSegment,
+                      }
+                    : { type: 'collocation' },
               },
           },
           { stateDimension: snapshot.freeVariableNames.length }
@@ -7672,6 +7731,28 @@ export function AppProvider({
         const sourceFreeEps0 = sourceType.free_eps0
         const sourceFreeEps1 = sourceType.free_eps1
         const sourceContext = sourceBranch.data.homoc_context
+        const sourceDiscretization =
+          sourceType.discretization?.type === 'shooting' || sourceType.ncol === 0
+            ? 'shooting'
+            : 'collocation'
+        const discretization = request.discretization ?? sourceDiscretization
+        const shootingIntervals = request.shootingIntervals ?? sourceType.ntst
+        const integrationStepsPerSegment =
+          request.integrationStepsPerSegment ??
+          (sourceType.discretization?.type === 'shooting'
+            ? sourceType.discretization.integration_steps_per_segment
+            : DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT)
+        if (sourceDiscretization === 'shooting' && discretization !== 'shooting') {
+          throw new Error(
+            'Restarting a standard-shooting homoclinic branch as collocation is not yet supported. Keep Method set to Standard Shooting.'
+          )
+        }
+        const shootingSettingsError = homoclinicShootingSettingsError(
+          discretization,
+          shootingIntervals,
+          integrationStepsPerSegment
+        )
+        if (shootingSettingsError) throw new Error(shootingSettingsError)
 
         const name = request.name.trim()
         const nameError = validateBranchName(name)
@@ -7709,8 +7790,13 @@ export function AppProvider({
         ) {
           throw new Error('Target NCOL must be a positive integer.')
         }
-        if (!request.freeTime && !request.freeEps0 && !request.freeEps1) {
-          throw new Error('At least one of T, eps0, or eps1 must be free.')
+        const extraSelectionError = homoclinicExtraSelectionError(
+          request.freeTime,
+          request.freeEps0,
+          request.freeEps1
+        )
+        if (extraSelectionError) {
+          throw new Error(extraSelectionError)
         }
 
         const baseParams = getBranchParams(state.system, sourceBranch)
@@ -7782,16 +7868,24 @@ export function AppProvider({
             pointState: seedState,
             sourceNtst: sourceType.ntst,
             sourceNcol: sourceType.ncol,
+            sourceNormalizedMesh:
+              sourceDiscretization === 'collocation'
+                ? sourceType.normalized_mesh
+                : undefined,
             sourceFreeTime,
             sourceFreeEps0,
             sourceFreeEps1,
             sourceFixedTime: Number.isFinite(sourceFixedTime) ? sourceFixedTime : 1.0,
             sourceFixedEps0,
             sourceFixedEps1,
+            sourceDiscretization,
             parameterName: param1Name,
             param2Name,
             targetNtst: Math.round(request.targetNtst),
             targetNcol: Math.round(request.targetNcol),
+            discretization,
+            shootingIntervals,
+            integrationStepsPerSegment,
             freeTime: request.freeTime,
             freeEps0: request.freeEps0,
             freeEps1: request.freeEps1,
@@ -7826,8 +7920,11 @@ export function AppProvider({
             branch_type:
               branchData.branch_type ?? {
                 type: 'HomoclinicCurve' as const,
-                ntst: Math.round(request.targetNtst),
-                ncol: Math.round(request.targetNcol),
+                ntst:
+                  discretization === 'shooting'
+                    ? shootingIntervals
+                    : Math.round(request.targetNtst),
+                ncol: discretization === 'shooting' ? 0 : Math.round(request.targetNcol),
                 param1_name: param1DisplayName,
                 param2_name: param2DisplayName,
                 param1_ref: param1Ref,
@@ -7835,6 +7932,13 @@ export function AppProvider({
                 free_time: request.freeTime,
                 free_eps0: request.freeEps0,
                 free_eps1: request.freeEps1,
+                discretization:
+                  discretization === 'shooting'
+                    ? {
+                        type: 'shooting' as const,
+                        integration_steps_per_segment: integrationStepsPerSegment,
+                      }
+                    : { type: 'collocation' as const },
               },
           },
           { stateDimension: snapshot.freeVariableNames.length }
@@ -7853,7 +7957,16 @@ export function AppProvider({
           startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType: 'homoclinic_curve',
           data: normalized,
-          settings: request.settings,
+          settings: {
+            ...request.settings,
+            homoclinic_discretization: discretization,
+            ...(discretization === 'shooting'
+              ? {
+                  shooting_intervals: shootingIntervals,
+                  integration_steps_per_segment: integrationStepsPerSegment,
+                }
+              : {}),
+          },
           timestamp: new Date().toISOString(),
           params: [...baseParams],
           subsystemSnapshot: snapshot,
@@ -8118,8 +8231,13 @@ export function AppProvider({
         ) {
           throw new Error('Target NCOL must be a positive integer.')
         }
-        if (!request.freeTime && !request.freeEps0 && !request.freeEps1) {
-          throw new Error('At least one of T, eps0, or eps1 must be free.')
+        const extraSelectionError = homoclinicExtraSelectionError(
+          request.freeTime,
+          request.freeEps0,
+          request.freeEps1
+        )
+        if (extraSelectionError) {
+          throw new Error(extraSelectionError)
         }
 
         const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
