@@ -37,6 +37,9 @@ pub mod heteroclinic_shooting;
 #[path = "continuation/heteroclinic_events.rs"]
 pub mod heteroclinic_events;
 
+#[path = "continuation/heteroclinic_transport.rs"]
+pub(crate) mod heteroclinic_transport;
+
 #[path = "continuation/homoclinic_events.rs"]
 pub mod homoclinic_events;
 

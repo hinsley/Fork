@@ -2,6 +2,9 @@ use super::heteroclinic_events::{
     build_heteroclinic_orbit_flip_data, compute_heteroclinic_event_diagnostics,
     HeteroclinicEventDiagnostics, DEFAULT_HETEROCLINIC_FOCUS_TOLERANCE,
 };
+use super::heteroclinic_transport::{
+    transported_inclination_frames, InclinationFrameData,
+};
 use super::homoclinic::{
     open_profile_palc_weights, transfer_homoclinic_aug, transfer_homoclinic_state,
 };
@@ -730,6 +733,135 @@ impl<'a> HeteroclinicProblem<'a> {
             compute_jacobian(system, SystemKind::Flow, state)
         })?;
         Ok(DMatrix::from_row_slice(dim, dim, &values))
+    }
+
+    fn collocation_interval_maps(
+        &mut self,
+        decoded: &DecodedHeteroclinicState,
+        params: &[f64],
+    ) -> Result<(Vec<DMatrix<f64>>, Vec<f64>)> {
+        let dim = self.dim();
+        let stages = self.setup.ncol;
+        let duration = 2.0 * decoded.time;
+        let mut maps = Vec::with_capacity(self.setup.ntst);
+        let mut residuals = Vec::with_capacity(self.setup.ntst);
+        for interval in 0..self.setup.ntst {
+            let h = duration * self.interval_width(interval);
+            let mut jacobians = Vec::with_capacity(stages);
+            for stage in 0..stages {
+                jacobians.push(self.jacobian_at(
+                    &decoded.stage_states[interval][stage],
+                    params,
+                )?);
+            }
+
+            // Linearize the converged implicit Runge--Kutta stage equations:
+            // Z_i = I + h sum_j a_ij A_j Z_j.
+            let block_dimension = dim * stages;
+            let mut system = DMatrix::zeros(block_dimension, block_dimension);
+            let mut rhs = DMatrix::zeros(block_dimension, dim);
+            for i in 0..stages {
+                for row in 0..dim {
+                    system[(i * dim + row, i * dim + row)] = 1.0;
+                    rhs[(i * dim + row, row)] = 1.0;
+                }
+                for j in 0..stages {
+                    let scale = h * self.coefficients.a[i][j];
+                    for row in 0..dim {
+                        for column in 0..dim {
+                            system[(i * dim + row, j * dim + column)] -=
+                                scale * jacobians[j][(row, column)];
+                        }
+                    }
+                }
+            }
+            let stage_variations = system
+                .clone()
+                .lu()
+                .solve(&rhs)
+                .ok_or_else(|| anyhow!("Heteroclinic collocation tangent-stage solve failed"))?;
+            let residual = (&system * &stage_variations - &rhs).norm()
+                / (system.norm() * stage_variations.norm() + rhs.norm()).max(1.0);
+            if !residual.is_finite() {
+                bail!("Heteroclinic collocation tangent-stage residual is non-finite");
+            }
+
+            let mut map = DMatrix::identity(dim, dim);
+            for stage in 0..stages {
+                let variation = stage_variations.rows(stage * dim, dim).into_owned();
+                map += h * self.coefficients.b[stage] * &jacobians[stage] * variation;
+            }
+            if map.iter().any(|value| !value.is_finite()) {
+                bail!("Heteroclinic collocation tangent map is non-finite");
+            }
+            maps.push(map);
+            residuals.push(residual);
+        }
+        Ok((maps, residuals))
+    }
+
+    fn inclination_frames(
+        &mut self,
+        decoded: &DecodedHeteroclinicState,
+        params: &[f64],
+    ) -> Result<(InclinationFrameData, InclinationFrameData)> {
+        let dim = self.dim();
+        let source_unstable_q = basis_matrix(&self.setup.source_basis.unstable_q, dim)?;
+        let source_yu = DMatrix::from_row_slice(
+            self.setup.source_basis.nneg,
+            self.setup.source_basis.npos,
+            &decoded.source_yu,
+        );
+        let source_unstable = invariant_graph_frame(
+            &source_unstable_q,
+            self.setup.source_basis.npos,
+            &source_yu,
+        )?;
+        let target_stable_q = basis_matrix(&self.setup.target_basis.stable_q, dim)?;
+        let target_ys = DMatrix::from_row_slice(
+            self.setup.target_basis.npos,
+            self.setup.target_basis.nneg,
+            &decoded.target_ys,
+        );
+        let target_stable = invariant_graph_frame(
+            &target_stable_q,
+            self.setup.target_basis.nneg,
+            &target_ys,
+        )?;
+
+        if self.setup.target_basis.npos < 2 || self.setup.source_basis.nneg < 2 {
+            bail!("Inclination flips require source-unstable and target-stable dimensions of at least two");
+        }
+        let target_unstable_q = basis_matrix(&self.setup.target_basis.unstable_q, dim)?;
+        let target_strong_unstable = target_unstable_q
+            .columns(1, self.setup.target_basis.npos - 1)
+            .into_owned();
+        let source_stable_q = basis_matrix(&self.setup.source_basis.stable_q, dim)?;
+        let source_strong_stable = source_stable_q
+            .columns(1, self.setup.source_basis.nneg - 1)
+            .into_owned();
+
+        let source_endpoint = decoded
+            .mesh_states
+            .first()
+            .ok_or_else(|| anyhow!("Heteroclinic collocation mesh is empty"))?;
+        let target_endpoint = decoded
+            .mesh_states
+            .last()
+            .ok_or_else(|| anyhow!("Heteroclinic collocation mesh is empty"))?;
+        let source_flow = DVector::from_vec(self.flow_at(source_endpoint, params)?);
+        let target_flow = DVector::from_vec(self.flow_at(target_endpoint, params)?);
+        let (maps, residuals) = self.collocation_interval_maps(decoded, params)?;
+        transported_inclination_frames(
+            &maps,
+            &residuals,
+            &source_unstable,
+            &target_stable,
+            &target_flow,
+            &source_flow,
+            &target_strong_unstable,
+            &source_strong_stable,
+        )
     }
 
     fn set_phase_reference(
@@ -1796,6 +1928,30 @@ pub(crate) fn build_stable_normals(
     for index in 0..unstable_dim {
         graph[(stable_dim + index, index)] = 1.0;
     }
+    Ok(basis * graph)
+}
+
+pub(crate) fn invariant_graph_frame(
+    basis: &DMatrix<f64>,
+    invariant_dim: usize,
+    graph_coordinates: &DMatrix<f64>,
+) -> Result<DMatrix<f64>> {
+    let dim = basis.nrows();
+    if dim == 0
+        || basis.ncols() != dim
+        || invariant_dim == 0
+        || invariant_dim >= dim
+        || graph_coordinates.shape() != (dim - invariant_dim, invariant_dim)
+    {
+        bail!("Heteroclinic invariant graph dimensions are inconsistent");
+    }
+    let mut graph = DMatrix::zeros(dim, invariant_dim);
+    for index in 0..invariant_dim {
+        graph[(index, index)] = 1.0;
+    }
+    graph
+        .view_mut((invariant_dim, 0), (dim - invariant_dim, invariant_dim))
+        .copy_from(graph_coordinates);
     Ok(basis * graph)
 }
 
