@@ -6539,6 +6539,29 @@ mod tests {
     }
 
     #[test]
+    fn auto_periodic_schur_returns_zero_mode_beyond_dense_fallback_limit() {
+        let interval_count = 1100usize;
+        let mut transfers = vec![DMatrix::identity(2, 2); interval_count];
+        transfers[517][(0, 0)] = 0.0;
+
+        let result = floquet_computation(&transfers, FloquetBackend::Auto, true)
+            .expect("automatic large singular Floquet modes");
+        assert_eq!(result.backend, FloquetBackend::PeriodicSchur);
+        let zero_index = result
+            .multipliers
+            .iter()
+            .position(|value| value.norm() == 0.0)
+            .expect("zero multiplier");
+        assert!((result.mesh_vectors[0][zero_index][0].norm() - 1.0).abs() < 1e-12);
+        assert!(result.mesh_vectors[518][zero_index]
+            .iter()
+            .all(|value| value.norm() < 1e-12));
+        assert!(result.mesh_vectors[interval_count - 1][zero_index]
+            .iter()
+            .all(|value| value.norm() < 1e-12));
+    }
+
+    #[test]
     fn periodic_schur_and_block_cyclic_match_on_nonuniform_cocycle() {
         let interval_count = 23usize;
         let mut expected_logs = [0.0f64, 0.0f64];

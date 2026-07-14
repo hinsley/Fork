@@ -80,7 +80,7 @@ pub(super) fn periodic_schur_floquet_spectrum(
             .bases
             .as_ref()
             .ok_or_else(|| anyhow!("Periodic Schur vectors were not accumulated."))?;
-        schur_mesh_vectors(&schur.factors, bases, &input_scales, &entries)?
+        schur_mesh_vectors(&schur.factors, bases, &input_scales, &entries, transfers)?
     } else {
         Vec::new()
     };
@@ -453,7 +453,14 @@ fn safe_diagonal_product(
     let mut mantissa = Complex::new(1.0, 0.0);
     let mut binary_exponent = 0i64;
     for factor in factors {
-        mantissa *= factor[(index, index)];
+        let diagonal = factor[(index, index)];
+        let factor_scale = active_one_norm(factor, 0, factor.nrows() - 1);
+        let zero_tolerance =
+            8.0 * f64::EPSILON * factor.nrows().max(1) as f64 * factor_scale.max(f64::MIN_POSITIVE);
+        if diagonal.norm() <= zero_tolerance {
+            return Complex::new(0.0, 0.0);
+        }
+        mantissa *= diagonal;
         let magnitude = mantissa.norm();
         if magnitude == 0.0 {
             return Complex::new(0.0, 0.0);
@@ -483,20 +490,39 @@ fn schur_mesh_vectors(
     bases: &[DMatrix<Complex<f64>>],
     input_scales: &[f64],
     multipliers: &[(usize, Complex<f64>)],
+    transfers: &[DMatrix<f64>],
 ) -> Result<Vec<Vec<Vec<Complex<f64>>>>> {
     let dim = factors[0].nrows();
     let period = factors.len();
-    if bases.len() != period || input_scales.len() != period || multipliers.len() != dim {
+    if bases.len() != period
+        || input_scales.len() != period
+        || multipliers.len() != dim
+        || transfers.len() != period
+    {
         bail!("Periodic Schur mode reconstruction received inconsistent factor metadata.");
     }
-    if input_scales.contains(&0.0) {
-        bail!("Periodic Schur raw modes are not available for a singular transfer sequence.");
+
+    let zero_targets = multipliers
+        .iter()
+        .filter_map(|(target, multiplier)| (multiplier.norm() == 0.0).then_some(*target))
+        .collect::<Vec<_>>();
+    let mut modes = vec![None; dim];
+    if !zero_targets.is_empty() {
+        let zero_modes = product_free_zero_mode_mesh_vectors(transfers, zero_targets.len())?;
+        for (&target, mode) in zero_targets.iter().zip(zero_modes) {
+            modes[target] = Some(mode);
+        }
     }
 
-    let mut modes = Vec::with_capacity(dim);
     for &(target, multiplier) in multipliers {
-        if multiplier.norm() == 0.0 || !multiplier.re.is_finite() || !multiplier.im.is_finite() {
-            bail!("Periodic Schur raw modes require a finite nonzero multiplier.");
+        if multiplier.norm() == 0.0 {
+            continue;
+        }
+        if !multiplier.re.is_finite() || !multiplier.im.is_finite() {
+            bail!("Periodic Schur raw modes require finite multipliers.");
+        }
+        if input_scales.contains(&0.0) {
+            bail!("A singular transfer sequence cannot have a nonzero periodic-Schur multiplier.");
         }
         let root = canonical_periodic_root(multiplier, period);
         let local_roots = input_scales
@@ -515,41 +541,68 @@ fn schur_mesh_vectors(
         }
 
         for component in (0..target).rev() {
+            let has_zero_diagonal = factors
+                .iter()
+                .any(|factor| factor[(component, component)].norm() == 0.0);
             let mut affine = Vec::with_capacity(period);
             let mut total_log_gain = 0.0;
             for factor_index in 0..period {
                 let diagonal = factors[factor_index][(component, component)];
-                if diagonal.norm() == 0.0 {
-                    bail!(
-                        "Periodic Schur factor has a zero diagonal in triangular back-substitution."
-                    );
-                }
                 let next = (factor_index + 1) % period;
                 let coupling = (component + 1..=target)
                     .map(|column| {
                         factors[factor_index][(component, column)] * coordinates[next][column]
                     })
                     .sum::<Complex<f64>>();
-                let gain = local_roots[factor_index] / diagonal;
-                let forcing = -coupling / diagonal;
-                total_log_gain += gain.norm().ln();
-                affine.push((gain, forcing));
+                if has_zero_diagonal {
+                    // Solve the triangular recurrence backward:
+                    //
+                    //   root_k x_k - diagonal_k x_(k+1) = coupling_k.
+                    //
+                    // Dividing by the nonzero root keeps nonzero modes
+                    // well-defined when a different Schur direction is killed
+                    // by a singular local factor.
+                    affine.push((
+                        diagonal / local_roots[factor_index],
+                        coupling / local_roots[factor_index],
+                    ));
+                } else {
+                    let gain = local_roots[factor_index] / diagonal;
+                    let forcing = -coupling / diagonal;
+                    total_log_gain += gain.norm().ln();
+                    affine.push((gain, forcing));
+                }
             }
 
-            let initial = solve_cyclic_affine(&affine)?;
-            coordinates[0][component] = initial;
-            if total_log_gain <= 0.0 {
-                for factor_index in 0..period - 1 {
-                    coordinates[factor_index + 1][component] = affine[factor_index].0
-                        * coordinates[factor_index][component]
-                        + affine[factor_index].1;
+            if has_zero_diagonal {
+                let reversed = affine.iter().rev().copied().collect::<Vec<_>>();
+                let initial = solve_cyclic_affine(&reversed)?;
+                coordinates[0][component] = initial;
+                let mut next_value = initial;
+                for factor_index in (0..period).rev() {
+                    let current = affine[factor_index].0 * next_value + affine[factor_index].1;
+                    if factor_index > 0 {
+                        coordinates[factor_index][component] = current;
+                    }
+                    next_value = current;
                 }
             } else {
-                let mut next_value = initial;
-                for factor_index in (1..period).rev() {
-                    let previous = (next_value - affine[factor_index].1) / affine[factor_index].0;
-                    coordinates[factor_index][component] = previous;
-                    next_value = previous;
+                let initial = solve_cyclic_affine(&affine)?;
+                coordinates[0][component] = initial;
+                if total_log_gain <= 0.0 {
+                    for factor_index in 0..period - 1 {
+                        coordinates[factor_index + 1][component] = affine[factor_index].0
+                            * coordinates[factor_index][component]
+                            + affine[factor_index].1;
+                    }
+                } else {
+                    let mut next_value = initial;
+                    for factor_index in (1..period).rev() {
+                        let previous =
+                            (next_value - affine[factor_index].1) / affine[factor_index].0;
+                        coordinates[factor_index][component] = previous;
+                        next_value = previous;
+                    }
                 }
             }
         }
@@ -570,16 +623,165 @@ fn schur_mesh_vectors(
             let power = safe_complex_power(root, mesh_index);
             raw_mesh.push(balanced.iter().map(|value| *value * power).collect());
         }
-        modes.push(raw_mesh);
+        modes[target] = Some(raw_mesh);
     }
 
     let mut by_mesh = vec![vec![Vec::new(); dim]; period];
     for (mode_index, mode) in modes.into_iter().enumerate() {
+        let mode = mode.ok_or_else(|| {
+            anyhow!(
+                "Periodic Schur did not reconstruct raw mode {}.",
+                mode_index + 1
+            )
+        })?;
         for (mesh_index, vector) in mode.into_iter().enumerate() {
             by_mesh[mesh_index][mode_index] = vector;
         }
     }
     Ok(by_mesh)
+}
+
+/// Compute the kernel of the full periodic product without ever forming that
+/// product or the `(period * dimension)` block-cyclic operator.
+///
+/// Starting from the zero subspace at the closing boundary, walk backward and
+/// compute
+///
+/// `S_i = { x : T_i x is in S_(i+1) }`.
+///
+/// If `U` spans `S_(i+1)`, this is the nullspace of
+/// `(I - U U^T) T_i`. Each solve is only `dimension` square, so the method has
+/// the same `O(period * dimension^3)` scaling as periodic Schur.
+fn product_free_zero_mode_mesh_vectors(
+    transfers: &[DMatrix<f64>],
+    requested_modes: usize,
+) -> Result<Vec<Vec<Vec<Complex<f64>>>>> {
+    let first = transfers
+        .first()
+        .ok_or_else(|| anyhow!("Zero-multiplier modes require transfer matrices."))?;
+    let dim = first.nrows();
+    if requested_modes == 0 {
+        return Ok(Vec::new());
+    }
+    if requested_modes > dim {
+        bail!(
+            "Requested {} zero-multiplier modes for dimension {}.",
+            requested_modes,
+            dim
+        );
+    }
+
+    let mut preimage_basis = DMatrix::<f64>::zeros(dim, 0);
+    for transfer in transfers.iter().rev() {
+        let constrained = if preimage_basis.ncols() == 0 {
+            transfer.clone()
+        } else {
+            transfer - &preimage_basis * (preimage_basis.transpose() * transfer)
+        };
+        preimage_basis = numerical_nullspace(&constrained, transfer.norm())?;
+    }
+
+    if preimage_basis.ncols() < requested_modes {
+        bail!(
+            "Periodic zero multiplier has algebraic multiplicity {}, but the product-free cocycle nullspace has geometric multiplicity {}.",
+            requested_modes,
+            preimage_basis.ncols()
+        );
+    }
+    let anchors = canonical_subspace_basis(&preimage_basis, requested_modes)?;
+    let mut modes = Vec::with_capacity(requested_modes);
+    for anchor in anchors {
+        let mut current = anchor;
+        let mut mesh = Vec::with_capacity(transfers.len());
+        let mut trajectory_scale = 1.0f64;
+        for transfer in transfers {
+            mesh.push(
+                current
+                    .iter()
+                    .map(|value| Complex::new(*value, 0.0))
+                    .collect::<Vec<_>>(),
+            );
+            current = transfer * current;
+            if current.iter().any(|value| !value.is_finite()) {
+                bail!("Product-free zero-multiplier mode became non-finite.");
+            }
+            trajectory_scale = trajectory_scale.max(current.norm());
+        }
+        let closure_tolerance = 4096.0
+            * f64::EPSILON
+            * transfers.len().max(1) as f64
+            * dim.max(1) as f64
+            * trajectory_scale;
+        if current.norm() > closure_tolerance {
+            bail!(
+                "Product-free zero-multiplier mode failed closure: residual {:.3e}, tolerance {:.3e}.",
+                current.norm(),
+                closure_tolerance
+            );
+        }
+        modes.push(mesh);
+    }
+    Ok(modes)
+}
+
+fn numerical_nullspace(matrix: &DMatrix<f64>, reference_scale: f64) -> Result<DMatrix<f64>> {
+    let dim = matrix.ncols();
+    let svd = matrix.clone().svd(false, true);
+    let v_t = svd
+        .v_t
+        .ok_or_else(|| anyhow!("Singular periodic-cocycle SVD did not return right vectors."))?;
+    let tolerance = 8.0
+        * f64::EPSILON
+        * matrix.nrows().max(matrix.ncols()).max(1) as f64
+        * reference_scale.max(f64::MIN_POSITIVE);
+    let null_indices = svd
+        .singular_values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| (*value <= tolerance).then_some(index))
+        .collect::<Vec<_>>();
+    Ok(DMatrix::from_fn(dim, null_indices.len(), |row, column| {
+        v_t[(null_indices[column], row)]
+    }))
+}
+
+/// Turn an arbitrary orthonormal basis into a deterministic coordinate-pivoted
+/// basis. Projecting e_1, e_2, ... through the subspace projector removes the
+/// arbitrary rotations and signs returned by an SVD for repeated zero modes.
+fn canonical_subspace_basis(basis: &DMatrix<f64>, requested: usize) -> Result<Vec<DVector<f64>>> {
+    let dim = basis.nrows();
+    let projector = basis * basis.transpose();
+    let mut selected: Vec<DVector<f64>> = Vec::with_capacity(requested);
+    let tolerance = 4096.0 * f64::EPSILON * dim.max(1) as f64;
+    for axis in 0..dim {
+        let mut candidate = projector.column(axis).into_owned();
+        for previous in &selected {
+            candidate -= previous * previous.dot(&candidate);
+        }
+        let norm = candidate.norm();
+        if norm <= tolerance {
+            continue;
+        }
+        candidate /= norm;
+        let pivot = candidate
+            .iter()
+            .enumerate()
+            .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+        if candidate[pivot].is_sign_negative() {
+            candidate *= -1.0;
+        }
+        selected.push(candidate);
+        if selected.len() == requested {
+            return Ok(selected);
+        }
+    }
+    bail!(
+        "Could not construct {} deterministic zero-multiplier modes from a rank-{} cocycle kernel.",
+        requested,
+        basis.ncols()
+    )
 }
 
 fn solve_cyclic_affine(affine: &[(Complex<f64>, Complex<f64>)]) -> Result<Complex<f64>> {
@@ -685,6 +887,44 @@ mod tests {
             .collect::<Vec<_>>();
         logs.sort_by(f64::total_cmp);
         logs
+    }
+
+    fn assert_mode_cocycle(
+        transfers: &[DMatrix<f64>],
+        spectrum: &PeriodicSchurSpectrum,
+        mode_index: usize,
+        tolerance: f64,
+    ) {
+        for interval in 0..transfers.len() {
+            let current = DVector::from_vec(spectrum.mesh_vectors[interval][mode_index].clone());
+            let transported = transfers[interval].map(|value| Complex::new(value, 0.0)) * current;
+            let expected = if interval + 1 < transfers.len() {
+                spectrum.mesh_vectors[interval + 1][mode_index].clone()
+            } else {
+                spectrum.mesh_vectors[0][mode_index]
+                    .iter()
+                    .map(|value| *value * spectrum.multipliers[mode_index])
+                    .collect()
+            };
+            let residual = transported
+                .iter()
+                .zip(&expected)
+                .map(|(actual, expected)| (*actual - *expected).norm_sqr())
+                .sum::<f64>()
+                .sqrt();
+            let scale = transported
+                .iter()
+                .chain(&expected)
+                .map(|value| value.norm_sqr())
+                .sum::<f64>()
+                .sqrt()
+                .max(1.0);
+            assert!(
+                residual / scale <= tolerance,
+                "cocycle residual={} at interval {interval}, mode {mode_index}",
+                residual / scale
+            );
+        }
     }
 
     #[test]
@@ -819,5 +1059,121 @@ mod tests {
         assert!((logs[0] + exponent).abs() < 2e-9, "logs={logs:?}");
         assert!((logs[1] - exponent).abs() < 2e-9, "logs={logs:?}");
         assert_eq!(spectrum.mesh_vectors[0].len(), 2);
+    }
+
+    #[test]
+    fn periodic_schur_returns_product_free_zero_mode_past_dense_limit() {
+        let interval_count = 1100usize;
+        let singular_interval = 437usize;
+        let mut transfers = Vec::with_capacity(interval_count);
+        for interval in 0..interval_count {
+            let phase = 2.0 * PI * interval as f64 / interval_count as f64;
+            let next_phase = 2.0 * PI * (interval + 1) as f64 / interval_count as f64;
+            let current = rotation(0.63 * phase.sin());
+            let next = rotation(0.63 * next_phase.sin());
+            let first = if interval == singular_interval {
+                0.0
+            } else {
+                1.0001
+            };
+            let local = DMatrix::from_diagonal(&DVector::from_vec(vec![first, 1.0002]));
+            transfers.push(next * local * current.transpose());
+        }
+
+        let spectrum = periodic_schur_floquet_spectrum(&transfers, true)
+            .expect("large singular periodic Schur spectrum and raw modes");
+        let zero_index = spectrum
+            .multipliers
+            .iter()
+            .position(|value| value.norm() == 0.0)
+            .expect("one zero multiplier");
+        assert_eq!(
+            spectrum
+                .multipliers
+                .iter()
+                .filter(|value| value.norm() == 0.0)
+                .count(),
+            1
+        );
+        let anchor_norm = spectrum.mesh_vectors[0][zero_index]
+            .iter()
+            .map(|value| value.norm_sqr())
+            .sum::<f64>()
+            .sqrt();
+        assert!((anchor_norm - 1.0).abs() < 1e-10);
+        assert_mode_cocycle(&transfers, &spectrum, zero_index, 2e-10);
+    }
+
+    #[test]
+    fn periodic_schur_returns_deterministic_repeated_zero_modes() {
+        let interval_count = 31usize;
+        let mut transfers = Vec::with_capacity(interval_count);
+        for interval in 0..interval_count {
+            let phase = 2.0 * PI * interval as f64 / interval_count as f64;
+            let next_phase = 2.0 * PI * (interval + 1) as f64 / interval_count as f64;
+            let current = rotation_3d(0.4 * phase.sin(), 0.3 * phase.cos());
+            let next = rotation_3d(0.4 * next_phase.sin(), 0.3 * next_phase.cos());
+            let local = if interval == 13 {
+                DMatrix::from_diagonal(&DVector::from_vec(vec![0.0, 0.0, 1.01]))
+            } else {
+                DMatrix::from_diagonal(&DVector::from_vec(vec![1.02, 0.99, 1.01]))
+            };
+            transfers.push(next * local * current.transpose());
+        }
+
+        let first = periodic_schur_floquet_spectrum(&transfers, true)
+            .expect("repeated-zero periodic Schur modes");
+        let second = periodic_schur_floquet_spectrum(&transfers, true)
+            .expect("deterministic repeated-zero periodic Schur modes");
+        let zero_indices = first
+            .multipliers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, value)| (value.norm() == 0.0).then_some(index))
+            .collect::<Vec<_>>();
+        assert_eq!(zero_indices.len(), 2);
+        for &mode_index in &zero_indices {
+            assert_mode_cocycle(&transfers, &first, mode_index, 2e-10);
+            for component in 0..3 {
+                assert!(
+                    (first.mesh_vectors[0][mode_index][component]
+                        - second.mesh_vectors[0][mode_index][component])
+                        .norm()
+                        < 1e-12
+                );
+            }
+        }
+        let overlap = first.mesh_vectors[0][zero_indices[0]]
+            .iter()
+            .zip(&first.mesh_vectors[0][zero_indices[1]])
+            .map(|(left, right)| left.conj() * right)
+            .sum::<Complex<f64>>();
+        assert!(overlap.norm() < 1e-10);
+    }
+
+    #[test]
+    fn periodic_schur_preserves_representable_tiny_nonzero_mode() {
+        let interval_count = 1usize;
+        let target = 1.0e-14f64;
+        let local = DMatrix::from_diagonal(&DVector::from_vec(vec![
+            target.powf(1.0 / interval_count as f64),
+            1.01,
+        ]));
+        let transfers = vec![local; interval_count];
+        let spectrum = periodic_schur_floquet_spectrum(&transfers, true)
+            .expect("representable tiny periodic Schur mode");
+        assert!(spectrum.multipliers[0].norm() > 0.0);
+        assert!((spectrum.multipliers[0].norm().ln() - target.ln()).abs() < 1e-9);
+        assert_mode_cocycle(&transfers, &spectrum, 0, 2e-10);
+    }
+
+    #[test]
+    fn periodic_schur_reports_defective_zero_mode_multiplicity() {
+        let transfers = vec![DMatrix::from_row_slice(2, 2, &[0.0, 1.0, 0.0, 0.0])];
+        let error = periodic_schur_floquet_spectrum(&transfers, true)
+            .expect_err("defective zero multiplier should not fabricate a raw-mode basis");
+        let message = error.to_string();
+        assert!(message.contains("algebraic multiplicity 2"), "{message}");
+        assert!(message.contains("geometric multiplicity 1"), "{message}");
     }
 }

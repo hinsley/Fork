@@ -204,9 +204,11 @@ This reduces large-mesh Floquet work to `O(NTST * dimension^3)` arithmetic and
 cycle bifurcation detection, normal forms, and invariant-manifold seeds.
 Impact:
 Large meshes no longer fail solely because the block-cyclic matrix exceeds the dense limit. The
-block-cyclic path remains independently testable for cross-backend regression checks, repeated or
-singular small cases, and explicit diagnostics. Native and browser builds use the same algorithm
-without a platform LAPACK dependency.
+periodic-Schur path also reconstructs singular zero-multiplier modes with a backward local
+nullspace/preimage recurrence, including deterministic bases for repeated semisimple zeros, without
+forming the dense block operator. The block-cyclic path remains independently testable for
+cross-backend regression checks and explicit diagnostics. Native and browser builds use the same
+algorithm without a platform LAPACK dependency.
 References:
 `crates/fork_core/src/continuation/periodic_schur.rs`,
 `crates/fork_core/src/continuation/periodic.rs`,

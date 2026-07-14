@@ -709,8 +709,10 @@ Fork has two product-free eigensolvers for the resulting transfer sequence:
   reduces the sequence to periodic Hessenberg/triangular form, and applies an implicit complex
   single-shift periodic QR iteration, with controlled zero-shift recovery for nearly neutral
   multiplier clusters. Multipliers are recovered from the diagonal factor products in scaled
-  log-polar form. Its storage is `O(ntst × dim²)` and its leading arithmetic cost is
-  `O(ntst × dim³)`; it never constructs an `(ntst × dim)` square matrix.
+  log-polar form. Singular zero-multiplier modes are reconstructed with a backward sequence of
+  local nullspace/preimage solves, so this path remains product-free even when a transfer loses
+  rank. Its storage is `O(ntst × dim²)` and its leading arithmetic cost is `O(ntst × dim³)`; it
+  never constructs an `(ntst × dim)` square matrix.
 - **Block-cyclic reference** places the transfers in one matrix `C` of size `(ntst × dim)`:
 
 ```
@@ -759,8 +761,11 @@ coordinate space with zeros in frozen components.
 The periodic-Schur path accumulates every periodic basis and solves the upper-triangular periodic
 cocycle component by component. It emits the mode at each mesh boundary directly from the
 corresponding Schur basis, rather than repeatedly multiplying an anchor vector and amplifying a
-stable mode's roundoff contamination. The block-cyclic path accepts eigenvectors only when the
-shifted operator has the requested geometric multiplicity. Both paths report defective or
+stable mode's roundoff contamination. For a zero multiplier it instead walks the physical transfer
+sequence backward through `S_i = {x : T_i x is in S_(i+1)}`, using only state-dimension SVDs, then
+propagates a deterministic coordinate-pivoted kernel basis forward. Repeated zero modes are therefore
+stable across runs without a dense block operator. The block-cyclic path accepts eigenvectors only
+when the shifted operator has the requested geometric multiplicity. Both paths report defective or
 numerically inseparable multipliers instead of manufacturing nonexistent independent modes.
 
 Production invariant-manifold paths with stored parameter provenance rebuild their Floquet seed from
