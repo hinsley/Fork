@@ -1,5 +1,6 @@
 import {
     EquilibriumSolution,
+    ForcedPeriodicResponseSolution,
     SystemConfig,
     ContinuationBranchData,
     ContinuationEigenvalue,
@@ -172,7 +173,8 @@ export class WasmBridge {
             params: [...params],
             paramNames: [...paramNames],
             varNames: [...varNames],
-            periodicVariables: config.periodicVariables?.map((entry) => ({ ...entry }))
+            periodicVariables: config.periodicVariables?.map((entry) => ({ ...entry })),
+            periodicForcing: config.periodicForcing ? { ...config.periodicForcing } : undefined
         };
 
         this.instance = new wasmModule.WasmSystem(
@@ -184,6 +186,82 @@ export class WasmBridge {
             systemType
         ) as WasmSystem;
         this.instance.set_periods(new Float64Array(periodicPeriodsForConfig(this.config)));
+    }
+
+    validatePeriodicForcing(): number {
+        const forcing = this.config.periodicForcing;
+        if (!forcing) throw new Error("Declare periodic forcing first.");
+        return this.instance.validate_periodic_forcing(
+            forcing.symbol === 't' ? forcing.periodExpression : '',
+            forcing.symbol === 'n' ? forcing.iterationPeriod : 0
+        );
+    }
+
+    solveForcedPeriodicResponse(
+        initialGuess: number[],
+        phase: number,
+        responseMultiple: number,
+        stepsPerForcingPeriod: number,
+        maxSteps: number,
+        damping: number,
+        tolerance: number,
+        initialContext?: number
+    ): ForcedPeriodicResponseSolution {
+        const forcing = this.config.periodicForcing;
+        if (!forcing) throw new Error("Declare periodic forcing first.");
+        const strobeSeed = initialContext === undefined
+            ? initialGuess
+            : (this.instance.advance_forced_response_seed(
+                forcing.symbol === 't' ? forcing.periodExpression : '',
+                forcing.symbol === 'n' ? forcing.iterationPeriod : 0,
+                phase,
+                stepsPerForcingPeriod,
+                initialContext,
+                new Float64Array(initialGuess)
+            ) as { state: number[] }).state;
+        return this.instance.solve_forced_response(
+            forcing.symbol === 't' ? forcing.periodExpression : '',
+            forcing.symbol === 'n' ? forcing.iterationPeriod : 0,
+            phase,
+            responseMultiple,
+            stepsPerForcingPeriod,
+            new Float64Array(strobeSeed),
+            maxSteps,
+            damping,
+            tolerance
+        ) as ForcedPeriodicResponseSolution;
+    }
+
+    createForcedPeriodicResponseContinuationRunner(
+        responseState: number[],
+        parameterName: string,
+        phase: number,
+        responseMultiple: number,
+        stepsPerForcingPeriod: number,
+        settings: unknown,
+        forward: boolean
+    ): ContinuationRunner {
+        if (!wasmModule) throw new Error("WASM module not loaded");
+        const forcing = this.config.periodicForcing;
+        if (!forcing) throw new Error("Declare periodic forcing first.");
+        return new wasmModule.WasmForcedResponseRunner(
+            this.config.equations,
+            new Float64Array(this.config.params),
+            this.config.paramNames,
+            this.config.varNames,
+            this.config.solver,
+            this.config.type,
+            forcing.symbol === 't' ? forcing.periodExpression : '',
+            forcing.symbol === 'n' ? forcing.iterationPeriod : 0,
+            phase,
+            responseMultiple,
+            stepsPerForcingPeriod,
+            new Float64Array(responseState),
+            parameterName,
+            settings,
+            forward,
+            new Float64Array(periodicPeriodsForConfig(this.config))
+        ) as ContinuationRunner;
     }
 
     createEquilibriumContinuationRunner(

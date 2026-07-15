@@ -88,6 +88,31 @@ export function runEquilibriumContinuationWithProgress(
   return runContinuationRunnerWithProgress(runner, label);
 }
 
+export function runForcedPeriodicResponseContinuationWithProgress(
+  bridge: WasmBridge,
+  responseState: number[],
+  parameterName: string,
+  phase: number,
+  responseMultiple: number,
+  stepsPerForcingPeriod: number,
+  settings: any,
+  forward: boolean,
+  label: string
+): ContinuationBranchData {
+  return runContinuationRunnerWithProgress(
+    bridge.createForcedPeriodicResponseContinuationRunner(
+      responseState,
+      parameterName,
+      phase,
+      responseMultiple,
+      stepsPerForcingPeriod,
+      settings,
+      forward
+    ),
+    label
+  );
+}
+
 /**
  * Continue limit cycles with stepped progress updates.
  */

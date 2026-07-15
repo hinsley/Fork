@@ -9,6 +9,7 @@ import type {
   ManifoldStability,
   EquilibriumSolution,
   EventSeriesMode,
+  ForcedPeriodicResponseSolution,
   HeteroclinicEventDiagnostics,
   SystemConfig,
 } from '../system/types'
@@ -198,6 +199,34 @@ export type EquilibriumContinuationRequest = {
 }
 
 export type EquilibriumContinuationResult = ContinuationBranchData
+
+export type SolveForcedPeriodicResponseRequest = {
+  system: SystemConfig
+  initialGuess: number[]
+  /** Live orbit clock attached to an orbit-derived seed. */
+  initialContext?: number
+  phase: number
+  responseMultiple: number
+  stepsPerForcingPeriod: number
+  maxSteps: number
+  dampingFactor: number
+  tolerance: number
+}
+
+export type SolveForcedPeriodicResponseResult = ForcedPeriodicResponseSolution
+
+export type ForcedPeriodicResponseContinuationRequest = {
+  system: SystemConfig
+  responseState: number[]
+  parameterName: string
+  phase: number
+  responseMultiple: number
+  stepsPerForcingPeriod: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type ForcedPeriodicResponseContinuationResult = ContinuationBranchData
 
 export type ManifoldTerminationCapsRequest = {
   max_steps: number
@@ -758,6 +787,14 @@ export interface ForkCoreClient {
     request: SolveEquilibriumRequest,
     opts?: { signal?: AbortSignal }
   ): Promise<SolveEquilibriumResult>
+  solveForcedPeriodicResponse(
+    request: SolveForcedPeriodicResponseRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<SolveForcedPeriodicResponseResult>
+  runForcedPeriodicResponseContinuation(
+    request: ForcedPeriodicResponseContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<ForcedPeriodicResponseContinuationResult>
   runEquilibriumContinuation(
     request: EquilibriumContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }

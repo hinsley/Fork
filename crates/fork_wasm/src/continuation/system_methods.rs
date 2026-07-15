@@ -261,6 +261,11 @@ impl WasmSystem {
             })?;
 
         let updated_branch = match &branch.branch_type {
+            BranchType::ForcedPeriodicResponse { .. } => {
+                return Err(JsValue::from_str(
+                    "Forced-response branches are extended with WasmForcedResponseRunner.",
+                ));
+            }
             BranchType::Equilibrium => {
                 let kind = match self.system_type {
                     SystemType::Flow => SystemKind::Flow,

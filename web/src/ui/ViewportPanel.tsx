@@ -1180,6 +1180,15 @@ function collectMap1DRange(system: VisibleObjectSource, axisIndex: number): [num
       }
       continue
     }
+    if (object.type === 'forced_periodic_response') {
+      for (const point of object.solution?.cycle_points ?? []) {
+        const value = point?.[safeAxisIndex]
+        if (typeof value !== 'number' || !Number.isFinite(value)) continue
+        min = Math.min(min, value)
+        max = Math.max(max, value)
+      }
+      continue
+    }
     if (object.type === 'limit_cycle') {
       const value = object.state?.[safeAxisIndex]
       if (typeof value !== 'number' || !Number.isFinite(value)) continue
@@ -3311,6 +3320,87 @@ function buildSceneTraces(
       continue
     }
 
+    if (object.type === 'forced_periodic_response') {
+      const solution = object.solution
+      if (!solution || solution.cycle_points.length === 0) continue
+      const snapshot =
+        object.subsystemSnapshot &&
+        isSubsystemSnapshotCompatible(system.config, object.subsystemSnapshot)
+          ? object.subsystemSnapshot
+          : null
+      const states = snapshot
+        ? solution.cycle_points.map((point) => stateVectorToDisplay(snapshot, point))
+        : solution.cycle_points
+      const dimension = states[0]?.length ?? 0
+      if (dimension === 0) continue
+      const axes = resolveAxisOrder(
+        dimension,
+        Math.min(projectionPlotDim, dimension),
+        projectionAxisIndices
+      )
+      const highlight = nodeId === selectedNodeId
+      const width = node.render.lineWidth + (highlight ? 1 : 0)
+      if (isMap1D) {
+        const axis = axes[0] ?? 0
+        const cobweb = buildCobwebLineTrace(
+          buildCobwebRowsFromStates(states, {
+            closeCycle: true,
+            variableIndex: axis,
+          }),
+          {
+            name: object.name,
+            uid: nodeId,
+            color: node.render.color,
+            lineWidth: width,
+            variablePeriod: periodsByStateIndex[axis] ?? null,
+          }
+        )
+        if (cobweb) traces.push(cobweb)
+      } else if (isTimeSeries) {
+        const axis = axes[0] ?? 0
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          name: object.name,
+          uid: nodeId,
+          x: solution.contexts.slice(0, states.length),
+          y: states.map((point) => point[axis]),
+          line: { color: node.render.color, width },
+        })
+      } else if (axes.length >= 3) {
+        traces.push({
+          type: 'scatter3d',
+          mode: 'lines',
+          name: object.name,
+          uid: nodeId,
+          x: states.map((point) => point[axes[0]]),
+          y: states.map((point) => point[axes[1]]),
+          z: states.map((point) => point[axes[2]]),
+          line: { color: node.render.color, width },
+        })
+      } else if (axes.length >= 2) {
+        const split = insertPeriodicLineBreaks({
+          x: states.map((point) => point[axes[0]]),
+          y: states.map((point) => point[axes[1]]),
+          coordinatePeriods: [
+            periodsByStateIndex[axes[0]] ?? null,
+            periodsByStateIndex[axes[1]] ?? null,
+          ],
+        })
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          name: object.name,
+          uid: nodeId,
+          x: split.x,
+          y: split.y,
+          line: { color: node.render.color, width },
+          connectgaps: false,
+        })
+      }
+      continue
+    }
+
     if (object.type === 'limit_cycle') {
       const highlight = nodeId === selectedNodeId
       const selectedLimitCyclePointIndex =
@@ -4272,6 +4362,64 @@ function buildSceneTraces(
         packedStateDimension
       )
       return Number.isFinite(inferred) ? (inferred as number) : null
+    }
+
+    if (
+      branch.branchType === 'forced_periodic_response' &&
+      selectedBranchPointIndex !== null
+    ) {
+      const selected = branch.data.points[selectedBranchPointIndex]
+      const responseStates = (selected?.cycle_points ?? []).map((state) =>
+        branchSnapshot ? stateVectorToDisplay(branchSnapshot, state) : state
+      )
+      if (responseStates.length > 0 && isMap1D) {
+        const cobweb = buildCobwebLineTrace(
+          buildCobwebRowsFromStates(responseStates, {
+            closeCycle: true,
+            variableIndex: axisX,
+          }),
+          {
+            name: `${branch.name} selected response`,
+            uid: nodeId,
+            color: node.render.color,
+            lineWidth: lineWidth + 1,
+            variablePeriod: periodsByStateIndex[axisX] ?? null,
+          }
+        )
+        if (cobweb) traces.push(cobweb)
+      } else if (responseStates.length > 0 && !isTimeSeries && projectionPlotDim >= 3) {
+        traces.push({
+          type: 'scatter3d',
+          mode: 'lines',
+          name: `${branch.name} selected response`,
+          uid: nodeId,
+          x: responseStates.map((state) => state[axisX]),
+          y: responseStates.map((state) => state[axisY]),
+          z: responseStates.map((state) => state[axisZ]),
+          line: { color: node.render.color, width: lineWidth + 1 },
+          showlegend: false,
+        })
+      } else if (responseStates.length > 0 && !isTimeSeries && projectionPlotDim >= 2) {
+        const split = insertPeriodicLineBreaks({
+          x: responseStates.map((state) => state[axisX]),
+          y: responseStates.map((state) => state[axisY]),
+          coordinatePeriods: [
+            periodsByStateIndex[axisX] ?? null,
+            periodsByStateIndex[axisY] ?? null,
+          ],
+        })
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          name: `${branch.name} selected response`,
+          uid: nodeId,
+          x: split.x,
+          y: split.y,
+          line: { color: node.render.color, width: lineWidth + 1 },
+          connectgaps: false,
+          showlegend: false,
+        })
+      }
     }
 
     const isCycleLikeBranch = LIMIT_CYCLE_BRANCH_TYPES.has(branch.branchType)

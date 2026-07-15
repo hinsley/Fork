@@ -1,5 +1,7 @@
 import type { SystemConfig } from '../system/types'
 import { isCliSafeName } from '../utils/naming'
+import { usesEquationContext } from '../system/expressionContext'
+import { forcingDeclarationError } from '../system/forcing'
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 
@@ -12,6 +14,7 @@ export type SystemValidation = {
     equations?: string[]
     params?: string[]
     periodicVariables?: string[]
+    periodicForcing?: string
     solver?: string
   }
   warnings: string[]
@@ -113,6 +116,15 @@ export const validateSystemConfig = (system: SystemConfig): SystemValidation => 
     }
     if (periodicErrors.some(Boolean)) {
       errors.periodicVariables = periodicErrors
+    }
+  }
+
+  if (system.periodicForcing) {
+    const forcingError = forcingDeclarationError(system, usesEquationContext(system))
+    if (forcingError) {
+      errors.periodicForcing = forcingError
+    } else {
+      warnings.push('The forcing period is a user-declared periodicity contract.')
     }
   }
 

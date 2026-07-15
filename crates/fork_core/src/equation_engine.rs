@@ -1739,6 +1739,20 @@ pub struct EquationSystem {
     pub(crate) params_dual: RefCell<Vec<Dual>>,
 }
 
+impl Clone for EquationSystem {
+    fn clone(&self) -> Self {
+        Self {
+            equations: self.equations.clone(),
+            params: self.params.clone(),
+            param_map: self.param_map.clone(),
+            var_map: self.var_map.clone(),
+            stack_f64: RefCell::new(Vec::with_capacity(64)),
+            stack_dual: RefCell::new(Vec::with_capacity(64)),
+            params_dual: RefCell::new(Vec::new()),
+        }
+    }
+}
+
 impl EquationSystem {
     pub fn new(equations: Vec<Bytecode>, params: Vec<f64>) -> Self {
         Self {
@@ -1799,6 +1813,28 @@ impl EquationSystem {
         let mut stack = self.stack_dual.borrow_mut();
         for (i, eq) in self.equations.iter().enumerate() {
             out[i] = VM::execute_at(eq, &x_dual, &params, Dual::new(context, 0.0), &mut stack);
+        }
+    }
+
+    /// Evaluates the complete system with Dual state/context values while
+    /// seeding one stored parameter. This is used when differentiating a
+    /// numerical flow or map composition with respect to that parameter.
+    pub fn apply_dual_wrt_param(
+        &self,
+        context: Dual,
+        x: &[Dual],
+        param_idx: usize,
+        out: &mut [Dual],
+    ) {
+        self.ensure_dual_params();
+        {
+            let mut params = self.params_dual.borrow_mut();
+            params[param_idx].eps = 1.0;
+        }
+        let params = self.params_dual.borrow();
+        let mut stack = self.stack_dual.borrow_mut();
+        for (i, eq) in self.equations.iter().enumerate() {
+            out[i] = VM::execute_at(eq, x, &params, context, &mut stack);
         }
     }
 }

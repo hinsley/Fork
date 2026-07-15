@@ -664,6 +664,17 @@ pub struct ContinuationPoint {
 #[serde(tag = "type")]
 pub enum BranchType {
     Equilibrium,
+    ForcedPeriodicResponse {
+        symbol: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        period_expression: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        iteration_period: Option<usize>,
+        phase: f64,
+        response_multiple: usize,
+        steps_per_forcing_period: usize,
+        integrator: String,
+    },
     LimitCycle {
         ntst: usize,
         ncol: usize,

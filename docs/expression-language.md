@@ -37,6 +37,11 @@ maps evaluate `n` once per unit iteration and then increment it. Events and obse
 sample clock, including when the equations themselves have a frozen forcing context. Parameter
 constant expressions remain context-free: `t` and `n` are invalid there.
 
+Flow forcing-period declarations use the same context-free, parameter-only expression subset. They
+may reference parameters and constants (for example `tau / omega`) but not state variables or
+`t`/`n`. Unlike parameter constants, a forcing-period expression is reevaluated and differentiated
+at every continuation trial and must remain finite and positive.
+
 Lyapunov exponents and covariant Lyapunov vectors may be computed directly for a live
 nonautonomous system. Their spectra describe the driven state dynamics and do not add the
 artificial neutral direction that state augmentation by a phase variable would introduce.

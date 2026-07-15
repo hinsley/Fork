@@ -51,6 +51,7 @@ const wasmState = {
   lastEqManifoldExtensionPeriods: null as number[] | null,
   lastEqManifoldExtensionPointCount: null as number | null,
   lastManifold2DExtensionPointCount: null as number | null,
+  lastForcedResponseInitialGuess: null as number[] | null,
   initPromise: Promise.resolve() as Promise<void>,
   initResolver: null as null | (() => void),
 }
@@ -152,6 +153,38 @@ beforeAll(async () => {
           iterations: 2,
           jacobian: [],
           eigenpairs: [],
+        }
+      }
+      validate_periodic_forcing(periodExpression: string, iterationPeriod: number) {
+        if (!periodExpression && iterationPeriod <= 0) throw new Error('invalid forcing period')
+        return periodExpression ? Math.PI * 2 : iterationPeriod
+      }
+      advance_forced_response_seed(
+        _periodExpression: string,
+        _iterationPeriod: number,
+        _phase: number,
+        _steps: number,
+        initialContext: number,
+        initialState: Float64Array
+      ) {
+        return {
+          state: Array.from(initialState, (value) => value + initialContext),
+          context: initialContext,
+        }
+      }
+      solve_forced_response(...args: unknown[]) {
+        wasmState.lastForcedResponseInitialGuess = Array.from(args[5] as Float64Array)
+        return {
+          state: [0.25],
+          residual_norm: 1e-12,
+          iterations: 2,
+          monodromy: [0.5],
+          multipliers: [{ re: 0.5, im: 0 }],
+          cycle_points: [[0.25], [0.25]],
+          contexts: [0, 1],
+          forcing_period: 1,
+          response_multiple: 1,
+          minimal_response_multiple: 1,
         }
       }
       compute_lyapunov_exponents() {
@@ -690,6 +723,7 @@ beforeAll(async () => {
       default: vi.fn(() => wasmState.initPromise ?? Promise.resolve()),
       WasmSystem: MockWasmSystem,
       WasmEquilibriumRunner: MockWasmEquilibriumRunner,
+      WasmForcedResponseRunner: MockContinuationRunner,
       WasmEqManifold1DRunner: MockEqManifold1DRunner,
       WasmEqManifold1DExtensionRunner: MockEqManifold1DExtensionRunner,
       WasmManifold2DExtensionRunner: MockManifold2DExtensionRunner,
@@ -755,6 +789,7 @@ beforeEach(() => {
   wasmState.lastEqManifoldExtensionPeriods = null
   wasmState.lastEqManifoldExtensionPointCount = null
   wasmState.lastManifold2DExtensionPointCount = null
+  wasmState.lastForcedResponseInitialGuess = null
   wasmState.initPromise = Promise.resolve()
   wasmState.initResolver = null
 })
@@ -796,6 +831,63 @@ describe('forkCoreWorker', () => {
       id: 'job-1',
       ok: true,
       result: { points: [], bifurcations: [], indices: [] },
+    })
+  })
+
+  it('solves and continues a declared forced periodic response', async () => {
+    const handler = requireHandler()
+    const forcedSystem: SystemConfig = {
+      ...baseSystem,
+      equations: ['-x + a*cos(t)'],
+      params: [0.2],
+      paramNames: ['a'],
+      periodicForcing: { symbol: 't', periodExpression: 'tau' },
+    }
+    await handler({
+      data: {
+        id: 'job-forced-solve',
+        kind: 'solveForcedPeriodicResponse',
+        payload: {
+          system: forcedSystem,
+          initialGuess: [0],
+          initialContext: 0.5,
+          phase: 0,
+          responseMultiple: 1,
+          stepsPerForcingPeriod: 200,
+          maxSteps: 25,
+          dampingFactor: 1,
+          tolerance: 1e-9,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+    expect(workerScope.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({
+      id: 'job-forced-solve',
+      ok: true,
+      result: { state: [0.25], forcing_period: 1 },
+    })
+    expect(wasmState.lastForcedResponseInitialGuess).toEqual([0.5])
+
+    workerScope.postMessage.mockClear()
+    await handler({
+      data: {
+        id: 'job-forced-continue',
+        kind: 'runForcedPeriodicResponseContinuation',
+        payload: {
+          system: forcedSystem,
+          responseState: [0.25],
+          parameterName: 'a',
+          phase: 0.25,
+          responseMultiple: 2,
+          stepsPerForcingPeriod: 100,
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+    expect(workerScope.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({
+      id: 'job-forced-continue',
+      ok: true,
+      result: { points: [] },
     })
   })
 

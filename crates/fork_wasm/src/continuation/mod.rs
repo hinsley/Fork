@@ -24,7 +24,7 @@ mod manifold_2d_extension_runner;
 mod map_normal_forms;
 mod packed_periodic_workflows;
 mod periodic_normal_forms;
-mod runner_boundary;
+pub(crate) mod runner_boundary;
 mod shared;
 mod system_methods;
 

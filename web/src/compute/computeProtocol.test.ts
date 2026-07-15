@@ -5,10 +5,14 @@ import type {
   ContinuationProgress,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
+  ForcedPeriodicResponseContinuationRequest,
+  ForcedPeriodicResponseContinuationResult,
   SimulateOrbitRequest,
   SimulateOrbitResult,
   SolveEquilibriumRequest,
   SolveEquilibriumResult,
+  SolveForcedPeriodicResponseRequest,
+  SolveForcedPeriodicResponseResult,
 } from './ForkCoreClient'
 import {
   computeOperationKinds,
@@ -33,6 +37,8 @@ const expectedOperationKinds = [
   'computeLyapunovExponents',
   'computeCovariantLyapunovVectors',
   'solveEquilibrium',
+  'solveForcedPeriodicResponse',
+  'runForcedPeriodicResponseContinuation',
   'runEquilibriumContinuation',
   'runContinuationExtension',
   'runEquilibriumManifold1D',
@@ -61,6 +67,7 @@ const expectedOperationKinds = [
 ] as const satisfies readonly ComputeOperationKind[]
 
 const expectedProgressOperationKinds = [
+  'runForcedPeriodicResponseContinuation',
   'runEquilibriumContinuation',
   'runContinuationExtension',
   'runEquilibriumManifold1D',
@@ -108,6 +115,18 @@ describe('compute protocol', () => {
     expectTypeOf<ComputeResult<'computeIsocline'>>().toEqualTypeOf<ComputeIsoclineResult>()
     expectTypeOf<ComputeRequest<'solveEquilibrium'>>().toEqualTypeOf<SolveEquilibriumRequest>()
     expectTypeOf<ComputeResult<'solveEquilibrium'>>().toEqualTypeOf<SolveEquilibriumResult>()
+    expectTypeOf<ComputeRequest<'solveForcedPeriodicResponse'>>().toEqualTypeOf<
+      SolveForcedPeriodicResponseRequest
+    >()
+    expectTypeOf<ComputeResult<'solveForcedPeriodicResponse'>>().toEqualTypeOf<
+      SolveForcedPeriodicResponseResult
+    >()
+    expectTypeOf<ComputeRequest<'runForcedPeriodicResponseContinuation'>>().toEqualTypeOf<
+      ForcedPeriodicResponseContinuationRequest
+    >()
+    expectTypeOf<ComputeResult<'runForcedPeriodicResponseContinuation'>>().toEqualTypeOf<
+      ForcedPeriodicResponseContinuationResult
+    >()
     expectTypeOf<ComputeRequest<'runEquilibriumContinuation'>>().toEqualTypeOf<
       EquilibriumContinuationRequest
     >()

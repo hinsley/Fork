@@ -21,6 +21,8 @@ import type {
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   FoldCurveContinuationRequest,
+  ForcedPeriodicResponseContinuationRequest,
+  ForcedPeriodicResponseContinuationResult,
   ForkCoreClient,
   HomoclinicContinuationResult,
   HomoclinicFromHomoclinicRequest,
@@ -53,6 +55,8 @@ import type {
   SampleMap1DFunctionResult,
   SolveEquilibriumRequest,
   SolveEquilibriumResult,
+  SolveForcedPeriodicResponseRequest,
+  SolveForcedPeriodicResponseResult,
   SimulateOrbitRequest,
   SimulateOrbitResult,
   ValidateSystemRequest,
@@ -210,6 +214,36 @@ export class WasmForkCoreClient implements ForkCoreClient {
     const job = this.queue.enqueue(
       'runEquilibriumContinuation',
       (signal) => this.runWorker('runEquilibriumContinuation', request, signal, opts?.onProgress),
+      opts
+    )
+    return await job.promise
+  }
+
+  async solveForcedPeriodicResponse(
+    request: SolveForcedPeriodicResponseRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<SolveForcedPeriodicResponseResult> {
+    const job = this.queue.enqueue(
+      'solveForcedPeriodicResponse',
+      (signal) => this.runWorker('solveForcedPeriodicResponse', request, signal),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runForcedPeriodicResponseContinuation(
+    request: ForcedPeriodicResponseContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<ForcedPeriodicResponseContinuationResult> {
+    const job = this.queue.enqueue(
+      'runForcedPeriodicResponseContinuation',
+      (signal) =>
+        this.runWorker(
+          'runForcedPeriodicResponseContinuation',
+          request,
+          signal,
+          opts?.onProgress
+        ),
       opts
     )
     return await job.promise

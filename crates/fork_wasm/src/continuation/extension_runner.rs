@@ -1349,6 +1349,11 @@ impl WasmContinuationExtensionRunner {
 
         let branch_type = merge.branch.branch_type.clone();
         let runner_kind = match &branch_type {
+            BranchType::ForcedPeriodicResponse { .. } => {
+                return Err(JsValue::from_str(
+                    "Forced-response branches are extended with WasmForcedResponseRunner.",
+                ));
+            }
             BranchType::Equilibrium => {
                 let kind = match system_type {
                     "map" => SystemKind::Map {

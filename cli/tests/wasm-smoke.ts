@@ -16,6 +16,7 @@ const wasm = requireWasm(wasmEntry);
 const requiredExports = [
   'WasmSystem',
   'WasmEquilibriumRunner',
+  'WasmForcedResponseRunner',
   'WasmContinuationExtensionRunner',
   'WasmCodim1CurveExtensionRunner',
   'WasmFoldCurveRunner',
@@ -109,6 +110,97 @@ const frozenEquilibrium = frozenFlow.solve_equilibrium(
   1
 );
 assert.ok(Math.abs(frozenEquilibrium.state[0] - 1.25) < 1e-10);
+
+const periodicFlow = new wasm.WasmSystem(
+  ['-x + a*cos(omega*t)'],
+  new Float64Array([2, 0.4]),
+  ['omega', 'a'],
+  ['x'],
+  'rk4',
+  'flow'
+);
+const resolvedFlowPeriod = periodicFlow.validate_periodic_forcing('tau / omega', 0);
+assert.ok(Math.abs(resolvedFlowPeriod - Math.PI) < 1e-12);
+const advancedFlowSeed = periodicFlow.advance_forced_response_seed(
+  'tau / omega', 0, 0.25, 200, 0.2, new Float64Array([0])
+);
+assert.ok(Math.abs(advancedFlowSeed.context - Math.PI / 4) < 1e-12);
+assert.ok(Number.isFinite(advancedFlowSeed.state[0]));
+const flowResponse = periodicFlow.solve_forced_response(
+  'tau / omega',
+  0,
+  0,
+  1,
+  200,
+  new Float64Array([0]),
+  25,
+  1,
+  1e-9
+);
+assert.ok(Math.abs(flowResponse.state[0] - 0.08) < 1e-6);
+assert.ok(Math.abs(flowResponse.multipliers[0].re - Math.exp(-Math.PI)) < 1e-6);
+assert.equal(flowResponse.cycle_points.length, 201);
+
+const periodicMap = new wasm.WasmSystem(
+  ['0.5*x + a*cos(pi*n)'],
+  new Float64Array([1]),
+  ['a'],
+  ['x'],
+  'discrete',
+  'map'
+);
+assert.equal(periodicMap.validate_periodic_forcing('', 2), 2);
+const advancedMapSeed = periodicMap.advance_forced_response_seed(
+  '', 2, 1, 1, 2, new Float64Array([0])
+);
+assert.equal(advancedMapSeed.context, 3);
+assert.deepEqual(advancedMapSeed.state, [1]);
+const mapResponse = periodicMap.solve_forced_response(
+  '',
+  2,
+  1,
+  1,
+  1,
+  new Float64Array([0]),
+  25,
+  1,
+  1e-12
+);
+assert.equal(mapResponse.contexts.length, 3);
+assert.deepEqual(mapResponse.contexts, [1, 2, 3]);
+assert.ok(Math.abs(mapResponse.multipliers[0].re - 0.25) < 1e-12);
+
+const forcedResponseRunner = new wasm.WasmForcedResponseRunner(
+  ['-x + a*cos(omega*t)'],
+  new Float64Array([2, 0.4]),
+  ['omega', 'a'],
+  ['x'],
+  'rk4',
+  'flow',
+  'tau / omega',
+  0,
+  0,
+  1,
+  100,
+  new Float64Array(flowResponse.state),
+  'a',
+  {
+    step_size: 0.01,
+    min_step_size: 1e-5,
+    max_step_size: 0.05,
+    max_steps: 4,
+    corrector_steps: 8,
+    corrector_tolerance: 1e-8,
+    step_tolerance: 1e-8,
+  },
+  true,
+  new Float64Array([Number.NaN])
+);
+while (!forcedResponseRunner.get_progress().done) forcedResponseRunner.run_steps(1);
+const forcedResponseBranch = forcedResponseRunner.get_result();
+assert.equal(forcedResponseBranch.branch_type.type, 'ForcedPeriodicResponse');
+assert.ok(forcedResponseBranch.points.length >= 2);
+assert.ok(forcedResponseBranch.points.every((point: any) => point.cycle_points?.length === 101));
 
 const forcedLyapunov = new wasm.WasmLyapunovRunner(
   ['t*x'],

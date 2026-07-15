@@ -21,6 +21,7 @@ import { makeStableId as makeId, nowIso } from '../utils/determinism'
 import { resolveSceneAxisSelection } from './sceneAxes'
 import { normalizePeriodicVariables } from './periodicity'
 import { liftReducedFloquetVectorsForDisplay } from './floquetModes'
+import { normalizePeriodicForcing } from './forcing'
 
 const DEFAULT_SYSTEM: SystemConfig = {
   name: 'Untitled System',
@@ -1567,6 +1568,7 @@ export function updateSystem(system: System, config: SystemConfig): System {
     paramNames: [...config.paramNames],
     varNames: [...config.varNames],
     periodicVariables: normalizePeriodicVariables(config),
+    periodicForcing: normalizePeriodicForcing(config),
     solver: config.solver,
     type: config.type
   }
@@ -1703,6 +1705,7 @@ export function normalizeSystem(system: System): System {
     paramNames: [...next.config.paramNames],
     varNames: [...next.config.varNames],
     periodicVariables: normalizePeriodicVariables(next.config),
+    periodicForcing: normalizePeriodicForcing(next.config),
   }
 
   if (!next.scenes) {

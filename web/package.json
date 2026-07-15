@@ -19,7 +19,8 @@
     "test:unit:coverage": "vitest run --coverage --coverage.provider=v8 --coverage.reporter=lcov --coverage.reporter=text",
     "test:e2e": "node ./scripts/playwright-runner.mjs",
     "test:e2e:headed": "node ./scripts/playwright-runner.mjs --headed",
-    "test:real-wasm": "npm run wasm:web && node ./scripts/playwright-runner.mjs e2e/hopf-curve-limit-cycle.spec.ts"
+    "test:real-wasm": "npm run wasm:web && node ./scripts/playwright-runner.mjs e2e/hopf-curve-limit-cycle.spec.ts",
+    "test:real-wasm:forced": "npm run wasm:web && node ./scripts/playwright-runner.mjs e2e/forced-periodic-response.spec.ts"
   },
   "dependencies": {
     "fflate": "^0.8.2",

@@ -12,6 +12,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
     InspectorMetrics,
     PlotlyViewport,
     StateTable,
+    autonomousAnalysisError,
     buildSuggestedBranchName,
     continuationDraft,
     continuationError,
@@ -81,6 +82,11 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                       {`Apply valid system changes before solving ${equilibriumLabelPluralLower}.`}
                     </div>
                   ) : null}
+                  {autonomousAnalysisError ? (
+                    <div className="field-warning" data-testid="autonomous-workflow-warning">
+                      {autonomousAnalysisError}
+                    </div>
+                  ) : null}
                   <StateTable
                     title="Initial state"
                     varNames={frozenVariableHeaderNames}
@@ -140,7 +146,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                   {equilibriumError ? <div className="field-error">{equilibriumError}</div> : null}
                   <button
                     onClick={handleSolveEquilibrium}
-                    disabled={runDisabled}
+                    disabled={runDisabled || Boolean(autonomousAnalysisError)}
                     data-testid="equilibrium-solve-submit"
                   >
                     Solve {equilibriumLabel}
@@ -534,6 +540,9 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                       Apply valid system changes before continuing.
                     </div>
                   ) : null}
+                  {autonomousAnalysisError ? (
+                    <div className="field-warning">{autonomousAnalysisError}</div>
+                  ) : null}
                   {continuationParameterCount === 0 ? (
                     <p className="empty-state">Add parameters to enable continuation.</p>
                   ) : null}
@@ -712,7 +721,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                       ) : null}
                       <button
                         onClick={handleCreateEquilibriumBranch}
-                        disabled={runDisabled}
+                        disabled={runDisabled || Boolean(autonomousAnalysisError)}
                         data-testid="equilibrium-branch-submit"
                       >
                         Create Branch
@@ -736,6 +745,9 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                     <div className="field-warning">
                       Apply valid system changes before computing manifolds.
                     </div>
+                  ) : null}
+                  {autonomousAnalysisError ? (
+                    <div className="field-warning">{autonomousAnalysisError}</div>
                   ) : null}
                   {systemDraft.type === 'map' ? (
                     <p className="empty-state">
@@ -1224,7 +1236,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                       ) : null}
                       <button
                         onClick={handleCreateEquilibriumManifold}
-                        disabled={runDisabled}
+                        disabled={runDisabled || Boolean(autonomousAnalysisError)}
                         data-testid="equilibrium-manifold-submit"
                       >
                         Compute

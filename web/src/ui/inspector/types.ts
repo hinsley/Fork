@@ -26,6 +26,8 @@ export type InspectorActions = Pick<
   | 'computeLyapunovExponents'
   | 'computeCovariantLyapunovVectors'
   | 'solveEquilibrium'
+  | 'solveForcedPeriodicResponse'
+  | 'createForcedPeriodicResponseBranch'
   | 'createEquilibriumBranch'
   | 'createEquilibriumManifold1D'
   | 'extendEquilibriumManifold1D'

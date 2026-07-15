@@ -140,6 +140,16 @@ function App() {
     await actions.createIsoclineObject(name)
   }
 
+  const createForcedPeriodicResponse = async (orbitId?: string) => {
+    if (!system) return
+    const names = Object.values(system.objects).map((object) => object.name)
+    const name = suggestDefaultName('forcedPeriodicResponse', {
+      entityLabel: 'Forced response',
+      existingNames: names,
+    })
+    await actions.createForcedPeriodicResponseObject(name, orbitId)
+  }
+
   const openCreateObjectMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
     objectsTreeRef.current?.openCreateMenu({ x: event.clientX, y: event.clientY })
   }
@@ -366,6 +376,7 @@ function App() {
                 onCreateFolder={actions.createFolder}
                 onCreateOrbit={createOrbit}
                 onCreateEquilibrium={createEquilibrium}
+                onCreateForcedPeriodicResponse={createForcedPeriodicResponse}
                 onCreateIsocline={createIsocline}
                 onDuplicateNode={actions.duplicateNode}
                 onDeleteNode={actions.deleteNode}

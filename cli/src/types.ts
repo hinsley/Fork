@@ -3,6 +3,10 @@ export interface PeriodicVariableConfig {
   period: number;
 }
 
+export type PeriodicForcingConfig =
+  | { symbol: 't'; periodExpression: string }
+  | { symbol: 'n'; iterationPeriod: number };
+
 export interface SystemConfig {
   name: string;
   equations: string[];
@@ -10,6 +14,7 @@ export interface SystemConfig {
   paramNames: string[];
   varNames: string[];
   periodicVariables?: PeriodicVariableConfig[];
+  periodicForcing?: PeriodicForcingConfig;
   solver: string; // "rk4" | "tsit5" | "discrete"
   type: "flow" | "map";
 }
@@ -77,6 +82,40 @@ export interface EquilibriumObject {
   parameters?: number[]; // Snapshot of parameters when created (or last successfully solved)
   customParameters?: number[]; // Optional custom parameter override snapshot
   frozenEquationContext?: FrozenEquationContext;
+}
+
+export interface ForcedPeriodicResponseSolution {
+  state: number[];
+  residual_norm: number;
+  iterations: number;
+  monodromy: number[];
+  multipliers: ComplexValue[];
+  cycle_points: number[][];
+  contexts: number[];
+  forcing_period: number;
+  response_multiple: number;
+  minimal_response_multiple: number;
+}
+
+export interface ForcedPeriodicResponseObject {
+  type: 'forced_periodic_response';
+  name: string;
+  systemName: string;
+  origin: { type: 'manual' } | { type: 'orbit'; orbitName: string; sourceContext: number };
+  solution?: ForcedPeriodicResponseSolution;
+  lastSolverParams: {
+    initialGuess: number[];
+    phase: number;
+    responseMultiple: number;
+    stepsPerForcingPeriod: number;
+    maxSteps: number;
+    dampingFactor: number;
+    tolerance: number;
+  };
+  parameters?: number[];
+  customParameters?: number[];
+  frozenEquationContext?: FrozenEquationContext;
+  createdAt: string;
 }
 
 export interface ContinuationEigenvalue {
@@ -675,6 +714,7 @@ export interface ContinuationObject {
   startObject: string;
   branchType:
     | 'equilibrium'
+    | 'forced_periodic_response'
     | 'limit_cycle'
     | 'homoclinic_curve'
     | 'heteroclinic_curve'
@@ -723,7 +763,7 @@ export interface LimitCycleObject {
   createdAt: string;
 }
 
-export type AnalysisObject = OrbitObject | EquilibriumObject | LimitCycleObject | ContinuationObject;
+export type AnalysisObject = OrbitObject | EquilibriumObject | ForcedPeriodicResponseObject | LimitCycleObject | ContinuationObject;
 
 export interface CovariantLyapunovData {
   dim: number;

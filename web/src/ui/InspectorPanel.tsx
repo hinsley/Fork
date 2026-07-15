@@ -50,6 +50,8 @@ export function InspectorPanel({
           onComputeLyapunovExponents={actions.computeLyapunovExponents}
           onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
           onSolveEquilibrium={actions.solveEquilibrium}
+          onSolveForcedPeriodicResponse={actions.solveForcedPeriodicResponse}
+          onCreateForcedPeriodicResponseBranch={actions.createForcedPeriodicResponseBranch}
           onCreateEquilibriumBranch={actions.createEquilibriumBranch}
           onCreateEquilibriumManifold1D={actions.createEquilibriumManifold1D}
           onExtendEquilibriumManifold1D={actions.extendEquilibriumManifold1D}

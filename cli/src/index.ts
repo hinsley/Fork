@@ -11,6 +11,7 @@ import {
     EquilibriumObject,
     EquilibriumRunSummary,
     EquilibriumSolverParams,
+    ForcedPeriodicResponseObject,
     LimitCycleObject,
     PeriodicVariableConfig,
     SystemConfig,
@@ -31,6 +32,7 @@ import {
 } from './labels';
 
 import { createEquilibriumBranchForObject, createLimitCycleBranchForObject } from './continuation/create';
+import { runForcedPeriodicResponseContinuationWithProgress } from './continuation/progress';
 import { extendBranch, supportsContinuationBranchExtension } from './continuation/extend';
 import { inspectBranch } from './continuation/inspect';
 import { initiateLCFromOrbit } from './continuation/initiate-lc-from-orbit';
@@ -66,7 +68,60 @@ function objectExists(sysName: string, objectName: string): boolean {
     return Storage.listObjects(sysName).includes(objectName);
 }
 
-type ContextualAnalysisObject = OrbitObject | EquilibriumObject | LimitCycleObject;
+type ContextualAnalysisObject =
+    | OrbitObject
+    | EquilibriumObject
+    | LimitCycleObject
+    | ForcedPeriodicResponseObject;
+
+function formatPeriodicForcing(config: SystemConfig): string {
+    const forcing = config.periodicForcing;
+    if (!forcing) return 'not declared';
+    return forcing.symbol === 't'
+        ? `t period = ${forcing.periodExpression}`
+        : `n period = ${forcing.iterationPeriod}`;
+}
+
+async function editPeriodicForcing(config: SystemConfig): Promise<SystemConfig['periodicForcing']> {
+    const symbol = config.type === 'map' ? 'n' : 't';
+    const { enabled } = await inquirer.prompt({
+        type: 'confirm',
+        name: 'enabled',
+        message: `Declare periodic ${symbol}-forcing?`,
+        default: Boolean(config.periodicForcing)
+    });
+    if (!enabled) return undefined;
+    let periodicForcing: SystemConfig['periodicForcing'];
+    if (config.type === 'flow') {
+        const { periodExpression } = await inquirer.prompt({
+            name: 'periodExpression',
+            message: 'Forcing period expression:',
+            default:
+                config.periodicForcing?.symbol === 't'
+                    ? config.periodicForcing.periodExpression
+                    : 'tau'
+        });
+        periodicForcing = { symbol: 't', periodExpression: String(periodExpression).trim() };
+    } else {
+        const { iterationPeriod } = await inquirer.prompt({
+            type: 'number',
+            name: 'iterationPeriod',
+            message: 'Forcing iteration period:',
+            default:
+                config.periodicForcing?.symbol === 'n'
+                    ? config.periodicForcing.iterationPeriod
+                    : 1,
+            validate: (value: number) =>
+                Number.isSafeInteger(value) && value > 0
+                    ? true
+                    : 'Enter a positive safe integer.'
+        });
+        periodicForcing = { symbol: 'n', iterationPeriod };
+    }
+    const candidate = { ...config, periodicForcing };
+    new WasmBridge(candidate).validatePeriodicForcing();
+    return periodicForcing;
+}
 
 function printExpressionContextHelp(systemType: SystemConfig['type']): void {
     const symbol = systemType === 'map' ? 'n' : 't';
@@ -515,6 +570,12 @@ async function createSystem() {
         solver: defaultSolver
     };
 
+    try {
+        config.periodicForcing = await editPeriodicForcing(config);
+    } catch (error) {
+        console.error(chalk.red(`Periodic forcing declaration rejected: ${error instanceof Error ? error.message : String(error)}`));
+    }
+
     Storage.saveSystem(config);
     console.log(chalk.green(`System ${config.name} (${config.type}) saved!`));
 }
@@ -527,6 +588,7 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
         printField('Solver', sys.solver);
         printField('Variables', sys.varNames.join(', '));
         printField('Periods', formatPeriodicVariables(sys));
+        printField('Periodic Forcing', formatPeriodicForcing(sys));
         console.log(chalk.dim('  Equations:'));
         sys.varNames.forEach((v, i) => {
             const prefix = sys.type === 'map' ? `${v}_{n+1}` : `d${v}/dt`;
@@ -539,6 +601,7 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
             { name: 'Edit Name', value: 'Edit Name' },
             { name: 'Edit Equations', value: 'Edit Equations' },
             { name: 'Edit Variable Periods', value: 'Edit Variable Periods' },
+            { name: 'Edit Periodic Forcing', value: 'Edit Periodic Forcing' },
             { name: 'Edit Parameters', value: 'Edit Parameters' },
         ];
         if (!sys.type || sys.type === 'flow') {
@@ -560,6 +623,14 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
             return undefined;
         }
         if (action === 'Save & Back') {
+            if (sys.periodicForcing) {
+                try {
+                    new WasmBridge(sys).validatePeriodicForcing();
+                } catch (error) {
+                    console.error(chalk.red(`Periodic forcing declaration rejected: ${error instanceof Error ? error.message : String(error)}`));
+                    continue;
+                }
+            }
             if (sys.name !== originalName) {
                 Storage.deleteSystem(originalName);
             }
@@ -615,6 +686,12 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
             }
         } else if (action === 'Edit Variable Periods') {
             sys.periodicVariables = await editPeriodicVariables(sys);
+        } else if (action === 'Edit Periodic Forcing') {
+            try {
+                sys.periodicForcing = await editPeriodicForcing(sys);
+            } catch (error) {
+                console.error(chalk.red(`Periodic forcing declaration rejected: ${error instanceof Error ? error.message : String(error)}`));
+            }
         } else if (action === 'Edit Parameters') {
             while (true) {
                 const choices: any[] = sys.paramNames.map((p, i) => {
@@ -704,6 +781,9 @@ async function objectsListMenu(sysName: string) {
                 choices: [
                     { name: 'Orbit', value: 'Orbit' },
                     { name: equilibriumLabel, value: 'Equilibrium' },
+                    ...(sysConfig.periodicForcing
+                        ? [{ name: 'Forced periodic response', value: 'Forced Response' }]
+                        : []),
                     new inquirer.Separator(),
                     { name: 'Back', value: 'Back' }
                 ],
@@ -721,6 +801,8 @@ async function objectsListMenu(sysName: string) {
                 if (nav) {
                     pendingNav = nav;
                 }
+            } else if (objType === 'Forced Response') {
+                await createForcedPeriodicResponse(sysName);
             }
         } else {
             const obj = Storage.loadObject(sysName, objName) as AnalysisObject;
@@ -1048,6 +1130,313 @@ async function createEquilibrium(sysName: string): Promise<NavigationRequest | v
     return await manageEquilibrium(sysName, eq);
 }
 
+async function createForcedPeriodicResponse(sysName: string): Promise<void> {
+    const system = Storage.loadSystem(sysName);
+    if (!system.periodicForcing) {
+        printError('Declare periodic forcing before creating a forced response.');
+        return;
+    }
+    const { name } = await inquirer.prompt({
+        name: 'name',
+        message: 'Name for this Forced Periodic Response:',
+        validate: isValidName
+    });
+    if (objectExists(sysName, name)) {
+        printError(`Object "${name}" already exists.`);
+        return;
+    }
+    const orbitChoices = Storage.listObjects(sysName)
+        .map(objectName => Storage.loadObject(sysName, objectName))
+        .filter((object): object is OrbitObject => object.type === 'orbit' && object.data.length > 0)
+        .map(orbit => ({ name: `Orbit: ${orbit.name}`, value: orbit.name }));
+    const { seed } = await inquirer.prompt({
+        type: 'rawlist',
+        name: 'seed',
+        message: 'Initial strobe-state seed:',
+        choices: [
+            { name: 'Manual zero state', value: '' },
+            ...orbitChoices
+        ]
+    });
+    const orbit = seed ? Storage.loadObject(sysName, seed) as OrbitObject : null;
+    const finalSample = orbit?.data.at(-1);
+    const initialGuess = finalSample?.slice(1) ?? system.varNames.map(() => 0);
+    const response: ForcedPeriodicResponseObject = {
+        type: 'forced_periodic_response',
+        name,
+        systemName: system.name,
+        origin: orbit && finalSample
+            ? { type: 'orbit', orbitName: orbit.name, sourceContext: finalSample[0] }
+            : { type: 'manual' },
+        lastSolverParams: {
+            initialGuess,
+            phase: 0,
+            responseMultiple: 1,
+            stepsPerForcingPeriod: 200,
+            maxSteps: 25,
+            dampingFactor: 1,
+            tolerance: 1e-9
+        },
+        parameters: [...system.params],
+        createdAt: new Date().toISOString()
+    };
+    Storage.saveObject(sysName, response);
+    printSuccess(`Forced periodic response ${name} created.`);
+    await manageForcedPeriodicResponse(sysName, response);
+}
+
+async function solveForcedPeriodicResponseObject(
+    sysName: string,
+    object: ForcedPeriodicResponseObject,
+    system: SystemConfig
+): Promise<void> {
+    if (object.frozenEquationContext) {
+        printError('Stroboscopic analysis requires live t/n. Unfreeze the equation forcing context.');
+        return;
+    }
+    const defaults = object.lastSolverParams;
+    const answers = await inquirer.prompt([
+        ...system.varNames.map((variableName, index) => ({
+            name: `state_${index}`,
+            type: 'number',
+            message: `Initial ${variableName}:`,
+            default: defaults.initialGuess[index] ?? 0
+        })),
+        { name: 'phase', type: 'number', message: system.type === 'flow' ? 'Strobe phase fraction:' : 'Strobe phase residue:', default: defaults.phase },
+        { name: 'responseMultiple', type: 'number', message: 'Response multiple:', default: defaults.responseMultiple },
+        { name: 'stepsPerForcingPeriod', type: 'number', message: 'Integration steps per forcing period:', default: defaults.stepsPerForcingPeriod },
+        { name: 'maxSteps', type: 'number', message: 'Newton steps:', default: defaults.maxSteps },
+        { name: 'dampingFactor', type: 'number', message: 'Damping:', default: defaults.dampingFactor },
+        { name: 'tolerance', type: 'number', message: 'Tolerance:', default: defaults.tolerance }
+    ]);
+    const initialGuess = system.varNames.map((_, index) => Number(answers[`state_${index}`]));
+    const phase = Number(answers.phase);
+    const responseMultiple = Number(answers.responseMultiple);
+    const stepsPerForcingPeriod = Number(answers.stepsPerForcingPeriod);
+    const maxSteps = Number(answers.maxSteps);
+    const dampingFactor = Number(answers.dampingFactor);
+    const tolerance = Number(answers.tolerance);
+    if (
+        initialGuess.some(value => !Number.isFinite(value)) ||
+        !Number.isFinite(phase) ||
+        (system.type === 'map' && !Number.isSafeInteger(phase)) ||
+        !Number.isSafeInteger(responseMultiple) || responseMultiple < 1 ||
+        !Number.isSafeInteger(stepsPerForcingPeriod) || stepsPerForcingPeriod < 1 ||
+        !Number.isSafeInteger(maxSteps) || maxSteps < 1 ||
+        !Number.isFinite(dampingFactor) || dampingFactor <= 0 ||
+        !Number.isFinite(tolerance) || tolerance <= 0
+    ) {
+        printError('Forced-response solver settings are invalid.');
+        return;
+    }
+    const runConfig = {
+        ...system,
+        params: object.customParameters?.length === system.params.length
+            ? [...object.customParameters]
+            : [...system.params]
+    };
+    try {
+        const solution = new WasmBridge(runConfig).solveForcedPeriodicResponse(
+            initialGuess,
+            phase,
+            responseMultiple,
+            stepsPerForcingPeriod,
+            maxSteps,
+            dampingFactor,
+            tolerance,
+            !object.solution && object.origin.type === 'orbit'
+                ? object.origin.sourceContext
+                : undefined
+        );
+        object.solution = solution;
+        object.lastSolverParams = {
+            initialGuess: [...solution.state],
+            phase,
+            responseMultiple,
+            stepsPerForcingPeriod,
+            maxSteps,
+            dampingFactor,
+            tolerance
+        };
+        object.parameters = [...runConfig.params];
+        Storage.saveObject(sysName, object);
+        printSuccess('Forced periodic response converged.');
+    } catch (error) {
+        printError(error instanceof Error ? error.message : String(error));
+    }
+}
+
+function inspectForcedPeriodicResponse(object: ForcedPeriodicResponseObject): void {
+    printHeader(object.name, 'forced periodic response');
+    if (!object.solution) {
+        printInfo('No stored solution yet.');
+        return;
+    }
+    const solution = object.solution;
+    printField('Forcing Period', solution.forcing_period);
+    printField('Response Multiple', solution.response_multiple);
+    printField('Response Period', solution.forcing_period * solution.response_multiple);
+    printField('Residual', solution.residual_norm);
+    printField('Newton Iterations', solution.iterations);
+    printField('Trajectory Points', solution.cycle_points.length);
+    printArray('Strobe State', solution.state);
+    console.log(chalk.yellow('Multipliers'));
+    solution.multipliers.forEach((value, index) =>
+        console.log(`  μ${index + 1}: ${value.re} ${value.im < 0 ? '-' : '+'} ${Math.abs(value.im)}i`)
+    );
+    if (solution.minimal_response_multiple < solution.response_multiple) {
+        console.log(chalk.yellow(
+            `  Lower-period response detected: multiple ${solution.minimal_response_multiple}.`
+        ));
+    }
+}
+
+async function createForcedPeriodicResponseBranch(
+    sysName: string,
+    object: ForcedPeriodicResponseObject,
+    system: SystemConfig
+): Promise<void> {
+    if (!object.solution) {
+        printError('Solve the forced response before continuing it.');
+        return;
+    }
+    if (object.frozenEquationContext) {
+        printError('Stroboscopic analysis requires live t/n. Unfreeze the equation forcing context.');
+        return;
+    }
+    if (system.paramNames.length === 0) {
+        printError('Add a parameter before continuing.');
+        return;
+    }
+    const answers = await inquirer.prompt([
+        { name: 'name', message: 'Branch name:', validate: isValidName },
+        { type: 'rawlist', name: 'parameterName', message: 'Continuation parameter:', choices: system.paramNames },
+        { type: 'rawlist', name: 'direction', message: 'Direction:', choices: ['forward', 'backward'] },
+        { type: 'number', name: 'stepSize', message: 'Initial step size:', default: 0.01 },
+        { type: 'number', name: 'maxSteps', message: 'Max points:', default: 300 }
+    ]);
+    if (Storage.listBranches(sysName, object.name).includes(answers.name)) {
+        printError(`Branch "${answers.name}" already exists.`);
+        return;
+    }
+    const settings = {
+        step_size: Math.max(Number(answers.stepSize), 1e-9),
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        max_steps: Math.max(Math.trunc(Number(answers.maxSteps)), 1),
+        corrector_steps: 8,
+        corrector_tolerance: 1e-8,
+        step_tolerance: 1e-8
+    };
+    const runConfig = {
+        ...system,
+        params: object.parameters?.length === system.params.length
+            ? [...object.parameters]
+            : [...system.params]
+    };
+    try {
+        const data = runForcedPeriodicResponseContinuationWithProgress(
+            new WasmBridge(runConfig),
+            object.solution.state,
+            answers.parameterName,
+            object.lastSolverParams.phase,
+            object.lastSolverParams.responseMultiple,
+            object.lastSolverParams.stepsPerForcingPeriod,
+            settings,
+            answers.direction === 'forward',
+            'Forced response continuation'
+        );
+        const branch: ContinuationObject = {
+            type: 'continuation',
+            name: answers.name,
+            systemName: system.name,
+            parameterName: answers.parameterName,
+            parentObject: object.name,
+            startObject: object.name,
+            branchType: 'forced_periodic_response',
+            data,
+            settings,
+            timestamp: new Date().toISOString(),
+            params: [...runConfig.params]
+        };
+        Storage.saveBranch(sysName, object.name, branch);
+        printSuccess(`Branch ${branch.name} saved.`);
+    } catch (error) {
+        printError(error instanceof Error ? error.message : String(error));
+    }
+}
+
+async function manageForcedPeriodicResponse(
+    sysName: string,
+    object: ForcedPeriodicResponseObject
+): Promise<void> {
+    while (true) {
+        const system = Storage.loadSystem(sysName);
+        printHeader(object.name, 'forced periodic response');
+        printField('Periodic Forcing', formatPeriodicForcing(system));
+        printField('Status', object.solution ? 'solved' : 'not solved');
+        const { action } = await inquirer.prompt({
+            type: 'rawlist',
+            name: 'action',
+            message: 'Object Actions',
+            choices: [
+                { name: 'Inspect Data', value: 'inspect' },
+                { name: 'Solve / Rerun', value: 'solve' },
+                { name: 'Create Continuation Branch', value: 'continue' },
+                { name: 'Branches', value: 'branches' },
+                ...(usesEquationContext(system)
+                    ? [{ name: 'Equation Forcing Context', value: 'forcing-context' }]
+                    : []),
+                new inquirer.Separator(),
+                { name: 'Delete Object', value: 'delete' },
+                { name: 'Back', value: 'back' }
+            ]
+        });
+        if (action === 'back') return;
+        if (action === 'inspect') inspectForcedPeriodicResponse(object);
+        if (action === 'solve') {
+            await solveForcedPeriodicResponseObject(sysName, object, system);
+            object = Storage.loadObject(sysName, object.name) as ForcedPeriodicResponseObject;
+        }
+        if (action === 'continue') await createForcedPeriodicResponseBranch(sysName, object, system);
+        if (action === 'forcing-context') {
+            await configureEquationForcingContext(sysName, object, system);
+            object = Storage.loadObject(sysName, object.name) as ForcedPeriodicResponseObject;
+        }
+        if (action === 'branches') {
+            const names = Storage.listBranches(sysName, object.name);
+            if (names.length === 0) {
+                printInfo('No branches stored.');
+                continue;
+            }
+            const { branchName } = await inquirer.prompt({
+                type: 'rawlist',
+                name: 'branchName',
+                message: 'Branches:',
+                choices: [...names, new inquirer.Separator(), 'Back']
+            });
+            if (branchName !== 'Back') {
+                await manageBranch(
+                    sysName,
+                    Storage.loadBranch(sysName, object.name, branchName) as ContinuationObject
+                );
+            }
+        }
+        if (action === 'delete') {
+            const { confirm } = await inquirer.prompt({
+                type: 'confirm',
+                name: 'confirm',
+                message: `Delete ${object.name}?`,
+                default: false
+            });
+            if (confirm) {
+                Storage.deleteObject(sysName, object.name);
+                return;
+            }
+        }
+    }
+}
+
 async function manageObject(
     sysName: string,
     obj: AnalysisObject,
@@ -1058,6 +1447,9 @@ async function manageObject(
     }
     if (obj.type === 'equilibrium') {
         return await manageEquilibrium(sysName, obj as EquilibriumObject, nav);
+    }
+    if (obj.type === 'forced_periodic_response') {
+        return await manageForcedPeriodicResponse(sysName, obj as ForcedPeriodicResponseObject);
     }
     if (obj.type === 'limit_cycle') {
         return await manageLimitCycle(sysName, obj as LimitCycleObject, nav);

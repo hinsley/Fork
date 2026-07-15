@@ -24,6 +24,8 @@ import type {
   EquilibriumManifold2DResult,
   EventSeriesResult,
   FoldCurveContinuationRequest,
+  ForcedPeriodicResponseContinuationRequest,
+  ForcedPeriodicResponseContinuationResult,
   HomoclinicContinuationResult,
   HomoclinicFromHomoclinicRequest,
   HomoclinicFromHomotopySaddleRequest,
@@ -57,6 +59,8 @@ import type {
   SimulateOrbitResult,
   SolveEquilibriumRequest,
   SolveEquilibriumResult,
+  SolveForcedPeriodicResponseRequest,
+  SolveForcedPeriodicResponseResult,
   ValidateSystemRequest,
   ValidateSystemResult,
 } from '../ForkCoreClient'
@@ -471,6 +475,84 @@ async function runEquilibriumContinuation(
     new Float64Array(periodicPeriodsForConfig(request.system))
   )
 
+  return runAdaptiveSteppedRunnerToCompletion(runner, signal, onProgress)
+}
+
+function periodicForcingArgs(system: SystemConfig): [string, number] {
+  const forcing = system.periodicForcing
+  if (!forcing) {
+    throw new Error('Stroboscopic analysis requires a periodic forcing declaration.')
+  }
+  if (system.type === 'flow' && forcing.symbol === 't') {
+    return [forcing.periodExpression, 0]
+  }
+  if (system.type === 'map' && forcing.symbol === 'n') {
+    return ['', forcing.iterationPeriod]
+  }
+  throw new Error('The periodic forcing declaration does not match the system type.')
+}
+
+async function runSolveForcedPeriodicResponse(
+  request: SolveForcedPeriodicResponseRequest,
+  signal: AbortSignal
+): Promise<SolveForcedPeriodicResponseResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = createWasmSystem(wasm, request.system)
+  const [periodExpression, iterationPeriod] = periodicForcingArgs(request.system)
+  abortIfNeeded(signal)
+  let initialGuess = request.initialGuess
+  if (request.initialContext !== undefined) {
+    const advanced = system.advance_forced_response_seed(
+      periodExpression,
+      iterationPeriod,
+      request.phase,
+      request.stepsPerForcingPeriod,
+      request.initialContext,
+      new Float64Array(initialGuess)
+    ) as { state: number[] }
+    initialGuess = advanced.state
+  }
+  abortIfNeeded(signal)
+  return system.solve_forced_response(
+    periodExpression,
+    iterationPeriod,
+    request.phase,
+    request.responseMultiple,
+    request.stepsPerForcingPeriod,
+    new Float64Array(initialGuess),
+    request.maxSteps,
+    request.dampingFactor,
+    request.tolerance
+  )
+}
+
+async function runForcedPeriodicResponseContinuation(
+  request: ForcedPeriodicResponseContinuationRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<ForcedPeriodicResponseContinuationResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const [periodExpression, iterationPeriod] = periodicForcingArgs(request.system)
+  const runner = new wasm.WasmForcedResponseRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type,
+    periodExpression,
+    iterationPeriod,
+    request.phase,
+    request.responseMultiple,
+    request.stepsPerForcingPeriod,
+    new Float64Array(request.responseState),
+    request.parameterName,
+    { ...request.settings },
+    request.forward,
+    new Float64Array(periodicPeriodsForConfig(request.system))
+  )
   return runAdaptiveSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
@@ -2122,7 +2204,10 @@ async function runValidateSystem(
     abortIfNeeded(signal)
     // Attempt full system compile first for a fast pass.
     const instance = createWasmSystem(wasm, system)
-    void instance
+    if (system.periodicForcing) {
+      const [periodExpression, iterationPeriod] = periodicForcingArgs(system)
+      instance.validate_periodic_forcing(periodExpression, iterationPeriod)
+    }
     return { ok: true, equationErrors }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -2157,6 +2242,8 @@ const handlers = {
   computeLyapunovExponents: runLyapunovExponents,
   computeCovariantLyapunovVectors: runCovariantLyapunovVectors,
   solveEquilibrium: runSolveEquilibrium,
+  solveForcedPeriodicResponse: runSolveForcedPeriodicResponse,
+  runForcedPeriodicResponseContinuation,
   runEquilibriumContinuation,
   runContinuationExtension,
   runEquilibriumManifold1D,

@@ -21,6 +21,26 @@ References:
 
 ---
 
+### 2026-07-14: Continue periodic forced responses with a stroboscopic return map
+Context:
+Periodic `t`-forced flows and `n`-forced maps need phase-locked continuation without changing every
+state-space contract.
+Decision:
+Declare a forcing period and solve fixed points of a fixed-phase stroboscopic return operator. Dual
+propagation covers the full operator, including parameter-dependent flow periods and endpoints.
+Autonomous limit cycles retain orthogonal collocation as their default and remain a separate
+workflow.
+Why:
+This reuses PALC, preserves state dimensions, and gives the physical forced-response multipliers
+without an artificial neutral phase direction.
+Impact:
+Fork localizes forced-response folds, period doublings, and Neimark-Sacker points. Live forcing is
+required. Switching, normal forms, two-parameter curves, compact phase augmentation, and
+quasiperiodic multi-angle continuation remain follow-ups.
+References:
+`crates/fork_core/src/forced_response.rs`, `crates/fork_wasm/src/forced_response.rs`,
+`docs/forced_periodic_responses.md`
+
 ### 2026-07-14: Keep forcing context external to state and freeze it object-locally
 Context:
 Flows need equation time `t` and maps need iteration index `n`, but unconditional state

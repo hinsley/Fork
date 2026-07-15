@@ -14,6 +14,7 @@ import {
   parsePeriodExpression,
 } from '../../system/periodicity'
 import type { SystemStringDefinition } from '../../system/systemString'
+import { normalizePeriodicForcing } from '../../system/forcing'
 import { SystemStringTools } from './SystemStringTools'
 import type { SystemEditorActions } from './types'
 
@@ -28,6 +29,9 @@ type SystemDraft = {
   params: string[]
   equations: string[]
   periodicVariables: Array<{ enabled: boolean; period: string }>
+  periodicForcingEnabled: boolean
+  flowPeriodExpression: string
+  mapIterationPeriod: string
 }
 
 type EditorState = {
@@ -56,6 +60,7 @@ function adjustArray<T>(values: T[], targetLength: number, fill: () => T): T[] {
 
 function makeDraft(config: SystemConfig): SystemDraft {
   const periodic = normalizePeriodicVariables(config)
+  const forcing = normalizePeriodicForcing(config)
   return {
     name: config.name,
     type: config.type,
@@ -68,6 +73,9 @@ function makeDraft(config: SystemConfig): SystemDraft {
       enabled: periodic[index]?.enabled ?? false,
       period: String(periodic[index]?.period ?? DEFAULT_VARIABLE_PERIOD),
     })),
+    periodicForcingEnabled: Boolean(forcing),
+    flowPeriodExpression: forcing?.symbol === 't' ? forcing.periodExpression : 'tau',
+    mapIterationPeriod: forcing?.symbol === 'n' ? String(forcing.iterationPeriod) : '2',
   }
 }
 
@@ -133,16 +141,21 @@ function buildConfig(draft: SystemDraft): SystemConfig {
       enabled: entry.enabled,
       period: parsePeriodExpression(entry.period) ?? Number.NaN,
     })),
+    periodicForcing: !draft.periodicForcingEnabled
+      ? undefined
+      : draft.type === 'flow'
+        ? { symbol: 't', periodExpression: draft.flowPeriodExpression.trim() }
+        : { symbol: 'n', iterationPeriod: Number(draft.mapIterationPeriod) },
   }
 }
 
 function configsEqual(left: SystemConfig, right: SystemConfig): boolean {
-  return JSON.stringify({ ...left, periodicVariables: normalizePeriodicVariables(left) }) ===
-    JSON.stringify({ ...right, periodicVariables: normalizePeriodicVariables(right) })
+  return JSON.stringify({ ...left, periodicVariables: normalizePeriodicVariables(left), periodicForcing: normalizePeriodicForcing(left) }) ===
+    JSON.stringify({ ...right, periodicVariables: normalizePeriodicVariables(right), periodicForcing: normalizePeriodicForcing(right) })
 }
 
 function configKey(config: SystemConfig): string {
-  return JSON.stringify({ ...config, periodicVariables: normalizePeriodicVariables(config) })
+  return JSON.stringify({ ...config, periodicVariables: normalizePeriodicVariables(config), periodicForcing: normalizePeriodicForcing(config) })
 }
 
 function formatValues(values: string[]): string {
@@ -321,6 +334,7 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
       ...previous,
       type,
       solver: type === 'map' ? 'discrete' : FLOW_SOLVERS.includes(previous.solver) ? previous.solver : 'rk4',
+      periodicForcingEnabled: false,
     }))
   }
 
@@ -397,6 +411,43 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
                 ) : null}
               </div>
               {validation.warnings.length > 0 ? <div className="field-warning system-editor__message">{validation.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}
+              <div className="periodic-control system-editor__forcing" data-testid="system-periodic-forcing">
+                <label className="periodic-control__toggle">
+                  <input
+                    type="checkbox"
+                    checked={draft.periodicForcingEnabled}
+                    onChange={(event) => setDraft((previous) => ({ ...previous, periodicForcingEnabled: event.target.checked }))}
+                    data-testid="system-periodic-forcing-enabled"
+                  />
+                  Periodic forcing
+                </label>
+                {draft.periodicForcingEnabled ? (
+                  draft.type === 'flow' ? (
+                    <label className="system-editor__field">
+                      <span>Forcing period expression</span>
+                      <input
+                        value={draft.flowPeriodExpression}
+                        placeholder="e.g. tau / omega"
+                        onChange={(event) => setDraft((previous) => ({ ...previous, flowPeriodExpression: event.target.value }))}
+                        data-testid="system-forcing-period-expression"
+                      />
+                    </label>
+                  ) : (
+                    <label className="system-editor__field">
+                      <span>Forcing period (iterations)</span>
+                      <input
+                        type="number"
+                        step="1"
+                        value={draft.mapIterationPeriod}
+                        onChange={(event) => setDraft((previous) => ({ ...previous, mapIterationPeriod: event.target.value }))}
+                        data-testid="system-forcing-iteration-period"
+                      />
+                    </label>
+                  )
+                ) : null}
+                {showErrors && validation.errors.periodicForcing ? <span className="field-error" data-testid="system-periodic-forcing-error">{validation.errors.periodicForcing}</span> : null}
+                {draft.periodicForcingEnabled ? <span className="field-warning">This declares the forcing periodicity used by stroboscopic response analysis; Fork does not infer it from the equations.</span> : null}
+              </div>
             </div>
           ) : null}
         </section>

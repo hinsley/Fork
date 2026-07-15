@@ -54,6 +54,7 @@ export function formatObjectTypeLabel(
     })
   }
   if (object.type === 'limit_cycle') return 'limit cycle'
+  if (object.type === 'forced_periodic_response') return 'forced periodic response'
   if (object.type === 'orbit') return 'orbit'
   return object.type
 }

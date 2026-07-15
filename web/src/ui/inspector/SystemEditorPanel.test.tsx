@@ -5,11 +5,17 @@ import { createSystem } from '../../system/model'
 import { SystemEditorPanel } from './SystemEditorPanel'
 import type { SystemEditorActions } from './types'
 
-function renderEditor(options: { withParameter?: boolean } = {}) {
+function renderEditor(options: { withParameter?: boolean; forcedFlow?: boolean } = {}) {
   const system = createSystem({ name: 'Editor_Test' })
   if (options.withParameter) {
     system.config.paramNames = ['old_parameter']
     system.config.params = [99]
+  }
+  if (options.forcedFlow) {
+    system.config.equations[0] = 'y + cos(omega*t)'
+    system.config.paramNames = ['omega']
+    system.config.params = [2]
+    system.config.periodicForcing = { symbol: 't', periodExpression: 'tau / omega' }
   }
   const actions: SystemEditorActions = {
     updateSystem: vi.fn().mockResolvedValue(undefined),
@@ -45,6 +51,24 @@ describe('SystemEditorPanel', () => {
     expect(screen.queryByTestId('system-periodic-period-0')).not.toBeInTheDocument()
     await user.click(screen.getByTestId('system-periodic-enabled-0'))
     expect(screen.getByTestId('system-periodic-period-0')).toBeVisible()
+  })
+
+  it('conditionally renders and persists the forcing-period declaration', async () => {
+    const user = userEvent.setup()
+    const { actions } = renderEditor({ forcedFlow: true })
+
+    expect(screen.getByTestId('system-forcing-period-expression')).toHaveValue('tau / omega')
+    await user.clear(screen.getByTestId('system-forcing-period-expression'))
+    await user.type(screen.getByTestId('system-forcing-period-expression'), 'tau / (2*omega)')
+    await user.click(screen.getByTestId('system-apply'))
+
+    await waitFor(() => expect(actions.updateSystem).toHaveBeenCalledOnce())
+    expect(actions.updateSystem).toHaveBeenCalledWith(expect.objectContaining({
+      periodicForcing: { symbol: 't', periodExpression: 'tau / (2*omega)' },
+    }))
+
+    await user.click(screen.getByTestId('system-periodic-forcing-enabled'))
+    expect(screen.queryByTestId('system-forcing-period-expression')).not.toBeInTheDocument()
   })
 
   it('documents the expression language and its piecewise autodiff caveat', async () => {

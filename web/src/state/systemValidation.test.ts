@@ -167,4 +167,28 @@ describe('validateSystemConfig', () => {
     )
     expect(flowResult.errors.solver).toBeUndefined()
   })
+
+  it('validates periodic forcing against context and system type', () => {
+    const flow = validateSystemConfig(buildConfig({
+      equations: ['-x + cos(omega*t)'],
+      paramNames: ['omega'],
+      params: [2],
+      periodicForcing: { symbol: 't', periodExpression: 'tau / omega' },
+    }))
+    expect(flow.errors.periodicForcing).toBeUndefined()
+    expect(flow.warnings).toContain('The forcing period is a user-declared periodicity contract.')
+
+    const noContext = validateSystemConfig(buildConfig({
+      periodicForcing: { symbol: 't', periodExpression: 'tau' },
+    }))
+    expect(noContext.errors.periodicForcing).toContain('contextual t/n')
+
+    const map = validateSystemConfig(buildConfig({
+      type: 'map',
+      solver: 'discrete',
+      equations: ['x + cos(pi*n)'],
+      periodicForcing: { symbol: 'n', iterationPeriod: 0 },
+    }))
+    expect(map.errors.periodicForcing).toBe('Map forcing period must be a positive safe integer.')
+  })
 })

@@ -25,6 +25,7 @@ import type {
   Codim2PointData,
   ContinuationObject,
   EquilibriumObject,
+  ForcedPeriodicResponseObject,
   IsoclineObject,
   LimitCycleObject,
   OrbitObject,
@@ -212,6 +213,120 @@ function renderInspectorForStateSpaceStride(
 }
 
 describe('InspectorDetailsPanel', () => {
+  it('solves and continues forced periodic responses with live forcing', async () => {
+    const config: SystemConfig = {
+      name: 'Forced_Flow',
+      equations: ['-x + a*cos(t)'],
+      params: [0.2],
+      paramNames: ['a'],
+      varNames: ['x'],
+      solver: 'rk4',
+      type: 'flow',
+      periodicForcing: { symbol: 't', periodExpression: 'tau' },
+    }
+    const base = createSystem({ name: config.name, config })
+    const response: ForcedPeriodicResponseObject = {
+      type: 'forced_periodic_response',
+      name: 'Forced_1',
+      systemName: config.name,
+      origin: { type: 'manual' },
+      solution: {
+        state: [0.1],
+        residual_norm: 1e-12,
+        iterations: 2,
+        monodromy: [0.5],
+        multipliers: [{ re: 0.5, im: 0 }],
+        cycle_points: [[0.1], [0.2], [0.1]],
+        contexts: [0, Math.PI, 2 * Math.PI],
+        forcing_period: 2 * Math.PI,
+        response_multiple: 1,
+        minimal_response_multiple: 1,
+      },
+      solutionProvenance: {
+        systemType: 'flow',
+        solver: 'rk4',
+        periodicForcing: { symbol: 't', periodExpression: 'tau' },
+        phase: 0,
+        responseMultiple: 1,
+        stepsPerForcingPeriod: 200,
+        parameters: [0.2],
+        subsystemHash: buildSubsystemSnapshot(config).hash,
+      },
+      lastSolverParams: {
+        initialGuess: [0],
+        phase: 0,
+        responseMultiple: 1,
+        stepsPerForcingPeriod: 200,
+        maxSteps: 25,
+        dampingFactor: 1,
+        tolerance: 1e-9,
+      },
+      parameters: [0.2],
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(base, response)
+    const onSolve = vi.fn().mockResolvedValue(undefined)
+    const onContinue = vi.fn().mockResolvedValue(undefined)
+    render(
+      <InspectorDetailsPanel
+        system={added.system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onSolveForcedPeriodicResponse={onSolve}
+        onCreateForcedPeriodicResponseBranch={onContinue}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+    expect(screen.getByTestId('action-forced-response-solver-toggle')).toHaveTextContent(
+      'Solve forced response'
+    )
+    expect(screen.getByTestId('action-forced-response-data-toggle')).toHaveTextContent(
+      'View Data'
+    )
+    expect(screen.getByTestId('action-forced-response-continuation-toggle')).toHaveTextContent(
+      'Continue forced response'
+    )
+    expect(screen.getByText('Forcing period')).toBeInTheDocument()
+    expect(screen.getByText(/μ1 =/)).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('forced-response-solve-submit'))
+    await waitFor(() => expect(onSolve).toHaveBeenCalledWith(expect.objectContaining({
+      responseId: added.nodeId,
+      responseMultiple: 1,
+      stepsPerForcingPeriod: 200,
+    })))
+    fireEvent.click(screen.getByTestId('forced-response-branch-submit'))
+    await waitFor(() => expect(onContinue).toHaveBeenCalledWith(expect.objectContaining({
+      responseId: added.nodeId,
+      parameterName: 'a',
+    })))
+    fireEvent.change(screen.getByTestId('forced-response-phase'), {
+      target: { value: '0.25' },
+    })
+    expect(screen.getByTestId('forced-response-stale')).toBeInTheDocument()
+    expect(screen.getByTestId('forced-response-branch-submit')).toBeDisabled()
+  })
+
   it('validates adaptive mesh integers exactly and ignores stale disabled fields', () => {
     expect(
       buildCollocationAdaptivitySettings({

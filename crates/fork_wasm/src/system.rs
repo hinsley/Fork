@@ -13,6 +13,7 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub struct WasmSystem {
     pub(crate) system: EquationSystem,
+    pub(crate) param_names: Vec<String>,
     state: Vec<f64>,
     t: f64,
     pub(crate) solver: SolverType,
@@ -136,6 +137,7 @@ impl WasmSystem {
 
         Ok(WasmSystem {
             system,
+            param_names,
             state: vec![0.0; dim],
             t: 0.0,
             solver,

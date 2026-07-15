@@ -10,6 +10,7 @@ mod analysis;
 mod continuation;
 mod equilibrium;
 mod event_series;
+mod forced_response;
 mod system;
 
 pub use analysis::{WasmCovariantLyapunovRunner, WasmLyapunovRunner};
@@ -22,4 +23,5 @@ pub use continuation::{
     WasmLimitCycleRunner, WasmManifold2DExtensionRunner, WasmNSCurveRunner, WasmPDCurveRunner,
 };
 pub use equilibrium::WasmEquilibriumSolverRunner;
+pub use forced_response::WasmForcedResponseRunner;
 pub use system::WasmSystem;

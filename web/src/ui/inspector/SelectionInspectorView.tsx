@@ -1,6 +1,7 @@
 import type { InspectorSelectionController } from '../InspectorDetailsPanel'
 import { OrbitInspectorSections } from './sections/OrbitInspectorSections'
 import { EquilibriumInspectorSections } from './sections/EquilibriumInspectorSections'
+import { ForcedPeriodicResponseInspectorSections } from './sections/ForcedPeriodicResponseInspectorSections'
 import { LimitCycleInspectorSections } from './sections/LimitCycleInspectorSections'
 import { LimitCycleManifoldSection } from './sections/LimitCycleManifoldSection'
 import { IsoclineInspectorSections } from './sections/IsoclineInspectorSections'
@@ -462,6 +463,8 @@ export function SelectionInspectorView({
           <OrbitInspectorSections scope={scope} />
 
           <EquilibriumInspectorSections scope={scope} />
+
+          <ForcedPeriodicResponseInspectorSections scope={scope} />
 
           {limitCycle ? (
             <InspectorDisclosure

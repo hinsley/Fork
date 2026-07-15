@@ -12,6 +12,7 @@ import type {
   ContinuationSettings,
   EquilibriumEigenvectorRenderStyle,
   EquilibriumObject,
+  ForcedPeriodicResponseObject,
   FrozenEquationContext,
   IsoclineObject,
   LimitCycleObject,
@@ -56,6 +57,8 @@ import type {
   EquilibriumManifold2DRequest,
   EquilibriumContinuationRequest,
   EquilibriumSolveRequest,
+  ForcedPeriodicResponseContinuationRequest,
+  ForcedPeriodicResponseSolveRequest,
   FoldCurveContinuationRequest,
   HomoclinicFromHomoclinicRequest,
   HomoclinicFromHomotopySaddleRequest,
@@ -214,6 +217,12 @@ type InspectorDetailsPanelProps = {
   onComputeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
   onComputeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
+  onSolveForcedPeriodicResponse?: (
+    request: ForcedPeriodicResponseSolveRequest
+  ) => Promise<void>
+  onCreateForcedPeriodicResponseBranch?: (
+    request: ForcedPeriodicResponseContinuationRequest
+  ) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   onCreateEquilibriumManifold1D?: (
     request: EquilibriumManifold1DRequest
@@ -269,6 +278,7 @@ type InspectorDetailsPanelProps = {
 }
 
 const STATE_SPACE_STRIDE_BRANCH_TYPES: ReadonlySet<ContinuationObject['branchType']> = new Set([
+  'forced_periodic_response',
   'limit_cycle',
   'isoperiodic_curve',
   'homoclinic_curve',
@@ -326,6 +336,16 @@ type EquilibriumSolveDraft = {
   maxSteps: string
   dampingFactor: string
   mapIterations: string
+}
+
+type ForcedPeriodicResponseSolveDraft = {
+  initialGuess: string[]
+  phase: string
+  responseMultiple: string
+  stepsPerForcingPeriod: string
+  maxSteps: string
+  dampingFactor: string
+  tolerance: string
 }
 
 type LimitCycleFromOrbitDraft = CollocationAdaptivityDraft & {
@@ -1233,9 +1253,37 @@ function makeEquilibriumSolveDraft(
   }
 }
 
+function makeForcedPeriodicResponseSolveDraft(
+  system: SystemConfig,
+  response?: ForcedPeriodicResponseObject
+): ForcedPeriodicResponseSolveDraft {
+  const stored = response?.lastSolverParams
+  return {
+    initialGuess: adjustArray(
+      (stored?.initialGuess ?? response?.solution?.state ?? system.varNames.map(() => 0)).map(
+        (value) => value.toString()
+      ),
+      system.varNames.length,
+      () => '0'
+    ),
+    phase: (stored?.phase ?? 0).toString(),
+    responseMultiple: (stored?.responseMultiple ?? 1).toString(),
+    stepsPerForcingPeriod: (stored?.stepsPerForcingPeriod ?? 200).toString(),
+    maxSteps: (stored?.maxSteps ?? 25).toString(),
+    dampingFactor: (stored?.dampingFactor ?? 1).toString(),
+    tolerance: (stored?.tolerance ?? 1e-9).toString(),
+  }
+}
+
 function makeParamOverrideDraft(
   system: SystemConfig,
-  object?: OrbitObject | EquilibriumObject | LimitCycleObject | IsoclineObject | null
+  object?:
+    | OrbitObject
+    | EquilibriumObject
+    | ForcedPeriodicResponseObject
+    | LimitCycleObject
+    | IsoclineObject
+    | null
 ): string[] {
   const fallback = system.params.map((value) => value.toString())
   const customParams =
@@ -2032,7 +2080,12 @@ function isIsoclineSnapshotStale(systemConfig: SystemConfig, object: IsoclineObj
   )
 }
 
-type FreezableObject = OrbitObject | EquilibriumObject | LimitCycleObject | IsoclineObject
+type FreezableObject =
+  | OrbitObject
+  | EquilibriumObject
+  | ForcedPeriodicResponseObject
+  | LimitCycleObject
+  | IsoclineObject
 
 function resolveObjectFrozenValues(
   systemConfig: SystemConfig,
@@ -2133,6 +2186,8 @@ function useInspectorSelectionController({
   onComputeLyapunovExponents,
   onComputeCovariantLyapunovVectors,
   onSolveEquilibrium,
+  onSolveForcedPeriodicResponse = async () => {},
+  onCreateForcedPeriodicResponseBranch = async () => {},
   onCreateEquilibriumBranch,
   onCreateEquilibriumManifold1D = async () => {},
   onExtendEquilibriumManifold1D = async () => {},
@@ -2166,9 +2221,12 @@ function useInspectorSelectionController({
   const branch = selectedNodeId ? system.branches[selectedNodeId] : undefined
   const orbit = object?.type === 'orbit' ? object : null
   const equilibrium = object?.type === 'equilibrium' ? object : null
+  const forcedPeriodicResponse =
+    object?.type === 'forced_periodic_response' ? object : null
   const limitCycle = object?.type === 'limit_cycle' ? object : null
   const isocline = object?.type === 'isocline' ? object : null
-  const paramOverrideTarget = orbit || equilibrium || limitCycle || isocline
+  const paramOverrideTarget =
+    orbit || equilibrium || forcedPeriodicResponse || limitCycle || isocline
   const selectedOrbitPointIndex =
     orbitPointSelection && orbitPointSelection.orbitId === selectedNodeId
       ? orbitPointSelection.pointIndex
@@ -2257,6 +2315,7 @@ function useInspectorSelectionController({
     branch &&
       [
         'equilibrium',
+        'forced_periodic_response',
         'limit_cycle',
         'homoclinic_curve',
         'heteroclinic_curve',
@@ -2556,6 +2615,52 @@ function useInspectorSelectionController({
     makeEquilibriumSolveDraft(system.config)
   )
   const [equilibriumError, setEquilibriumError] = useState<string | null>(null)
+  const [forcedPeriodicResponseDraft, setForcedPeriodicResponseDraft] =
+    useState<ForcedPeriodicResponseSolveDraft>(() =>
+      makeForcedPeriodicResponseSolveDraft(system.config)
+    )
+  const [forcedPeriodicResponseError, setForcedPeriodicResponseError] = useState<
+    string | null
+  >(null)
+  const forcedPeriodicResponseStale = useMemo(() => {
+    if (!forcedPeriodicResponse?.solution) return false
+    const provenance = forcedPeriodicResponse.solutionProvenance
+    if (!provenance || !system.config.periodicForcing) return true
+    const currentParameters =
+      forcedPeriodicResponse.customParameters?.length === system.config.params.length
+        ? forcedPeriodicResponse.customParameters
+        : system.config.params
+    let subsystemHash: string
+    try {
+      subsystemHash = buildSubsystemSnapshot(
+        system.config,
+        forcedPeriodicResponse.frozenVariables
+      ).hash
+    } catch {
+      return true
+    }
+    const phase = parseNumber(forcedPeriodicResponseDraft.phase)
+    const responseMultiple = parseNumber(forcedPeriodicResponseDraft.responseMultiple)
+    const periodSteps = parseNumber(forcedPeriodicResponseDraft.stepsPerForcingPeriod)
+    return (
+      provenance.systemType !== system.config.type ||
+      provenance.solver !== system.config.solver ||
+      JSON.stringify(provenance.periodicForcing) !==
+        JSON.stringify(system.config.periodicForcing) ||
+      provenance.subsystemHash !== subsystemHash ||
+      provenance.parameters.length !== currentParameters.length ||
+      provenance.parameters.some((value, index) => value !== currentParameters[index]) ||
+      phase !== provenance.phase ||
+      responseMultiple !== provenance.responseMultiple ||
+      periodSteps !== provenance.stepsPerForcingPeriod
+    )
+  }, [
+    forcedPeriodicResponse,
+    forcedPeriodicResponseDraft.phase,
+    forcedPeriodicResponseDraft.responseMultiple,
+    forcedPeriodicResponseDraft.stepsPerForcingPeriod,
+    system.config,
+  ])
   const equilibriumMapIterations =
     systemDraft.type === 'map'
       ? (() => {
@@ -2592,6 +2697,8 @@ function useInspectorSelectionController({
   const selectionTypeLabel =
     selectionNode?.objectType === 'equilibrium'
       ? equilibriumLabelLower
+      : selectionNode?.objectType === 'forced_periodic_response'
+        ? 'forced periodic response'
       : selectionNode?.objectType ?? selectionNode?.kind
   const [paramOverrideDraft, setParamOverrideDraft] = useState<string[]>(() =>
     makeParamOverrideDraft(system.config, paramOverrideTarget)
@@ -3100,10 +3207,13 @@ function useInspectorSelectionController({
 
   const continuationParameterLabels = useMemo(
     () =>
-      continuationParameterOptions(system.config, selectedSubsystemSnapshot).map((option) =>
-        formatParameterRefLabel(option.ref)
-      ),
-    [selectedSubsystemSnapshot, system.config]
+      continuationParameterOptions(system.config, selectedSubsystemSnapshot)
+        .filter(
+          (option) =>
+            !forcedPeriodicResponse || option.ref.kind !== 'frozen_context'
+        )
+        .map((option) => formatParameterRefLabel(option.ref)),
+    [forcedPeriodicResponse, selectedSubsystemSnapshot, system.config]
   )
   const continuationParameterSet = useMemo(
     () => new Set(continuationParameterLabels),
@@ -3378,6 +3488,7 @@ function useInspectorSelectionController({
     if (
       current.type === 'orbit' ||
       current.type === 'equilibrium' ||
+      current.type === 'forced_periodic_response' ||
       current.type === 'limit_cycle' ||
       current.type === 'isocline'
     ) {
@@ -3417,6 +3528,17 @@ function useInspectorSelectionController({
             : 'curve_1d',
       }))
       setEquilibriumManifoldError(null)
+    }
+    if (current.type === 'forced_periodic_response') {
+      setForcedPeriodicResponseDraft(
+        makeForcedPeriodicResponseSolveDraft(stableSystemConfig, current)
+      )
+      setForcedPeriodicResponseError(null)
+      setContinuationDraft((previous) => ({
+        ...makeContinuationDraft(stableSystemConfig),
+        name: previous.name,
+      }))
+      setContinuationError(null)
     }
     if (current.type === 'limit_cycle') {
       setLimitCycleManifoldDraft((prev) => ({
@@ -4284,6 +4406,12 @@ function useInspectorSelectionController({
           detail: object.solution ? 'Solved' : 'Not solved',
         }
       }
+      if (object.type === 'forced_periodic_response') {
+        return {
+          label: 'Forced periodic response',
+          detail: object.solution ? 'Solved' : 'Not solved',
+        }
+      }
       if (object.type === 'limit_cycle') {
         return {
           label: 'Limit Cycle',
@@ -4933,6 +5061,30 @@ function useInspectorSelectionController({
           description: 'Seed a 1D curve or 2D surface from the eigenspaces.',
         }
       )
+    }
+  }
+  if (forcedPeriodicResponse) {
+    if (forcedPeriodicResponse.solution) {
+      workflowActions.push({
+        id: 'forced-response-data-toggle',
+        group: 'Inspect',
+        label: 'View Data',
+        description: 'Inspect the strobe state, response period, trajectory, and multipliers.',
+      })
+    }
+    workflowActions.push({
+      id: 'forced-response-solver-toggle',
+      group: 'Compute',
+      label: 'Solve forced response',
+      description: 'Correct a phase-locked response on the declared stroboscopic section.',
+    })
+    if (forcedPeriodicResponse.solution) {
+      workflowActions.push({
+        id: 'forced-response-continuation-toggle',
+        group: 'Continuation',
+        label: 'Continue forced response',
+        description: 'Create a one-parameter stroboscopic continuation branch.',
+      })
     }
   }
   if (limitCycle) {
@@ -5775,6 +5927,118 @@ function useInspectorSelectionController({
       ...(systemDraft.type === 'map' ? { mapIterations: mapIterations ?? 1 } : {}),
     }
     await onSolveEquilibrium(request)
+  }
+
+  const handleSolveForcedPeriodicResponse = async () => {
+    if (runDisabled) {
+      setForcedPeriodicResponseError('Apply valid system settings before solving.')
+      return
+    }
+    if (!forcedPeriodicResponse || !selectedNodeId) {
+      setForcedPeriodicResponseError('Select a forced periodic response to solve.')
+      return
+    }
+    if (currentFrozenEquationContext) {
+      setForcedPeriodicResponseError(
+        'Stroboscopic analysis requires live t/n. Unfreeze the equation forcing context.'
+      )
+      return
+    }
+    const initialGuess = forcedPeriodicResponseDraft.initialGuess.map(parseNumber)
+    const phase = parseNumber(forcedPeriodicResponseDraft.phase)
+    const responseMultiple = parseNumber(forcedPeriodicResponseDraft.responseMultiple)
+    const stepsPerForcingPeriod = parseNumber(
+      forcedPeriodicResponseDraft.stepsPerForcingPeriod
+    )
+    const maxSteps = parseNumber(forcedPeriodicResponseDraft.maxSteps)
+    const dampingFactor = parseNumber(forcedPeriodicResponseDraft.dampingFactor)
+    const tolerance = parseNumber(forcedPeriodicResponseDraft.tolerance)
+    if (initialGuess.some((value) => value === null)) {
+      setForcedPeriodicResponseError('Initial guess values must be numeric.')
+      return
+    }
+    if (phase === null || (systemDraft.type === 'map' && !Number.isInteger(phase))) {
+      setForcedPeriodicResponseError(
+        systemDraft.type === 'map' ? 'Map phase must be an integer residue.' : 'Phase must be finite.'
+      )
+      return
+    }
+    if (responseMultiple === null || responseMultiple < 1 || !Number.isInteger(responseMultiple)) {
+      setForcedPeriodicResponseError('Response multiple must be a positive integer.')
+      return
+    }
+    if (
+      stepsPerForcingPeriod === null ||
+      stepsPerForcingPeriod < 1 ||
+      !Number.isInteger(stepsPerForcingPeriod)
+    ) {
+      setForcedPeriodicResponseError('Steps per forcing period must be a positive integer.')
+      return
+    }
+    if (maxSteps === null || maxSteps < 1 || !Number.isInteger(maxSteps)) {
+      setForcedPeriodicResponseError('Newton steps must be a positive integer.')
+      return
+    }
+    if (dampingFactor === null || dampingFactor <= 0) {
+      setForcedPeriodicResponseError('Damping must be positive.')
+      return
+    }
+    if (tolerance === null || tolerance <= 0) {
+      setForcedPeriodicResponseError('Tolerance must be positive.')
+      return
+    }
+    setForcedPeriodicResponseError(null)
+    await onSolveForcedPeriodicResponse({
+      responseId: selectedNodeId,
+      initialGuess: initialGuess.map((value) => value ?? 0),
+      phase,
+      responseMultiple,
+      stepsPerForcingPeriod,
+      maxSteps,
+      dampingFactor,
+      tolerance,
+    })
+  }
+
+  const handleCreateForcedPeriodicResponseBranch = async () => {
+    if (!forcedPeriodicResponse?.solution || !selectedNodeId) {
+      setContinuationError('Solve the forced periodic response before continuing it.')
+      return
+    }
+    if (currentFrozenEquationContext) {
+      setContinuationError(
+        'Stroboscopic analysis requires live t/n. Unfreeze the equation forcing context.'
+      )
+      return
+    }
+    if (!continuationDraft.parameterName) {
+      setContinuationError('Select a continuation parameter.')
+      return
+    }
+    const name =
+      continuationDraft.name.trim() ||
+      buildSuggestedBranchName(
+        forcedPeriodicResponse.name,
+        continuationDraft.parameterName,
+        existingBranchNames
+      )
+    if (!isCliSafeName(name)) {
+      setContinuationError('Branch names must be alphanumeric with underscores only.')
+      return
+    }
+    const { settings, error } = buildContinuationSettings(continuationDraft)
+    if (!settings) {
+      setContinuationError(error ?? 'Invalid continuation settings.')
+      return
+    }
+    setContinuationError(null)
+    await onCreateForcedPeriodicResponseBranch({
+      responseId: selectedNodeId,
+      name,
+      parameterName: continuationDraft.parameterName,
+      settings,
+      forward: continuationDraft.forward,
+    })
   }
 
   const handleCreateEquilibriumBranch = async () => {
@@ -8270,6 +8534,10 @@ function useInspectorSelectionController({
     equilibriumManifoldExtensionDraft,
     equilibriumManifoldExtensionError,
     equilibriumManifoldModeOptions,
+    forcedPeriodicResponse,
+    forcedPeriodicResponseDraft,
+    forcedPeriodicResponseError,
+    forcedPeriodicResponseStale,
     existingBranchNames,
     existingObjectNames,
     foldCurveDraft,
@@ -8302,6 +8570,7 @@ function useInspectorSelectionController({
     onCreatePeriodicBranchFromPoint,
     handleCreateCycleFromPD,
     handleCreateEquilibriumBranch,
+    handleCreateForcedPeriodicResponseBranch,
     handleCreateEquilibriumManifold,
     handleCreateFoldCurve,
     handleCreateHomoclinicFromHomoclinic,
@@ -8336,6 +8605,7 @@ function useInspectorSelectionController({
     handleRunOrbit,
     handleExtendOrbit,
     handleSolveEquilibrium,
+    handleSolveForcedPeriodicResponse,
     handleToggleFrozenVariable,
     handleToggleFrozenEquationContext,
     handleToggleIsoclineAxis,
@@ -8520,6 +8790,7 @@ function useInspectorSelectionController({
     setCovariantDraft,
     setDiagramSearch,
     setEquilibriumDraft,
+    setForcedPeriodicResponseDraft,
     setEquilibriumManifoldDraft,
     setEquilibriumManifoldExtensionDraft,
     setFoldCurveDraft,

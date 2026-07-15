@@ -5,6 +5,10 @@ export interface PeriodicVariableConfig {
   period: number
 }
 
+export type PeriodicForcingConfig =
+  | { symbol: 't'; periodExpression: string }
+  | { symbol: 'n'; iterationPeriod: number }
+
 export interface SystemConfig {
   name: string
   equations: string[]
@@ -12,6 +16,7 @@ export interface SystemConfig {
   paramNames: string[]
   varNames: string[]
   periodicVariables?: PeriodicVariableConfig[]
+  periodicForcing?: PeriodicForcingConfig
   solver: string
   type: 'flow' | 'map'
 }
@@ -113,6 +118,60 @@ export interface EquilibriumObject {
 export interface EquilibriumSolutionProvenance {
   fingerprint: string
   mapIterations?: number
+}
+
+export type ForcedPeriodicResponseOrigin =
+  | { type: 'manual' }
+  | { type: 'orbit'; orbitId?: string; orbitName: string; sourceContext: number }
+
+export interface ForcedPeriodicResponseSolverParams {
+  initialGuess: number[]
+  phase: number
+  responseMultiple: number
+  stepsPerForcingPeriod: number
+  maxSteps: number
+  dampingFactor: number
+  tolerance: number
+}
+
+export interface ForcedPeriodicResponseSolution {
+  state: number[]
+  residual_norm: number
+  iterations: number
+  monodromy: number[]
+  multipliers: ComplexValue[]
+  cycle_points: number[][]
+  contexts: number[]
+  forcing_period: number
+  response_multiple: number
+  minimal_response_multiple: number
+}
+
+export interface ForcedPeriodicResponseProvenance {
+  systemType: SystemConfig['type']
+  solver: string
+  periodicForcing: PeriodicForcingConfig
+  phase: number
+  responseMultiple: number
+  stepsPerForcingPeriod: number
+  parameters: number[]
+  subsystemHash: string
+}
+
+export interface ForcedPeriodicResponseObject {
+  type: 'forced_periodic_response'
+  id?: string
+  name: string
+  systemName: string
+  origin: ForcedPeriodicResponseOrigin
+  solution?: ForcedPeriodicResponseSolution
+  solutionProvenance?: ForcedPeriodicResponseProvenance
+  lastSolverParams: ForcedPeriodicResponseSolverParams
+  parameters?: number[]
+  customParameters?: number[]
+  frozenVariables?: FrozenVariablesConfig
+  subsystemSnapshot?: SubsystemSnapshot
+  createdAt: string
 }
 
 export interface ContinuationEigenvalue {
@@ -626,6 +685,16 @@ export type HomoclinicBranchDiscretization =
 
 export type BranchType =
   | { type: 'Equilibrium' }
+  | {
+      type: 'ForcedPeriodicResponse'
+      symbol: 't' | 'n'
+      period_expression?: string
+      iteration_period?: number
+      phase: number
+      response_multiple: number
+      steps_per_forcing_period: number
+      integrator: string
+    }
   | { type: 'LimitCycle'; ntst: number; ncol: number; normalized_mesh?: number[] }
   | {
       type: 'HomoclinicCurve'
@@ -791,6 +860,7 @@ export interface ContinuationObject {
   startObject: string
   branchType:
     | 'equilibrium'
+    | 'forced_periodic_response'
     | 'limit_cycle'
     | 'homoclinic_curve'
     | 'heteroclinic_curve'
@@ -931,6 +1001,7 @@ export type LimitCycleRenderTarget =
 export type AnalysisObject =
   | OrbitObject
   | EquilibriumObject
+  | ForcedPeriodicResponseObject
   | LimitCycleObject
   | IsoclineObject
   | ContinuationObject

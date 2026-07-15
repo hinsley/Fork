@@ -32,6 +32,7 @@ import { inspectBranch } from './inspect';
 import { getBranchParams } from './utils';
 import {
   runContinuationExtensionWithProgress,
+  runForcedPeriodicResponseContinuationWithProgress,
   runEquilibriumManifold1DExtensionWithProgress,
   runManifold2DExtensionWithProgress
 } from './progress';
@@ -575,6 +576,63 @@ export async function extendBranch(
     runConfig.params = getBranchParams(sysName, branch, sysConfig);
     const bridge = new WasmBridge(runConfig);
     const mapIterations = sysConfig.type === 'map' ? branch.mapIterations ?? 1 : 1;
+
+    if (branch.branchType === 'forced_periodic_response') {
+      const metadata = branch.data.branch_type as {
+        type?: string;
+        phase?: number;
+        response_multiple?: number;
+        steps_per_forcing_period?: number;
+      } | undefined;
+      if (!metadata || metadata.type !== 'ForcedPeriodicResponse') {
+        throw new Error('Forced-response branch metadata is missing.');
+      }
+      const indices = branch.data.indices ?? branch.data.points.map((_, index) => index);
+      const endpointArrayIndex = indices.reduce((best, value, index) => {
+        const better = directionForward ? value > indices[best] : value < indices[best];
+        return better ? index : best;
+      }, 0);
+      const endpoint = branch.data.points[endpointArrayIndex];
+      if (!endpoint) throw new Error('Forced-response branch endpoint is missing.');
+      const parameterName = branch.runtimeParameterName ?? branch.parameterName;
+      const parameterIndex = runConfig.paramNames.indexOf(parameterName);
+      if (parameterIndex < 0) throw new Error(`Unknown continuation parameter: ${parameterName}`);
+      runConfig.params[parameterIndex] = endpoint.param_value;
+      const extension = runForcedPeriodicResponseContinuationWithProgress(
+        new WasmBridge(runConfig),
+        endpoint.state,
+        parameterName,
+        metadata.phase ?? 0,
+        metadata.response_multiple ?? 1,
+        metadata.steps_per_forcing_period ?? 200,
+        continuationSettings,
+        directionForward,
+        'Forced response extension'
+      );
+      const newPoints = extension.points.slice(1);
+      const endpointLogical = indices[endpointArrayIndex] ?? endpointArrayIndex;
+      const direction = directionForward ? 1 : -1;
+      const baseLength = branch.data.points.length;
+      branch.data = normalizeBranchEigenvalues({
+        ...extension,
+        points: [...branch.data.points, ...newPoints],
+        indices: [
+          ...indices,
+          ...newPoints.map((_, index) => endpointLogical + direction * (index + 1))
+        ],
+        bifurcations: [
+          ...(branch.data.bifurcations ?? []),
+          ...(extension.bifurcations ?? []).map(index =>
+            index === 0 ? baseLength - 1 : baseLength + index - 1
+          )
+        ],
+        branch_type: branch.data.branch_type
+      });
+      branch.settings = continuationSettings;
+      Storage.saveBranch(sysName, branch.parentObject, branch);
+      printSuccess(`Extension successful! Total points: ${branch.data.points.length}`);
+      return await inspectBranch(sysName, branch);
+    }
 
     // If indices are missing, fill them (migration)
     if (!branch.data.indices) {

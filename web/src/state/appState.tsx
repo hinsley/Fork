@@ -32,6 +32,8 @@ import type {
   EquilibriumObject,
   EquilibriumManifold2DSettings,
   EquilibriumSolverParams,
+  ForcedPeriodicResponseObject,
+  ForcedPeriodicResponseSolverParams,
   FrozenEquationContext,
   FrozenVariablesConfig,
   FloquetBackend,
@@ -108,6 +110,7 @@ import {
   resolveRuntimeParameterName,
   resolveSubsystemSnapshot,
   rewriteExpressionForFrozenContext,
+  stateVectorToDisplay,
 } from '../system/subsystemGateway'
 import { formatEquilibriumLabel } from '../system/labels'
 import { normalizeFrozenEquationContext } from '../system/expressionContext'
@@ -682,13 +685,19 @@ function buildIsoclineSnapshotSignature(
   })
 }
 
-type FreezableAnalysisObject = OrbitObject | EquilibriumObject | LimitCycleObject | IsoclineObject
+type FreezableAnalysisObject =
+  | OrbitObject
+  | EquilibriumObject
+  | ForcedPeriodicResponseObject
+  | LimitCycleObject
+  | IsoclineObject
 
 function isFreezableObject(object: AnalysisObject | undefined): object is FreezableAnalysisObject {
   if (!object) return false
   return (
     object.type === 'orbit' ||
     object.type === 'equilibrium' ||
+    object.type === 'forced_periodic_response' ||
     object.type === 'limit_cycle' ||
     object.type === 'isocline'
   )
@@ -1322,6 +1331,18 @@ export type EquilibriumContinuationRequest = {
   forward: boolean
 }
 
+export type ForcedPeriodicResponseSolveRequest = ForcedPeriodicResponseSolverParams & {
+  responseId: string
+}
+
+export type ForcedPeriodicResponseContinuationRequest = {
+  responseId: string
+  name: string
+  parameterName: string
+  settings: ContinuationSettings
+  forward: boolean
+}
+
 export type BranchContinuationRequest = {
   branchId: string
   pointIndex: number
@@ -1844,6 +1865,10 @@ export type AppActions = {
   deleteNode: (nodeId: string) => Promise<void>
   createOrbitObject: (name: string) => Promise<string | null>
   createEquilibriumObject: (name: string) => Promise<string | null>
+  createForcedPeriodicResponseObject: (
+    name: string,
+    orbitId?: string
+  ) => Promise<string | null>
   createIsoclineObject: (name: string) => Promise<string | null>
   runOrbit: (request: OrbitRunRequest) => Promise<void>
   computeIsocline: (
@@ -1875,6 +1900,10 @@ export type AppActions = {
   computeLimitCycleFloquetModes: (request: LimitCycleFloquetModesRequest) => Promise<void>
   computeNormalFormAtPoint: (request: NormalFormAtPointRequest) => Promise<void>
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
+  solveForcedPeriodicResponse: (request: ForcedPeriodicResponseSolveRequest) => Promise<void>
+  createForcedPeriodicResponseBranch: (
+    request: ForcedPeriodicResponseContinuationRequest
+  ) => Promise<void>
   createEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   createEquilibriumManifold1D: (request: EquilibriumManifold1DRequest) => Promise<void>
   extendEquilibriumManifold1D: (
@@ -3300,6 +3329,247 @@ export function AppProvider({
       }
     },
     [state.system, store]
+  )
+
+  const createForcedPeriodicResponseObject = useCallback(
+    async (name: string, orbitId?: string) => {
+      if (!state.system) return null
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) throw new Error('System settings are invalid.')
+        if (!system.periodicForcing) {
+          throw new Error('Declare periodic forcing in the system editor first.')
+        }
+        const trimmedName = name.trim()
+        const nameError = validateObjectName(trimmedName, 'Forced periodic response')
+        if (nameError) throw new Error(nameError)
+        const existingNames = Object.values(state.system.objects).map((object) => object.name)
+        if (existingNames.includes(trimmedName)) {
+          throw new Error(`Object "${trimmedName}" already exists.`)
+        }
+
+        let initialGuess = system.varNames.map(() => 0)
+        let origin: ForcedPeriodicResponseObject['origin'] = { type: 'manual' }
+        if (orbitId) {
+          const orbit = state.system.objects[orbitId]
+          if (!orbit || orbit.type !== 'orbit') {
+            throw new Error('Select a valid orbit to seed the forced response.')
+          }
+          const finalSample = orbit.data.at(-1)
+          if (!finalSample || finalSample.length !== system.varNames.length + 1) {
+            throw new Error('Run the orbit before using it as a forced-response seed.')
+          }
+          initialGuess = finalSample.slice(1)
+          origin = {
+            type: 'orbit',
+            orbitId,
+            orbitName: orbit.name,
+            sourceContext: finalSample[0],
+          }
+        }
+
+        const obj: ForcedPeriodicResponseObject = {
+          type: 'forced_periodic_response',
+          name: trimmedName,
+          systemName: system.name,
+          origin,
+          lastSolverParams: {
+            initialGuess,
+            phase: 0,
+            responseMultiple: 1,
+            stepsPerForcingPeriod: 200,
+            maxSteps: 25,
+            dampingFactor: 1,
+            tolerance: 1e-9,
+          },
+          parameters: [...system.params],
+          frozenVariables: { frozenValuesByVarName: {} },
+          createdAt: new Date().toISOString(),
+        }
+        const created = addObject(state.system, obj)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+        return created.nodeId
+      } catch (err) {
+        dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : String(err) })
+        return null
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [state.system, store]
+  )
+
+  const solveForcedPeriodicResponse = useCallback(
+    async (request: ForcedPeriodicResponseSolveRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const hydrated = await ensureEntitiesLoaded({ objectIds: [request.responseId] })
+        const current = hydrated ?? latestSystemRef.current
+        if (!current) throw new Error('No system is currently loaded.')
+        const system = current.config
+        const response = current.objects[request.responseId]
+        if (!response || response.type !== 'forced_periodic_response') {
+          throw new Error('Select a valid forced periodic response to solve.')
+        }
+        if (!system.periodicForcing) {
+          throw new Error('Declare periodic forcing in the system editor first.')
+        }
+        const solverParams: ForcedPeriodicResponseSolverParams = {
+          initialGuess: [...request.initialGuess],
+          phase: request.phase,
+          responseMultiple: request.responseMultiple,
+          stepsPerForcingPeriod: request.stepsPerForcingPeriod,
+          maxSteps: request.maxSteps,
+          dampingFactor: request.dampingFactor,
+          tolerance: request.tolerance,
+        }
+        if (solverParams.initialGuess.length !== system.varNames.length) {
+          throw new Error('Initial guess dimension mismatch.')
+        }
+        if (solverParams.initialGuess.some((value) => !Number.isFinite(value))) {
+          throw new Error('Initial guess values must be finite.')
+        }
+        if (!Number.isFinite(solverParams.phase)) throw new Error('Strobe phase must be finite.')
+        if (!Number.isSafeInteger(solverParams.responseMultiple) || solverParams.responseMultiple < 1) {
+          throw new Error('Response multiple must be a positive integer.')
+        }
+        if (!Number.isSafeInteger(solverParams.stepsPerForcingPeriod) || solverParams.stepsPerForcingPeriod < 1) {
+          throw new Error('Steps per forcing period must be a positive integer.')
+        }
+        const baseParams = resolveObjectParams(system, response.customParameters)
+        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(system, response, baseParams)
+        if (snapshot.frozenEquationContext) {
+          throw new Error('Stroboscopic analysis requires live t/n. Unfreeze the equation forcing context.')
+        }
+        const result = await client.solveForcedPeriodicResponse({
+          system: runConfig,
+          initialGuess: projectStateToReduced(snapshot, solverParams.initialGuess),
+          initialContext:
+            !response.solution && response.origin.type === 'orbit'
+              ? response.origin.sourceContext
+              : undefined,
+          phase: solverParams.phase,
+          responseMultiple: solverParams.responseMultiple,
+          stepsPerForcingPeriod: solverParams.stepsPerForcingPeriod,
+          maxSteps: solverParams.maxSteps,
+          dampingFactor: solverParams.dampingFactor,
+          tolerance: solverParams.tolerance,
+        })
+        const updated = updateObject(current, request.responseId, {
+          solution: result,
+          solutionProvenance: {
+            systemType: system.type,
+            solver: system.solver,
+            periodicForcing: structuredClone(system.periodicForcing),
+            phase: solverParams.phase,
+            responseMultiple: solverParams.responseMultiple,
+            stepsPerForcingPeriod: solverParams.stepsPerForcingPeriod,
+            parameters: [...baseParams],
+            subsystemHash: snapshot.hash,
+          },
+          lastSolverParams: {
+            ...solverParams,
+            initialGuess: stateVectorToDisplay(snapshot, result.state),
+          },
+          parameters: [...baseParams],
+          frozenVariables: normalizeObjectFrozenVariables(system, response),
+          subsystemSnapshot: snapshot,
+        })
+        dispatch({ type: 'SET_SYSTEM', system: updated })
+        await store.save(updated)
+      } catch (err) {
+        dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : String(err) })
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, ensureEntitiesLoaded, state.system, store]
+  )
+
+  const createForcedPeriodicResponseBranch = useCallback(
+    async (request: ForcedPeriodicResponseContinuationRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const hydrated = await ensureEntitiesLoaded({ objectIds: [request.responseId] })
+        const current = hydrated ?? latestSystemRef.current
+        if (!current) throw new Error('No system is currently loaded.')
+        const system = current.config
+        const response = current.objects[request.responseId]
+        if (!response || response.type !== 'forced_periodic_response' || !response.solution) {
+          throw new Error('Solve the forced periodic response before continuing it.')
+        }
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) throw new Error(nameError)
+        if (branchNameExists(current, request.responseId, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+        const baseParams = resolveObjectParams(system, response.customParameters)
+        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(system, response, baseParams)
+        if (snapshot.frozenEquationContext) {
+          throw new Error('Stroboscopic analysis requires live t/n. Unfreeze the equation forcing context.')
+        }
+        const parameterRef = parseContinuationParameter(system, snapshot, request.parameterName)
+        if (parameterRef.kind === 'frozen_context') {
+          throw new Error('The live forcing context cannot be used as a continuation parameter.')
+        }
+        const runtimeParameterName = resolveRuntimeParameterName(snapshot, parameterRef)
+        const params = response.lastSolverParams
+        const branchData = await client.runForcedPeriodicResponseContinuation(
+          {
+            system: runConfig,
+            responseState: response.solution.state,
+            parameterName: runtimeParameterName,
+            phase: params.phase,
+            responseMultiple: params.responseMultiple,
+            stepsPerForcingPeriod: params.stepsPerForcingPeriod,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Forced-response continuation', progress },
+              }),
+          }
+        )
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: resolveDisplayParameterName(parameterRef),
+          parameterRef,
+          parentObjectId: request.responseId,
+          startObjectId: request.responseId,
+          parentObject: response.name,
+          startObject: response.name,
+          branchType: 'forced_periodic_response',
+          data: normalizeBranchEigenvalues(branchData),
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
+        }
+        const created = addBranch(current, branch, request.responseId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : String(err) })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, ensureEntitiesLoaded, state.system, store]
   )
 
   const createIsoclineObject = useCallback(
@@ -4815,6 +5085,7 @@ export function AppProvider({
         if (
           ![
             'equilibrium',
+            'forced_periodic_response',
             'limit_cycle',
             'homoclinic_curve',
             'heteroclinic_curve',
@@ -4870,7 +5141,62 @@ export function AppProvider({
           sourceBranch.branchType === 'homoclinic_curve'
             ? ensureHomoclinicEndpointResumeSeeds(sourceBranch.data)
             : null
-        if (sourceBranch.branchType === 'homoclinic_curve') {
+        if (sourceBranch.branchType === 'forced_periodic_response') {
+          if (snapshot.frozenEquationContext) {
+            throw new Error(
+              'Stroboscopic analysis requires live t/n. Unfreeze the equation forcing context.'
+            )
+          }
+          const metadata = sourceBranch.data.branch_type
+          if (!metadata || metadata.type !== 'ForcedPeriodicResponse') {
+            throw new Error('Forced-response branch metadata is missing.')
+          }
+          const endpoint = resolveExtensionEndpointArrayIndex(sourceBranch, request.forward)
+          const endpointPoint = sourceBranch.data.points[endpoint.arrayIndex]
+          if (!endpointPoint) throw new Error('Unable to resolve a forced-response endpoint.')
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [extensionRuntimeName]: endpointPoint.param_value,
+          })
+          const extension = await client.runForcedPeriodicResponseContinuation(
+            {
+              system: runConfig,
+              responseState: endpointPoint.state,
+              parameterName: extensionRuntimeName,
+              phase: metadata.phase,
+              responseMultiple: metadata.response_multiple,
+              stepsPerForcingPeriod: metadata.steps_per_forcing_period,
+              settings: request.settings,
+              forward: request.forward,
+            },
+            {
+              onProgress: (progress) =>
+                dispatch({
+                  type: 'SET_CONTINUATION_PROGRESS',
+                  progress: { label: 'Forced-response extension', progress },
+                }),
+            }
+          )
+          const existingIndices = ensureBranchIndices(sourceBranch.data)
+          const endpointLogical = existingIndices[endpoint.arrayIndex] ?? endpoint.arrayIndex
+          const direction = request.forward ? 1 : -1
+          const extensionPoints = extension.points.slice(1)
+          const baseLength = sourceBranch.data.points.length
+          updatedData = {
+            ...extension,
+            points: [...sourceBranch.data.points, ...extensionPoints],
+            indices: [
+              ...existingIndices,
+              ...extensionPoints.map((_, index) => endpointLogical + direction * (index + 1)),
+            ],
+            bifurcations: [
+              ...(sourceBranch.data.bifurcations ?? []),
+              ...(extension.bifurcations ?? []).map((index) =>
+                index === 0 ? baseLength - 1 : baseLength + index - 1
+              ),
+            ],
+            branch_type: metadata,
+          }
+        } else if (sourceBranch.branchType === 'homoclinic_curve') {
           const sourceType = homocSourceData?.branch_type
           if (!sourceType || sourceType.type !== 'HomoclinicCurve') {
             throw new Error(
@@ -8836,6 +9162,7 @@ export function AppProvider({
       deleteNode: deleteNodeAction,
       createOrbitObject,
       createEquilibriumObject,
+      createForcedPeriodicResponseObject,
       createIsoclineObject,
       runOrbit,
       computeIsocline,
@@ -8847,6 +9174,8 @@ export function AppProvider({
       computeCovariantLyapunovVectors,
       computeLimitCycleFloquetModes,
       solveEquilibrium,
+      solveForcedPeriodicResponse,
+      createForcedPeriodicResponseBranch,
       createEquilibriumBranch,
       createEquilibriumManifold1D,
       extendEquilibriumManifold1D,
@@ -8885,6 +9214,7 @@ export function AppProvider({
     }),
     [
       createEquilibriumObject,
+      createForcedPeriodicResponseObject,
       createOrbitObject,
       runOrbit,
       sampleMap1DFunction,
@@ -8895,6 +9225,8 @@ export function AppProvider({
       computeCovariantLyapunovVectors,
       computeLimitCycleFloquetModes,
       solveEquilibrium,
+      solveForcedPeriodicResponse,
+      createForcedPeriodicResponseBranch,
       createEquilibriumBranch,
       createEquilibriumManifold1D,
       extendEquilibriumManifold1D,

@@ -5,6 +5,11 @@ just providing data and layout objects. It covers event listeners, forced
 updates, and any layout/state overrides that can change Plotly's default
 behavior.
 
+Forced-periodic-response objects use the existing `ViewportPanel` trace path: flow time-series
+traces use stored live contexts, state-space traces use stored response states, and one-dimensional
+maps use the existing cobweb builder. Selecting a forced-response branch point overlays its stored
+`cycle_points`. This adds trace construction but no new Plotly event or layout injection.
+
 ## Runtime touchpoints
 
 ### Plotly lifecycle and render config

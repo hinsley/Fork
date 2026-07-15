@@ -5,6 +5,7 @@ export const DEFAULT_NAME_MAX_LENGTH = 48
 export type DefaultNameKind =
   | 'orbit'
   | 'equilibrium'
+  | 'forcedPeriodicResponse'
   | 'isocline'
   | 'folder'
   | 'scene'
@@ -40,6 +41,7 @@ export type DefaultNameOptions = {
 const INDEXED_LABELS: Partial<Record<DefaultNameKind, string>> = {
   orbit: 'Orbit',
   equilibrium: 'Equilibrium',
+  forcedPeriodicResponse: 'Forced_Response',
   isocline: 'Isocline',
   folder: 'Folder',
   scene: 'Scene',

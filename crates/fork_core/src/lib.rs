@@ -4,6 +4,7 @@ pub mod continuation;
 pub mod equation_engine;
 pub mod equilibrium;
 pub mod event_series;
+pub mod forced_response;
 pub mod isocline;
 pub mod solvers;
 pub mod state_periodicity;

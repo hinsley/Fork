@@ -33,6 +33,7 @@ type ObjectsTreeProps = {
   onCreateFolder?: (parentId?: string | null) => void
   onCreateOrbit: () => void
   onCreateEquilibrium: () => void
+  onCreateForcedPeriodicResponse?: (orbitId?: string) => void
   onCreateIsocline?: () => void
   onDuplicateNode?: (id: string) => void | Promise<void>
   onDeleteNode: (id: string) => void
@@ -62,6 +63,7 @@ function getBranchTypeLabel(branch: ContinuationObject, system: System): string 
       mapIterations: branch.mapIterations,
     })
   }
+  if (branch.branchType === 'forced_periodic_response') return 'forced periodic response'
   if (branch.branchType === 'limit_cycle') return 'limit cycle'
   if (branch.branchType === 'homoclinic_curve') return 'homoclinic curve'
   if (branch.branchType === 'heteroclinic_curve') return 'heteroclinic curve'
@@ -122,6 +124,9 @@ function getNodeLabel(node: TreeNode, system: System) {
     return `${node.name} (${equilibriumLabel})`
   }
   if (node.objectType === 'limit_cycle') return `${node.name} (limit cycle)`
+  if (node.objectType === 'forced_periodic_response') {
+    return `${node.name} (forced periodic response)`
+  }
   if (node.objectType === 'isocline') return `${node.name} (isocline)`
   if (node.objectType === 'orbit') return `${node.name} (orbit)`
   if (node.kind === 'scene') return `${node.name} (scene)`
@@ -153,6 +158,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       onCreateFolder = () => {},
       onCreateOrbit,
       onCreateEquilibrium,
+      onCreateForcedPeriodicResponse = () => {},
       onCreateIsocline = () => {},
       onDuplicateNode = () => {},
       onDeleteNode,
@@ -1027,6 +1033,18 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             >
               {createEquilibriumLabel}
             </button>
+            {system.config.periodicForcing ? (
+              <button
+                className="context-menu__item"
+                onClick={() => {
+                  onCreateForcedPeriodicResponse()
+                  setCreateMenu(null)
+                }}
+                data-testid="create-forced-periodic-response"
+              >
+                Forced periodic response
+              </button>
+            ) : null}
             <button
               className="context-menu__item"
               onClick={() => {
@@ -1072,6 +1090,30 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
                   data-testid="object-context-duplicate"
                 >
                   Duplicate
+                </button>
+              )
+            })()}
+            {(() => {
+              const node = system.nodes[nodeContextMenu.id]
+              if (
+                !system.config.periodicForcing ||
+                !node ||
+                node.kind !== 'object' ||
+                node.objectType !== 'orbit'
+              ) {
+                return null
+              }
+              return (
+                <button
+                  className="context-menu__item"
+                  onClick={() => {
+                    const orbitId = nodeContextMenu.id
+                    setNodeContextMenu(null)
+                    onCreateForcedPeriodicResponse(orbitId)
+                  }}
+                  data-testid="object-context-create-forced-periodic-response"
+                >
+                  Create forced periodic response
                 </button>
               )
             })()}

@@ -19,6 +19,7 @@ import type {
   ContinuationObject,
   ContinuationSettings,
   EquilibriumObject,
+  ForcedPeriodicResponseObject,
   LimitCycleObject,
   OrbitObject,
   System,
@@ -134,17 +135,20 @@ function createRichSystem(): {
   equilibriumBranchId: string
   limitCycleId: string
   limitCycleBranchId: string
+  forcedResponseId: string
+  forcedResponseBranchId: string
 } {
   let system = createSystem({
     name: 'Zip_Roundtrip_System',
     config: {
       name: 'Zip_Roundtrip_System',
-      equations: ['y', '-x + mu'],
+      equations: ['y + 0.1*cos(t)', '-x + mu'],
       params: [0.2],
       paramNames: ['mu'],
       varNames: ['x', 'y'],
       solver: 'rk4',
       type: 'flow',
+      periodicForcing: { symbol: 't', periodExpression: 'tau' },
     },
   })
 
@@ -256,6 +260,74 @@ function createRichSystem(): {
   const limitCycleBranchAdded = addBranch(system, limitCycleBranch, limitCycleAdded.nodeId)
   system = limitCycleBranchAdded.system
 
+  const forcedResponse: ForcedPeriodicResponseObject = {
+    type: 'forced_periodic_response',
+    name: 'Forced_A',
+    systemName: system.config.name,
+    origin: { type: 'orbit', orbitId: orbitAdded.nodeId, orbitName: orbit.name, sourceContext: 0.2 },
+    solution: {
+      state: [0.1, -0.2],
+      residual_norm: 1e-12,
+      iterations: 3,
+      monodromy: [0.5, 0, 0, 0.25],
+      multipliers: [{ re: 0.5, im: 0 }, { re: 0.25, im: 0 }],
+      cycle_points: [[0.1, -0.2], [0.2, -0.1], [0.1, -0.2]],
+      contexts: [0, Math.PI, 2 * Math.PI],
+      forcing_period: 2 * Math.PI,
+      response_multiple: 1,
+      minimal_response_multiple: 1,
+    },
+    lastSolverParams: {
+      initialGuess: [0, 0],
+      phase: 0,
+      responseMultiple: 1,
+      stepsPerForcingPeriod: 200,
+      maxSteps: 25,
+      dampingFactor: 1,
+      tolerance: 1e-9,
+    },
+    parameters: [0.2],
+    createdAt: nowIso(),
+  }
+  const forcedResponseAdded = addObject(system, forcedResponse)
+  system = forcedResponseAdded.system
+  const forcedBranch: ContinuationObject = {
+    type: 'continuation',
+    name: 'forced_mu',
+    systemName: system.config.name,
+    parameterName: 'mu',
+    parentObjectId: forcedResponseAdded.nodeId,
+    startObjectId: forcedResponseAdded.nodeId,
+    parentObject: forcedResponse.name,
+    startObject: forcedResponse.name,
+    branchType: 'forced_periodic_response',
+    data: {
+      points: [{
+        state: [0.1, -0.2],
+        param_value: 0.2,
+        stability: 'None',
+        eigenvalues: [{ re: 0.5, im: 0 }],
+        cycle_points: forcedResponse.solution?.cycle_points,
+      }],
+      bifurcations: [],
+      indices: [0],
+      branch_type: {
+        type: 'ForcedPeriodicResponse',
+        symbol: 't',
+        period_expression: 'tau',
+        phase: 0,
+        response_multiple: 1,
+        steps_per_forcing_period: 200,
+        integrator: 'rk4',
+      },
+    },
+    settings: BASE_SETTINGS,
+    timestamp: nowIso(),
+    params: [0.2],
+  }
+  const forcedBranchAdded = addBranch(system, forcedBranch, forcedResponseAdded.nodeId)
+  system = forcedBranchAdded.system
+
   system = addScene(system, 'Scene_A').system
   system = addBifurcationDiagram(system, 'Diagram_A').system
   const analysisAdded = addAnalysisViewport(system, 'Return_Map_A')
@@ -288,6 +360,8 @@ function createRichSystem(): {
     equilibriumBranchId: equilibriumBranchAdded.nodeId,
     limitCycleId: limitCycleAdded.nodeId,
     limitCycleBranchId: limitCycleBranchAdded.nodeId,
+    forcedResponseId: forcedResponseAdded.nodeId,
+    forcedResponseBranchId: forcedBranchAdded.nodeId,
   }
 }
 
@@ -352,6 +426,10 @@ describe('system import/export (zip)', () => {
     expect(restored.branches[ids.equilibriumBranchId].startObjectId).toBe(ids.equilibriumId)
     expect(restored.branches[ids.limitCycleBranchId].parentObjectId).toBe(ids.limitCycleId)
     expect(restored.branches[ids.limitCycleBranchId].startObjectId).toBe(ids.equilibriumBranchId)
+    expect(restored.objects[ids.forcedResponseId]).toEqual(ids.system.objects[ids.forcedResponseId])
+    expect(restored.branches[ids.forcedResponseBranchId]).toEqual(
+      ids.system.branches[ids.forcedResponseBranchId]
+    )
 
     const restoredCycle = restored.objects[ids.limitCycleId]
     expect(restoredCycle.type).toBe('limit_cycle')
