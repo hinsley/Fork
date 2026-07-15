@@ -22,6 +22,7 @@ import type {
   ContinuationObject,
   ContinuationSettings,
   EquilibriumObject,
+  ForcedPeriodicResponseObject,
   IsoclineObject,
   LimitCycleObject,
   OrbitObject,
@@ -4039,6 +4040,142 @@ describe('ViewportPanel view state wiring', () => {
     expect(flippedMaxTrace?.y).toEqual([0.2, 0.6])
     expect(flippedMinTrace?.x).toEqual([1, 2])
     expect(flippedMinTrace?.y).toEqual([0.2, 0.6])
+  })
+
+  it('renders forced-response branches as envelopes on mixed state and parameter axes', () => {
+    const config: SystemConfig = {
+      name: 'Forced_Response_Diagram_Envelope',
+      equations: ['-x + a * cos(t)'],
+      params: [1],
+      paramNames: ['a'],
+      varNames: ['x'],
+      periodicForcing: { symbol: 't', periodExpression: 'tau' },
+      solver: 'rk4',
+      type: 'flow'
+    }
+    let system = createSystem({ name: config.name, config })
+    const response: ForcedPeriodicResponseObject = {
+      type: 'forced_periodic_response',
+      name: 'Forced response seed',
+      systemName: config.name,
+      origin: { type: 'manual' },
+      lastSolverParams: {
+        initialGuess: [0],
+        phase: 0,
+        responseMultiple: 1,
+        stepsPerForcingPeriod: 200,
+        maxSteps: 25,
+        dampingFactor: 1,
+        tolerance: 1e-9
+      },
+      parameters: [...config.params],
+      createdAt: nowIso()
+    }
+    const responseResult = addObject(system, response)
+    system = responseResult.system
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'forced_response_envelope',
+      systemName: config.name,
+      parameterName: 'a',
+      parameterRef: { kind: 'native_param', name: 'a' },
+      parentObject: response.name,
+      startObject: response.name,
+      branchType: 'forced_periodic_response',
+      data: {
+        points: [
+          {
+            state: [0.25],
+            param_value: 1,
+            stability: 'None',
+            eigenvalues: [],
+            cycle_points: [[-1], [2], [0.25]]
+          },
+          {
+            state: [0.5],
+            param_value: 2,
+            stability: 'None',
+            eigenvalues: [],
+            cycle_points: [[-2], [3], [0.5]]
+          }
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: {
+          type: 'ForcedPeriodicResponse',
+          symbol: 't',
+          period_expression: 'tau',
+          phase: 0,
+          response_multiple: 1,
+          steps_per_forcing_period: 200,
+          integrator: 'rk4'
+        }
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        max_steps: 10,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6
+      },
+      timestamp: nowIso(),
+      params: [...config.params]
+    }
+    const branchResult = addBranch(system, branch, responseResult.nodeId)
+    system = branchResult.system
+    const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
+    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
+      xAxis: { kind: 'parameter', name: 'a' },
+      yAxis: { kind: 'state', name: 'x' }
+    })
+
+    const findEnvelopeTraces = () => {
+      const props = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+      const maxTrace = props?.data.find(
+        (trace) =>
+          'uid' in trace &&
+          trace.uid === branchResult.nodeId &&
+          'name' in trace &&
+          trace.name === branch.name &&
+          'mode' in trace &&
+          trace.mode === 'lines'
+      ) as { x?: number[]; y?: number[] } | undefined
+      const minTrace = props?.data.find(
+        (trace) =>
+          'uid' in trace &&
+          trace.uid === branchResult.nodeId &&
+          'name' in trace &&
+          trace.name === `${branch.name} min` &&
+          'mode' in trace &&
+          trace.mode === 'lines'
+      ) as { x?: number[]; y?: number[] } | undefined
+      return { maxTrace, minTrace }
+    }
+
+    renderPanel(system)
+
+    let { maxTrace, minTrace } = findEnvelopeTraces()
+    expect(maxTrace?.x).toEqual([1, 2])
+    expect(maxTrace?.y).toEqual([2, 3])
+    expect(minTrace?.x).toEqual([1, 2])
+    expect(minTrace?.y).toEqual([-1, -2])
+
+    plotlyCalls.length = 0
+    system = updateBifurcationDiagram(system, diagramResult.nodeId, {
+      xAxis: { kind: 'state', name: 'x' },
+      yAxis: { kind: 'parameter', name: 'a' }
+    })
+    renderPanel(system)
+
+    const flippedEnvelope = findEnvelopeTraces()
+    maxTrace = flippedEnvelope.maxTrace
+    minTrace = flippedEnvelope.minTrace
+    expect(maxTrace?.x).toEqual([2, 3])
+    expect(maxTrace?.y).toEqual([1, 2])
+    expect(minTrace?.x).toEqual([-1, -2])
+    expect(minTrace?.y).toEqual([1, 2])
   })
 
   it('renders envelopes when plotted state axes include one free variable even with multi-free subsystems', () => {

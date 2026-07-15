@@ -1284,6 +1284,10 @@ const LIMIT_CYCLE_BRANCH_TYPES = new Set([
   'lpc_curve',
   'ns_curve',
 ])
+const PERIODIC_ENVELOPE_BRANCH_TYPES = new Set([
+  ...LIMIT_CYCLE_BRANCH_TYPES,
+  'forced_periodic_response',
+])
 const CODIM1_BIFURCATION_CURVE_BRANCH_TYPES = new Set([
   'fold_curve',
   'hopf_curve',
@@ -1392,13 +1396,19 @@ function resolveLimitCycleEnvelopeStates(
   const { ntst, ncol } = resolveLimitCycleMesh(branch)
   const layout = resolveLimitCycleLayout(branch.branchType)
   const allowPackedTail = allowsPackedTailLimitCycleProfile(branch.branchType)
-  const { profilePoints } = extractLimitCycleProfile(
+  const { profilePoints: packedProfilePoints } = extractLimitCycleProfile(
     point.state,
     packedStateDimension,
     ntst,
     ncol,
     { layout, allowPackedTail }
   )
+  const profilePoints =
+    branch.branchType === 'forced_periodic_response' &&
+    Array.isArray(point.cycle_points) &&
+    point.cycle_points.length > 0
+      ? point.cycle_points
+      : packedProfilePoints
 
   let minValue = Number.POSITIVE_INFINITY
   let maxValue = Number.NEGATIVE_INFINITY
@@ -5562,6 +5572,9 @@ function buildDiagramTraces(
     const pointIndices: number[] = []
     const hasMixedAxes = xAxis.kind !== yAxis.kind
     const isLimitCycleBranch = LIMIT_CYCLE_BRANCH_TYPES.has(branch.branchType)
+    const isPeriodicEnvelopeBranch = PERIODIC_ENVELOPE_BRANCH_TYPES.has(
+      branch.branchType
+    )
     const isStateAxisPair = xAxis.kind === 'state' && yAxis.kind === 'state'
     const isStateParamPair =
       (xAxis.kind === 'state' && yAxis.kind === 'parameter') ||
@@ -5950,7 +5963,7 @@ function buildDiagramTraces(
       continue
     }
 
-    if (hasMixedAxes && isLimitCycleBranch) {
+    if (hasMixedAxes && isPeriodicEnvelopeBranch) {
       const parameterAxis = xAxis.kind === 'parameter' ? xAxis : yAxis
       const stateAxis = xAxis.kind === 'state' ? xAxis : yAxis
       const xMin: number[] = []
