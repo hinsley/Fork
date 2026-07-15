@@ -22,9 +22,27 @@ describe('system strings', () => {
     })
   })
 
+  it('evaluates mathematical constants in parameter expressions', () => {
+    expect(parseSystemString("x' = omega*x\nomega = tau / 4\noffset = e - pi")).toEqual({
+      varNames: ['x'],
+      equations: ['omega*x'],
+      paramNames: ['omega', 'offset'],
+      params: [Math.PI / 2, Math.E - Math.PI],
+    })
+  })
+
+  it('allows comparison operators in equation expressions', () => {
+    expect(parseSystemString("x' = if(x >= 0, x, -x)\ny' = if(y == 0, pi, y)")).toEqual({
+      varNames: ['x', 'y'],
+      equations: ['if(x >= 0, x, -x)', 'if(y == 0, pi, y)'],
+      paramNames: [],
+      params: [],
+    })
+  })
+
   it('requires the prime marker to classify an equation', () => {
     expect(() => parseSystemString('x = y')).toThrow(
-      'Line 1: parameter "x" must have a finite numeric value.'
+      'Line 1: parameter "x" must have a finite constant expression.'
     )
   })
 
@@ -35,8 +53,8 @@ describe('system strings', () => {
     ["x' = -x = 1", 'Line 1: expected exactly one assignment separator (=).'],
     ["x'' = -x", "Line 1: expected <variable>' = <equation> or <parameter> = <number>."],
     ["x' =", 'Line 1: equation for "x" cannot be empty.'],
-    ['rate = 1ms', 'Line 1: parameter "rate" must have a finite numeric value.'],
-    ['rate = 1e309', 'Line 1: parameter "rate" must have a finite numeric value.'],
+    ['rate = 1ms', 'Line 1: parameter "rate" must have a finite constant expression.'],
+    ['rate = 1e309', 'Line 1: parameter "rate" must have a finite constant expression.'],
     ['not-a-name = 1', "Line 1: expected <variable>' = <equation> or <parameter> = <number>."],
   ])('rejects ambiguous or incomplete input: %s', (input, message) => {
     expect(() => parseSystemString(input)).toThrow(message)

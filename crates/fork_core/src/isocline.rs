@@ -1,4 +1,6 @@
-use crate::equation_engine::{parse, Bytecode, Compiler, EquationSystem, Expr, VM};
+use crate::equation_engine::{
+    builtin_constant, parse, Bytecode, Compiler, EquationSystem, Expr, VM,
+};
 use anyhow::{anyhow, bail, Result};
 use marching_cubes::tables::{EDGE_TABLE, TRI_TABLE};
 use serde::{Deserialize, Serialize};
@@ -119,13 +121,20 @@ fn validate_expression_symbols_recursive(
     match expr {
         Expr::Number(_) => Ok(()),
         Expr::Variable(name) => {
-            if vars.contains(name.as_str()) || params.contains(name.as_str()) {
+            if vars.contains(name.as_str())
+                || params.contains(name.as_str())
+                || builtin_constant(name).is_some()
+            {
                 Ok(())
             } else {
                 bail!("Unknown variable or parameter: {name}")
             }
         }
         Expr::Binary(left, _, right) => {
+            validate_expression_symbols_recursive(left, vars, params)?;
+            validate_expression_symbols_recursive(right, vars, params)
+        }
+        Expr::Comparison(left, _, right) => {
             validate_expression_symbols_recursive(left, vars, params)?;
             validate_expression_symbols_recursive(right, vars, params)
         }

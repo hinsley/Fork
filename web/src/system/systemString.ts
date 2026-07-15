@@ -1,3 +1,5 @@
+import { parseConstantExpression } from './constantExpression'
+
 export type SystemStringDefinition = {
   varNames: string[]
   equations: string[]
@@ -8,7 +10,6 @@ export type SystemStringDefinition = {
 const IDENTIFIER = '[a-zA-Z_][a-zA-Z0-9_]*'
 const EQUATION_LINE = new RegExp(`^(${IDENTIFIER})\\s*'\\s*=\\s*(.*)$`)
 const PARAMETER_LINE = new RegExp(`^(${IDENTIFIER})\\s*=\\s*(.*)$`)
-const NUMERIC_LITERAL = /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/
 
 type DefinedName = {
   kind: 'variable' | 'parameter'
@@ -51,7 +52,12 @@ export function parseSystemString(input: string): SystemStringDefinition {
     const line = rawLine.trim()
     if (!line) return
 
-    const assignmentCount = [...line].filter((character) => character === '=').length
+    const assignmentCount = [...line].filter((character, characterIndex) => {
+      if (character !== '=') return false
+      const previous = line[characterIndex - 1]
+      const next = line[characterIndex + 1]
+      return previous !== '<' && previous !== '>' && previous !== '!' && previous !== '=' && next !== '='
+    }).length
     if (assignmentCount !== 1) {
       lineError(lineNumber, 'expected exactly one assignment separator (=).')
     }
@@ -71,9 +77,9 @@ export function parseSystemString(input: string): SystemStringDefinition {
     if (parameterMatch) {
       const name = parameterMatch[1]
       const rawValue = parameterMatch[2].trim()
-      const value = NUMERIC_LITERAL.test(rawValue) ? Number(rawValue) : Number.NaN
-      if (!Number.isFinite(value)) {
-        lineError(lineNumber, `parameter "${name}" must have a finite numeric value.`)
+      const value = parseConstantExpression(rawValue)
+      if (value === null) {
+        lineError(lineNumber, `parameter "${name}" must have a finite constant expression.`)
       }
       recordName(definitions, name, 'parameter', lineNumber)
       result.paramNames.push(name)

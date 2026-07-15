@@ -124,6 +124,56 @@ assert.ok(
   'Extended smooth functions should evaluate through generated WASM.'
 );
 
+const stableConditionalSystem = new wasm.WasmSystem(
+  [
+    'if(x>=0,erf(x)+erfc(x)+sinc(x)+sigmoid(x)+softplus(x)+logaddexp(x,pi)+clamp(x,-tau,e)+heaviside(x),0)',
+  ],
+  new Float64Array(),
+  [],
+  ['x'],
+  'discrete',
+  'map'
+);
+const stableX = 0.4;
+const stableSigmoid = (value: number): number =>
+  value >= 0
+    ? 1 / (1 + Math.exp(-value))
+    : Math.exp(value) / (1 + Math.exp(value));
+const stableSoftplus = (value: number): number =>
+  Math.max(value, 0) + Math.log1p(Math.exp(-Math.abs(value)));
+const stableLogAddExp = (left: number, right: number): number => {
+  const maximum = Math.max(left, right);
+  return maximum + Math.log1p(Math.exp(-Math.abs(left - right)));
+};
+const expectedStableValue =
+  1 +
+  Math.sin(stableX) / stableX +
+  stableSigmoid(stableX) +
+  stableSoftplus(stableX) +
+  stableLogAddExp(stableX, Math.PI) +
+  stableX +
+  1;
+stableConditionalSystem.set_state(new Float64Array([stableX]));
+const expectedStableDerivative =
+  (stableX * Math.cos(stableX) - Math.sin(stableX)) / (stableX * stableX) +
+  stableSigmoid(stableX) * (1 - stableSigmoid(stableX)) +
+  stableSigmoid(stableX) +
+  stableSigmoid(stableX - Math.PI) +
+  1;
+assert.ok(
+  Math.abs(stableConditionalSystem.compute_jacobian()[0] - expectedStableDerivative) < 1e-10,
+  'Stable and conditional function Jacobian should match the analytic derivative.'
+);
+stableConditionalSystem.step(1);
+assert.ok(
+  Math.abs(stableConditionalSystem.get_state()[0] - expectedStableValue) < 1e-10,
+  'Stable and conditional functions should evaluate through generated WASM.'
+);
+stableConditionalSystem.set_state(new Float64Array([-0.4]));
+assert.equal(stableConditionalSystem.compute_jacobian()[0], 0);
+stableConditionalSystem.step(1);
+assert.equal(stableConditionalSystem.get_state()[0], 0);
+
 const piecewiseSystem = new wasm.WasmSystem(
   ['abs(x)+min(x,p,2)+max(-2,x,p)+floor(p)+ceil(p)+round(p)+trunc(p)+fract(x)+sign(x)'],
   new Float64Array([1.3]),

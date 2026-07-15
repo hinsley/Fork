@@ -104,8 +104,271 @@ pub enum OpCode {
     Fract,
     /// Pops top value (a), pushes signum(a).
     Sign,
+    /// Pops top value (a), pushes erf(a).
+    Erf,
+    /// Pops top value (a), pushes erfc(a).
+    Erfc,
+    /// Pops top value (a), pushes sin(a) / a with sinc(0) = 1.
+    Sinc,
+    /// Pops top value (a), pushes the logistic sigmoid of a.
+    Sigmoid,
+    /// Pops top value (a), pushes log(1 + exp(a)) using a stable formulation.
+    Softplus,
+    /// Pops b and a, pushes log(exp(a) + exp(b)) using a stable formulation.
+    LogAddExp,
+    /// Pops upper, lower, and value, pushes value clamped to [lower, upper].
+    Clamp,
+    /// Pops top value (a), pushes 0, 0.5, or 1 according to the sign of a.
+    Heaviside,
+    /// Pops b and a, pushes 1 if a < b and 0 otherwise.
+    Less,
+    /// Pops b and a, pushes 1 if a <= b and 0 otherwise.
+    LessEqual,
+    /// Pops b and a, pushes 1 if a > b and 0 otherwise.
+    Greater,
+    /// Pops b and a, pushes 1 if a >= b and 0 otherwise.
+    GreaterEqual,
+    /// Pops b and a, pushes 1 if a == b and 0 otherwise.
+    Equal,
+    /// Pops b and a, pushes 1 if a != b and 0 otherwise.
+    NotEqual,
+    /// Pops false value, true value, and condition, then pushes the selected value.
+    Select,
     /// Pops top value (a), pushes -a.
     Neg,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ComparisonOp {
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    Equal,
+    NotEqual,
+}
+
+/// Scalar operations used by the expression VM in addition to `num_traits::Float`.
+pub trait ExpressionScalar: Scalar {
+    fn expr_erf(self) -> Self;
+    fn expr_erfc(self) -> Self;
+    fn expr_sinc(self) -> Self;
+    fn expr_sigmoid(self) -> Self;
+    fn expr_softplus(self) -> Self;
+    fn expr_logaddexp(self, other: Self) -> Self;
+    fn expr_clamp(self, lower: Self, upper: Self) -> Self;
+    fn expr_heaviside(self) -> Self;
+    fn expr_compare(self, other: Self, comparison: ComparisonOp) -> Self;
+    fn expr_select(self, if_true: Self, if_false: Self) -> Self;
+}
+
+fn sinc_value_derivative(value: f64) -> (f64, f64) {
+    if value.abs() < 1e-4 {
+        let x2 = value * value;
+        let result = 1.0 - x2 / 6.0 + x2 * x2 / 120.0 - x2 * x2 * x2 / 5040.0;
+        let derivative = -value / 3.0 + value * x2 / 30.0 - value * x2 * x2 / 840.0;
+        (result, derivative)
+    } else {
+        (
+            value.sin() / value,
+            (value * value.cos() - value.sin()) / (value * value),
+        )
+    }
+}
+
+fn sigmoid_value(value: f64) -> f64 {
+    if value >= 0.0 {
+        1.0 / (1.0 + (-value).exp())
+    } else {
+        let exp = value.exp();
+        exp / (1.0 + exp)
+    }
+}
+
+fn softplus_value(value: f64) -> f64 {
+    value.max(0.0) + (-value.abs()).exp().ln_1p()
+}
+
+fn logaddexp_value(left: f64, right: f64) -> f64 {
+    if left == f64::INFINITY || right == f64::INFINITY {
+        f64::INFINITY
+    } else if left == f64::NEG_INFINITY {
+        right
+    } else if right == f64::NEG_INFINITY {
+        left
+    } else if left >= right {
+        left + (right - left).exp().ln_1p()
+    } else {
+        right + (left - right).exp().ln_1p()
+    }
+}
+
+fn logaddexp_weights(left: f64, right: f64) -> (f64, f64) {
+    if left == right {
+        (0.5, 0.5)
+    } else if left == f64::INFINITY || right == f64::NEG_INFINITY {
+        (1.0, 0.0)
+    } else if right == f64::INFINITY || left == f64::NEG_INFINITY {
+        (0.0, 1.0)
+    } else {
+        let left_weight = sigmoid_value(left - right);
+        (left_weight, 1.0 - left_weight)
+    }
+}
+
+fn compare_values(left: f64, right: f64, comparison: ComparisonOp) -> f64 {
+    let result = match comparison {
+        ComparisonOp::Less => left < right,
+        ComparisonOp::LessEqual => left <= right,
+        ComparisonOp::Greater => left > right,
+        ComparisonOp::GreaterEqual => left >= right,
+        ComparisonOp::Equal => left == right,
+        ComparisonOp::NotEqual => left != right,
+    };
+    if result {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+impl ExpressionScalar for f64 {
+    fn expr_erf(self) -> Self {
+        libm::erf(self)
+    }
+
+    fn expr_erfc(self) -> Self {
+        libm::erfc(self)
+    }
+
+    fn expr_sinc(self) -> Self {
+        sinc_value_derivative(self).0
+    }
+
+    fn expr_sigmoid(self) -> Self {
+        sigmoid_value(self)
+    }
+
+    fn expr_softplus(self) -> Self {
+        softplus_value(self)
+    }
+
+    fn expr_logaddexp(self, other: Self) -> Self {
+        logaddexp_value(self, other)
+    }
+
+    fn expr_clamp(self, lower: Self, upper: Self) -> Self {
+        if self.is_nan() || lower.is_nan() || upper.is_nan() || lower > upper {
+            f64::NAN
+        } else if self < lower {
+            lower
+        } else if self > upper {
+            upper
+        } else {
+            self
+        }
+    }
+
+    fn expr_heaviside(self) -> Self {
+        if self.is_nan() {
+            f64::NAN
+        } else if self < 0.0 {
+            0.0
+        } else if self > 0.0 {
+            1.0
+        } else {
+            0.5
+        }
+    }
+
+    fn expr_compare(self, other: Self, comparison: ComparisonOp) -> Self {
+        compare_values(self, other, comparison)
+    }
+
+    fn expr_select(self, if_true: Self, if_false: Self) -> Self {
+        if self.is_nan() {
+            f64::NAN
+        } else if self != 0.0 {
+            if_true
+        } else {
+            if_false
+        }
+    }
+}
+
+impl ExpressionScalar for Dual {
+    fn expr_erf(self) -> Self {
+        let derivative = 2.0 / std::f64::consts::PI.sqrt() * (-self.val * self.val).exp();
+        Dual::new(libm::erf(self.val), self.eps * derivative)
+    }
+
+    fn expr_erfc(self) -> Self {
+        let derivative = -2.0 / std::f64::consts::PI.sqrt() * (-self.val * self.val).exp();
+        Dual::new(libm::erfc(self.val), self.eps * derivative)
+    }
+
+    fn expr_sinc(self) -> Self {
+        let (value, derivative) = sinc_value_derivative(self.val);
+        Dual::new(value, self.eps * derivative)
+    }
+
+    fn expr_sigmoid(self) -> Self {
+        let value = sigmoid_value(self.val);
+        Dual::new(value, self.eps * value * (1.0 - value))
+    }
+
+    fn expr_softplus(self) -> Self {
+        Dual::new(softplus_value(self.val), self.eps * sigmoid_value(self.val))
+    }
+
+    fn expr_logaddexp(self, other: Self) -> Self {
+        let (left_weight, right_weight) = logaddexp_weights(self.val, other.val);
+        Dual::new(
+            logaddexp_value(self.val, other.val),
+            left_weight * self.eps + right_weight * other.eps,
+        )
+    }
+
+    fn expr_clamp(self, lower: Self, upper: Self) -> Self {
+        if self.val.is_nan() || lower.val.is_nan() || upper.val.is_nan() || lower.val > upper.val {
+            Dual::new(f64::NAN, f64::NAN)
+        } else if self.val < lower.val {
+            lower
+        } else if self.val > upper.val {
+            upper
+        } else {
+            self
+        }
+    }
+
+    fn expr_heaviside(self) -> Self {
+        Dual::new(
+            if self.val.is_nan() {
+                f64::NAN
+            } else if self.val < 0.0 {
+                0.0
+            } else if self.val > 0.0 {
+                1.0
+            } else {
+                0.5
+            },
+            0.0,
+        )
+    }
+
+    fn expr_compare(self, other: Self, comparison: ComparisonOp) -> Self {
+        Dual::new(compare_values(self.val, other.val, comparison), 0.0)
+    }
+
+    fn expr_select(self, if_true: Self, if_false: Self) -> Self {
+        if self.val.is_nan() {
+            Dual::new(f64::NAN, f64::NAN)
+        } else if self.val != 0.0 {
+            if_true
+        } else {
+            if_false
+        }
+    }
 }
 
 /// Represents a compiled sequence of operations.
@@ -136,7 +399,7 @@ impl VM {
     ///
     /// # Type Parameters
     /// * `T`: The scalar type (e.g., `f64` or `Dual`).
-    pub fn execute<T: Scalar>(
+    pub fn execute<T: ExpressionScalar>(
         bytecode: &Bytecode,
         vars: &[T],
         params: &[T],
@@ -341,6 +604,66 @@ impl VM {
                     let a = stack.pop().unwrap();
                     stack.push(a.signum());
                 }
+                OpCode::Erf => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.expr_erf());
+                }
+                OpCode::Erfc => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.expr_erfc());
+                }
+                OpCode::Sinc => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.expr_sinc());
+                }
+                OpCode::Sigmoid => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.expr_sigmoid());
+                }
+                OpCode::Softplus => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.expr_softplus());
+                }
+                OpCode::LogAddExp => {
+                    let b = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
+                    stack.push(a.expr_logaddexp(b));
+                }
+                OpCode::Clamp => {
+                    let upper = stack.pop().unwrap();
+                    let lower = stack.pop().unwrap();
+                    let value = stack.pop().unwrap();
+                    stack.push(value.expr_clamp(lower, upper));
+                }
+                OpCode::Heaviside => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.expr_heaviside());
+                }
+                OpCode::Less
+                | OpCode::LessEqual
+                | OpCode::Greater
+                | OpCode::GreaterEqual
+                | OpCode::Equal
+                | OpCode::NotEqual => {
+                    let b = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
+                    let comparison = match op {
+                        OpCode::Less => ComparisonOp::Less,
+                        OpCode::LessEqual => ComparisonOp::LessEqual,
+                        OpCode::Greater => ComparisonOp::Greater,
+                        OpCode::GreaterEqual => ComparisonOp::GreaterEqual,
+                        OpCode::Equal => ComparisonOp::Equal,
+                        OpCode::NotEqual => ComparisonOp::NotEqual,
+                        _ => unreachable!(),
+                    };
+                    stack.push(a.expr_compare(b, comparison));
+                }
+                OpCode::Select => {
+                    let if_false = stack.pop().unwrap();
+                    let if_true = stack.pop().unwrap();
+                    let condition = stack.pop().unwrap();
+                    stack.push(condition.expr_select(if_true, if_false));
+                }
                 OpCode::Neg => {
                     let a = stack.pop().unwrap();
                     stack.push(-a);
@@ -361,8 +684,9 @@ pub enum Expr {
     Number(f64),
     Variable(String),
     Binary(Box<Expr>, char, Box<Expr>), // char is operator +, -, *, /, ^
-    Unary(char, Box<Expr>),             // -, s (sin), c (cos), e (exp)
-    Call(String, Vec<Expr>),            // functions like sin(x) or atan2(y, x)
+    Comparison(Box<Expr>, ComparisonOp, Box<Expr>),
+    Unary(char, Box<Expr>),  // -, s (sin), c (cos), e (exp)
+    Call(String, Vec<Expr>), // functions like sin(x) or atan2(y, x)
 }
 
 /// Function signatures suitable for user-facing expression-language help.
@@ -399,6 +723,12 @@ pub const SMOOTH_FUNCTION_SIGNATURES: &[&str] = &[
     "log1p(x)",
     "pow(x, y)",
     "hypot(x, y)",
+    "erf(x)",
+    "erfc(x)",
+    "sinc(x)",
+    "sigmoid(x)",
+    "softplus(x)",
+    "logaddexp(x, y)",
 ];
 
 /// These functions have useful piecewise derivatives, but are not differentiable everywhere.
@@ -412,6 +742,9 @@ pub const PIECEWISE_FUNCTION_SIGNATURES: &[&str] = &[
     "trunc(x)",
     "fract(x)",
     "sign(x)",
+    "clamp(x, min, max)",
+    "heaviside(x)",
+    "if(condition, then, else)",
 ];
 
 /// Compiles an AST (`Expr`) into `Bytecode`.
@@ -456,6 +789,8 @@ impl Compiler {
                     ops.push(OpCode::LoadVar(idx));
                 } else if let Some(&idx) = self.param_map.get(name) {
                     ops.push(OpCode::LoadParam(idx));
+                } else if let Some(value) = builtin_constant(name) {
+                    ops.push(OpCode::LoadConst(value));
                 } else {
                     return Err(format!("Unknown variable or parameter: {name}"));
                 }
@@ -471,6 +806,18 @@ impl Compiler {
                     '^' => ops.push(OpCode::Pow),
                     _ => return Err(format!("Unknown binary operator: {op}")),
                 }
+            }
+            Expr::Comparison(left, comparison, right) => {
+                self.compile_recursive(left, ops)?;
+                self.compile_recursive(right, ops)?;
+                ops.push(match comparison {
+                    ComparisonOp::Less => OpCode::Less,
+                    ComparisonOp::LessEqual => OpCode::LessEqual,
+                    ComparisonOp::Greater => OpCode::Greater,
+                    ComparisonOp::GreaterEqual => OpCode::GreaterEqual,
+                    ComparisonOp::Equal => OpCode::Equal,
+                    ComparisonOp::NotEqual => OpCode::NotEqual,
+                });
             }
             Expr::Unary(op, operand) => {
                 self.compile_recursive(operand, ops)?;
@@ -514,6 +861,15 @@ fn function_arity_error(name: &str, expected: &str, actual: usize) -> String {
     format!("Function '{name}' expects {expected}; got {actual}.")
 }
 
+pub fn builtin_constant(name: &str) -> Option<f64> {
+    match name {
+        "pi" => Some(std::f64::consts::PI),
+        "tau" => Some(std::f64::consts::TAU),
+        "e" => Some(std::f64::consts::E),
+        _ => None,
+    }
+}
+
 fn resolve_fixed_function(name: &str, arity: usize) -> Result<OpCode, String> {
     let unary = match name {
         "sin" => Some(OpCode::Sin),
@@ -550,6 +906,12 @@ fn resolve_fixed_function(name: &str, arity: usize) -> Result<OpCode, String> {
         "trunc" => Some(OpCode::Trunc),
         "fract" => Some(OpCode::Fract),
         "sign" | "signum" => Some(OpCode::Sign),
+        "erf" => Some(OpCode::Erf),
+        "erfc" => Some(OpCode::Erfc),
+        "sinc" => Some(OpCode::Sinc),
+        "sigmoid" => Some(OpCode::Sigmoid),
+        "softplus" => Some(OpCode::Softplus),
+        "heaviside" => Some(OpCode::Heaviside),
         _ => None,
     };
     if let Some(opcode) = unary {
@@ -569,7 +931,18 @@ fn resolve_fixed_function(name: &str, arity: usize) -> Result<OpCode, String> {
         "atan2" => fixed_binary_function(name, arity, OpCode::Atan2),
         "hypot" => fixed_binary_function(name, arity, OpCode::Hypot),
         "pow" => fixed_binary_function(name, arity, OpCode::Pow),
+        "logaddexp" => fixed_binary_function(name, arity, OpCode::LogAddExp),
+        "clamp" => fixed_ternary_function(name, arity, OpCode::Clamp),
+        "if" => fixed_ternary_function(name, arity, OpCode::Select),
         _ => Err(format!("Unknown function: {name}")),
+    }
+}
+
+fn fixed_ternary_function(name: &str, arity: usize, opcode: OpCode) -> Result<OpCode, String> {
+    if arity == 3 {
+        Ok(opcode)
+    } else {
+        Err(function_arity_error(name, "3 arguments", arity))
     }
 }
 
@@ -606,6 +979,12 @@ enum Token {
     Star,
     Slash,
     Caret,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    EqualEqual,
+    NotEqual,
     Comma,
     LParen,
     RParen,
@@ -688,6 +1067,44 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 '*' => tokens.push(Token::Star),
                 '/' => tokens.push(Token::Slash),
                 '^' => tokens.push(Token::Caret),
+                '<' => {
+                    chars.next();
+                    if chars.peek() == Some(&'=') {
+                        chars.next();
+                        tokens.push(Token::LessEqual);
+                    } else {
+                        tokens.push(Token::Less);
+                    }
+                    continue;
+                }
+                '>' => {
+                    chars.next();
+                    if chars.peek() == Some(&'=') {
+                        chars.next();
+                        tokens.push(Token::GreaterEqual);
+                    } else {
+                        tokens.push(Token::Greater);
+                    }
+                    continue;
+                }
+                '=' => {
+                    chars.next();
+                    if chars.peek() == Some(&'=') {
+                        chars.next();
+                        tokens.push(Token::EqualEqual);
+                        continue;
+                    }
+                    return Err("Expected '=='".to_string());
+                }
+                '!' => {
+                    chars.next();
+                    if chars.peek() == Some(&'=') {
+                        chars.next();
+                        tokens.push(Token::NotEqual);
+                        continue;
+                    }
+                    return Err("Expected '!='".to_string());
+                }
                 ',' => tokens.push(Token::Comma),
                 '(' => tokens.push(Token::LParen),
                 ')' => tokens.push(Token::RParen),
@@ -720,7 +1137,43 @@ impl Parser {
     }
 
     fn parse_expression(&mut self) -> Result<Expr, String> {
-        self.parse_term()
+        self.parse_comparison()
+    }
+
+    fn parse_comparison(&mut self) -> Result<Expr, String> {
+        let left = self.parse_term()?;
+        let comparison = match self.peek() {
+            Some(Token::Less) => ComparisonOp::Less,
+            Some(Token::LessEqual) => ComparisonOp::LessEqual,
+            Some(Token::Greater) => ComparisonOp::Greater,
+            Some(Token::GreaterEqual) => ComparisonOp::GreaterEqual,
+            Some(Token::EqualEqual) => ComparisonOp::Equal,
+            Some(Token::NotEqual) => ComparisonOp::NotEqual,
+            _ => return Ok(left),
+        };
+        self.consume();
+        let right = self.parse_term()?;
+        if matches!(
+            self.peek(),
+            Some(
+                Token::Less
+                    | Token::LessEqual
+                    | Token::Greater
+                    | Token::GreaterEqual
+                    | Token::EqualEqual
+                    | Token::NotEqual
+            )
+        ) {
+            return Err(
+                "Chained comparisons are not supported; combine explicit comparisons in if()."
+                    .to_string(),
+            );
+        }
+        Ok(Expr::Comparison(
+            Box::new(left),
+            comparison,
+            Box::new(right),
+        ))
     }
 
     fn parse_term(&mut self) -> Result<Expr, String> {
@@ -962,6 +1415,111 @@ mod tests {
     }
 
     #[test]
+    fn evaluates_builtin_mathematical_constants() {
+        assert_close(
+            eval_with_x_and_p("pi + tau + e", 0.0, 0.0),
+            std::f64::consts::PI + std::f64::consts::TAU + std::f64::consts::E,
+        );
+
+        let dual = eval_dual_wrt_p("p * pi + tau / e", 0.0, 1.5);
+        assert_close(
+            dual.val,
+            1.5 * std::f64::consts::PI + std::f64::consts::TAU / std::f64::consts::E,
+        );
+        assert_close(dual.eps, std::f64::consts::PI);
+    }
+
+    #[test]
+    fn declared_names_shadow_builtin_constants_for_compatibility() {
+        let compiler = Compiler::new(&["pi".to_string()], &["e".to_string()]);
+        let parsed = parse("pi + e + tau").expect("expression should parse");
+        let bytecode = compiler.compile(&parsed);
+        let system = EquationSystem::new(vec![bytecode], vec![4.0]);
+        let mut out = vec![0.0];
+
+        system.apply(0.0, &[3.0], &mut out);
+
+        assert_close(out[0], 3.0 + 4.0 + std::f64::consts::TAU);
+    }
+
+    #[test]
+    fn evaluates_stable_scientific_function_family() {
+        let cases = [
+            ("erf(p)", 0.7),
+            ("erfc(p)", 0.7),
+            ("sinc(p)", 0.7),
+            ("sinc(p)", 1e-8),
+            ("sigmoid(p)", -1.3),
+            ("softplus(p)", -1.3),
+            ("logaddexp(p, x)", 1.3),
+        ];
+
+        for (expr, p) in cases {
+            let dual = eval_dual_wrt_p(expr, 0.7, p);
+            assert_close(dual.val, eval_with_x_and_p(expr, 0.7, p));
+            assert_eps_close(dual.eps, numeric_derivative_wrt_p(expr, 0.7, p));
+        }
+
+        assert_close(eval_with_x_and_p("erf(1)", 0.0, 0.0), 0.8427007929497149);
+        assert_close(eval_with_x_and_p("erfc(1)", 0.0, 0.0), 0.15729920705028513);
+        assert_close(eval_with_x_and_p("sinc(0)", 0.0, 0.0), 1.0);
+        assert_close(eval_with_x_and_p("sigmoid(1000)", 0.0, 0.0), 1.0);
+        assert_close(eval_with_x_and_p("sigmoid(-1000)", 0.0, 0.0), 0.0);
+        assert_close(eval_with_x_and_p("softplus(1000)", 0.0, 0.0), 1000.0);
+        assert_close(eval_with_x_and_p("softplus(-1000)", 0.0, 0.0), 0.0);
+        assert_close(
+            eval_with_x_and_p("logaddexp(1000, 999)", 0.0, 0.0),
+            1000.0 + (-1.0_f64).exp().ln_1p(),
+        );
+        assert_close(
+            eval_with_x_and_p("logaddexp(-1000, -1001)", 0.0, 0.0),
+            -1000.0 + (-1.0_f64).exp().ln_1p(),
+        );
+    }
+
+    #[test]
+    fn evaluates_piecewise_conditionals_and_comparisons() {
+        let comparisons = [
+            ("p < x", 0.0),
+            ("p <= x", 1.0),
+            ("p > x", 0.0),
+            ("p >= x", 1.0),
+            ("p == x", 1.0),
+            ("p != x", 0.0),
+        ];
+        for (expr, expected) in comparisons {
+            assert_close(eval_with_x_and_p(expr, 0.7, 0.7), expected);
+            assert_close(eval_dual_wrt_p(expr, 0.7, 0.7).eps, 0.0);
+        }
+
+        let positive = eval_dual_wrt_p("if(p > 0, p^2, -p)", 0.0, 1.2);
+        assert_close(positive.val, 1.44);
+        assert_close(positive.eps, 2.4);
+        let negative = eval_dual_wrt_p("if(p > 0, p^2, -p)", 0.0, -1.2);
+        assert_close(negative.val, 1.2);
+        assert_close(negative.eps, -1.0);
+
+        for (p, expected_val, expected_eps) in [(-2.0, -1.0, 0.0), (0.5, 0.5, 1.0), (2.0, 1.0, 0.0)]
+        {
+            let dual = eval_dual_wrt_p("clamp(p, -1, 1)", 0.0, p);
+            assert_close(dual.val, expected_val);
+            assert_close(dual.eps, expected_eps);
+        }
+
+        assert_close(eval_with_x_and_p("heaviside(-1)", 0.0, 0.0), 0.0);
+        assert_close(eval_with_x_and_p("heaviside(0)", 0.0, 0.0), 0.5);
+        assert_close(eval_with_x_and_p("heaviside(1)", 0.0, 0.0), 1.0);
+        assert_close(eval_dual_wrt_p("heaviside(p)", 0.0, 0.7).eps, 0.0);
+        assert!(eval_with_x_and_p("clamp(p, 1, -1)", 0.0, 0.0).is_nan());
+        assert!(eval_with_x_and_p("heaviside(0/0)", 0.0, 0.0).is_nan());
+    }
+
+    #[test]
+    fn parser_rejects_chained_comparisons() {
+        assert!(parse("0 < x < 1").is_err());
+    }
+
+    #[test]
     fn evaluates_binary_and_variadic_function_family() {
         let x = 0.7_f64;
         let p = 1.3_f64;
@@ -1030,6 +1588,11 @@ mod tests {
                 "min(x)",
                 "Function 'min' expects at least 2 arguments; got 1.",
             ),
+            (
+                "clamp(x, 0)",
+                "Function 'clamp' expects 3 arguments; got 2.",
+            ),
+            ("if(x, 1)", "Function 'if' expects 3 arguments; got 2."),
         ];
 
         for (expression, expected) in cases {

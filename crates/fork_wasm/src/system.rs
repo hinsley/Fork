@@ -248,6 +248,31 @@ mod tests {
     }
 
     #[test]
+    fn wasm_system_supports_constants_stable_functions_and_conditionals() {
+        let mut system = WasmSystem::new(
+            vec![
+                "if(x >= 0, erf(x) + erfc(x) + sinc(x) + sigmoid(x) + softplus(x) + logaddexp(x, pi) + clamp(x, -tau, e) + heaviside(x), 0)"
+                    .to_string(),
+            ],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "discrete",
+            "map",
+        )
+        .expect("system");
+
+        system.set_state(&[0.4]);
+        let jacobian = system.compute_jacobian();
+        assert_eq!(jacobian.len(), 1);
+        assert!(jacobian[0].is_finite());
+        assert!(jacobian[0] > 1.0, "unexpected Jacobian: {jacobian:?}");
+
+        system.step(1.0);
+        assert!(system.get_state()[0].is_finite());
+    }
+
+    #[test]
     #[cfg(target_arch = "wasm32")]
     fn wasm_system_rejects_unknown_solver() {
         let result = WasmSystem::new(

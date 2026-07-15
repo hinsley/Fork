@@ -56,6 +56,12 @@ describe('SystemEditorPanel', () => {
     expect(screen.getByText('atan2(y, x)')).toBeVisible()
     expect(screen.getByText('log(x, base)')).toBeVisible()
     expect(screen.getByText('min(x, y, ...)')).toBeVisible()
+    expect(screen.getByText('pi')).toBeVisible()
+    expect(screen.getByText('erf(x)')).toBeVisible()
+    expect(screen.getByText('logaddexp(x, y)')).toBeVisible()
+    expect(screen.getByText('clamp(x, min, max)')).toBeVisible()
+    expect(screen.getByText('if(condition, then, else)')).toBeVisible()
+    expect(screen.getByText('==')).toBeVisible()
     expect(screen.getByText(/not differentiable at jumps, ties, or corners/i)).toBeVisible()
   })
 
@@ -70,6 +76,39 @@ describe('SystemEditorPanel', () => {
     await waitFor(() => expect(actions.updateSystem).toHaveBeenCalledOnce())
     expect(actions.updateSystem).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'Updated_System' })
+    )
+  })
+
+  it('evaluates mathematical constants in parameter value expressions', async () => {
+    const user = userEvent.setup()
+    const { actions } = renderEditor({ withParameter: true })
+
+    const value = screen.getByTestId('system-param-value-0')
+    await user.clear(value)
+    await user.type(value, 'tau / 4')
+    await user.click(screen.getByTestId('system-apply'))
+
+    await waitFor(() => expect(actions.updateSystem).toHaveBeenCalledOnce())
+    expect(actions.updateSystem).toHaveBeenCalledWith(
+      expect.objectContaining({ params: [Math.PI / 2] })
+    )
+  })
+
+  it('evaluates constant expressions pasted into parameter values', async () => {
+    const user = userEvent.setup()
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        readText: vi.fn().mockResolvedValue('tau / 4'),
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    })
+    renderEditor({ withParameter: true })
+
+    await user.click(screen.getByRole('button', { name: 'Paste values' }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('system-param-value-0')).toHaveValue(String(Math.PI / 2))
     )
   })
 
@@ -102,7 +141,7 @@ describe('SystemEditorPanel', () => {
     expect(screen.queryByTestId('system-var-1')).not.toBeInTheDocument()
     expect(screen.getByTestId('system-eq-0')).toHaveValue('alpha * u')
     expect(screen.getByTestId('system-param-0')).toHaveValue('alpha')
-    expect(screen.getByTestId('system-param-value-0')).toHaveValue(2.5)
+    expect(screen.getByTestId('system-param-value-0')).toHaveValue('2.5')
     expect(screen.queryByText('old_parameter')).not.toBeInTheDocument()
     expect(screen.queryByTestId('system-periodic-period-0')).not.toBeInTheDocument()
     expect(actions.updateSystem).not.toHaveBeenCalled()
@@ -135,6 +174,6 @@ describe('SystemEditorPanel', () => {
     expect(screen.getByTestId('system-var-0')).toHaveValue('x')
     expect(screen.getByTestId('system-var-1')).toHaveValue('y')
     expect(screen.getByTestId('system-param-0')).toHaveValue('old_parameter')
-    expect(screen.getByTestId('system-param-value-0')).toHaveValue(99)
+    expect(screen.getByTestId('system-param-value-0')).toHaveValue('99')
   })
 })

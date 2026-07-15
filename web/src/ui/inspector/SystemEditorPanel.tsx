@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useReducer, type SetStateAction } from 'react'
 import type { SystemConfig } from '../../system/types'
+import { parseConstantExpression } from '../../system/constantExpression'
 import {
+  EXPRESSION_COMPARISONS,
+  EXPRESSION_CONSTANTS,
   EXPRESSION_FUNCTION_GROUPS,
   PIECEWISE_EXPRESSION_FUNCTIONS,
 } from '../../system/expressionLanguage'
@@ -112,11 +115,6 @@ function systemEditorReducer(state: EditorState, action: EditorAction): EditorSt
   }
 }
 
-function parseNumber(value: string): number | null {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
 function buildConfig(draft: SystemDraft): SystemConfig {
   const varNames = draft.varNames.map((name) => name.trim())
   return {
@@ -126,7 +124,7 @@ function buildConfig(draft: SystemDraft): SystemConfig {
     varNames,
     equations: draft.equations.map((equation) => equation.trim()),
     paramNames: draft.paramNames.map((name) => name.trim()),
-    params: draft.params.map((value) => parseNumber(value) ?? Number.NaN),
+    params: draft.params.map((value) => parseConstantExpression(value) ?? Number.NaN),
     periodicVariables: adjustArray(
       draft.periodicVariables,
       varNames.length,
@@ -152,6 +150,14 @@ function formatValues(values: string[]): string {
 }
 
 function parseValues(value: string): number[] {
+  const expressions = value
+    .split(/[,\r\n]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  const evaluated = expressions.map(parseConstantExpression)
+  if (evaluated.length > 0 && evaluated.every((entry) => entry !== null)) {
+    return evaluated as number[]
+  }
   return (value.match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) ?? [])
     .map(Number)
     .filter(Number.isFinite)
@@ -167,6 +173,15 @@ function ExpressionLanguageReference() {
           <code>/</code>, <code>^</code>, parentheses, and scientific notation such as{' '}
           <code>1e-3</code>.
         </p>
+        <p>
+          Built-in constants:{' '}
+          {EXPRESSION_CONSTANTS.map((constant, index) => (
+            <span key={constant}>
+              {index > 0 ? ', ' : ''}<code>{constant}</code>
+            </span>
+          ))}. Parameter values also accept finite constant expressions such as{' '}
+          <code>tau / 4</code>.
+        </p>
         <div className="system-editor__expression-groups">
           {EXPRESSION_FUNCTION_GROUPS.map((group) => (
             <div key={group.label}>
@@ -178,6 +193,14 @@ function ExpressionLanguageReference() {
               </span>
             </div>
           ))}
+          <div>
+            <strong>Comparisons</strong>
+            <span>
+              {EXPRESSION_COMPARISONS.map((operator) => (
+                <code key={operator}>{operator}</code>
+              ))}
+            </span>
+          </div>
           <div>
             <strong>Piecewise</strong>
             <span>
@@ -410,7 +433,7 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
             {sections.parameters ? (
               <div className="system-editor__card-body">
                 <div className="system-editor__parameter-tools"><button type="button" className="inspector-inline-button" onClick={() => void copyText(formatValues(draft.params))} disabled={draft.paramNames.length === 0}>Copy values</button><button type="button" className="inspector-inline-button" onClick={() => void pasteParameters()} disabled={draft.paramNames.length === 0}>Paste values</button></div>
-                {draft.paramNames.length > 0 ? <div className="inspector-list system-editor__parameter-list">{draft.paramNames.map((name, index) => <div className="system-editor__parameter-row" key={`parameter-${index}`}><label className="system-editor__compact-field"><span className="system-editor__mobile-label">Parameter</span><input value={name} onChange={(event) => setDraft((previous) => ({ ...previous, paramNames: previous.paramNames.map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-param-${index}`} /></label><label className="system-editor__compact-field"><span className="system-editor__mobile-label">Value</span><input type="number" value={draft.params[index] ?? ''} onChange={(event) => setDraft((previous) => ({ ...previous, params: adjustArray(previous.params, previous.paramNames.length, () => '0').map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-param-value-${index}`} /></label><button type="button" className="system-editor__remove-button" onClick={() => setDraft((previous) => ({ ...previous, paramNames: previous.paramNames.filter((_, current) => current !== index), params: previous.params.filter((_, current) => current !== index) }))} data-testid={`system-remove-param-${index}`}>Remove</button></div>)}</div> : <div className="system-editor__empty">No parameters defined. Add one when an equation needs a named constant.</div>}
+                {draft.paramNames.length > 0 ? <div className="inspector-list system-editor__parameter-list">{draft.paramNames.map((name, index) => <div className="system-editor__parameter-row" key={`parameter-${index}`}><label className="system-editor__compact-field"><span className="system-editor__mobile-label">Parameter</span><input value={name} onChange={(event) => setDraft((previous) => ({ ...previous, paramNames: previous.paramNames.map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-param-${index}`} /></label><label className="system-editor__compact-field"><span className="system-editor__mobile-label">Value</span><input type="text" inputMode="text" placeholder="e.g. tau / 4" value={draft.params[index] ?? ''} onChange={(event) => setDraft((previous) => ({ ...previous, params: adjustArray(previous.params, previous.paramNames.length, () => '0').map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-param-value-${index}`} /></label><button type="button" className="system-editor__remove-button" onClick={() => setDraft((previous) => ({ ...previous, paramNames: previous.paramNames.filter((_, current) => current !== index), params: previous.params.filter((_, current) => current !== index) }))} data-testid={`system-remove-param-${index}`}>Remove</button></div>)}</div> : <div className="system-editor__empty">No parameters defined. Add one when an equation needs a named constant.</div>}
               </div>
             ) : null}
           </section>

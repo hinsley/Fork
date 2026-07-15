@@ -46,7 +46,22 @@ export const EXPRESSION_FUNCTION_GROUPS = [
     label: 'Algebraic',
     functions: ['sqrt(x)', 'cbrt(x)', 'pow(x, y)', 'hypot(x, y)'],
   },
+  {
+    label: 'Special and stable',
+    functions: [
+      'erf(x)',
+      'erfc(x)',
+      'sinc(x)',
+      'sigmoid(x)',
+      'softplus(x)',
+      'logaddexp(x, y)',
+    ],
+  },
 ] as const
+
+export const EXPRESSION_CONSTANTS = ['pi', 'tau', 'e'] as const
+
+export const EXPRESSION_COMPARISONS = ['<', '<=', '>', '>=', '==', '!='] as const
 
 export const PIECEWISE_EXPRESSION_FUNCTIONS = [
   'abs(x)',
@@ -58,4 +73,7 @@ export const PIECEWISE_EXPRESSION_FUNCTIONS = [
   'trunc(x)',
   'fract(x)',
   'sign(x)',
+  'clamp(x, min, max)',
+  'heaviside(x)',
+  'if(condition, then, else)',
 ] as const
