@@ -389,6 +389,8 @@ export interface ContinuationPoint {
     | string
   eigenvalues?: ContinuationEigenvalue[]
   cycle_points?: number[][]
+  cycle_contexts?: number[]
+  forcing_period?: number
   auxiliary?: number
   codim2?: Codim2PointData
   codim2_events?: Codim2PointData[]
@@ -994,9 +996,11 @@ export interface IsoclineObject {
   subsystemSnapshot?: SubsystemSnapshot
 }
 
-export type LimitCycleRenderTarget =
+export type PeriodicOrbitRenderTarget =
   | { type: 'object' }
   | { type: 'branch'; branchId: string; pointIndex: number }
+
+export type LimitCycleRenderTarget = PeriodicOrbitRenderTarget
 
 export type AnalysisObject =
   | OrbitObject

@@ -16,13 +16,17 @@ export function ForcedPeriodicResponseInspectorSections({
     forcedPeriodicResponse,
     forcedPeriodicResponseDraft,
     forcedPeriodicResponseError,
+    forcedPeriodicResponseRenderLabel,
     forcedPeriodicResponseStale,
     formatComplexValue,
     formatNumber,
     formatScientific,
     handleCreateForcedPeriodicResponseBranch,
     handleSolveForcedPeriodicResponse,
+    isStoredForcedPeriodicResponseTarget,
+    onSetLimitCycleRenderTarget,
     runDisabled,
+    selectedNodeId,
     selectionKey,
     setContinuationDraft,
     setForcedPeriodicResponseDraft,
@@ -35,6 +39,26 @@ export function ForcedPeriodicResponseInspectorSections({
 
   return (
     <>
+      <div className="inspector-section" data-testid="forced-response-render-target">
+        <h4 className="inspector-subheading">Rendered at</h4>
+        <div className="inspector-data">{forcedPeriodicResponseRenderLabel}</div>
+        {onSetLimitCycleRenderTarget && !isStoredForcedPeriodicResponseTarget ? (
+          <div className="inspector-row">
+            <button
+              type="button"
+              onClick={() =>
+                selectedNodeId
+                  ? onSetLimitCycleRenderTarget(selectedNodeId, { type: 'object' })
+                  : null
+              }
+              data-testid="forced-response-render-stored"
+            >
+              Render stored response
+            </button>
+          </div>
+        ) : null}
+      </div>
+
       <InspectorDisclosure
         key={`${selectionKey}-forced-response-solver`}
         title="Forced Response Solver"

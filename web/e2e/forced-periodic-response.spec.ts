@@ -48,6 +48,18 @@ test('solves a real-WASM time-forced flow and preserves autonomous guards', asyn
   await expect(page.getByText('3.1415927').first()).toBeVisible()
   await expect(page.getByText(/μ1 =/)).toBeVisible()
 
+  await page.getByTestId('inspector-workflow-back').click()
+  await page.getByTestId('action-forced-response-continuation-toggle').click()
+  await page.getByLabel('Max points').fill('3')
+  await page.getByTestId('forced-response-branch-submit').click()
+  await page.getByTestId('action-branch-points-toggle').click()
+  await page.getByTestId('branch-point-prev').click()
+  await expect(page.getByTestId('branch-point-render-lc')).toHaveText(
+    'Render Forced Response Here'
+  )
+  await page.getByTestId('branch-point-render-lc').click()
+  await expect(page.getByTestId('branch-point-render-lc')).toHaveCount(0)
+
   await harness.createEquilibrium()
   await page.getByTestId('action-equilibrium-solver-toggle').click()
   await expect(

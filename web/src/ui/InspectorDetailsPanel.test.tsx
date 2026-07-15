@@ -327,6 +327,157 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByTestId('forced-response-branch-submit')).toBeDisabled()
   })
 
+  it('sets and restores forced-response render targets from the branch navigator', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Forced_Render_Target',
+      equations: ['-x + a*cos(t)'],
+      params: [0.2],
+      paramNames: ['a'],
+      varNames: ['x'],
+      solver: 'rk4',
+      type: 'flow',
+      periodicForcing: { symbol: 't', periodExpression: 'tau' },
+    }
+    const response: ForcedPeriodicResponseObject = {
+      type: 'forced_periodic_response',
+      name: 'Forced_1',
+      systemName: config.name,
+      origin: { type: 'manual' },
+      solution: {
+        state: [0.1],
+        residual_norm: 1e-12,
+        iterations: 2,
+        monodromy: [0.5],
+        multipliers: [{ re: 0.5, im: 0 }],
+        cycle_points: [[0.1], [0.2], [0.1]],
+        contexts: [0, Math.PI, 2 * Math.PI],
+        forcing_period: 2 * Math.PI,
+        response_multiple: 1,
+        minimal_response_multiple: 1,
+      },
+      lastSolverParams: {
+        initialGuess: [0],
+        phase: 0,
+        responseMultiple: 1,
+        stepsPerForcingPeriod: 200,
+        maxSteps: 25,
+        dampingFactor: 1,
+        tolerance: 1e-9,
+      },
+      parameters: [0.2],
+      createdAt: new Date().toISOString(),
+    }
+    const withResponse = addObject(createSystem({ name: config.name, config }), response)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'forced_a',
+      systemName: config.name,
+      parameterName: 'a',
+      parameterRef: { kind: 'native_param', name: 'a' },
+      parentObject: response.name,
+      startObject: response.name,
+      branchType: 'forced_periodic_response',
+      data: {
+        points: [
+          {
+            state: [0.3],
+            param_value: 0.4,
+            stability: 'None',
+            eigenvalues: [{ re: 0.6, im: 0 }],
+            cycle_points: [[0.3], [0.4], [0.3]],
+          },
+        ],
+        bifurcations: [],
+        indices: [7],
+        branch_type: {
+          type: 'ForcedPeriodicResponse',
+          symbol: 't',
+          period_expression: 'tau',
+          phase: 0,
+          response_multiple: 1,
+          steps_per_forcing_period: 200,
+          integrator: 'rk4',
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2],
+    }
+    const withBranch = addBranch(withResponse.system, branch, withResponse.nodeId)
+    const onSetRenderTarget = vi.fn()
+    const commonProps = {
+      view: 'selection' as const,
+      theme: 'light' as const,
+      onRename: vi.fn(),
+      onToggleVisibility: vi.fn(),
+      onUpdateRender: vi.fn(),
+      onUpdateScene: vi.fn(),
+      onUpdateBifurcationDiagram: vi.fn(),
+      onUpdateSystem: vi.fn().mockResolvedValue(undefined),
+      onValidateSystem: vi.fn().mockResolvedValue({ ok: true, equationErrors: [] }),
+      onRunOrbit: vi.fn().mockResolvedValue(undefined),
+      onComputeLyapunovExponents: vi.fn().mockResolvedValue(undefined),
+      onComputeCovariantLyapunovVectors: vi.fn().mockResolvedValue(undefined),
+      onSolveEquilibrium: vi.fn().mockResolvedValue(undefined),
+      onCreateEquilibriumBranch: vi.fn().mockResolvedValue(undefined),
+      onCreateBranchFromPoint: vi.fn().mockResolvedValue(undefined),
+      onExtendBranch: vi.fn().mockResolvedValue(undefined),
+      onCreateFoldCurveFromPoint: vi.fn().mockResolvedValue(undefined),
+      onCreateHopfCurveFromPoint: vi.fn().mockResolvedValue(undefined),
+      onCreateNSCurveFromPoint: vi.fn().mockResolvedValue(undefined),
+      onCreateLimitCycleFromHopf: vi.fn().mockResolvedValue(undefined),
+      onCreateLimitCycleFromOrbit: vi.fn().mockResolvedValue(undefined),
+      onCreateLimitCycleFromPD: vi.fn().mockResolvedValue(undefined),
+      onCreateCycleFromPD: vi.fn().mockResolvedValue(undefined),
+      onSetLimitCycleRenderTarget: onSetRenderTarget,
+    }
+    const branchView = render(
+      <InspectorDetailsPanel
+        {...commonProps}
+        system={withBranch.system}
+        selectedNodeId={withBranch.nodeId}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    const renderButton = await screen.findByTestId('branch-point-render-lc')
+    expect(renderButton).toHaveTextContent('Render Forced Response Here')
+    await user.click(renderButton)
+    expect(onSetRenderTarget).toHaveBeenCalledWith(withResponse.nodeId, {
+      type: 'branch',
+      branchId: withBranch.nodeId,
+      pointIndex: 0,
+    })
+
+    branchView.unmount()
+    const targetedSystem = structuredClone(withBranch.system)
+    targetedSystem.ui.limitCycleRenderTargets = {
+      [withResponse.nodeId]: {
+        type: 'branch',
+        branchId: withBranch.nodeId,
+        pointIndex: 0,
+      },
+    }
+    render(
+      <InspectorDetailsPanel
+        {...commonProps}
+        system={targetedSystem}
+        selectedNodeId={withResponse.nodeId}
+      />
+    )
+
+    expect(screen.getByTestId('forced-response-render-target')).toHaveTextContent(
+      'forced_a @ 7'
+    )
+    const restoreButton = screen.getByTestId('forced-response-render-stored')
+    expect(restoreButton).toHaveTextContent('Render stored response')
+    await user.click(restoreButton)
+    expect(onSetRenderTarget).toHaveBeenLastCalledWith(withResponse.nodeId, {
+      type: 'object',
+    })
+  })
+
   it('validates adaptive mesh integers exactly and ignores stale disabled fields', () => {
     expect(
       buildCollocationAdaptivitySettings({

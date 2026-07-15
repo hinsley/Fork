@@ -3541,6 +3541,7 @@ export function AppProvider({
               }),
           }
         )
+        const normalizedBranchData = normalizeBranchEigenvalues(branchData)
         const branch: ContinuationObject = {
           type: 'continuation',
           name,
@@ -3552,14 +3553,22 @@ export function AppProvider({
           parentObject: response.name,
           startObject: response.name,
           branchType: 'forced_periodic_response',
-          data: normalizeBranchEigenvalues(branchData),
+          data: normalizedBranchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
           params: [...baseParams],
           subsystemSnapshot: snapshot,
         }
         const created = addBranch(current, branch, request.responseId)
-        const selected = selectNode(created.system, created.nodeId)
+        const withTarget =
+          normalizedBranchData.points.length > 0
+            ? updateLimitCycleRenderTarget(created.system, request.responseId, {
+                type: 'branch',
+                branchId: created.nodeId,
+                pointIndex: normalizedBranchData.points.length - 1,
+              })
+            : created.system
+        const selected = selectNode(withTarget, created.nodeId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
@@ -5318,7 +5327,11 @@ export function AppProvider({
         }
 
         let updated = updateBranch(state.system, request.branchId, updatedBranch)
-        if (sourceBranch.branchType === 'limit_cycle' && normalized.points.length > 0) {
+        if (
+          (sourceBranch.branchType === 'limit_cycle' ||
+            sourceBranch.branchType === 'forced_periodic_response') &&
+          normalized.points.length > 0
+        ) {
           const parentNodeId = resolveBranchParentObjectId(state.system, sourceBranch)
           if (parentNodeId) {
             const lastIndex = normalized.points.length - 1

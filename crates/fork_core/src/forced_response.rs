@@ -167,6 +167,12 @@ pub struct StroboscopicEvaluation {
     pub forcing_period: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForcedResponseTrajectoryMetadata {
+    pub contexts: Vec<f64>,
+    pub forcing_period: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdvancedStrobeSeed {
     pub state: Vec<f64>,
@@ -845,6 +851,63 @@ impl<'a> ForcedResponseContinuationProblem<'a> {
             .to_string(),
         }
     }
+
+    pub fn trajectory_metadata_at_parameter(
+        &mut self,
+        parameter: f64,
+        point_count: usize,
+    ) -> Result<ForcedResponseTrajectoryMetadata> {
+        if !parameter.is_finite() {
+            bail!("Forced-response continuation parameter must be finite");
+        }
+        if point_count == 0 {
+            bail!("Forced-response trajectory must contain at least one point");
+        }
+        let forcing = self.forcing.clone();
+        let settings = self.stroboscopic;
+        self.with_parameter(parameter, |map| {
+            let forcing_period = map.resolved_period()?;
+            let (expected_count, contexts) = match forcing {
+                PeriodicForcing::Flow { .. } => {
+                    let steps = settings
+                        .response_multiple
+                        .checked_mul(settings.steps_per_forcing_period)
+                        .ok_or_else(|| anyhow::anyhow!("Stroboscopic flow step count overflow"))?;
+                    let expected_count = steps
+                        .checked_add(1)
+                        .ok_or_else(|| anyhow::anyhow!("Stroboscopic point count overflow"))?;
+                    let start = settings.phase.rem_euclid(1.0) * forcing_period;
+                    let dt = forcing_period / settings.steps_per_forcing_period as f64;
+                    let contexts = (0..point_count)
+                        .map(|index| start + index as f64 * dt)
+                        .collect();
+                    (expected_count, contexts)
+                }
+                PeriodicForcing::Map { iteration_period } => {
+                    let iterations = iteration_period
+                        .checked_mul(settings.response_multiple)
+                        .ok_or_else(|| anyhow::anyhow!("Stroboscopic iteration count overflow"))?;
+                    let expected_count = iterations
+                        .checked_add(1)
+                        .ok_or_else(|| anyhow::anyhow!("Stroboscopic point count overflow"))?;
+                    let start = (settings.phase as i64).rem_euclid(iteration_period as i64) as f64;
+                    let contexts = (0..point_count)
+                        .map(|index| start + index as f64)
+                        .collect();
+                    (expected_count, contexts)
+                }
+            };
+            if point_count != expected_count {
+                bail!(
+                    "Forced-response trajectory point count mismatch: expected {expected_count}, got {point_count}"
+                );
+            }
+            Ok(ForcedResponseTrajectoryMetadata {
+                contexts,
+                forcing_period,
+            })
+        })
+    }
 }
 
 impl ContinuationProblem for ForcedResponseContinuationProblem<'_> {
@@ -1029,6 +1092,61 @@ mod tests {
         let nonfinite =
             CompiledParameterExpression::compile("1 / omega", &["omega".to_string()]).unwrap();
         assert!(nonfinite.evaluate(&[0.0]).is_err());
+    }
+
+    #[test]
+    fn continuation_problem_reports_exact_trajectory_contexts_at_trial_parameters() {
+        let mut flow = compile_system(
+            &["-x + cos(omega*t)"],
+            &["x"],
+            &[("omega", 2.0)],
+            ExpressionContext::FlowTime,
+        );
+        let mut flow_problem = ForcedResponseContinuationProblem::new(
+            &mut flow,
+            PeriodicForcing::flow("tau / omega", &["omega".to_string()]).unwrap(),
+            0,
+            FlowIntegrator::Rk4,
+            StroboscopicSettings {
+                phase: 0.25,
+                response_multiple: 2,
+                steps_per_forcing_period: 2,
+            },
+            StatePeriodicity::none(),
+        )
+        .unwrap();
+        let flow_metadata = flow_problem
+            .trajectory_metadata_at_parameter(4.0, 5)
+            .unwrap();
+        assert!((flow_metadata.forcing_period - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+        assert_eq!(flow_metadata.contexts.len(), 5);
+        assert!((flow_metadata.contexts[0] - std::f64::consts::FRAC_PI_8).abs() < 1e-12);
+        assert!((flow_metadata.contexts[4] - 9.0 * std::f64::consts::PI / 8.0).abs() < 1e-12);
+
+        let mut map = compile_system(
+            &["a*x + cos(pi*n)"],
+            &["x"],
+            &[("a", 0.5)],
+            ExpressionContext::MapIteration,
+        );
+        let mut map_problem = ForcedResponseContinuationProblem::new(
+            &mut map,
+            PeriodicForcing::map(2).unwrap(),
+            0,
+            FlowIntegrator::Tsit5,
+            StroboscopicSettings {
+                phase: 1.0,
+                response_multiple: 2,
+                steps_per_forcing_period: 200,
+            },
+            StatePeriodicity::none(),
+        )
+        .unwrap();
+        let map_metadata = map_problem
+            .trajectory_metadata_at_parameter(0.75, 5)
+            .unwrap();
+        assert_eq!(map_metadata.forcing_period, 2.0);
+        assert_eq!(map_metadata.contexts, vec![1.0, 2.0, 3.0, 4.0, 5.0]);
     }
 
     #[test]

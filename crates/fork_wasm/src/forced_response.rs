@@ -12,6 +12,7 @@ use fork_core::forced_response::{
     StroboscopicMap, StroboscopicSettings,
 };
 use fork_core::state_periodicity::StatePeriodicity;
+use js_sys::{Array, Reflect};
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
@@ -297,9 +298,35 @@ impl WasmForcedResponseRunner {
     }
 
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let (mut branch, _) = self.runner.take_result_with_problem()?;
+        let (mut branch, mut problem) = self.runner.take_result_with_problem()?;
         branch.branch_type = self.branch_type.clone();
-        serialize_js(&branch)
+        let metadata = branch
+            .points
+            .iter()
+            .map(|point| {
+                let point_count = point.cycle_points.as_ref().map_or(0, Vec::len);
+                problem
+                    .trajectory_metadata_at_parameter(point.param_value, point_count)
+                    .map_err(|error| JsValue::from_str(&error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let value = serialize_js(&branch)?;
+        let points = Array::from(&Reflect::get(&value, &JsValue::from_str("points"))?);
+        for (index, point_metadata) in metadata.iter().enumerate() {
+            let point = points.get(index as u32);
+            Reflect::set(
+                &point,
+                &JsValue::from_str("cycle_contexts"),
+                &to_value(&point_metadata.contexts)
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?,
+            )?;
+            Reflect::set(
+                &point,
+                &JsValue::from_str("forcing_period"),
+                &JsValue::from_f64(point_metadata.forcing_period),
+            )?;
+        }
+        Ok(value)
     }
 }
 

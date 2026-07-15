@@ -25,7 +25,12 @@ import {
   updateSystem,
 } from './model'
 import { buildSubsystemSnapshot } from './subsystemGateway'
-import type { ContinuationObject, LimitCycleObject, OrbitObject } from './types'
+import type {
+  ContinuationObject,
+  ForcedPeriodicResponseObject,
+  LimitCycleObject,
+  OrbitObject,
+} from './types'
 
 describe('system model', () => {
   it('adds objects, renames, and toggles visibility', () => {
@@ -489,6 +494,121 @@ describe('system model', () => {
       branchId: withBranch.nodeId,
       pointIndex: 0,
     })
+  })
+
+  it('preserves forced-response render targets when normalizing skeleton systems', () => {
+    const base = createSystem({
+      name: 'Forced_Target_Skeleton',
+      config: {
+        name: 'Forced_Target_Skeleton',
+        equations: ['-x + a*cos(t)'],
+        params: [0.2],
+        paramNames: ['a'],
+        varNames: ['x'],
+        periodicForcing: { symbol: 't', periodExpression: 'tau' },
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const response: ForcedPeriodicResponseObject = {
+      type: 'forced_periodic_response',
+      name: 'Forced_Seed',
+      systemName: base.config.name,
+      origin: { type: 'manual' },
+      lastSolverParams: {
+        initialGuess: [0],
+        phase: 0,
+        responseMultiple: 1,
+        stepsPerForcingPeriod: 200,
+        maxSteps: 25,
+        dampingFactor: 1,
+        tolerance: 1e-9,
+      },
+      createdAt: new Date().toISOString(),
+    }
+    const withResponse = addObject(base, response)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'forced_branch',
+      systemName: base.config.name,
+      parameterName: 'a',
+      parentObject: response.name,
+      startObject: response.name,
+      branchType: 'forced_periodic_response',
+      data: {
+        points: [
+          {
+            state: [0.1],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+            cycle_points: [[0.1], [0.2], [0.1]],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'ForcedPeriodicResponse',
+          symbol: 't',
+          period_expression: 'tau',
+          phase: 0,
+          response_multiple: 1,
+          steps_per_forcing_period: 200,
+          integrator: 'rk4',
+        },
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        max_steps: 10,
+        corrector_steps: 3,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [0.2],
+    }
+    const withBranch = addBranch(withResponse.system, branch, withResponse.nodeId)
+    const targetSystem = structuredClone(withBranch.system)
+    targetSystem.ui.limitCycleRenderTargets = {
+      [withResponse.nodeId]: {
+        type: 'branch',
+        branchId: withBranch.nodeId,
+        pointIndex: 0,
+      },
+    }
+
+    const skeleton = normalizeSystem({
+      ...targetSystem,
+      objects: {},
+      branches: {},
+    })
+
+    expect(skeleton.ui.limitCycleRenderTargets?.[withResponse.nodeId]).toEqual({
+      type: 'branch',
+      branchId: withBranch.nodeId,
+      pointIndex: 0,
+    })
+
+    const duplicated = duplicateNode(targetSystem, withResponse.nodeId)
+    expect(duplicated).not.toBeNull()
+    if (!duplicated) {
+      throw new Error('Expected the forced-response object to be duplicated')
+    }
+    const duplicatedTarget = duplicated.system.ui.limitCycleRenderTargets?.[duplicated.nodeId]
+    expect(duplicatedTarget?.type).toBe('branch')
+    if (duplicatedTarget?.type === 'branch') {
+      expect(duplicatedTarget.branchId).not.toBe(withBranch.nodeId)
+      expect(duplicated.system.nodes[duplicatedTarget.branchId]?.parentId).toBe(
+        duplicated.nodeId
+      )
+    }
+
+    const withoutTargetBranch = removeNode(targetSystem, withBranch.nodeId)
+    expect(
+      withoutTargetBranch.ui.limitCycleRenderTargets?.[withResponse.nodeId]
+    ).toBeUndefined()
   })
 
   it('renames scene nodes without cloning object or branch payload maps', () => {

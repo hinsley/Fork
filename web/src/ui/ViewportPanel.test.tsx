@@ -4178,6 +4178,116 @@ describe('ViewportPanel view state wiring', () => {
     expect(minTrace?.y).toEqual([1, 2])
   })
 
+  it('renders forced-response objects from the selected branch datum target', () => {
+    const config: SystemConfig = {
+      name: 'Forced_Response_Render_Target',
+      equations: ['-x + a * cos(t)'],
+      params: [1],
+      paramNames: ['a'],
+      varNames: ['x'],
+      periodicForcing: { symbol: 't', periodExpression: 'tau / a' },
+      solver: 'rk4',
+      type: 'flow'
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Response time series')
+    system = sceneResult.system
+    const response: ForcedPeriodicResponseObject = {
+      type: 'forced_periodic_response',
+      name: 'Forced response',
+      systemName: config.name,
+      origin: { type: 'manual' },
+      solution: {
+        state: [0],
+        residual_norm: 0,
+        iterations: 1,
+        monodromy: [0.5],
+        multipliers: [{ re: 0.5, im: 0 }],
+        cycle_points: [[0], [1], [0]],
+        contexts: [0, Math.PI, 2 * Math.PI],
+        forcing_period: 2 * Math.PI,
+        response_multiple: 1,
+        minimal_response_multiple: 1
+      },
+      lastSolverParams: {
+        initialGuess: [0],
+        phase: 0,
+        responseMultiple: 1,
+        stepsPerForcingPeriod: 2,
+        maxSteps: 25,
+        dampingFactor: 1,
+        tolerance: 1e-9
+      },
+      parameters: [1],
+      createdAt: nowIso()
+    }
+    const responseResult = addObject(system, response)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'forced_response_target',
+      systemName: config.name,
+      parameterName: 'a',
+      parameterRef: { kind: 'native_param', name: 'a' },
+      parentObject: response.name,
+      startObject: response.name,
+      branchType: 'forced_periodic_response',
+      data: {
+        points: [
+          {
+            state: [5],
+            param_value: 2,
+            stability: 'None',
+            eigenvalues: [{ re: 0.25, im: 0 }],
+            cycle_points: [[5], [7], [5]],
+            cycle_contexts: [0, Math.PI / 2, Math.PI],
+            forcing_period: Math.PI
+          }
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'ForcedPeriodicResponse',
+          symbol: 't',
+          period_expression: 'tau / a',
+          phase: 0,
+          response_multiple: 1,
+          steps_per_forcing_period: 2,
+          integrator: 'rk4'
+        }
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        max_steps: 10,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6
+      },
+      timestamp: nowIso(),
+      params: [1]
+    }
+    const branchResult = addBranch(responseResult.system, branch, responseResult.nodeId)
+    system = updateLimitCycleRenderTarget(branchResult.system, responseResult.nodeId, {
+      type: 'branch',
+      branchId: branchResult.nodeId,
+      pointIndex: 0
+    })
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const trace = props?.data.find(
+      (entry) =>
+        'uid' in entry &&
+        entry.uid === responseResult.nodeId &&
+        'mode' in entry &&
+        entry.mode === 'lines'
+    ) as { x?: number[]; y?: number[] } | undefined
+    expect(trace?.x).toEqual([0, Math.PI / 2, Math.PI])
+    expect(trace?.y).toEqual([5, 7, 5])
+  })
+
   it('renders envelopes when plotted state axes include one free variable even with multi-free subsystems', () => {
     const config: SystemConfig = {
       name: 'Frozen_LC_MultiFree_Axes_Envelope',

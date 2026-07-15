@@ -2539,16 +2539,65 @@ function useInspectorSelectionController({
   const isStoredCycleTarget =
     !limitCycleRenderTarget || limitCycleRenderTarget.type === 'object'
   const canRenderStoredCycle = limitCycle?.origin.type === 'orbit'
-  const limitCycleParentId = useMemo(() => {
+  const forcedPeriodicResponseRenderTarget =
+    forcedPeriodicResponse && selectedNodeId
+      ? limitCycleRenderTargets[selectedNodeId] ?? null
+      : null
+  const forcedPeriodicResponseRenderBranch =
+    forcedPeriodicResponseRenderTarget?.type === 'branch'
+      ? system.branches[forcedPeriodicResponseRenderTarget.branchId]
+      : null
+  const forcedPeriodicResponseRenderLabel = useMemo(() => {
+    if (
+      forcedPeriodicResponseRenderTarget?.type !== 'branch' ||
+      !forcedPeriodicResponseRenderBranch
+    ) {
+      return 'Stored response'
+    }
+    const indices = ensureBranchIndices(forcedPeriodicResponseRenderBranch.data)
+    const logicalIndex = indices[forcedPeriodicResponseRenderTarget.pointIndex]
+    const displayIndex = Number.isFinite(logicalIndex)
+      ? logicalIndex
+      : forcedPeriodicResponseRenderTarget.pointIndex
+    return `${forcedPeriodicResponseRenderBranch.name} @ ${displayIndex}`
+  }, [forcedPeriodicResponseRenderBranch, forcedPeriodicResponseRenderTarget])
+  const isStoredForcedPeriodicResponseTarget =
+    !forcedPeriodicResponseRenderTarget ||
+    forcedPeriodicResponseRenderTarget.type === 'object'
+  const periodicOrbitParentId = useMemo(() => {
     if (!branch) return null
+    const isPeriodicOrbitObject = (objectId: string): boolean => {
+      const payload = system.objects[objectId]
+      if (payload) {
+        return payload.type === 'limit_cycle' || payload.type === 'forced_periodic_response'
+      }
+      const node = system.nodes[objectId]
+      if (
+        node?.kind === 'object' &&
+        (node.objectType === 'limit_cycle' ||
+          node.objectType === 'forced_periodic_response')
+      ) {
+        return true
+      }
+      const indexEntry = system.index.objects[objectId]
+      return (
+        indexEntry?.objectType === 'limit_cycle' ||
+        indexEntry?.objectType === 'forced_periodic_response'
+      )
+    }
+    if (branch.parentObjectId && isPeriodicOrbitObject(branch.parentObjectId)) {
+      return branch.parentObjectId
+    }
     return (
       Object.entries(system.objects).find(
-        ([, obj]) => obj.type === 'limit_cycle' && obj.name === branch.parentObject
+        ([, obj]) =>
+          (obj.type === 'limit_cycle' || obj.type === 'forced_periodic_response') &&
+          obj.name === branch.parentObject
       )?.[0] ?? null
     )
-  }, [branch, system.objects])
-  const branchRenderTarget = limitCycleParentId
-    ? limitCycleRenderTargets[limitCycleParentId] ?? null
+  }, [branch, system.index.objects, system.nodes, system.objects])
+  const branchRenderTarget = periodicOrbitParentId
+    ? limitCycleRenderTargets[periodicOrbitParentId] ?? null
     : null
   const isBranchRenderTarget =
     Boolean(
@@ -8537,6 +8586,7 @@ function useInspectorSelectionController({
     forcedPeriodicResponse,
     forcedPeriodicResponseDraft,
     forcedPeriodicResponseError,
+    forcedPeriodicResponseRenderLabel,
     forcedPeriodicResponseStale,
     existingBranchNames,
     existingObjectNames,
@@ -8639,6 +8689,7 @@ function useInspectorSelectionController({
     isMapSystem,
     isRealEigenvalue,
     isStoredCycleTarget,
+    isStoredForcedPeriodicResponseTarget,
     isSurfaceManifoldBranch,
     isoperiodicCurveDraft,
     isoperiodicCurveError,
@@ -8698,7 +8749,7 @@ function useInspectorSelectionController({
     limitCycleMesh,
     limitCycleModeMultipliers,
     limitCycleMultiplierPlot,
-    limitCycleParentId,
+    periodicOrbitParentId,
     limitCyclePointMetrics,
     limitCyclePreviewEnd,
     limitCyclePreviewError,

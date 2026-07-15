@@ -17,6 +17,7 @@ import type {
   ContinuationObject,
   ContinuationPoint,
   EquilibriumEigenPair,
+  ForcedPeriodicResponseObject,
   IsoclineComputedSnapshot,
   LineStyle,
   ManifoldCurveGeometry,
@@ -1034,7 +1035,10 @@ function buildFloquetEigenpairsAtPoint(
 }
 
 
-type VisibleObjectSource = Pick<System, 'rootIds' | 'nodes' | 'objects'>
+type VisibleObjectSource = Pick<
+  System,
+  'config' | 'rootIds' | 'nodes' | 'objects' | 'branches' | 'ui'
+>
 type VisibleBranchSource = Pick<System, 'rootIds' | 'nodes' | 'branches'>
 type VisibleSceneSource = Pick<System, 'rootIds' | 'nodes' | 'objects' | 'branches'>
 type TraceSystem = System
@@ -1100,7 +1104,10 @@ function collectVisibleSceneNodeIds(system: VisibleSceneSource): string[] {
   return ids
 }
 
-function resolveBranchSnapshot(system: System, branch: ContinuationObject): SubsystemSnapshot | null {
+function resolveBranchSnapshot(
+  system: Pick<System, 'config'>,
+  branch: ContinuationObject
+): SubsystemSnapshot | null {
   if (!branch.subsystemSnapshot) return null
   if (!isSubsystemSnapshotCompatible(system.config, branch.subsystemSnapshot)) return null
   return branch.subsystemSnapshot
@@ -1148,6 +1155,111 @@ function resolveBranchPointDisplayProjection(
   return Object.keys(projection).length > 0 ? projection : undefined
 }
 
+type ForcedResponseRenderData = {
+  cyclePoints: number[][]
+  contexts: number[]
+  snapshot: SubsystemSnapshot | null
+  projection?: {
+    parameterRef?: ContinuationObject['parameterRef']
+    paramValue?: number
+    parameter2Ref?: ContinuationObject['parameter2Ref']
+    param2Value?: number
+  }
+}
+
+function fallbackForcedResponseContexts(
+  object: ForcedPeriodicResponseObject,
+  branch: ContinuationObject,
+  point: ContinuationPoint,
+  pointCount: number
+): number[] {
+  if (pointCount <= 0) return []
+  const metadata = branch.data.branch_type
+  if (!metadata || metadata.type !== 'ForcedPeriodicResponse') {
+    return object.solution?.contexts.slice(0, pointCount) ?? []
+  }
+  if (metadata.symbol === 'n') {
+    const iterationPeriod = Math.max(1, Math.trunc(metadata.iteration_period ?? 1))
+    const phase = Math.trunc(metadata.phase)
+    const start = ((phase % iterationPeriod) + iterationPeriod) % iterationPeriod
+    return Array.from({ length: pointCount }, (_, index) => start + index)
+  }
+  const forcingPeriod =
+    typeof point.forcing_period === 'number' && Number.isFinite(point.forcing_period)
+      ? point.forcing_period
+      : object.solution?.forcing_period
+  if (typeof forcingPeriod !== 'number' || !Number.isFinite(forcingPeriod)) {
+    return object.solution?.contexts.slice(0, pointCount) ?? []
+  }
+  const start = ((metadata.phase % 1) + 1) % 1 * forcingPeriod
+  const expectedSteps = Math.max(
+    1,
+    metadata.response_multiple * metadata.steps_per_forcing_period
+  )
+  const step =
+    pointCount === expectedSteps + 1
+      ? forcingPeriod / metadata.steps_per_forcing_period
+      : (forcingPeriod * metadata.response_multiple) / Math.max(1, pointCount - 1)
+  return Array.from({ length: pointCount }, (_, index) => start + index * step)
+}
+
+function resolveForcedResponseRenderData(
+  system: Pick<System, 'config' | 'branches' | 'ui'>,
+  objectId: string,
+  object: ForcedPeriodicResponseObject
+): ForcedResponseRenderData | null {
+  const solution = object.solution
+  if (!solution || solution.cycle_points.length === 0) return null
+  const storedSnapshot =
+    object.subsystemSnapshot &&
+    isSubsystemSnapshotCompatible(system.config, object.subsystemSnapshot)
+      ? object.subsystemSnapshot
+      : null
+  const target = system.ui.limitCycleRenderTargets?.[objectId]
+  if (target?.type !== 'branch') {
+    return {
+      cyclePoints: solution.cycle_points,
+      contexts: solution.contexts,
+      snapshot: storedSnapshot,
+    }
+  }
+  const branch = system.branches[target.branchId]
+  const point = branch?.data.points[target.pointIndex]
+  const belongsToObject =
+    branch &&
+    (branch.parentObjectId === objectId ||
+      (!branch.parentObjectId && branch.parentObject === object.name))
+  if (
+    !branch ||
+    branch.branchType !== 'forced_periodic_response' ||
+    !point ||
+    !belongsToObject ||
+    !point.cycle_points ||
+    point.cycle_points.length === 0
+  ) {
+    return {
+      cyclePoints: solution.cycle_points,
+      contexts: solution.contexts,
+      snapshot: storedSnapshot,
+    }
+  }
+  const snapshot = resolveBranchSnapshot(system, branch)
+  const packedStateDimension =
+    snapshot?.freeVariableNames.length ?? system.config.varNames.length
+  const contexts =
+    Array.isArray(point.cycle_contexts) &&
+    point.cycle_contexts.length === point.cycle_points.length &&
+    point.cycle_contexts.every(Number.isFinite)
+      ? point.cycle_contexts
+      : fallbackForcedResponseContexts(object, branch, point, point.cycle_points.length)
+  return {
+    cyclePoints: point.cycle_points,
+    contexts,
+    snapshot,
+    projection: resolveBranchPointDisplayProjection(branch, point, packedStateDimension),
+  }
+}
+
 function collectMap1DRange(system: VisibleObjectSource, axisIndex: number): [number, number] | null {
   const safeAxisIndex = Number.isInteger(axisIndex) ? Math.max(0, axisIndex) : 0
   let min = Number.POSITIVE_INFINITY
@@ -1181,7 +1293,8 @@ function collectMap1DRange(system: VisibleObjectSource, axisIndex: number): [num
       continue
     }
     if (object.type === 'forced_periodic_response') {
-      for (const point of object.solution?.cycle_points ?? []) {
+      const renderData = resolveForcedResponseRenderData(system, nodeId, object)
+      for (const point of renderData?.cyclePoints ?? []) {
         const value = point?.[safeAxisIndex]
         if (typeof value !== 'number' || !Number.isFinite(value)) continue
         min = Math.min(min, value)
@@ -3331,16 +3444,13 @@ function buildSceneTraces(
     }
 
     if (object.type === 'forced_periodic_response') {
-      const solution = object.solution
-      if (!solution || solution.cycle_points.length === 0) continue
-      const snapshot =
-        object.subsystemSnapshot &&
-        isSubsystemSnapshotCompatible(system.config, object.subsystemSnapshot)
-          ? object.subsystemSnapshot
-          : null
-      const states = snapshot
-        ? solution.cycle_points.map((point) => stateVectorToDisplay(snapshot, point))
-        : solution.cycle_points
+      const renderData = resolveForcedResponseRenderData(system, nodeId, object)
+      if (!renderData) continue
+      const states = renderData.snapshot
+        ? renderData.cyclePoints.map((point) =>
+            stateVectorToDisplay(renderData.snapshot!, point, renderData.projection)
+          )
+        : renderData.cyclePoints
       const dimension = states[0]?.length ?? 0
       if (dimension === 0) continue
       const axes = resolveAxisOrder(
@@ -3373,7 +3483,7 @@ function buildSceneTraces(
           mode: 'lines',
           name: object.name,
           uid: nodeId,
-          x: solution.contexts.slice(0, states.length),
+          x: renderData.contexts.slice(0, states.length),
           y: states.map((point) => point[axis]),
           line: { color: node.render.color, width },
         })
@@ -4374,9 +4484,28 @@ function buildSceneTraces(
       return Number.isFinite(inferred) ? (inferred as number) : null
     }
 
+    const forcedResponseParentId =
+      branch.branchType === 'forced_periodic_response'
+        ? branch.parentObjectId ??
+          Object.entries(system.objects).find(
+            ([, candidate]) =>
+              candidate.type === 'forced_periodic_response' &&
+              candidate.name === branch.parentObject
+          )?.[0] ??
+          null
+        : null
+    const forcedResponseTarget = forcedResponseParentId
+      ? system.ui.limitCycleRenderTargets?.[forcedResponseParentId]
+      : null
+    const selectedForcedResponseIsTarget = Boolean(
+      forcedResponseTarget?.type === 'branch' &&
+      forcedResponseTarget.branchId === nodeId &&
+      forcedResponseTarget.pointIndex === selectedBranchPointIndex
+    )
     if (
       branch.branchType === 'forced_periodic_response' &&
-      selectedBranchPointIndex !== null
+      selectedBranchPointIndex !== null &&
+      !selectedForcedResponseIsTarget
     ) {
       const selected = branch.data.points[selectedBranchPointIndex]
       const responseStates = (selected?.cycle_points ?? []).map((state) =>
@@ -7261,16 +7390,21 @@ export function ViewportPanel({
   const systemRootIds = system.rootIds
   const systemNodes = system.nodes
   const systemObjects = system.objects
+  const systemBranches = system.branches
+  const systemUi = system.ui
   const systemScenes = system.scenes
   const systemAnalysisViewports = system.analysisViewports
   const systemDiagrams = system.bifurcationDiagrams
   const mapRangeSource = useMemo<VisibleObjectSource>(
     () => ({
+      config: systemConfig,
       rootIds: systemRootIds,
       nodes: systemNodes,
       objects: systemObjects,
+      branches: systemBranches,
+      ui: systemUi,
     }),
-    [systemRootIds, systemNodes, systemObjects]
+    [systemBranches, systemConfig, systemNodes, systemObjects, systemRootIds, systemUi]
   )
 
   const viewports = useMemo(() => {

@@ -71,7 +71,7 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
     isDiscreteMap,
     isLimitCycleBranch,
     limitCycleMesh,
-    limitCycleParentId,
+    periodicOrbitParentId,
     limitCyclePointMetrics,
     manifoldCurveSolverDiagnostics,
     manifoldSolverDiagnostics,
@@ -291,19 +291,24 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                           onPointSelect={setBranchPoint}
                           onPointInputChange={setBranchPointInput}
                           onJumpToPoint={handleJumpToBranchPoint}
-                          onRenderLimitCycleHere={
+                          onRenderPeriodicOrbitHere={
                             branchPointIndex !== null &&
                             selectedNodeId &&
-                            limitCycleParentId &&
+                            periodicOrbitParentId &&
                             onSetLimitCycleRenderTarget &&
                             !isBranchRenderTarget
                               ? () =>
-                                  onSetLimitCycleRenderTarget(limitCycleParentId, {
+                                  onSetLimitCycleRenderTarget(periodicOrbitParentId, {
                                     type: 'branch',
                                     branchId: selectedNodeId,
                                     pointIndex: branchPointIndex,
                                   })
                               : undefined
+                          }
+                          renderPeriodicOrbitLabel={
+                            branch.branchType === 'forced_periodic_response'
+                              ? 'Render Forced Response Here'
+                              : 'Render LC Here'
                           }
                         />
                         <InspectorSubDisclosure
@@ -926,19 +931,24 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                           onPointSelect={setBranchPoint}
                           onPointInputChange={setBranchPointInput}
                           onJumpToPoint={handleJumpToBranchPoint}
-                          onRenderLimitCycleHere={
+                          onRenderPeriodicOrbitHere={
                             branchPointIndex !== null &&
                             selectedNodeId &&
-                            limitCycleParentId &&
+                            periodicOrbitParentId &&
                             onSetLimitCycleRenderTarget &&
                             !isBranchRenderTarget
                               ? () =>
-                                  onSetLimitCycleRenderTarget(limitCycleParentId, {
+                                  onSetLimitCycleRenderTarget(periodicOrbitParentId, {
                                     type: 'branch',
                                     branchId: selectedNodeId,
                                     pointIndex: branchPointIndex,
                                   })
                               : undefined
+                          }
+                          renderPeriodicOrbitLabel={
+                            branch.branchType === 'forced_periodic_response'
+                              ? 'Render Forced Response Here'
+                              : 'Render LC Here'
                           }
                         />
                         <InspectorSubDisclosure

@@ -22,7 +22,8 @@ type BranchNavigatorContentProps = {
   onPointSelect: (arrayIndex: number) => void
   onPointInputChange: (value: string) => void
   onJumpToPoint: () => void
-  onRenderLimitCycleHere?: () => void
+  onRenderPeriodicOrbitHere?: () => void
+  renderPeriodicOrbitLabel?: string
 }
 
 export function BranchNavigatorContent({
@@ -41,7 +42,8 @@ export function BranchNavigatorContent({
   onPointSelect,
   onPointInputChange,
   onJumpToPoint,
-  onRenderLimitCycleHere,
+  onRenderPeriodicOrbitHere,
+  renderPeriodicOrbitLabel = 'Render LC Here',
 }: BranchNavigatorContentProps) {
   const finitePeriod =
     typeof selectedPointPeriod === 'number' && Number.isFinite(selectedPointPeriod)
@@ -165,14 +167,14 @@ export function BranchNavigatorContent({
         </div>
       ) : null}
 
-      {branchPointIndex !== null && onRenderLimitCycleHere ? (
+      {branchPointIndex !== null && onRenderPeriodicOrbitHere ? (
         <div className="inspector-row">
           <button
             type="button"
-            onClick={onRenderLimitCycleHere}
+            onClick={onRenderPeriodicOrbitHere}
             data-testid="branch-point-render-lc"
           >
-            Render LC Here
+            {renderPeriodicOrbitLabel}
           </button>
         </div>
       ) : null}

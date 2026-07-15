@@ -1924,14 +1924,23 @@ export function normalizeSystem(system: System): System {
   )
   const limitCycleRenderTargets = nextUi.limitCycleRenderTargets ?? {}
   const normalizedTargets: Record<string, LimitCycleRenderTarget> = {}
-  const isLimitCycleObject = (objectId: string): boolean => {
+  const isPeriodicOrbitObject = (objectId: string): boolean => {
     const payload = next.objects[objectId]
-    if (payload) return payload.type === 'limit_cycle'
+    if (payload) {
+      return payload.type === 'limit_cycle' || payload.type === 'forced_periodic_response'
+    }
     const node = next.nodes[objectId]
-    if (node?.kind === 'object' && node.objectType === 'limit_cycle')
+    if (
+      node?.kind === 'object' &&
+      (node.objectType === 'limit_cycle' || node.objectType === 'forced_periodic_response')
+    ) {
       return true
+    }
     const indexEntry = existingIndex.objects[objectId]
-    return indexEntry?.objectType === 'limit_cycle'
+    return (
+      indexEntry?.objectType === 'limit_cycle' ||
+      indexEntry?.objectType === 'forced_periodic_response'
+    )
   }
   const hasBranchReference = (branchId: string): boolean => {
     if (next.branches[branchId]) return true
@@ -1940,7 +1949,7 @@ export function normalizeSystem(system: System): System {
     return Boolean(existingIndex.branches[branchId])
   }
   Object.entries(limitCycleRenderTargets).forEach(([objectId, target]) => {
-    if (!isLimitCycleObject(objectId)) {
+    if (!isPeriodicOrbitObject(objectId)) {
       return
     }
     if (!target || typeof target !== 'object') return

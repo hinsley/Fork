@@ -201,6 +201,12 @@ const forcedResponseBranch = forcedResponseRunner.get_result();
 assert.equal(forcedResponseBranch.branch_type.type, 'ForcedPeriodicResponse');
 assert.ok(forcedResponseBranch.points.length >= 2);
 assert.ok(forcedResponseBranch.points.every((point: any) => point.cycle_points?.length === 101));
+assert.ok(forcedResponseBranch.points.every((point: any) => point.cycle_contexts?.length === 101));
+assert.ok(
+  forcedResponseBranch.points.every(
+    (point: any) => Math.abs(point.forcing_period - Math.PI) < 1e-12
+  )
+);
 
 const forcedLyapunov = new wasm.WasmLyapunovRunner(
   ['t*x'],
