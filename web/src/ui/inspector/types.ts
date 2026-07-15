@@ -12,6 +12,7 @@ export type InspectorActions = Pick<
   | 'updateRender'
   | 'updateObjectParams'
   | 'updateObjectFrozenVariables'
+  | 'updateObjectFrozenEquationContext'
   | 'updateIsoclineObject'
   | 'computeIsocline'
   | 'updateScene'

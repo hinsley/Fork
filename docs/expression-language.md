@@ -24,6 +24,23 @@ In the web editor and system-string import, parameter values accept finite const
 using numeric literals, `pi`, `tau`, `e`, arithmetic, powers, unary signs, and parentheses. For
 example, `omega = tau / 4` is stored as the numeric value `pi/2`.
 
+## Contextual time and iteration symbols
+
+Flow equations may use undeclared `t` for the solver's live time. Map equations may use undeclared
+`n` for the current integer iteration index. The symbols are contextual: undeclared `n` is an error
+in a flow, and undeclared `t` is an error in a map. Resolution order is declared state variable,
+declared parameter, applicable context symbol, then built-in constant, so an existing declared `t`
+or `n` continues to shadow the contextual meaning.
+
+Run Orbit accepts an initial `t0` or `n0`. Runge-Kutta stages evaluate `t` at their stage times;
+maps evaluate `n` once per unit iteration and then increment it. Events and observables use the live
+sample clock, including when the equations themselves have a frozen forcing context. Parameter
+constant expressions remain context-free: `t` and `n` are invalid there.
+
+Lyapunov exponents and covariant Lyapunov vectors may be computed directly for a live
+nonautonomous system. Their spectra describe the driven state dynamics and do not add the
+artificial neutral direction that state augmentation by a phase variable would introduce.
+
 ## Differentiable functions
 
 | Family | Signatures |

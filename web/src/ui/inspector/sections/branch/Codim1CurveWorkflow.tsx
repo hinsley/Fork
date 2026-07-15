@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 
 export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -97,7 +98,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                                     : undefined
                                 const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
                                 const value = branchValue ?? fallbackValue
-                                const label = `${name} (current: ${formatNumber(
+                                const label = `${formatContinuationParameterDisplayLabel(name)} (current: ${formatNumber(
                                   value ?? Number.NaN,
                                   6
                                 )})`
@@ -279,7 +280,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                                     : undefined
                                 const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
                                 const value = branchValue ?? fallbackValue
-                                const label = `${name} (current: ${formatNumber(
+                                const label = `${formatContinuationParameterDisplayLabel(name)} (current: ${formatNumber(
                                   value ?? Number.NaN,
                                   6
                                 )})`
@@ -469,7 +470,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                                     : undefined
                                 const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
                                 const value = branchValue ?? fallbackValue
-                                const label = `${name} (current: ${formatNumber(
+                                const label = `${formatContinuationParameterDisplayLabel(name)} (current: ${formatNumber(
                                   value ?? Number.NaN,
                                   6
                                 )})`

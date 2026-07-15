@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 
 export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -88,7 +89,7 @@ export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionCon
                         >
                           {continuationParameterLabels.map((name) => (
                             <option key={name} value={name}>
-                              {name}
+                              {formatContinuationParameterDisplayLabel(name)}
                               {name === branch.parameterName ? ' (current)' : ''}
                             </option>
                           ))}

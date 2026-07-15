@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
+import { formatContinuationParameterDisplayLabel } from '../../../system/subsystemGateway'
 import type { ManifoldStability, ManifoldDirection } from '../../../system/types'
 import type { EquilibriumManifoldProfileDraft } from '../../manifoldProfileDrafts'
 import { InspectorSubDisclosure } from '../selectionSession'
@@ -587,7 +588,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         >
                           {continuationParameterLabels.map((name) => (
                             <option key={name} value={name}>
-                              {name}
+                              {formatContinuationParameterDisplayLabel(name)}
                             </option>
                           ))}
                         </select>

@@ -1,5 +1,5 @@
 use crate::equation_engine::{
-    builtin_constant, parse, Bytecode, Compiler, EquationSystem, Expr, VM,
+    builtin_constant, parse, Bytecode, Compiler, EquationSystem, Expr, ExpressionContext, VM,
 };
 use anyhow::{anyhow, bail, Result};
 use marching_cubes::tables::{EDGE_TABLE, TRI_TABLE};
@@ -39,9 +39,23 @@ pub fn compile_scalar_expression(
     var_names: &[String],
     param_names: &[String],
 ) -> Result<Bytecode> {
+    compile_scalar_expression_with_context(
+        expression,
+        var_names,
+        param_names,
+        ExpressionContext::None,
+    )
+}
+
+pub fn compile_scalar_expression_with_context(
+    expression: &str,
+    var_names: &[String],
+    param_names: &[String],
+    context: ExpressionContext,
+) -> Result<Bytecode> {
     let parsed = parse(expression).map_err(|err| anyhow!(err))?;
-    validate_expression_symbols(&parsed, var_names, param_names)?;
-    let compiler = Compiler::new(var_names, param_names);
+    validate_expression_symbols(&parsed, var_names, param_names, context)?;
+    let compiler = Compiler::new_with_context(var_names, param_names, context);
     compiler.try_compile(&parsed).map_err(|err| anyhow!(err))
 }
 
@@ -51,6 +65,17 @@ pub fn compute_isocline(
     level: f64,
     axes: &[IsoclineAxisSpec],
     frozen_state: &[f64],
+) -> Result<IsoclineGeometry> {
+    compute_isocline_at(system, scalar_expr, level, axes, frozen_state, 0.0)
+}
+
+pub fn compute_isocline_at(
+    system: &EquationSystem,
+    scalar_expr: &Bytecode,
+    level: f64,
+    axes: &[IsoclineAxisSpec],
+    frozen_state: &[f64],
+    context: f64,
 ) -> Result<IsoclineGeometry> {
     if !level.is_finite() {
         bail!("Isocline level must be finite.");
@@ -87,9 +112,9 @@ pub fn compute_isocline(
     }
 
     match axes.len() {
-        1 => compute_isocline_points(system, scalar_expr, level, &axes[0], frozen_state),
-        2 => compute_isocline_segments(system, scalar_expr, level, axes, frozen_state),
-        3 => compute_isocline_triangles(system, scalar_expr, level, axes, frozen_state),
+        1 => compute_isocline_points(system, scalar_expr, level, &axes[0], frozen_state, context),
+        2 => compute_isocline_segments(system, scalar_expr, level, axes, frozen_state, context),
+        3 => compute_isocline_triangles(system, scalar_expr, level, axes, frozen_state, context),
         _ => unreachable!(),
     }
 }
@@ -98,31 +123,35 @@ fn evaluate_isocline_value(
     system: &EquationSystem,
     scalar_expr: &Bytecode,
     state: &[f64],
+    context: f64,
     stack: &mut Vec<f64>,
 ) -> f64 {
-    VM::execute(scalar_expr, state, &system.params, stack)
+    VM::execute_at(scalar_expr, state, &system.params, context, stack)
 }
 
 fn validate_expression_symbols(
     expr: &Expr,
     var_names: &[String],
     param_names: &[String],
+    context: ExpressionContext,
 ) -> Result<()> {
     let vars: HashSet<&str> = var_names.iter().map(String::as_str).collect();
     let params: HashSet<&str> = param_names.iter().map(String::as_str).collect();
-    validate_expression_symbols_recursive(expr, &vars, &params)
+    validate_expression_symbols_recursive(expr, &vars, &params, context.symbol())
 }
 
 fn validate_expression_symbols_recursive(
     expr: &Expr,
     vars: &HashSet<&str>,
     params: &HashSet<&str>,
+    context_symbol: Option<&str>,
 ) -> Result<()> {
     match expr {
         Expr::Number(_) => Ok(()),
         Expr::Variable(name) => {
             if vars.contains(name.as_str())
                 || params.contains(name.as_str())
+                || context_symbol == Some(name.as_str())
                 || builtin_constant(name).is_some()
             {
                 Ok(())
@@ -131,17 +160,19 @@ fn validate_expression_symbols_recursive(
             }
         }
         Expr::Binary(left, _, right) => {
-            validate_expression_symbols_recursive(left, vars, params)?;
-            validate_expression_symbols_recursive(right, vars, params)
+            validate_expression_symbols_recursive(left, vars, params, context_symbol)?;
+            validate_expression_symbols_recursive(right, vars, params, context_symbol)
         }
         Expr::Comparison(left, _, right) => {
-            validate_expression_symbols_recursive(left, vars, params)?;
-            validate_expression_symbols_recursive(right, vars, params)
+            validate_expression_symbols_recursive(left, vars, params, context_symbol)?;
+            validate_expression_symbols_recursive(right, vars, params, context_symbol)
         }
-        Expr::Unary(_, operand) => validate_expression_symbols_recursive(operand, vars, params),
+        Expr::Unary(_, operand) => {
+            validate_expression_symbols_recursive(operand, vars, params, context_symbol)
+        }
         Expr::Call(_, args) => {
             for arg in args {
-                validate_expression_symbols_recursive(arg, vars, params)?;
+                validate_expression_symbols_recursive(arg, vars, params, context_symbol)?;
             }
             Ok(())
         }
@@ -154,6 +185,7 @@ fn compute_isocline_points(
     level: f64,
     axis: &IsoclineAxisSpec,
     frozen_state: &[f64],
+    context: f64,
 ) -> Result<IsoclineGeometry> {
     let dim = frozen_state.len();
     let mut state = frozen_state.to_vec();
@@ -165,7 +197,9 @@ fn compute_isocline_points(
     for i in 0..sample_count {
         let x = axis.min + step * i as f64;
         state[axis.var_index] = x;
-        values.push(evaluate_isocline_value(system, scalar_expr, &state, &mut stack) - level);
+        values.push(
+            evaluate_isocline_value(system, scalar_expr, &state, context, &mut stack) - level,
+        );
     }
 
     let mut roots = Vec::new();
@@ -212,6 +246,7 @@ fn compute_isocline_segments(
     level: f64,
     axes: &[IsoclineAxisSpec],
     frozen_state: &[f64],
+    context: f64,
 ) -> Result<IsoclineGeometry> {
     let dim = frozen_state.len();
     let axis_x = &axes[0];
@@ -232,7 +267,7 @@ fn compute_isocline_segments(
             state[axis_x.var_index] = x;
             state[axis_y.var_index] = y;
             values[index(ix, iy)] =
-                evaluate_isocline_value(system, scalar_expr, &state, &mut stack) - level;
+                evaluate_isocline_value(system, scalar_expr, &state, context, &mut stack) - level;
         }
     }
 
@@ -367,6 +402,7 @@ fn compute_isocline_triangles(
     level: f64,
     axes: &[IsoclineAxisSpec],
     frozen_state: &[f64],
+    context: f64,
 ) -> Result<IsoclineGeometry> {
     let dim = frozen_state.len();
     let axis_x = &axes[0];
@@ -393,7 +429,8 @@ fn compute_isocline_triangles(
                 state[axis_y.var_index] = y;
                 state[axis_z.var_index] = z;
                 values[index(ix, iy, iz)] =
-                    evaluate_isocline_value(system, scalar_expr, &state, &mut stack) - level;
+                    evaluate_isocline_value(system, scalar_expr, &state, context, &mut stack)
+                        - level;
             }
         }
     }

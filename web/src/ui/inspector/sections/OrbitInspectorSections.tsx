@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
+import { formatContinuationParameterDisplayLabel } from '../../../system/subsystemGateway'
 import { InspectorSubDisclosure } from '../selectionSession'
 import { CollocationAdaptivityFields } from './branch/CollocationAdaptivityFields'
 
@@ -11,6 +12,7 @@ export function OrbitInspectorSections({
     InspectorDisclosure,
     InspectorMetrics,
     StateTable,
+    autonomousAnalysisError,
     buildSuggestedBranchName,
     clvColors,
     clvHasData,
@@ -35,6 +37,7 @@ export function OrbitInspectorSections({
     handleOrbitPreviewJump,
     handlePasteOrbitState,
     handleRunOrbit,
+    handleExtendOrbit,
     isDiscreteMap,
     limitCycleFromOrbitBranchSuggestion,
     limitCycleFromOrbitDraft,
@@ -107,6 +110,21 @@ export function OrbitInspectorSections({
                     testIdPrefix="orbit-run-ic"
                   />
                   <label>
+                    {systemDraft.type === 'map' ? 'Initial index (n₀)' : 'Initial time (t₀)'}
+                    <input
+                      type="number"
+                      step={systemDraft.type === 'map' ? 1 : 'any'}
+                      value={orbitDraft.initialContext}
+                      onChange={(event) =>
+                        setOrbitDraft((prev) => ({
+                          ...prev,
+                          initialContext: event.target.value,
+                        }))
+                      }
+                      data-testid="orbit-run-initial-context"
+                    />
+                  </label>
+                  <label>
                     {systemDraft.type === 'map' ? 'Iterations' : 'Duration'}
                     <input
                       type="number"
@@ -138,6 +156,17 @@ export function OrbitInspectorSections({
                   >
                     Run Orbit
                   </button>
+                  {orbit.data.length > 0 ? (
+                    <button
+                      onClick={handleExtendOrbit}
+                      disabled={runDisabled}
+                      data-testid="orbit-extend-submit"
+                    >
+                      {systemDraft.type === 'map'
+                        ? `Extend from n = ${orbit.t_end}`
+                        : `Extend from t = ${formatNumber(orbit.t_end, 6)}`}
+                    </button>
+                  ) : null}
                 </div>
               </InspectorDisclosure>
 
@@ -155,7 +184,7 @@ export function OrbitInspectorSections({
                         { label: 'System', value: orbit.systemName },
                         { label: 'Data points', value: orbit.data.length.toLocaleString() },
                         {
-                          label: 'Time range',
+                          label: systemDraft.type === 'map' ? 'Iteration range' : 'Time range',
                           value:
                             orbit.data.length > 0
                               ? `${formatFixed(orbit.t_start, 3)} to ${formatFixed(orbit.t_end, 3)}`
@@ -665,7 +694,11 @@ export function OrbitInspectorSections({
                 >
                   <div className="inspector-section">
                     <h4 className="inspector-subheading">Continue from Orbit</h4>
-                    {continuationParameterCount === 0 ? (
+                    {autonomousAnalysisError ? (
+                      <div className="field-warning" data-testid="autonomous-workflow-warning">
+                        {autonomousAnalysisError}
+                      </div>
+                    ) : continuationParameterCount === 0 ? (
                       <p className="empty-state">Add a parameter before continuing.</p>
                     ) : null}
                     {runDisabled ? (
@@ -676,7 +709,8 @@ export function OrbitInspectorSections({
                     {orbit && orbit.data.length === 0 ? (
                       <p className="empty-state">Run an orbit before continuing.</p>
                     ) : null}
-                    {continuationParameterCount === 0 ||
+                    {autonomousAnalysisError ||
+                    continuationParameterCount === 0 ||
                     !orbit ||
                     orbit.data.length === 0 ? null : (
                     <>
@@ -739,7 +773,7 @@ export function OrbitInspectorSections({
                         >
                           {continuationParameterLabels.map((name) => (
                             <option key={name} value={name}>
-                              {name}
+                              {formatContinuationParameterDisplayLabel(name)}
                             </option>
                           ))}
                         </select>
@@ -1035,7 +1069,9 @@ export function OrbitInspectorSections({
                             data-testid="heteroclinic-param1"
                           >
                             {continuationParameterLabels.map((name) => (
-                              <option key={name} value={name}>{name}</option>
+                              <option key={name} value={name}>
+                                {formatContinuationParameterDisplayLabel(name)}
+                              </option>
                             ))}
                           </select>
                         </label>
@@ -1057,7 +1093,7 @@ export function OrbitInspectorSections({
                                 value={name}
                                 disabled={name === heteroclinicFromOrbitDraft.parameterName}
                               >
-                                {name}
+                                {formatContinuationParameterDisplayLabel(name)}
                               </option>
                             ))}
                           </select>

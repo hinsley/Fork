@@ -9,6 +9,11 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
+import {
+  autonomousContextError,
+  configForObject,
+  usesEquationContext,
+} from '../expression-context';
 import { LimitCycleObject, OrbitObject, ContinuationObject } from '../types';
 import {
   ConfigEntry,
@@ -68,7 +73,20 @@ export async function initiateLCFromOrbit(
     return null;
   }
 
-  if (sysConfig.paramNames.length === 0) {
+  const contextError = autonomousContextError(sysConfig, orbit);
+  if (contextError) {
+    printError(contextError);
+    return null;
+  }
+
+  const parameterChoices = [
+    ...sysConfig.paramNames.map((name) => ({ name, value: name })),
+    ...(usesEquationContext(sysConfig) && orbit.frozenEquationContext?.symbol === 't'
+      ? [{ name: 't (frozen forcing context)', value: 'ctx:t' }]
+      : []),
+  ];
+
+  if (parameterChoices.length === 0) {
     printError("System has no parameters to continue. Add at least one parameter first.");
     return null;
   }
@@ -76,7 +94,7 @@ export async function initiateLCFromOrbit(
   // Configuration defaults
   let limitCycleObjectName = `lc_${orbit.name}`;
   let branchName = '';
-  let selectedParamName = sysConfig.paramNames[0];
+  let selectedParamName = parameterChoices[0].value;
   let toleranceInput = '0.1';
   let ntstInput = '20';
   let ncolInput = '4';
@@ -144,15 +162,11 @@ export async function initiateLCFromOrbit(
       section: 'Branch Settings',
       getDisplay: () => selectedParamName,
       edit: async () => {
-        const choices = sysConfig.paramNames.map(p => ({
-          name: p,
-          value: p
-        }));
         const { value } = await inquirer.prompt({
           type: 'rawlist',
           name: 'value',
           message: 'Select Continuation Parameter:',
-          choices,
+          choices: parameterChoices,
           default: selectedParamName,
           pageSize: MENU_PAGE_SIZE
         });
@@ -327,10 +341,15 @@ export async function initiateLCFromOrbit(
 
   try {
     // Use orbit's stored parameters if available, otherwise system defaults
-    const runConfig = { ...sysConfig };
+    const baseConfig = { ...sysConfig, params: [...sysConfig.params] };
     if (orbit.parameters && orbit.parameters.length === sysConfig.params.length) {
-      runConfig.params = [...orbit.parameters];
+      baseConfig.params = [...orbit.parameters];
     }
+    const runConfig = configForObject(baseConfig, orbit);
+    const runtimeParameterName =
+      selectedParamName === 'ctx:t'
+        ? runConfig.paramNames[runConfig.paramNames.length - 1]
+        : selectedParamName;
 
     const bridge = new WasmBridge(runConfig);
 
@@ -340,7 +359,7 @@ export async function initiateLCFromOrbit(
     const orbitStates = orbit.data.map(pt => pt.slice(1));
 
     // Get current value of the continuation parameter
-    const paramIdx = sysConfig.paramNames.indexOf(selectedParamName);
+    const paramIdx = runConfig.paramNames.indexOf(runtimeParameterName);
     const paramValue = paramIdx >= 0 ? runConfig.params[paramIdx] : 0;
 
     // Initialize LC guess from orbit
@@ -360,7 +379,7 @@ export async function initiateLCFromOrbit(
       runLimitCycleContinuationWithProgress(
         bridge,
         guess,
-        selectedParamName,
+        runtimeParameterName,
         continuationSettings,
         directionForward,
         'LC Continuation'
@@ -380,6 +399,8 @@ export async function initiateLCFromOrbit(
       name: branchName,
       systemName: sysName,
       parameterName: selectedParamName,
+      runtimeParameterName,
+      frozenEquationContext: orbit.frozenEquationContext,
       parentObject: limitCycleObjectName,
       startObject: orbit.name,
       branchType: 'limit_cycle',
@@ -411,7 +432,8 @@ export async function initiateLCFromOrbit(
       normalized_mesh: objectMesh,
       period: seedPeriod,
       state: [...seedState],
-      parameters: [...runConfig.params],
+      parameters: [...baseConfig.params],
+      frozenEquationContext: orbit.frozenEquationContext,
       parameterName: selectedParamName,
       paramValue: seedPoint?.param_value,
       floquetMultipliers: seedPoint?.eigenvalues,

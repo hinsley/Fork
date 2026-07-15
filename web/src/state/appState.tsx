@@ -32,6 +32,7 @@ import type {
   EquilibriumObject,
   EquilibriumManifold2DSettings,
   EquilibriumSolverParams,
+  FrozenEquationContext,
   FrozenVariablesConfig,
   FloquetBackend,
   IsoclineAxis,
@@ -95,6 +96,7 @@ import {
   type LimitCyclePackedStateLayout,
 } from '../system/limitCycleAnalysis'
 import {
+  buildContextFrozenRunConfig,
   buildReducedRunConfig,
   buildSubsystemSnapshot,
   continuationParameterOptions,
@@ -105,8 +107,10 @@ import {
   projectStateToReduced,
   resolveRuntimeParameterName,
   resolveSubsystemSnapshot,
+  rewriteExpressionForFrozenContext,
 } from '../system/subsystemGateway'
 import { formatEquilibriumLabel } from '../system/labels'
+import { normalizeFrozenEquationContext } from '../system/expressionContext'
 import { AppContext } from './appContext'
 import { createSystemStorageCommands } from './systemStorageCommands'
 import {
@@ -594,14 +598,17 @@ function buildCurrentIsoclineComputeRequest(
   const axes = normalizeIsoclineAxes(system, object.axes)
   const frozenState = normalizeIsoclineFrozenState(system, object.frozenState)
   const subsystemSnapshot = buildObjectSubsystemSnapshot(system, object)
-  const expression = resolveIsoclineExpression(system, source).trim()
-  if (!expression) {
+  const sourceExpression = resolveIsoclineExpression(system, source).trim()
+  if (!sourceExpression) {
     throw new Error('Isocline expression is required before computing.')
   }
-  const runConfig: SystemConfig = {
-    ...system,
-    params: resolveObjectParams(system, object.customParameters),
-  }
+  const expression = rewriteExpressionForFrozenContext(sourceExpression, subsystemSnapshot)
+  const parameterValues = resolveObjectParams(system, object.customParameters)
+  const runConfig = buildContextFrozenRunConfig(
+    system,
+    subsystemSnapshot,
+    parameterValues
+  )
   const request: CoreComputeIsoclineRequest = {
     system: runConfig,
     expression,
@@ -615,7 +622,7 @@ function buildCurrentIsoclineComputeRequest(
     level: object.level,
     axes,
     frozenState,
-    parameters: [...runConfig.params],
+    parameters: [...parameterValues],
     computedAt: new Date().toISOString(),
     subsystemSnapshot,
   }
@@ -637,13 +644,16 @@ function buildLastIsoclineComputeRequest(
     Array.isArray(snapshot.parameters) && snapshot.parameters.length === system.params.length
       ? snapshot.parameters
       : system.params
-  const runConfig: SystemConfig = {
-    ...system,
-    params: [...params],
-  }
+  const subsystemSnapshot = resolveSubsystemSnapshot(
+    system,
+    snapshot.subsystemSnapshot,
+    normalizeObjectFrozenVariables(system, object),
+    { maxFreeVariables: 3 }
+  )
+  const runConfig = buildContextFrozenRunConfig(system, subsystemSnapshot, params)
   const request: CoreComputeIsoclineRequest = {
     system: runConfig,
-    expression: snapshot.expression,
+    expression: rewriteExpressionForFrozenContext(snapshot.expression, subsystemSnapshot),
     level: snapshot.level,
     axes: snapshot.axes,
     frozenState: snapshot.frozenState,
@@ -652,12 +662,7 @@ function buildLastIsoclineComputeRequest(
     request,
     snapshot: {
       ...snapshot,
-      subsystemSnapshot: resolveSubsystemSnapshot(
-        system,
-        snapshot.subsystemSnapshot,
-        normalizeObjectFrozenVariables(system, object),
-        { maxFreeVariables: 3 }
-      ),
+      subsystemSnapshot,
     },
   }
 }
@@ -672,6 +677,8 @@ function buildIsoclineSnapshotSignature(
     axes: snapshot.axes,
     frozenState: snapshot.frozenState,
     parameters: snapshot.parameters,
+    frozenEquationContext: snapshot.subsystemSnapshot?.frozenEquationContext ?? null,
+    frozenContextParameterName: snapshot.subsystemSnapshot?.frozenContextParameterName ?? null,
   })
 }
 
@@ -698,7 +705,10 @@ function normalizeObjectFrozenVariables(
       if (freeSet.has(name)) return
       frozenValuesByVarName[name] = object.frozenState[index] ?? 0
     })
-    return { frozenValuesByVarName }
+    return {
+      frozenValuesByVarName,
+      frozenEquationContext: object.frozenVariables?.frozenEquationContext,
+    }
   }
   return object.frozenVariables ?? { frozenValuesByVarName: {} }
 }
@@ -761,6 +771,12 @@ function parseContinuationParameterAllowRuntimeName(
       if (generatedName === label) {
         return { kind: 'frozen_var', variableName }
       }
+    }
+    if (
+      snapshot.frozenEquationContext?.symbol === 't' &&
+      snapshot.frozenContextParameterName === label
+    ) {
+      return { kind: 'frozen_context', symbol: 't' }
     }
     throw error
   }
@@ -906,6 +922,13 @@ function resolveBranchPointReducedParamOverrides(
       valuesByGeneratedName[generated] = point.param_value
     }
   }
+  if (
+    branch.parameterRef?.kind === 'frozen_context' &&
+    snapshot.frozenContextParameterName &&
+    Number.isFinite(point.param_value)
+  ) {
+    valuesByGeneratedName[snapshot.frozenContextParameterName] = point.param_value
+  }
   const branchType = branch.data.branch_type
   const param2Ref = resolveBranchParam2Ref(branch)
   if (param2Ref?.kind === 'frozen_var') {
@@ -921,6 +944,18 @@ function resolveBranchPointReducedParamOverrides(
       if (generated) {
         valuesByGeneratedName[generated] = value
       }
+    }
+  }
+  if (param2Ref?.kind === 'frozen_context' && snapshot.frozenContextParameterName) {
+    const value = Number.isFinite(point.param2_value)
+      ? point.param2_value
+      : resolveContinuationPointParam2Value(
+          point,
+          branchType,
+          snapshot.freeVariableNames.length
+        )
+    if (Number.isFinite(value)) {
+      valuesByGeneratedName[snapshot.frozenContextParameterName] = value as number
     }
   }
   return valuesByGeneratedName
@@ -1160,6 +1195,7 @@ function resolveLimitCycleAnalysisContext(
       if (pointFrozenValuesChanged) {
         snapshot = buildSubsystemSnapshot(system, {
           frozenValuesByVarName: pointFrozenValuesByVarName,
+          frozenEquationContext: snapshot.frozenEquationContext,
         })
       }
 
@@ -1249,8 +1285,10 @@ export type ContinuationProgressState = {
 export type OrbitRunRequest = {
   orbitId: string
   initialState: number[]
+  initialContext: number
   duration: number
   dt?: number
+  extend?: boolean
 }
 
 export type OrbitLyapunovRequest = {
@@ -1781,6 +1819,10 @@ export type AppActions = {
     nodeId: string,
     frozenValuesByVarName: Record<string, number>
   ) => void
+  updateObjectFrozenEquationContext: (
+    nodeId: string,
+    context: FrozenEquationContext | null
+  ) => void
   updateIsoclineObject: (
     nodeId: string,
     update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
@@ -2211,7 +2253,10 @@ export function AppProvider({
         const updated = updateObject(state.system, nodeId, {
           axes: nextAxes,
           frozenState: nextFrozenState,
-          frozenVariables: { frozenValuesByVarName: normalizedFrozenValuesByVarName },
+          frozenVariables: {
+            frozenValuesByVarName: normalizedFrozenValuesByVarName,
+            frozenEquationContext: object.frozenVariables?.frozenEquationContext,
+          },
         })
         dispatch({ type: 'SET_SYSTEM', system: updated })
         scheduleSystemSave(updated)
@@ -2219,7 +2264,42 @@ export function AppProvider({
       }
 
       const updated = updateObject(state.system, nodeId, {
-        frozenVariables: { frozenValuesByVarName: normalizedFrozenValuesByVarName },
+        frozenVariables: {
+          frozenValuesByVarName: normalizedFrozenValuesByVarName,
+          frozenEquationContext: object.frozenVariables?.frozenEquationContext,
+        },
+      })
+      dispatch({ type: 'SET_SYSTEM', system: updated })
+      scheduleSystemSave(updated)
+    },
+    [scheduleSystemSave, state.system]
+  )
+
+  const updateObjectFrozenEquationContextAction = useCallback(
+    (nodeId: string, context: FrozenEquationContext | null) => {
+      if (!state.system) return
+      const object = state.system.objects[nodeId]
+      if (!isFreezableObject(object)) return
+
+      const normalized = normalizeFrozenEquationContext(state.system.config, context)
+      if (context && !normalized) {
+        dispatch({
+          type: 'SET_ERROR',
+          error:
+            state.system.config.type === 'map'
+              ? 'Frozen map index must be an integer.'
+              : 'Frozen flow time must be numeric.',
+        })
+        return
+      }
+
+      const updated = updateObject(state.system, nodeId, {
+        frozenVariables: {
+          frozenValuesByVarName: {
+            ...(object.frozenVariables?.frozenValuesByVarName ?? {}),
+          },
+          frozenEquationContext: normalized,
+        },
       })
       dispatch({ type: 'SET_SYSTEM', system: updated })
       scheduleSystemSave(updated)
@@ -2258,7 +2338,10 @@ export function AppProvider({
         axes,
         frozenState,
         level,
-        frozenVariables: { frozenValuesByVarName },
+        frozenVariables: {
+          frozenValuesByVarName,
+          frozenEquationContext: object.frozenVariables?.frozenEquationContext,
+        },
       } as Partial<IsoclineObject>
       const system = updateObject(state.system, nodeId, merged)
       dispatch({ type: 'SET_SYSTEM', system })
@@ -2288,6 +2371,9 @@ export function AppProvider({
           let nextParams = getBranchParams(system, branch)
           let paramsChanged = false
           let frozenChanged = false
+          let frozenContextChanged = false
+          let nextFrozenEquationContext =
+            object.frozenVariables?.frozenEquationContext ?? snapshot.frozenEquationContext
           const nextFrozenValuesByVarName = {
             ...(object.frozenVariables?.frozenValuesByVarName ?? {}),
           }
@@ -2308,6 +2394,16 @@ export function AppProvider({
               if (currentValue !== value) {
                 nextFrozenValuesByVarName[ref.variableName] = value
                 frozenChanged = true
+              }
+              return
+            }
+            if (ref.kind === 'frozen_context' && snapshot.frozenEquationContext) {
+              if (nextFrozenEquationContext?.value !== value) {
+                nextFrozenEquationContext = {
+                  symbol: 't',
+                  value,
+                }
+                frozenContextChanged = true
               }
             }
           }
@@ -2368,14 +2464,16 @@ export function AppProvider({
             nextObject.floquetMultipliers = nextFloquetMultipliers
             nextObject.floquetModes = undefined
           }
-          if (frozenChanged) {
+          if (frozenChanged || frozenContextChanged) {
             nextObject.frozenVariables = {
               frozenValuesByVarName: nextFrozenValuesByVarName,
+              frozenEquationContext: nextFrozenEquationContext,
             }
           }
           if (
             paramsChanged ||
             frozenChanged ||
+            frozenContextChanged ||
             floquetMultipliersChanged ||
             floquetModesChanged ||
             nextObject.paramValue !== object.paramValue ||
@@ -2559,6 +2657,12 @@ export function AppProvider({
         if (request.initialState.some((value) => !Number.isFinite(value))) {
           throw new Error('Initial state values must be numeric.')
         }
+        if (!Number.isFinite(request.initialContext)) {
+          throw new Error('Initial time must be finite.')
+        }
+        if (system.type === 'map' && !Number.isSafeInteger(request.initialContext)) {
+          throw new Error('Initial map index must be an integer.')
+        }
 
         const dt = system.type === 'map' ? 1 : request.dt ?? orbit.dt ?? 0.01
         if (!Number.isFinite(dt) || dt <= 0) {
@@ -2578,13 +2682,17 @@ export function AppProvider({
         const result = await client.simulateOrbit({
           system: runConfig,
           initialState: reducedInitialState,
+          initialContext: request.initialContext,
           steps,
           dt,
         })
 
+        const data = request.extend
+          ? [...orbit.data, ...result.data.slice(1)]
+          : result.data
         const updated = updateObject(state.system, request.orbitId, {
-          data: result.data,
-          t_start: result.t_start,
+          data,
+          t_start: request.extend ? orbit.t_start : result.t_start,
           t_end: result.t_end,
           dt: result.dt,
           parameters: [...baseParams],
@@ -3124,6 +3232,7 @@ export function AppProvider({
           subsystemSnapshot: snapshot,
           frozenVariables: {
             frozenValuesByVarName: { ...snapshot.frozenValuesByVarName },
+            frozenEquationContext: snapshot.frozenEquationContext,
           },
         })
         dispatch({ type: 'SET_SYSTEM', system: updated })
@@ -6784,7 +6893,10 @@ export function AppProvider({
           parameterRef,
           paramValue: firstPoint.param_value,
           createdAt: new Date().toISOString(),
-          frozenVariables: { frozenValuesByVarName: { ...snapshot.frozenValuesByVarName } },
+          frozenVariables: {
+            frozenValuesByVarName: { ...snapshot.frozenValuesByVarName },
+            frozenEquationContext: snapshot.frozenEquationContext,
+          },
           subsystemSnapshot: snapshot,
         }
 
@@ -7424,7 +7536,10 @@ export function AppProvider({
             dampingFactor: solverDamping,
             mapIterations: solverMapIterations,
           },
-          frozenVariables: { frozenValuesByVarName: { ...snapshot.frozenValuesByVarName } },
+          frozenVariables: {
+            frozenValuesByVarName: { ...snapshot.frozenValuesByVarName },
+            frozenEquationContext: snapshot.frozenEquationContext,
+          },
           subsystemSnapshot: snapshot,
         }
 
@@ -7649,7 +7764,10 @@ export function AppProvider({
           paramValue: firstPoint.param_value,
           floquetMultipliers: firstPoint.eigenvalues,
           createdAt: new Date().toISOString(),
-          frozenVariables: { frozenValuesByVarName: { ...snapshot.frozenValuesByVarName } },
+          frozenVariables: {
+            frozenValuesByVarName: { ...snapshot.frozenValuesByVarName },
+            frozenEquationContext: snapshot.frozenEquationContext,
+          },
           subsystemSnapshot: snapshot,
         }
 
@@ -8708,6 +8826,7 @@ export function AppProvider({
       updateRender: updateRenderAction,
       updateObjectParams: updateObjectParamsAction,
       updateObjectFrozenVariables: updateObjectFrozenVariablesAction,
+      updateObjectFrozenEquationContext: updateObjectFrozenEquationContextAction,
       updateIsoclineObject: updateIsoclineObjectAction,
       updateScene: updateSceneAction,
       updateAnalysisViewport: updateAnalysisViewportAction,
@@ -8825,6 +8944,7 @@ export function AppProvider({
       updateRenderAction,
       updateObjectParamsAction,
       updateObjectFrozenVariablesAction,
+      updateObjectFrozenEquationContextAction,
       updateIsoclineObjectAction,
       updateSceneAction,
       updateAnalysisViewportAction,

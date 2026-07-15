@@ -9,6 +9,11 @@ import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
 import {
+  autonomousContextError,
+  configForObject,
+  usesEquationContext,
+} from '../expression-context';
+import {
   ContinuationObject,
   EquilibriumObject,
   LimitCycleObject,
@@ -90,12 +95,31 @@ export async function createEquilibriumBranchForObject(
     return;
   }
 
-  if (sysConfig.paramNames.length === 0) {
+  const contextError = autonomousContextError(sysConfig, eqObj);
+  if (contextError) {
+    console.log(chalk.red(contextError));
+    return;
+  }
+
+  const canContinueFrozenTime =
+    usesEquationContext(sysConfig) && eqObj.frozenEquationContext?.symbol === 't';
+  const parameterChoices = [
+    ...sysConfig.paramNames,
+    ...(canContinueFrozenTime
+      ? [{ name: 't (frozen forcing context)', value: 'ctx:t' }]
+      : []),
+  ];
+
+  if (parameterChoices.length === 0) {
     console.log(chalk.red("System has no parameters to continue. Add at least one parameter first."));
     return;
   }
 
-  let selectedParamName = sysConfig.paramNames[0] ?? '';
+  let selectedParamName = parameterChoices[0]
+    ? typeof parameterChoices[0] === 'string'
+      ? parameterChoices[0]
+      : parameterChoices[0].value
+    : '';
   let branchName = '';
 
   let stepSizeInput = '0.01';
@@ -121,7 +145,7 @@ export async function createEquilibriumBranchForObject(
           type: 'rawlist',
           name: 'value',
           message: 'Select Continuation Parameter:',
-          choices: sysConfig.paramNames,
+          choices: parameterChoices,
           default: selectedParamName,
           pageSize: MENU_PAGE_SIZE
         });
@@ -308,10 +332,15 @@ export async function createEquilibriumBranchForObject(
   console.log(chalk.cyan(`Computing continuation (max ${continuationSettings.max_steps} steps)...`));
   try {
     // IMPORTANT: Restore parameters from the equilibrium object if available.
-    const runConfig = { ...sysConfig };
+    const baseConfig = { ...sysConfig, params: [...sysConfig.params] };
     if (eqObj.parameters && eqObj.parameters.length === sysConfig.params.length) {
-      runConfig.params = [...eqObj.parameters];
+      baseConfig.params = [...eqObj.parameters];
     }
+    const runConfig = configForObject(baseConfig, eqObj);
+    const runtimeParameterName =
+      selectedParamName === 'ctx:t'
+        ? runConfig.paramNames[runConfig.paramNames.length - 1]
+        : selectedParamName;
 
     const bridge = new WasmBridge(runConfig);
     const mapIterations = sysConfig.type === 'map'
@@ -322,7 +351,7 @@ export async function createEquilibriumBranchForObject(
       runEquilibriumContinuationWithProgress(
         bridge,
         eqObj.solution.state,
-        selectedParamName,
+        runtimeParameterName,
         mapIterations,
         continuationSettings,
         directionForward,
@@ -335,6 +364,8 @@ export async function createEquilibriumBranchForObject(
       name: branchName,
       systemName: sysName,
       parameterName: selectedParamName,
+      runtimeParameterName,
+      frozenEquationContext: eqObj.frozenEquationContext,
       parentObject: eqObj.name,
       startObject: eqObj.name,
       branchType: 'equilibrium',
@@ -365,7 +396,22 @@ export async function createLimitCycleBranchForObject(
 ): Promise<NavigationRequest | void> {
   const sysConfig = Storage.loadSystem(sysName);
 
-  if (sysConfig.paramNames.length === 0) {
+  const contextError = autonomousContextError(sysConfig, lcObj);
+  if (contextError) {
+    console.log(chalk.red(contextError));
+    return;
+  }
+
+  const canContinueFrozenTime =
+    usesEquationContext(sysConfig) && lcObj.frozenEquationContext?.symbol === 't';
+  const parameterChoices = [
+    ...sysConfig.paramNames,
+    ...(canContinueFrozenTime
+      ? [{ name: 't (frozen forcing context)', value: 'ctx:t' }]
+      : []),
+  ];
+
+  if (parameterChoices.length === 0) {
     console.log(chalk.red("System has no parameters to continue. Add at least one parameter first."));
     return;
   }
@@ -374,9 +420,13 @@ export async function createLimitCycleBranchForObject(
   const sourceNtst = lcObj.ntst;
   const sourceNcol = lcObj.ncol;
 
-  let selectedParamName = lcObj.parameterName && sysConfig.paramNames.includes(lcObj.parameterName)
+  let selectedParamName = lcObj.parameterName && parameterChoices.some((choice) =>
+    typeof choice === 'string' ? choice === lcObj.parameterName : choice.value === lcObj.parameterName
+  )
     ? lcObj.parameterName
-    : sysConfig.paramNames[0];
+    : typeof parameterChoices[0] === 'string'
+      ? parameterChoices[0]
+      : parameterChoices[0].value;
   let branchName = '';
 
   let stepSizeInput = '0.01';
@@ -402,7 +452,7 @@ export async function createLimitCycleBranchForObject(
           type: 'rawlist',
           name: 'value',
           message: 'Select Continuation Parameter:',
-          choices: sysConfig.paramNames,
+          choices: parameterChoices,
           default: selectedParamName,
           pageSize: MENU_PAGE_SIZE
         });
@@ -589,12 +639,17 @@ export async function createLimitCycleBranchForObject(
 
   console.log(chalk.cyan(`Computing limit cycle continuation (max ${continuationSettings.max_steps} steps)...`));
   try {
-    const runConfig = { ...sysConfig };
+    const baseConfig = { ...sysConfig, params: [...sysConfig.params] };
     if (lcObj.parameters && lcObj.parameters.length === sysConfig.params.length) {
-      runConfig.params = [...lcObj.parameters];
+      baseConfig.params = [...lcObj.parameters];
     }
+    const runConfig = configForObject(baseConfig, lcObj);
+    const runtimeParameterName =
+      selectedParamName === 'ctx:t'
+        ? runConfig.paramNames[runConfig.paramNames.length - 1]
+        : selectedParamName;
 
-    const paramIdx = sysConfig.paramNames.indexOf(selectedParamName);
+    const paramIdx = runConfig.paramNames.indexOf(runtimeParameterName);
     const paramValue = paramIdx >= 0 ? runConfig.params[paramIdx] : 0;
 
     const flatState = lcObj.state;
@@ -628,7 +683,7 @@ export async function createLimitCycleBranchForObject(
       runLimitCycleContinuationWithProgress(
         bridge,
         lcSetup,
-        selectedParamName,
+        runtimeParameterName,
         continuationSettings,
         directionForward,
         'LC Continuation'
@@ -642,6 +697,8 @@ export async function createLimitCycleBranchForObject(
       name: branchName,
       systemName: sysName,
       parameterName: selectedParamName,
+      runtimeParameterName,
+      frozenEquationContext: lcObj.frozenEquationContext,
       parentObject: lcObj.name,
       startObject: lcObj.name,
       branchType: 'limit_cycle',

@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 import { isHomoclinicExtraSelectionDisabled } from '../../../../system/homoclinicExtras'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 
@@ -85,7 +86,7 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                             >
                               {continuationParameterLabels.map((name) => (
                                 <option key={`homoc-homoc-param1-${name}`} value={name}>
-                                  {name}
+                                  {formatContinuationParameterDisplayLabel(name)}
                                 </option>
                               ))}
                             </select>
@@ -106,7 +107,7 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                                 .filter((name) => name !== homoclinicFromHomoclinicDraft.parameterName)
                                 .map((name) => (
                                   <option key={`homoc-homoc-param2-${name}`} value={name}>
-                                    {name}
+                                    {formatContinuationParameterDisplayLabel(name)}
                                   </option>
                                 ))}
                             </select>

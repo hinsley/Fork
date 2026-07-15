@@ -89,6 +89,7 @@ describe('WasmForkCoreClient', () => {
     const request: SimulateOrbitRequest = {
       system: baseSystem,
       initialState: [0],
+      initialContext: 0,
       steps: 1,
       dt: 0.1,
     }

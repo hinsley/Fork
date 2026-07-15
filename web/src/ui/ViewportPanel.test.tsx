@@ -207,6 +207,68 @@ describe('ViewportPanel view state wiring', () => {
     })
   })
 
+  it('suppresses an ambiguous n-dependent map curve until visible orbits share frozen n', async () => {
+    const config: SystemConfig = {
+      name: 'Forced_Map',
+      equations: ['r*x*(1-x) + n'],
+      params: [2.5],
+      paramNames: ['r'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: config.name, config })
+    const scene = addScene(system, 'Map Scene')
+    system = scene.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Forced Orbit',
+      systemName: config.name,
+      data: [[0, 0.2], [1, 0.4], [2, 0.7]],
+      t_start: 0,
+      t_end: 2,
+      dt: 1,
+    }
+    system = addObject(system, orbit).system
+    const liveSampler = vi.fn().mockResolvedValue({ x: [], y: [] })
+    const first = render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onSampleMap1DFunction={liveSampler}
+      />
+    )
+
+    expect(screen.getByTestId(`map-function-context-notice-${scene.nodeId}`)).toHaveTextContent(
+      'no unique static graph'
+    )
+    expect(liveSampler).not.toHaveBeenCalled()
+    first.unmount()
+
+    const frozenOrbit = Object.values(system.objects).find(
+      (object): object is OrbitObject => object.type === 'orbit'
+    )
+    if (!frozenOrbit) throw new Error('Expected orbit fixture')
+    frozenOrbit.frozenVariables = {
+      frozenValuesByVarName: {},
+      frozenEquationContext: { symbol: 'n', value: -3 },
+    }
+    const frozenSampler = vi.fn().mockResolvedValue({ x: [], y: [] })
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onSampleMap1DFunction={frozenSampler}
+      />
+    )
+    await waitFor(() => expect(frozenSampler).toHaveBeenCalledTimes(1))
+    const request = frozenSampler.mock.calls[0][0]
+    expect(request.system.equations[0]).not.toMatch(/\bn\b/)
+    expect(request.system.params.at(-1)).toBe(-3)
+  })
+
   it('opens a viewport context menu and duplicates a viewport', async () => {
     const user = userEvent.setup()
     let system = createSystem({ name: 'Viewport_Duplicate_System' })

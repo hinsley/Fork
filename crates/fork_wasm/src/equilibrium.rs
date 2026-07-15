@@ -24,6 +24,7 @@ impl WasmSystem {
         damping: f64,
         map_iterations: u32,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("equilibrium or map fixed-point analysis")?;
         let settings = NewtonSettings {
             max_steps: max_steps as usize,
             damping,

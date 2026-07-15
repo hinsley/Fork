@@ -1701,6 +1701,203 @@ describe('InspectorDetailsPanel', () => {
     )
   })
 
+  it('shows and updates equation forcing context only for contextual equations', async () => {
+    const user = userEvent.setup()
+    const system = createSystem({
+      name: 'Forced_Context',
+      config: {
+        name: 'Forced_Context',
+        equations: ['t-x'],
+        params: [],
+        paramNames: [],
+        varNames: ['x'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Forced_Orbit',
+      systemName: system.config.name,
+      data: [],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const { system: next, nodeId } = addObject(system, orbit)
+    const onUpdateObjectFrozenEquationContext = vi.fn()
+
+    render(
+      <InspectorDetailsPanel
+        system={next}
+        selectedNodeId={nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateObjectFrozenEquationContext={onUpdateObjectFrozenEquationContext}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('action-frozen-variables-toggle'))
+    expect(screen.getByTestId('autonomous-context-warning')).toHaveTextContent(
+      'Freeze the equation forcing context'
+    )
+    await user.click(screen.getByTestId('frozen-equation-context-toggle'))
+    expect(onUpdateObjectFrozenEquationContext).toHaveBeenCalledWith(nodeId, {
+      symbol: 't',
+      value: 0,
+    })
+  })
+
+  it('keeps matching frozen-context snapshots current and labels ctx:t for users', async () => {
+    const user = userEvent.setup()
+    const system = createSystem({
+      name: 'Forced_Context_Snapshot',
+      config: {
+        name: 'Forced_Context_Snapshot',
+        equations: ['t-x'],
+        params: [],
+        paramNames: [],
+        varNames: ['x'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const frozenVariables = {
+      frozenValuesByVarName: {},
+      frozenEquationContext: { symbol: 't' as const, value: 1.5 },
+    }
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Frozen_Context_Orbit',
+      systemName: system.config.name,
+      data: [[2, 0], [2.1, 0.1]],
+      t_start: 2,
+      t_end: 2.1,
+      dt: 0.1,
+      frozenVariables,
+      subsystemSnapshot: buildSubsystemSnapshot(system.config, frozenVariables),
+    }
+    const { system: next, nodeId } = addObject(system, orbit)
+
+    render(
+      <InspectorDetailsPanel
+        system={next}
+        selectedNodeId={nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    expect(screen.queryByTestId('subsystem-mismatch-badge')).not.toBeInTheDocument()
+    await user.click(screen.getByTestId('action-limit-cycle-toggle'))
+    expect(screen.getByLabelText('Continuation parameter')).toHaveDisplayValue(
+      't (frozen forcing context)'
+    )
+  })
+
+  it('explains why live forcing blocks autonomous orbit continuation', async () => {
+    const user = userEvent.setup()
+    const system = createSystem({
+      name: 'Live_Forced_Context',
+      config: {
+        name: 'Live_Forced_Context',
+        equations: ['t-x'],
+        params: [],
+        paramNames: [],
+        varNames: ['x'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const { system: next, nodeId } = addObject(system, {
+      type: 'orbit',
+      name: 'Live_Forced_Orbit',
+      systemName: system.config.name,
+      data: [[0, 0], [0.1, 0.1]],
+      t_start: 0,
+      t_end: 0.1,
+      dt: 0.1,
+    })
+
+    render(
+      <InspectorDetailsPanel
+        system={next}
+        selectedNodeId={nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('action-limit-cycle-toggle'))
+    expect(screen.getByTestId('autonomous-workflow-warning')).toHaveTextContent(
+      'This system depends on t. Freeze the equation forcing context before running autonomous analysis.'
+    )
+    expect(screen.queryByTestId('limit-cycle-from-orbit-submit')).not.toBeInTheDocument()
+  })
+
   it('shows the custom parameters tag in the parameters header when overrides exist', () => {
     const systemConfig = {
       name: 'Custom_Param_System',
@@ -2318,6 +2515,7 @@ describe('InspectorDetailsPanel', () => {
     expect(onRunOrbit).toHaveBeenCalledWith({
       orbitId: objectNodeId,
       initialState: [1, 2],
+      initialContext: 0,
       duration: 10,
       dt: 0.5,
     })

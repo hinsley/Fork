@@ -6,6 +6,10 @@ This document describes how Fork models frozen-variable computations and how con
 
 Frozen variables let an analysis object define a reduced subsystem where selected state variables are treated as constants. This supports fast-slow workflows where slow variables are used as continuation parameters for a fast subsystem.
 
+The same object-local configuration can freeze a flow's equation time `t` or a map's equation index
+`n`. This produces an autonomous frozen-forcing skeleton without augmenting the state. Stored orbit
+timestamps and the clock used by event and observable expressions continue to advance.
+
 ## User Workflow and UI Behavior
 
 Frozen-variable configuration is object-scoped and edited from the Inspector.
@@ -14,6 +18,8 @@ Frozen-variable configuration is object-scoped and edited from the Inspector.
 - Each variable row has a freeze toggle and numeric value input.
 - Frozen value inputs accept real-valued decimals (not integer-only).
 - New objects default to no frozen variables (all free).
+- When equations use the applicable contextual symbol, the table includes an `Equation forcing
+  context` row. Flows accept any finite frozen `t`; maps require an integer frozen `n`.
 
 Object-level status indicators:
 
@@ -31,6 +37,8 @@ Continuation parameter pickers include both native parameters and frozen variabl
 
 - Native parameter labels are unchanged.
 - Frozen-variable labels are prefixed as `var:<variableName>`.
+- A frozen flow context appears as `t (frozen forcing context)` and is stored as `ctx:t`.
+- Frozen map index `n` is not offered as a continuous continuation coordinate.
 - Continuation identity is stored as explicit refs (`parameterRef`, `parameter2Ref`), not just strings.
 
 When continuing along a frozen variable:
@@ -43,6 +51,7 @@ When continuing along a frozen variable:
 Frozen-variable behavior is object-scoped.
 
 - `frozenVariables.frozenValuesByVarName`: object-level frozen assignments.
+- `frozenVariables.frozenEquationContext`: optional object-level `t`/`n` skeleton value.
 - `subsystemSnapshot`: immutable snapshot of the reduced subsystem used for compute and display mapping.
 - `parameterRef` / `parameter2Ref`: explicit parameter identity, including frozen-variable refs.
 
@@ -52,6 +61,7 @@ Key snapshot fields:
 - `freeVariableNames` / `freeVariableIndices`: reduced subsystem state basis.
 - `frozenValuesByVarName`: frozen assignments.
 - `frozenParameterNamesByVarName`: generated internal parameter IDs (for example `fv__h2Na`).
+- `frozenContextParameterName`: collision-safe internal `fc__t` or `fc__n` identifier.
 - `hash`: deterministic snapshot hash used for mismatch detection.
 
 ## Compute Pipeline
@@ -71,6 +81,24 @@ Runtime naming note:
 
 - Generated frozen parameter names (`fv__...`) are internal runtime identifiers used only at the compute boundary.
 - Stored branch metadata remains display-oriented (`var:...`) with explicit refs for stable UI/projection behavior.
+- Equation-context occurrences are token-rewritten to `fc__t`/`fc__n` at the compute boundary;
+  suffixes avoid declared-parameter collisions.
+
+## Live versus autonomous workflows
+
+Orbit integration, events, observables, return maps, Lyapunov exponents, and CLVs support a live
+forcing context. Static vector-field slices, equilibria or fixed points, autonomous limit cycles,
+continuation, invariant manifolds, and connecting-orbit workflows require the equation forcing
+context to be frozen. The web, CLI, and WASM boundaries all enforce this rule.
+
+Frozen skeletons are instantaneous diagnostic families. They are especially informative for slow
+or small forcing, where the live dynamics can be viewed as a perturbation moving among nearby
+autonomous skeletons. They are not a substitute for a stroboscopic map or compact phase
+augmentation when the goal is true periodically or quasiperiodically forced continuation.
+
+For a one-dimensional `n`-dependent map, the orbit cobweb path is always retained. Fork draws a
+single static map-function curve only when all contributing visible orbits share one frozen `n`;
+otherwise it reports that the map has no unique static graph.
 
 ## Canonical State Representation
 

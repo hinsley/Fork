@@ -5,6 +5,7 @@ import {
   buildSubsystemSnapshot,
   continuationParameterOptions,
   embedReducedStateForDisplay,
+  formatContinuationParameterDisplayLabel,
   formatParameterRefLabel,
   parseParameterRefLabel,
   projectStateToReduced,
@@ -89,6 +90,53 @@ describe('subsystemGateway', () => {
     expect(resolveRuntimeParameterName(snapshot, frozenRef)).toBe(
       snapshot.frozenParameterNamesByVarName.y
     )
+  })
+
+  it('rewrites frozen flow time to a continuation-capable generated parameter', () => {
+    const forcedSystem: SystemConfig = {
+      ...BASE_SYSTEM,
+      equations: ['t + y', 'x - t'],
+    }
+    const snapshot = buildSubsystemSnapshot(forcedSystem, {
+      frozenValuesByVarName: {},
+      frozenEquationContext: { symbol: 't', value: 1.25 },
+    })
+    const reduced = buildReducedRunConfig(forcedSystem, snapshot)
+
+    expect(snapshot.frozenContextParameterName).toMatch(/^fc__t/)
+    expect(reduced.equations.join(' ')).not.toMatch(/\bt\b/)
+    expect(reduced.equations.join(' ')).toContain(snapshot.frozenContextParameterName)
+    expect(reduced.params.at(-1)).toBe(1.25)
+    expect(continuationParameterOptions(forcedSystem, snapshot).map((entry) => entry.label))
+      .toContain('ctx:t')
+
+    const ref = parseParameterRefLabel(forcedSystem, snapshot, 'ctx:t')
+    expect(ref).toEqual({ kind: 'frozen_context', symbol: 't' })
+    expect(formatContinuationParameterDisplayLabel(formatParameterRefLabel(ref))).toBe(
+      't (frozen forcing context)'
+    )
+    expect(resolveRuntimeParameterName(snapshot, ref)).toBe(
+      snapshot.frozenContextParameterName
+    )
+  })
+
+  it('freezes map iteration without exposing it as a continuous coordinate', () => {
+    const forcedMap: SystemConfig = {
+      ...BASE_SYSTEM,
+      type: 'map',
+      solver: 'discrete',
+      equations: ['x + n', 'y - n'],
+    }
+    const snapshot = buildSubsystemSnapshot(forcedMap, {
+      frozenValuesByVarName: {},
+      frozenEquationContext: { symbol: 'n', value: -2 },
+    })
+    const reduced = buildReducedRunConfig(forcedMap, snapshot)
+
+    expect(reduced.equations.join(' ')).not.toMatch(/\bn\b/)
+    expect(reduced.params.at(-1)).toBe(-2)
+    expect(continuationParameterOptions(forcedMap, snapshot).map((entry) => entry.label))
+      .not.toContain('ctx:n')
   })
 
   it('enforces optional free-variable caps', () => {

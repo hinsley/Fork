@@ -45,6 +45,7 @@ export type ContinuationProgress = {
 export type SimulateOrbitRequest = {
   system: SystemConfig
   initialState: number[]
+  initialContext: number
   steps: number
   dt: number
 }

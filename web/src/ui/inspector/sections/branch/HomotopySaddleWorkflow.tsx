@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 
 export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -77,7 +78,7 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
                             >
                               {continuationParameterLabels.map((name) => (
                                 <option key={name} value={name}>
-                                  {name}
+                                  {formatContinuationParameterDisplayLabel(name)}
                                 </option>
                               ))}
                             </select>
@@ -101,7 +102,7 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
                                 )
                                 .map((name) => (
                                   <option key={name} value={name}>
-                                    {name}
+                                    {formatContinuationParameterDisplayLabel(name)}
                                   </option>
                                 ))}
                             </select>

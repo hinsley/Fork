@@ -14,6 +14,11 @@ export interface SystemConfig {
   type: "flow" | "map";
 }
 
+export interface FrozenEquationContext {
+  symbol: 't' | 'n';
+  value: number;
+}
+
 export interface OrbitObject {
   type: "orbit";
   name: string;
@@ -26,6 +31,7 @@ export interface OrbitObject {
   covariantVectors?: CovariantLyapunovData;
   parameters?: number[]; // Snapshot of parameters when created
   customParameters?: number[]; // Optional custom parameter override snapshot
+  frozenEquationContext?: FrozenEquationContext;
 }
 
 export interface ComplexValue {
@@ -70,6 +76,7 @@ export interface EquilibriumObject {
   lastRun?: EquilibriumRunSummary;
   parameters?: number[]; // Snapshot of parameters when created (or last successfully solved)
   customParameters?: number[]; // Optional custom parameter override snapshot
+  frozenEquationContext?: FrozenEquationContext;
 }
 
 export interface ContinuationEigenvalue {
@@ -652,6 +659,8 @@ export interface ContinuationObject {
   name: string;
   systemName: string;
   parameterName: string;
+  runtimeParameterName?: string;
+  frozenEquationContext?: FrozenEquationContext;
   /**
    * Parent analysis object that owns this branch on disk.
    *
@@ -707,6 +716,7 @@ export interface LimitCycleObject {
   state: number[]; // Flattened collocation state: [mesh, stages, period].
   parameters?: number[]; // Full parameter snapshot at creation.
   customParameters?: number[]; // Optional custom parameter override snapshot
+  frozenEquationContext?: FrozenEquationContext;
   parameterName?: string;
   paramValue?: number;
   floquetMultipliers?: ContinuationEigenvalue[];

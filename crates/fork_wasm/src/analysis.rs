@@ -1,11 +1,11 @@
 //! Analysis helpers and Lyapunov/CLV runners.
 
-use crate::system::{build_system, SolverType, WasmSystem};
+use crate::system::{build_system_with_context, SolverType, WasmSystem};
 use fork_core::analysis::{
     covariant_lyapunov_vectors as core_clv, lyapunov_exponents as core_lyapunov, LyapunovStepper,
 };
 use fork_core::autodiff::TangentSystem;
-use fork_core::equation_engine::EquationSystem;
+use fork_core::equation_engine::{EquationSystem, ExpressionContext};
 use fork_core::solvers::{DiscreteMap, Tsit5, RK4};
 use fork_core::traits::Steppable;
 use js_sys::Float64Array;
@@ -345,7 +345,18 @@ impl WasmLyapunovRunner {
             qr_stride as usize
         };
 
-        let system = build_system(equations, params, &param_names, &var_names)?;
+        let expression_context = if solver_name == "discrete" {
+            ExpressionContext::MapIteration
+        } else {
+            ExpressionContext::FlowTime
+        };
+        let system = build_system_with_context(
+            equations,
+            params,
+            &param_names,
+            &var_names,
+            expression_context,
+        )?;
         let dim = initial_state.len();
         if dim != system.equations.len() {
             return Err(JsValue::from_str("Initial state dimension mismatch."));
@@ -645,7 +656,18 @@ impl WasmCovariantLyapunovRunner {
             ));
         }
 
-        let system = build_system(equations, params, &param_names, &var_names)?;
+        let expression_context = if solver_name == "discrete" {
+            ExpressionContext::MapIteration
+        } else {
+            ExpressionContext::FlowTime
+        };
+        let system = build_system_with_context(
+            equations,
+            params,
+            &param_names,
+            &var_names,
+            expression_context,
+        )?;
         let dim = initial_state.len();
         if dim != system.equations.len() {
             return Err(JsValue::from_str("Initial state dimension mismatch."));

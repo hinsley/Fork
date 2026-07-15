@@ -12,6 +12,7 @@ import type {
   ContinuationSettings,
   EquilibriumEigenvectorRenderStyle,
   EquilibriumObject,
+  FrozenEquationContext,
   IsoclineObject,
   LimitCycleObject,
   LimitCycleOrigin,
@@ -38,6 +39,11 @@ import {
 } from '../../system/equilibriumEigenvectors'
 import { maxSceneAxisCount, resolveSceneAxisSelection } from '../../system/sceneAxes'
 import { formatEquilibriumLabel } from '../../system/labels'
+import {
+  autonomousContextError as getAutonomousContextError,
+  equationContextSymbol,
+  usesEquationContext,
+} from '../../system/expressionContext'
 import { PlotlyViewport } from '../../viewports/plotly/PlotlyViewport'
 import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../../viewports/plotly/plotlyTheme'
 import type {
@@ -165,6 +171,10 @@ type InspectorDetailsPanelProps = {
     id: string,
     frozenValuesByVarName: Record<string, number>
   ) => void
+  onUpdateObjectFrozenEquationContext?: (
+    id: string,
+    context: FrozenEquationContext | null
+  ) => void
   onUpdateIsoclineObject?: (
     id: string,
     update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
@@ -287,6 +297,7 @@ type SystemDraft = {
 
 type OrbitRunDraft = {
   initialState: string[]
+  initialContext: string
   duration: string
   dt: string
 }
@@ -1174,6 +1185,7 @@ function makeOrbitRunDraft(system: SystemConfig, orbit?: OrbitObject): OrbitRunD
   const duration = hasData ? orbit!.t_end - orbit!.t_start : defaultDuration
   return {
     initialState: adjustArray(initialState, system.varNames.length, () => '0'),
+    initialContext: (orbit?.t_start ?? 0).toString(),
     duration: (duration > 0 ? duration : defaultDuration).toString(),
     dt: (orbit?.dt ?? defaultDt).toString(),
   }
@@ -2045,7 +2057,10 @@ function resolveObjectCurrentSubsystemSnapshot(
   const maxFreeVariables = object.type === 'isocline' ? 3 : undefined
   return buildSubsystemSnapshot(
     systemConfig,
-    { frozenValuesByVarName: resolveObjectFrozenValues(systemConfig, object) },
+    {
+      frozenValuesByVarName: resolveObjectFrozenValues(systemConfig, object),
+      frozenEquationContext: object.frozenVariables?.frozenEquationContext,
+    },
     { maxFreeVariables }
   )
 }
@@ -2106,6 +2121,7 @@ function useInspectorSelectionController({
   onUpdateRender,
   onUpdateObjectParams = () => {},
   onUpdateObjectFrozenVariables = () => {},
+  onUpdateObjectFrozenEquationContext = () => {},
   onUpdateIsoclineObject = () => {},
   onComputeIsocline = async () => null,
   onUpdateScene,
@@ -2582,6 +2598,7 @@ function useInspectorSelectionController({
   )
   const [paramOverrideError, setParamOverrideError] = useState<string | null>(null)
   const [frozenVariableDrafts, setFrozenVariableDrafts] = useState<Record<string, string>>({})
+  const [frozenEquationContextDraft, setFrozenEquationContextDraft] = useState('0')
   const activeFrozenVariableRef = useRef<string | null>(null)
 
   const [continuationDraft, setContinuationDraft] = useState<ContinuationDraft>(() =>
@@ -3098,6 +3115,17 @@ function useInspectorSelectionController({
     if (!paramOverrideTarget) return {}
     return resolveObjectFrozenValues(system.config, paramOverrideTarget)
   }, [paramOverrideTarget, system.config])
+  const equationContextUsed = useMemo(
+    () => usesEquationContext(system.config),
+    [system.config]
+  )
+  const equationContextName = equationContextSymbol(system.config)
+  const currentFrozenEquationContext = paramOverrideTarget?.frozenVariables
+    ?.frozenEquationContext
+  const autonomousAnalysisError = getAutonomousContextError(
+    system.config,
+    currentFrozenEquationContext
+  )
   const subsystemSnapshotMismatch = useMemo(() => {
     if (!paramOverrideTarget) return false
     return hasSubsystemSnapshotMismatch(system.config, paramOverrideTarget)
@@ -3143,6 +3171,12 @@ function useInspectorSelectionController({
       return next
     })
   }, [currentObjectFrozenValues, paramOverrideTarget, systemDraft.varNames])
+
+  useEffect(() => {
+    setFrozenEquationContextDraft(
+      (currentFrozenEquationContext?.value ?? 0).toString()
+    )
+  }, [currentFrozenEquationContext?.value, selectedNodeId])
 
   useEffect(() => {
     setOrbitPreviewPage(0)
@@ -4820,6 +4854,14 @@ function useInspectorSelectionController({
         tag: hasCustomParamOverride ? 'custom' : undefined,
       }
     )
+  } else if (paramOverrideTarget && isocline && equationContextUsed) {
+    workflowActions.push({
+      id: 'frozen-variables-toggle',
+      group: 'Configure',
+      label: 'Equation Forcing Context',
+      description: 'Freeze the forcing context before computing a static isocline.',
+      tag: subsystemSnapshotMismatch ? 'mismatch' : undefined,
+    })
   }
   if (orbit) {
     if (orbit.data.length > 0) {
@@ -5052,10 +5094,18 @@ function useInspectorSelectionController({
     }
     const duration = parseNumber(orbitDraft.duration)
     const dt = systemDraft.type === 'map' ? 1 : parseNumber(orbitDraft.dt)
+    const initialContext =
+      systemDraft.type === 'map'
+        ? parseInteger(orbitDraft.initialContext)
+        : parseNumber(orbitDraft.initialContext)
     const initialState = orbitDraft.initialState.map((value) => parseNumber(value))
 
     if (duration === null || duration <= 0) {
       setOrbitError('Duration must be a positive number.')
+      return
+    }
+    if (systemDraft.type === 'map' && !Number.isSafeInteger(duration)) {
+      setOrbitError('Map iterations must be an integer.')
       return
     }
     if (dt === null || dt <= 0) {
@@ -5066,15 +5116,59 @@ function useInspectorSelectionController({
       setOrbitError('Initial state values must be numeric.')
       return
     }
+    if (initialContext === null) {
+      setOrbitError(
+        systemDraft.type === 'map'
+          ? 'Initial map index must be an integer.'
+          : 'Initial time must be numeric.'
+      )
+      return
+    }
 
     setOrbitError(null)
     const request: OrbitRunRequest = {
       orbitId: selectedNodeId,
       initialState: initialState.map((value) => value ?? 0),
+      initialContext,
       duration,
       dt: systemDraft.type === 'map' ? undefined : dt,
     }
     await onRunOrbit(request)
+  }
+
+  const handleExtendOrbit = async () => {
+    if (runDisabled) {
+      setOrbitError('Apply valid system settings before extending orbits.')
+      return
+    }
+    if (!orbit || !selectedNodeId || orbit.data.length === 0) {
+      setOrbitError('Run the orbit before extending it.')
+      return
+    }
+    const duration = parseNumber(orbitDraft.duration)
+    const dt = systemDraft.type === 'map' ? 1 : parseNumber(orbitDraft.dt)
+    if (duration === null || duration <= 0) {
+      setOrbitError('Extension duration must be a positive number.')
+      return
+    }
+    if (systemDraft.type === 'map' && !Number.isSafeInteger(duration)) {
+      setOrbitError('Map extension iterations must be an integer.')
+      return
+    }
+    if (dt === null || dt <= 0) {
+      setOrbitError('Step size must be a positive number.')
+      return
+    }
+    const lastRow = orbit.data[orbit.data.length - 1]
+    setOrbitError(null)
+    await onRunOrbit({
+      orbitId: selectedNodeId,
+      initialState: lastRow.slice(1),
+      initialContext: orbit.t_end,
+      duration,
+      dt: systemDraft.type === 'map' ? undefined : dt,
+      extend: true,
+    })
   }
 
   const handleComputeLyapunov = async () => {
@@ -5390,6 +5484,53 @@ function useInspectorSelectionController({
     ]
   )
 
+  const handleToggleFrozenEquationContext = useCallback(
+    (frozen: boolean) => {
+      if (!paramOverrideTarget || !selectedNodeId || !equationContextUsed) return
+      if (!frozen) {
+        onUpdateObjectFrozenEquationContext(selectedNodeId, null)
+        return
+      }
+      const value =
+        equationContextName === 'n'
+          ? parseInteger(frozenEquationContextDraft)
+          : parseNumber(frozenEquationContextDraft)
+      if (value === null) return
+      onUpdateObjectFrozenEquationContext(selectedNodeId, {
+        symbol: equationContextName,
+        value,
+      })
+    },
+    [
+      equationContextName,
+      equationContextUsed,
+      frozenEquationContextDraft,
+      onUpdateObjectFrozenEquationContext,
+      paramOverrideTarget,
+      selectedNodeId,
+    ]
+  )
+
+  const handleFrozenEquationContextValueChange = useCallback(
+    (rawValue: string) => {
+      setFrozenEquationContextDraft(rawValue)
+      if (!currentFrozenEquationContext || !selectedNodeId) return
+      const value =
+        equationContextName === 'n' ? parseInteger(rawValue) : parseNumber(rawValue)
+      if (value === null) return
+      onUpdateObjectFrozenEquationContext(selectedNodeId, {
+        symbol: equationContextName,
+        value,
+      })
+    },
+    [
+      currentFrozenEquationContext,
+      equationContextName,
+      onUpdateObjectFrozenEquationContext,
+      selectedNodeId,
+    ]
+  )
+
   const handleUpdateIsocline = useCallback(
     (update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>) => {
       if (!isocline || !selectedNodeId) return
@@ -5487,6 +5628,10 @@ function useInspectorSelectionController({
 
   const handleComputeIsocline = useCallback(async () => {
     if (!isocline || !selectedNodeId) return
+    if (autonomousAnalysisError) {
+      setIsoclineError(autonomousAnalysisError)
+      return
+    }
     const parsedLevel = parseDraftNumber(isoclineLevelDraft)
     if (parsedLevel === null) {
       setIsoclineError('Isocline value must be a valid real number.')
@@ -5576,12 +5721,17 @@ function useInspectorSelectionController({
     isoclineFrozenVariables,
     isoclineLevelDraft,
     onComputeIsocline,
+    autonomousAnalysisError,
     selectedNodeId,
   ])
 
   const handleSolveEquilibrium = async () => {
     if (runDisabled) {
       setEquilibriumError(`Apply valid system settings before solving ${equilibriumLabelPluralLower}.`)
+      return
+    }
+    if (autonomousAnalysisError) {
+      setEquilibriumError(autonomousAnalysisError)
       return
     }
     if (!object || object.type !== 'equilibrium' || !selectedNodeId) {
@@ -5630,6 +5780,10 @@ function useInspectorSelectionController({
   const handleCreateEquilibriumBranch = async () => {
     if (runDisabled) {
       setContinuationError('Apply valid system settings before continuing.')
+      return
+    }
+    if (autonomousAnalysisError) {
+      setContinuationError(autonomousAnalysisError)
       return
     }
     if (!equilibrium || !selectedNodeId) {
@@ -5683,6 +5837,10 @@ function useInspectorSelectionController({
   const handleCreateEquilibriumManifold = async () => {
     if (runDisabled) {
       setEquilibriumManifoldError('Apply valid system settings before computing manifolds.')
+      return
+    }
+    if (autonomousAnalysisError) {
+      setEquilibriumManifoldError(autonomousAnalysisError)
       return
     }
     if (!equilibrium || !selectedNodeId) {
@@ -5901,6 +6059,10 @@ function useInspectorSelectionController({
       setLimitCycleManifoldError('Apply valid system settings before computing manifolds.')
       return
     }
+    if (autonomousAnalysisError) {
+      setLimitCycleManifoldError(autonomousAnalysisError)
+      return
+    }
     if (systemDraft.type === 'map') {
       setLimitCycleManifoldError('Invariant manifolds are currently available for flow systems only.')
       return
@@ -6098,6 +6260,10 @@ function useInspectorSelectionController({
       setBranchContinuationError('Apply valid system settings before continuing.')
       return
     }
+    if (autonomousAnalysisError) {
+      setBranchContinuationError(autonomousAnalysisError)
+      return
+    }
     if (!branch || !selectedNodeId) {
       setBranchContinuationError('Select a branch to continue.')
       return
@@ -6160,6 +6326,10 @@ function useInspectorSelectionController({
   const handleExtendBranch = async () => {
     if (runDisabled) {
       setBranchExtensionError('Apply valid system settings before extending.')
+      return
+    }
+    if (autonomousAnalysisError) {
+      setBranchExtensionError(autonomousAnalysisError)
       return
     }
     if (!branch || !selectedNodeId) {
@@ -6312,6 +6482,10 @@ function useInspectorSelectionController({
       setFoldCurveError('Apply valid system settings before continuing.')
       return
     }
+    if (autonomousAnalysisError) {
+      setFoldCurveError(autonomousAnalysisError)
+      return
+    }
     if (!branch || !selectedNodeId) {
       setFoldCurveError('Select a branch to continue.')
       return
@@ -6375,6 +6549,10 @@ function useInspectorSelectionController({
   const handleCreateHopfCurve = async () => {
     if (runDisabled) {
       setHopfCurveError('Apply valid system settings before continuing.')
+      return
+    }
+    if (autonomousAnalysisError) {
+      setHopfCurveError(autonomousAnalysisError)
       return
     }
     if (isDiscreteMap) {
@@ -6514,6 +6692,10 @@ function useInspectorSelectionController({
   const handleCreateIsoperiodicCurve = async () => {
     if (runDisabled) {
       setIsoperiodicCurveError('Apply valid system settings before continuing.')
+      return
+    }
+    if (autonomousAnalysisError) {
+      setIsoperiodicCurveError(autonomousAnalysisError)
       return
     }
     if (isDiscreteMap) {
@@ -6687,6 +6869,10 @@ function useInspectorSelectionController({
   const handleCreateNSCurve = async () => {
     if (runDisabled) {
       setNSCurveError('Apply valid system settings before continuing.')
+      return
+    }
+    if (autonomousAnalysisError) {
+      setNSCurveError(autonomousAnalysisError)
       return
     }
     if (!isDiscreteMap) {
@@ -7063,6 +7249,10 @@ function useInspectorSelectionController({
       setHomoclinicFromLargeCycleError('Apply valid system settings before continuing.')
       return
     }
+    if (autonomousAnalysisError) {
+      setHomoclinicFromLargeCycleError(autonomousAnalysisError)
+      return
+    }
     if (systemDraft.type === 'map') {
       setHomoclinicFromLargeCycleError('Homoclinic continuation requires a flow system.')
       return
@@ -7208,6 +7398,10 @@ function useInspectorSelectionController({
   const handleCreateHomoclinicFromHomoclinic = async () => {
     if (runDisabled) {
       setHomoclinicFromHomoclinicError('Apply valid system settings before continuing.')
+      return
+    }
+    if (autonomousAnalysisError) {
+      setHomoclinicFromHomoclinicError(autonomousAnalysisError)
       return
     }
     if (systemDraft.type === 'map') {
@@ -7503,6 +7697,10 @@ function useInspectorSelectionController({
       setHomoclinicFromHomotopySaddleError('Apply valid system settings before continuing.')
       return
     }
+    if (autonomousAnalysisError) {
+      setHomoclinicFromHomotopySaddleError(autonomousAnalysisError)
+      return
+    }
     if (systemDraft.type === 'map') {
       setHomoclinicFromHomotopySaddleError('Homoclinic continuation requires a flow system.')
       return
@@ -7621,6 +7819,10 @@ function useInspectorSelectionController({
       setLimitCycleFromOrbitError('Apply valid system settings before continuing.')
       return
     }
+    if (autonomousAnalysisError) {
+      setLimitCycleFromOrbitError(autonomousAnalysisError)
+      return
+    }
     if (systemDraft.type === 'map') {
       setLimitCycleFromOrbitError('Limit cycles require a flow system.')
       return
@@ -7717,6 +7919,10 @@ function useInspectorSelectionController({
   const handleCreateHeteroclinicFromOrbit = async () => {
     if (runDisabled) {
       setHeteroclinicFromOrbitError('Apply valid system settings before continuing.')
+      return
+    }
+    if (autonomousAnalysisError) {
+      setHeteroclinicFromOrbitError(autonomousAnalysisError)
       return
     }
     if (systemDraft.type !== 'flow') {
@@ -7988,6 +8194,7 @@ function useInspectorSelectionController({
     WorkflowFocusToolbar,
     activeFrozenVariableRef,
     analysis,
+    autonomousAnalysisError,
     axisOptions,
     branch,
     branchBifurcations,
@@ -8033,6 +8240,7 @@ function useInspectorSelectionController({
     covariantDraft,
     covariantError,
     currentObjectFrozenValues,
+    currentFrozenEquationContext,
     diagram,
     diagramFilteredBranches,
     diagramSearch,
@@ -8078,6 +8286,7 @@ function useInspectorSelectionController({
     formatScientific,
     formatTerminationReasonLabel,
     frozenVariableDrafts,
+    frozenEquationContextDraft,
     frozenVariableHeaderNames,
     handleClearParamOverride,
     handleClvColorChange,
@@ -8114,6 +8323,7 @@ function useInspectorSelectionController({
     handleExtendEquilibriumManifold1D,
     handleExtendManifold2D,
     handleFrozenVariableValueChange,
+    handleFrozenEquationContextValueChange,
     handleJumpToBranchPoint,
     handleLimitCycleFloquetColorChange,
     handleLimitCycleFloquetVisibilityChange,
@@ -8124,8 +8334,10 @@ function useInspectorSelectionController({
     handlePasteOrbitState,
     handlePasteParamOverride,
     handleRunOrbit,
+    handleExtendOrbit,
     handleSolveEquilibrium,
     handleToggleFrozenVariable,
+    handleToggleFrozenEquationContext,
     handleToggleIsoclineAxis,
     handleUpdateIsocline,
     handleUpdateIsoclineAxisField,
@@ -8176,6 +8388,8 @@ function useInspectorSelectionController({
     isoclineSourceKind,
     isoclineSourceVariable,
     isoclineStale,
+    equationContextUsed,
+    equationContextName,
     kaplanYorkeDimension,
     limitCycle,
     limitCycleCodim1Curve,

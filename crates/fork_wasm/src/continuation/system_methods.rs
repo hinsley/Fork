@@ -168,6 +168,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("equilibrium continuation")?;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -204,6 +205,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("equilibrium continuation")?;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -356,6 +358,7 @@ impl WasmSystem {
         map_iterations: u32,
         param_value: f64,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("equilibrium stability analysis")?;
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
             SystemType::Map => SystemKind::Map {
@@ -388,6 +391,7 @@ impl WasmSystem {
         map_iterations: u32,
         settings_val: JsValue,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("invariant-manifold analysis")?;
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
             SystemType::Map => SystemKind::Map {
@@ -412,6 +416,7 @@ impl WasmSystem {
         equilibrium_state: Vec<f64>,
         settings_val: JsValue,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("invariant-manifold analysis")?;
         if !matches!(self.system_type, SystemType::Flow) {
             return Err(JsValue::from_str(
                 "Invariant manifolds are currently available for flow systems only.",
@@ -430,6 +435,7 @@ impl WasmSystem {
         settings_val: JsValue,
         progress_callback: Function,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("invariant-manifold analysis")?;
         if !matches!(self.system_type, SystemType::Flow) {
             return Err(JsValue::from_str(
                 "Invariant manifolds are currently available for flow systems only.",
@@ -496,6 +502,7 @@ impl WasmSystem {
         floquet_multipliers_val: JsValue,
         settings_val: JsValue,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("invariant-manifold analysis")?;
         if !matches!(self.system_type, SystemType::Flow) {
             return Err(JsValue::from_str(
                 "Invariant manifolds are currently available for flow systems only.",
@@ -530,6 +537,7 @@ impl WasmSystem {
         settings_val: JsValue,
         progress_callback: Function,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("invariant-manifold analysis")?;
         if !matches!(self.system_type, SystemType::Flow) {
             return Err(JsValue::from_str(
                 "Invariant manifolds are currently available for flow systems only.",
@@ -604,6 +612,7 @@ impl WasmSystem {
         settings_val: JsValue,
         progress_callback: Function,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("invariant-manifold analysis")?;
         if !matches!(self.system_type, SystemType::Flow) {
             return Err(JsValue::from_str(
                 "2D invariant-manifold extension is available for flow systems only.",
@@ -713,6 +722,7 @@ impl WasmSystem {
         ncol: u32,
         parameter_name: &str,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("limit-cycle stability analysis")?;
         if !matches!(self.system_type, SystemType::Flow) {
             return Err(JsValue::from_str(
                 "Floquet mode computation is currently available for flow systems only.",
@@ -741,6 +751,7 @@ impl WasmSystem {
         parameter_name: &str,
         backend: &str,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("limit-cycle stability analysis")?;
         if !matches!(self.system_type, SystemType::Flow) {
             return Err(JsValue::from_str(
                 "Floquet mode computation is currently available for flow systems only.",
@@ -769,6 +780,7 @@ impl WasmSystem {
         normalized_mesh: Vec<f64>,
         parameter_name: &str,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("limit-cycle stability analysis")?;
         if !matches!(self.system_type, SystemType::Flow) {
             return Err(JsValue::from_str(
                 "Floquet mode computation is currently available for flow systems only.",
@@ -797,6 +809,7 @@ impl WasmSystem {
         parameter_name: &str,
         backend: &str,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("limit-cycle stability analysis")?;
         if !matches!(self.system_type, SystemType::Flow) {
             return Err(JsValue::from_str(
                 "Floquet mode computation is currently available for flow systems only.",
@@ -829,6 +842,7 @@ impl WasmSystem {
         ntst: u32,
         ncol: u32,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("limit-cycle analysis")?;
         let param_index =
             *self.system.param_map.get(parameter_name).ok_or_else(|| {
                 JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
@@ -868,6 +882,7 @@ impl WasmSystem {
         ncol: u32,
         tolerance: f64,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("codimension-two continuation")?;
         let param1_index = *self
             .system
             .param_map
@@ -918,6 +933,7 @@ impl WasmSystem {
         perturbation: f64,
         tolerance: f64,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("codimension-two continuation")?;
         let param1_index = *self
             .system
             .param_map
@@ -961,6 +977,7 @@ impl WasmSystem {
         ncol: u32,
         tolerance: f64,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("homoclinic analysis")?;
         let param1_index = *self
             .system
             .param_map
@@ -1007,6 +1024,7 @@ impl WasmSystem {
         ncol: u32,
         tolerance: f64,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("limit-cycle analysis")?;
         validate_limit_cycle_system_type(&self.system_type).map_err(JsValue::from_str)?;
         let dim = self.system.equations.len();
 
@@ -1068,6 +1086,7 @@ impl WasmSystem {
         ncol: u32,
         amplitude: f64,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("limit-cycle analysis")?;
         let param_index = *self
             .system
             .param_map
@@ -1097,6 +1116,7 @@ impl WasmSystem {
         normalized_mesh: Vec<f64>,
         amplitude: f64,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("limit-cycle analysis")?;
         let param_index = *self
             .system
             .param_map
@@ -1127,6 +1147,7 @@ impl WasmSystem {
         map_iterations: u32,
         amplitude: f64,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("map-cycle analysis")?;
         if !matches!(self.system_type, SystemType::Map) {
             return Err(JsValue::from_str(
                 "Map cycle initialization requires a map system.",
@@ -1162,6 +1183,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("limit-cycle continuation")?;
         validate_limit_cycle_system_type(&self.system_type).map_err(JsValue::from_str)?;
         let setup: LimitCycleSetup = from_value(setup_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid limit cycle setup: {}", e)))?;
@@ -1200,6 +1222,7 @@ impl WasmSystem {
         free_eps0: bool,
         free_eps1: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("heteroclinic analysis")?;
         if !matches!(self.system_type, SystemType::Flow) {
             return Err(JsValue::from_str(
                 "Heteroclinic continuation is available only for flows",
@@ -1249,6 +1272,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("heteroclinic continuation")?;
         let setup: HeteroclinicSetupV1 = from_value(setup_val)
             .map_err(|error| JsValue::from_str(&format!("Invalid heteroclinic setup: {error}")))?;
         let settings: ContinuationSettings = from_value(settings_val).map_err(|error| {
@@ -1268,6 +1292,7 @@ impl WasmSystem {
         settings_val: JsValue,
         extend_forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("heteroclinic continuation")?;
         let branch: ContinuationBranch = from_value(branch_val)
             .map_err(|error| JsValue::from_str(&format!("Invalid heteroclinic branch: {error}")))?;
         let settings: ContinuationSettings = from_value(settings_val).map_err(|error| {
@@ -1294,6 +1319,7 @@ impl WasmSystem {
         free_eps0: bool,
         free_eps1: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("homoclinic analysis")?;
         let param1_index =
             *self.system.param_map.get(parameter_name).ok_or_else(|| {
                 JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
@@ -1349,6 +1375,7 @@ impl WasmSystem {
         free_eps0: bool,
         free_eps1: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("homoclinic analysis")?;
         let param1_index =
             *self.system.param_map.get(parameter_name).ok_or_else(|| {
                 JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
@@ -1407,6 +1434,7 @@ impl WasmSystem {
         free_eps0: bool,
         free_eps1: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("homoclinic analysis")?;
         let param1_index =
             *self.system.param_map.get(parameter_name).ok_or_else(|| {
                 JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
@@ -1483,6 +1511,7 @@ impl WasmSystem {
         free_eps0: bool,
         free_eps1: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("homoclinic analysis")?;
         let param1_index =
             *self.system.param_map.get(parameter_name).ok_or_else(|| {
                 JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
@@ -1545,6 +1574,7 @@ impl WasmSystem {
         time: f64,
         eps1_tol: f64,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("homoclinic analysis")?;
         let param1_index =
             *self.system.param_map.get(parameter_name).ok_or_else(|| {
                 JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
@@ -1594,6 +1624,7 @@ impl WasmSystem {
         free_eps0: bool,
         free_eps1: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("homoclinic analysis")?;
         let param1_index =
             *self.system.param_map.get(parameter_name).ok_or_else(|| {
                 JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
@@ -1639,6 +1670,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("homoclinic continuation")?;
         let setup: HomoclinicSetup = from_value(setup_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid homoclinic setup: {}", e)))?;
         let settings: ContinuationSettings = from_value(settings_val)
@@ -1656,6 +1688,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("homoclinic continuation")?;
         let setup: HomotopySaddleSetup = from_value(setup_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid homotopy-saddle setup: {}", e)))?;
         let settings: ContinuationSettings = from_value(settings_val)
@@ -1693,6 +1726,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("fold-curve continuation")?;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -1854,6 +1888,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("Hopf-curve continuation")?;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -2062,6 +2097,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("isoperiodic-curve continuation")?;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -2216,6 +2252,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("limit-point-of-cycles continuation")?;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -2336,6 +2373,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("period-doubling continuation")?;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -2475,6 +2513,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("Neimark-Sacker continuation")?;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -2600,6 +2639,7 @@ impl WasmSystem {
         forward: bool,
         _batch_size: u32,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("equilibrium continuation")?;
         // For this simplified version, we just run the full continuation
         // and return the result with progress info.
         // The real stepped execution is in WasmEquilibriumRunner.

@@ -223,11 +223,11 @@ async function runOrbit(request: SimulateOrbitRequest, signal: AbortSignal): Pro
   const wasm = await loadWasm()
   const system = createWasmSystem(wasm, request.system)
 
-  system.set_t(0)
+  system.set_t(request.initialContext)
   system.set_state(new Float64Array(request.initialState))
 
   const data: number[][] = []
-  let t = 0
+  let t = request.initialContext
   data.push([t, ...Array.from(system.get_state())])
 
   for (let i = 0; i < request.steps; i += 1) {
@@ -244,7 +244,7 @@ async function runOrbit(request: SimulateOrbitRequest, signal: AbortSignal): Pro
 
   return {
     data,
-    t_start: 0,
+    t_start: request.initialContext,
     t_end: t,
     dt: request.dt,
   }

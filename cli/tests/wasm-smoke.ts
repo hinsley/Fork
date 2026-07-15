@@ -60,6 +60,88 @@ assert.equal(state.length, 1);
 assert.ok(Math.abs(state[0] - 0.25) < 1e-10, `Expected x ~= 0.25 after one step, got ${state[0]}`);
 assert.ok(Math.abs(system.get_t() - 0.25) < 1e-12, `Expected t ~= 0.25, got ${system.get_t()}`);
 
+const forcedFlow = new wasm.WasmSystem(
+  ['t'],
+  new Float64Array(),
+  [],
+  ['x'],
+  'rk4',
+  'flow'
+);
+forcedFlow.set_state(new Float64Array([0]));
+forcedFlow.set_t(2);
+forcedFlow.step(0.5);
+assert.ok(Math.abs(forcedFlow.get_state()[0] - 1.125) < 1e-12);
+assert.equal(forcedFlow.context_symbol(), 't');
+
+const forcedMap = new wasm.WasmSystem(
+  ['n'],
+  new Float64Array(),
+  [],
+  ['x'],
+  'discrete',
+  'map'
+);
+forcedMap.set_state(new Float64Array([0]));
+forcedMap.set_t(-2);
+forcedMap.step(1);
+assert.equal(forcedMap.get_state()[0], -2);
+forcedMap.step(1);
+assert.equal(forcedMap.get_state()[0], -1);
+assert.equal(forcedMap.get_t(), 0);
+
+assert.throws(
+  () => forcedFlow.solve_equilibrium(new Float64Array([0]), 10, 1, 1),
+  /Freeze the equation forcing context/
+);
+const frozenFlow = new wasm.WasmSystem(
+  ['x-fc__t'],
+  new Float64Array([1.25]),
+  ['fc__t'],
+  ['x'],
+  'rk4',
+  'flow'
+);
+const frozenEquilibrium = frozenFlow.solve_equilibrium(
+  new Float64Array([0]),
+  10,
+  1,
+  1
+);
+assert.ok(Math.abs(frozenEquilibrium.state[0] - 1.25) < 1e-10);
+
+const forcedLyapunov = new wasm.WasmLyapunovRunner(
+  ['t*x'],
+  new Float64Array(),
+  [],
+  ['x'],
+  'rk4',
+  new Float64Array([1]),
+  2,
+  4,
+  0.01,
+  1
+);
+while (!forcedLyapunov.get_progress().done) forcedLyapunov.run_steps(2);
+assert.equal(forcedLyapunov.get_result().length, 1);
+
+const forcedClv = new wasm.WasmCovariantLyapunovRunner(
+  ['t*x'],
+  new Float64Array(),
+  [],
+  ['x'],
+  'rk4',
+  new Float64Array([1]),
+  2,
+  0.01,
+  1,
+  4,
+  1,
+  1
+);
+while (!forcedClv.get_progress().done) forcedClv.run_steps(2);
+assert.equal(forcedClv.get_result().dimension, 1);
+
 const extendedSmoothExpression = [
   'sqrt(p)',
   'cbrt(p)',

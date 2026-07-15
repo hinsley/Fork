@@ -8,6 +8,7 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
+import { configForObject } from '../expression-context';
 import {
   ContinuationObject,
   EquilibriumManifold1DSettings,
@@ -196,8 +197,11 @@ async function extendEquilibriumManifold1D(
   };
 
   try {
-    const runConfig = { ...sysConfig };
-    runConfig.params = getBranchParams(sysName, branch, sysConfig);
+    const baseParams =
+      branch.params && branch.params.length >= sysConfig.params.length
+        ? branch.params.slice(0, sysConfig.params.length)
+        : getBranchParams(sysName, branch, sysConfig);
+    const runConfig = configForObject({ ...sysConfig, params: baseParams }, branch);
     const bridge = new WasmBridge(runConfig);
     const mapIterations =
       sysConfig.type === 'map'
@@ -621,7 +625,7 @@ export async function extendBranch(
     const extensionParameterName =
       typeof branchTypeMeta?.param1_name === 'string'
         ? branchTypeMeta.param1_name
-        : branch.parameterName;
+        : branch.runtimeParameterName ?? branch.parameterName;
 
     const updatedData = runContinuationExtensionWithProgress(
       bridge,

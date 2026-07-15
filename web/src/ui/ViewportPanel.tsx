@@ -58,10 +58,13 @@ import {
 import { resolveSceneAxisIndices, resolveSceneAxisSelection } from '../system/sceneAxes'
 import { resolveSceneProjection } from '../system/sceneProjection'
 import {
+  buildContextFrozenRunConfig,
+  buildSubsystemSnapshot,
   mapStateRowsToDisplay,
   stateVectorToDisplay,
   isSubsystemSnapshotCompatible,
 } from '../system/subsystemGateway'
+import { usesEquationContext } from '../system/expressionContext'
 import { normalizeFloquetMultipliersForRendering } from '../system/floquetModes'
 import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
 import type { PlotlyFigureCaptureState } from '../viewports/plotly/figureCapture'
@@ -145,6 +148,7 @@ type ViewportTileProps = {
   limitCyclePointSelection?: LimitCyclePointSelection
   mapRange: [number, number] | null
   mapFunctionSamples: MapFunctionSamples | null
+  mapFunctionUnavailableReason: string | null
   draggingId: string | null
   dragOverId: string | null
   setDraggingId: (id: string | null) => void
@@ -4034,7 +4038,9 @@ function buildSceneTraces(
       ref: ContinuationObject['parameterRef'] | ContinuationObject['parameter2Ref'] | undefined
     ): string | null => {
       if (!ref) return null
-      return ref.kind === 'native_param' ? ref.name : ref.variableName
+      if (ref.kind === 'native_param') return ref.name
+      if (ref.kind === 'frozen_context') return ref.symbol
+      return ref.variableName
     }
     const primaryParameterLabel = (() => {
       if (branchType && 'param1_name' in branchType && branchType.param1_name.trim()) {
@@ -6565,6 +6571,7 @@ function ViewportTile({
   limitCyclePointSelection,
   mapRange,
   mapFunctionSamples,
+  mapFunctionUnavailableReason,
   draggingId,
   dragOverId,
   onComputeEventSeriesFromOrbit,
@@ -6979,6 +6986,14 @@ function ViewportTile({
       {isCollapsed ? null : (
         <>
           <div className="viewport-tile__body">
+            {sceneProjection?.kind === 'map_cobweb_1d' && mapFunctionUnavailableReason ? (
+              <div
+                className="viewport-context-notice"
+                data-testid={`map-function-context-notice-${node.id}`}
+              >
+                {mapFunctionUnavailableReason}
+              </div>
+            ) : null}
             {analysis ? (
               <AnalysisViewportPlot
                 system={system}
@@ -7132,6 +7147,34 @@ export function ViewportPanel({
     systemConfig.type === 'map' &&
     systemConfig.varNames.length === 1 &&
     hasMapCobwebScene
+  const mapContextResolution = useMemo(() => {
+    if (!usesEquationContext(systemConfig)) {
+      return { config: systemConfig, reason: null as string | null }
+    }
+    const orbitContexts = collectVisibleObjectIds(mapRangeSource)
+      .map((id) => systemObjects[id])
+      .filter((object): object is OrbitObject => object?.type === 'orbit' && object.data.length > 0)
+      .map((orbit) => orbit.frozenVariables?.frozenEquationContext)
+    const shared = orbitContexts[0]
+    if (
+      !shared ||
+      shared.symbol !== 'n' ||
+      orbitContexts.some((context) => !context || context.symbol !== 'n' || context.value !== shared.value)
+    ) {
+      return {
+        config: null,
+        reason: 'This n-dependent map has no unique static graph. Freeze all visible orbits at one shared n to show the map-function curve.',
+      }
+    }
+    const snapshot = buildSubsystemSnapshot(systemConfig, {
+      frozenValuesByVarName: {},
+      frozenEquationContext: shared,
+    })
+    return {
+      config: buildContextFrozenRunConfig(systemConfig, snapshot),
+      reason: null,
+    }
+  }, [mapRangeSource, systemConfig, systemObjects])
   const mapRangeKey = useMemo(() => {
     if (!shouldSampleMapFunction) return null
     const range = collectMap1DRange(mapRangeSource, 0)
@@ -7146,13 +7189,13 @@ export function ViewportPanel({
     }
     return [parts[0], parts[1]] as [number, number]
   }, [mapRangeKey])
-  const mapConfigJson = shouldSampleMapFunction
+  const mapConfigJson = shouldSampleMapFunction && mapContextResolution.config
     ? JSON.stringify({
-        ...systemConfig,
-        equations: [...systemConfig.equations],
-        params: [...systemConfig.params],
-        paramNames: [...systemConfig.paramNames],
-        varNames: [...systemConfig.varNames],
+        ...mapContextResolution.config,
+        equations: [...mapContextResolution.config.equations],
+        params: [...mapContextResolution.config.params],
+        paramNames: [...mapContextResolution.config.paramNames],
+        varNames: [...mapContextResolution.config.varNames],
       })
     : null
   const mapConfig = useMemo(() => {
@@ -7449,6 +7492,7 @@ export function ViewportPanel({
                 limitCyclePointSelection={limitCyclePointSelection}
                 mapRange={mapRangeValues}
                 mapFunctionSamples={activeMapFunction}
+                mapFunctionUnavailableReason={mapContextResolution.reason}
                 draggingId={draggingId}
                 dragOverId={dragOverId}
                 setDraggingId={setDraggingId}

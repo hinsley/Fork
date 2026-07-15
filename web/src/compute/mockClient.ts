@@ -189,7 +189,7 @@ export class MockForkCoreClient implements ForkCoreClient {
           request.system.varNames.length,
           request.initialState.length
         )
-        let t = 0
+        let t = request.initialContext
         const initialState = Array.from(
           { length: dimension },
           (_, index) => request.initialState[index] ?? 0
@@ -207,7 +207,7 @@ export class MockForkCoreClient implements ForkCoreClient {
         }
         return {
           data,
-          t_start: 0,
+          t_start: request.initialContext,
           t_end: t,
           dt: request.dt,
         }

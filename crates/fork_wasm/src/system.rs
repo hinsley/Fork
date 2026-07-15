@@ -1,8 +1,10 @@
 //! Core WASM system wrapper and low-level utilities.
 
 use fork_core::autodiff::Dual;
-use fork_core::equation_engine::{parse, Compiler, EquationSystem};
-use fork_core::isocline::{compile_scalar_expression, compute_isocline, IsoclineAxisSpec};
+use fork_core::equation_engine::{parse, Compiler, EquationSystem, ExpressionContext};
+use fork_core::isocline::{
+    compile_scalar_expression_with_context, compute_isocline_at, IsoclineAxisSpec,
+};
 use fork_core::solvers::{DiscreteMap, Tsit5, RK4};
 use fork_core::state_periodicity::StatePeriodicity;
 use fork_core::traits::{DynamicalSystem, Steppable};
@@ -29,19 +31,61 @@ pub(crate) enum SystemType {
     Map,
 }
 
+impl SystemType {
+    pub(crate) fn expression_context(&self) -> ExpressionContext {
+        match self {
+            Self::Flow => ExpressionContext::FlowTime,
+            Self::Map => ExpressionContext::MapIteration,
+        }
+    }
+
+    pub(crate) fn symbol(&self) -> &'static str {
+        match self {
+            Self::Flow => "t",
+            Self::Map => "n",
+        }
+    }
+}
+
 pub(crate) fn build_system(
     equations: Vec<String>,
     params: Vec<f64>,
     param_names: &[String],
     var_names: &[String],
 ) -> Result<EquationSystem, JsValue> {
-    let compiler = Compiler::new(var_names, param_names);
+    build_system_with_context(
+        equations,
+        params,
+        param_names,
+        var_names,
+        ExpressionContext::None,
+    )
+}
+
+pub(crate) fn build_system_with_context(
+    equations: Vec<String>,
+    params: Vec<f64>,
+    param_names: &[String],
+    var_names: &[String],
+    context: ExpressionContext,
+) -> Result<EquationSystem, JsValue> {
+    let compiler = Compiler::new_with_context(var_names, param_names, context);
     let mut bytecodes = Vec::new();
     for eq_str in equations {
         let expr = parse(&eq_str).map_err(|e| JsValue::from_str(&e))?;
-        let code = compiler
-            .try_compile(&expr)
-            .map_err(|e| JsValue::from_str(&e))?;
+        let code = compiler.try_compile(&expr).map_err(|error| {
+            if context == ExpressionContext::None
+                && (error.starts_with("Context symbol ")
+                    || error.ends_with(": t")
+                    || error.ends_with(": n"))
+            {
+                JsValue::from_str(
+                    "This system has an unresolved t/n forcing context. Freeze the equation forcing context before running autonomous analysis.",
+                )
+            } else {
+                JsValue::from_str(&error)
+            }
+        })?;
         bytecodes.push(code);
     }
 
@@ -63,7 +107,12 @@ impl WasmSystem {
     ) -> Result<WasmSystem, JsValue> {
         console_error_panic_hook::set_once();
 
-        let compiler = Compiler::new(&var_names, &param_names);
+        let system_type = match system_type {
+            "map" => SystemType::Map,
+            _ => SystemType::Flow,
+        };
+        let compiler =
+            Compiler::new_with_context(&var_names, &param_names, system_type.expression_context());
         let mut bytecodes = Vec::new();
         for eq_str in equations {
             let expr = parse(&eq_str).map_err(|e| JsValue::from_str(&e))?;
@@ -83,11 +132,6 @@ impl WasmSystem {
             "tsit5" => SolverType::Tsit5(Tsit5::new(dim)),
             "discrete" => SolverType::Discrete(DiscreteMap::new(dim)),
             _ => return Err(JsValue::from_str("Unknown solver")),
-        };
-
-        let system_type = match system_type {
-            "map" => SystemType::Map,
-            _ => SystemType::Flow,
         };
 
         Ok(WasmSystem {
@@ -121,6 +165,25 @@ impl WasmSystem {
 
     pub fn get_t(&self) -> f64 {
         self.t
+    }
+
+    pub fn uses_context(&self) -> bool {
+        self.system.uses_context()
+    }
+
+    pub fn context_symbol(&self) -> Option<String> {
+        self.uses_context()
+            .then(|| self.system_type.symbol().to_string())
+    }
+
+    pub(crate) fn require_autonomous(&self, workflow: &str) -> Result<(), JsValue> {
+        if self.uses_context() {
+            return Err(JsValue::from_str(&format!(
+                "This system depends on {}. Freeze the equation forcing context before running {workflow}.",
+                self.system_type.symbol()
+            )));
+        }
+        Ok(())
     }
 
     pub fn step(&mut self, dt: f64) {
@@ -165,6 +228,7 @@ impl WasmSystem {
         var_names: Vec<String>,
         param_names: Vec<String>,
     ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("isocline analysis")?;
         let axis_count = axis_indices.len();
         if axis_count != axis_mins.len()
             || axis_count != axis_maxs.len()
@@ -175,8 +239,13 @@ impl WasmSystem {
             ));
         }
 
-        let scalar = compile_scalar_expression(&expression, &var_names, &param_names)
-            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+        let scalar = compile_scalar_expression_with_context(
+            &expression,
+            &var_names,
+            &param_names,
+            self.system_type.expression_context(),
+        )
+        .map_err(|err| JsValue::from_str(&err.to_string()))?;
         let axes: Vec<IsoclineAxisSpec> = (0..axis_count)
             .map(|idx| IsoclineAxisSpec {
                 var_index: axis_indices[idx],
@@ -185,8 +254,9 @@ impl WasmSystem {
                 samples: axis_samples[idx],
             })
             .collect();
-        let geometry = compute_isocline(&self.system, &scalar, level, &axes, &frozen_state)
-            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+        let geometry =
+            compute_isocline_at(&self.system, &scalar, level, &axes, &frozen_state, self.t)
+                .map_err(|err| JsValue::from_str(&err.to_string()))?;
         serde_wasm_bindgen::to_value(&geometry)
             .map_err(|err| JsValue::from_str(&format!("Failed to serialize isocline: {err}")))
     }
@@ -227,6 +297,47 @@ mod tests {
         let state = system.get_state();
         assert!((system.get_t() - 0.5).abs() < 1e-12);
         assert!((state[0] - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn wasm_system_evaluates_flow_time_context() {
+        let mut system = WasmSystem::new(
+            vec!["t".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "rk4",
+            "flow",
+        )
+        .expect("contextual flow");
+
+        assert!(system.uses_context());
+        assert_eq!(system.context_symbol().as_deref(), Some("t"));
+        system.set_state(&[0.0]);
+        system.set_t(2.0);
+        system.step(0.5);
+        assert!((system.get_state()[0] - 1.125).abs() < 1e-12);
+    }
+
+    #[test]
+    fn wasm_system_evaluates_map_iteration_context() {
+        let mut system = WasmSystem::new(
+            vec!["n".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "discrete",
+            "map",
+        )
+        .expect("contextual map");
+
+        assert!(system.uses_context());
+        assert_eq!(system.context_symbol().as_deref(), Some("n"));
+        system.set_state(&[0.0]);
+        system.set_t(-2.0);
+        system.step(1.0);
+        assert_eq!(system.get_state()[0], -2.0);
+        assert_eq!(system.get_t(), -1.0);
     }
 
     #[test]

@@ -1558,6 +1558,7 @@ export function updateAnalysisViewport(
 export function updateSystem(system: System, config: SystemConfig): System {
   const next = structuredClone(system)
   const previousName = next.config.name
+  const systemTypeChanged = next.config.type !== config.type
   next.name = config.name
   next.config = {
     name: config.name,
@@ -1576,6 +1577,15 @@ export function updateSystem(system: System, config: SystemConfig): System {
     })
     Object.values(next.branches).forEach((branch) => {
       branch.systemName = config.name
+    })
+  }
+
+  if (systemTypeChanged) {
+    Object.values(next.objects).forEach((object) => {
+      if (!('frozenVariables' in object) || !object.frozenVariables?.frozenEquationContext) return
+      const frozenVariables = { ...object.frozenVariables }
+      delete frozenVariables.frozenEquationContext
+      object.frozenVariables = frozenVariables
     })
   }
 

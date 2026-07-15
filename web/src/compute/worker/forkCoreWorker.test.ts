@@ -1514,6 +1514,7 @@ describe('forkCoreWorker', () => {
       payload: {
         system: baseSystem,
         initialState: [1, 2],
+        initialContext: 2,
         steps: 2,
         dt: 0.5,
       },
@@ -1528,9 +1529,9 @@ describe('forkCoreWorker', () => {
     }
     expect(response.ok).toBe(true)
     expect(response.result.data).toHaveLength(3)
-    expect(response.result.data[0]).toEqual([0, 1, 2])
-    expect(response.result.data[2]).toEqual([1, 2, 3])
-    expect(response.result.t_end).toBe(1)
+    expect(response.result.data[0]).toEqual([2, 1, 2])
+    expect(response.result.data[2]).toEqual([3, 2, 3])
+    expect(response.result.t_end).toBe(3)
   })
 
   it('samples 1D map functions for map systems', async () => {
@@ -2075,6 +2076,7 @@ describe('forkCoreWorker', () => {
       payload: {
         system: baseSystem,
         initialState: [0],
+        initialContext: 0,
         steps: 3,
         dt: 0.1,
       },

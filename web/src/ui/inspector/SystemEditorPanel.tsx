@@ -163,7 +163,7 @@ function parseValues(value: string): number[] {
     .filter(Number.isFinite)
 }
 
-function ExpressionLanguageReference() {
+function ExpressionLanguageReference({ systemType }: { systemType: 'flow' | 'map' }) {
   return (
     <details className="system-editor__expression-reference" data-testid="expression-reference">
       <summary>Expression syntax and functions</summary>
@@ -172,6 +172,21 @@ function ExpressionLanguageReference() {
           Use variable and parameter names with <code>+</code>, <code>-</code>, <code>*</code>,{' '}
           <code>/</code>, <code>^</code>, parentheses, and scientific notation such as{' '}
           <code>1e-3</code>.
+        </p>
+        <p>
+          {systemType === 'map' ? (
+            <>
+              Use <code>n</code> for the current map iteration. It starts at the orbit&apos;s{' '}
+              <code>n₀</code> and advances by one per iterate.
+            </>
+          ) : (
+            <>
+              Use <code>t</code> for the current flow time. Runge–Kutta stages evaluate it at their
+              stage times.
+            </>
+          )}{' '}
+          Declared variables or parameters with that name take precedence. Parameter values remain
+          constant expressions and cannot use the contextual symbol.
         </p>
         <p>
           Built-in constants:{' '}
@@ -398,7 +413,7 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
             {sections.variables ? (
               <div className="system-editor__card-body">
                 {showErrors && validation.errors.varNames ? <div className="field-error">{validation.errors.varNames}</div> : null}
-                <ExpressionLanguageReference />
+                <ExpressionLanguageReference systemType={draft.type} />
                 <div className="system-editor__table-head system-editor__table-head--variables" aria-hidden="true"><span>Name</span><span>{draft.type === 'map' ? 'Next-state expression' : 'Derivative'}</span><span>Domain</span><span /></div>
                 <div className="inspector-list system-editor__variable-list">
                   {draft.varNames.map((name, index) => (

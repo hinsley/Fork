@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 
 export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectionController }) {
@@ -123,7 +124,7 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                               >
                               {continuationParameterLabels.map((name) => (
                                 <option key={name} value={name}>
-                                  {name}
+                                  {formatContinuationParameterDisplayLabel(name)}
                                 </option>
                               ))}
                             </select>

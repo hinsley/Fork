@@ -2,9 +2,9 @@
 
 use crate::system::{SolverType, WasmSystem};
 use fork_core::event_series::{
-    compile_event_series_expressions, compute_event_series_from_orbit_with_periodicity,
-    extract_event_series_from_samples, EventSeriesMode, EventSeriesResult, EventSeriesStepper,
-    OrderedSample,
+    compile_event_series_expressions_with_context,
+    compute_event_series_from_orbit_with_periodicity, extract_event_series_from_samples,
+    EventSeriesMode, EventSeriesResult, EventSeriesStepper, OrderedSample,
 };
 use serde::Deserialize;
 use serde_wasm_bindgen::{from_value, to_value};
@@ -55,11 +55,12 @@ impl WasmSystem {
     ) -> Result<JsValue, JsValue> {
         let request: OrbitEventSeriesRequest = from_value(request_val)
             .map_err(|err| JsValue::from_str(&format!("Invalid event series request: {err}")))?;
-        let compiled = compile_event_series_expressions(
+        let compiled = compile_event_series_expressions_with_context(
             &request.event_expression,
             &request.observable_expressions,
             &request.var_names,
             &request.param_names,
+            self.system_type.expression_context(),
         )
         .map_err(|err| JsValue::from_str(&format!("Event expression error: {err}")))?;
 
@@ -87,11 +88,12 @@ impl WasmSystem {
     ) -> Result<JsValue, JsValue> {
         let request: SampledEventSeriesRequest = from_value(request_val)
             .map_err(|err| JsValue::from_str(&format!("Invalid sampled event request: {err}")))?;
-        let compiled = compile_event_series_expressions(
+        let compiled = compile_event_series_expressions_with_context(
             &request.event_expression,
             &request.observable_expressions,
             &request.var_names,
             &request.param_names,
+            self.system_type.expression_context(),
         )
         .map_err(|err| JsValue::from_str(&format!("Event expression error: {err}")))?;
 

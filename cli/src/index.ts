@@ -17,6 +17,12 @@ import {
     OrbitObject
 } from './types';
 import { WasmBridge, CovariantLyapunovResponse } from './wasm';
+import {
+    autonomousContextError,
+    configForObject,
+    equationContextSymbol,
+    usesEquationContext
+} from './expression-context';
 import { runAnalysisWithProgress, runEquilibriumSolveWithProgress } from './progress';
 import {
     formatBranchTypeLabel,
@@ -58,6 +64,63 @@ function systemExists(name: string): boolean {
 
 function objectExists(sysName: string, objectName: string): boolean {
     return Storage.listObjects(sysName).includes(objectName);
+}
+
+type ContextualAnalysisObject = OrbitObject | EquilibriumObject | LimitCycleObject;
+
+function printExpressionContextHelp(systemType: SystemConfig['type']): void {
+    const symbol = systemType === 'map' ? 'n' : 't';
+    console.log(
+        chalk.dim(
+            `Expressions may use undeclared ${symbol} as the live ${
+                systemType === 'map' ? 'iteration index' : 'solver time'
+            }. Declared variables/parameters shadow it; parameter constants cannot use t or n.`
+        )
+    );
+}
+
+async function configureEquationForcingContext(
+    sysName: string,
+    object: ContextualAnalysisObject,
+    system: SystemConfig
+): Promise<void> {
+    if (!usesEquationContext(system)) {
+        console.log(chalk.gray('These equations do not use a contextual forcing symbol.'));
+        return;
+    }
+    const symbol = equationContextSymbol(system);
+    const { mode } = await inquirer.prompt({
+        type: 'rawlist',
+        name: 'mode',
+        message: 'Equation forcing context:',
+        choices: [
+            { name: `Live ${symbol} (advances during simulation)`, value: 'live' },
+            { name: `Frozen ${symbol} (autonomous skeleton)`, value: 'frozen' }
+        ],
+        default: object.frozenEquationContext ? 'frozen' : 'live'
+    });
+    if (mode === 'live') {
+        delete object.frozenEquationContext;
+        Storage.saveObject(sysName, object);
+        console.log(chalk.green(`Equation forcing context is now live ${symbol}.`));
+        return;
+    }
+    const { value } = await inquirer.prompt({
+        name: 'value',
+        message: `Frozen ${symbol} value:`,
+        default: object.frozenEquationContext?.value ?? 0,
+        validate: (input: string | number) => {
+            const parsed = Number(input);
+            if (!Number.isFinite(parsed)) return 'Enter a finite real number.';
+            if (symbol === 'n' && !Number.isSafeInteger(parsed)) {
+                return 'Frozen n must be an integer.';
+            }
+            return true;
+        }
+    });
+    object.frozenEquationContext = { symbol, value: Number(value) };
+    Storage.saveObject(sysName, object);
+    console.log(chalk.green(`Equation forcing context frozen at ${symbol} = ${Number(value)}.`));
 }
 
 const DEFAULT_VARIABLE_PERIOD = Math.PI * 2;
@@ -401,6 +464,7 @@ async function createSystem() {
             };
         });
 
+        printExpressionContextHelp(type);
         const equationResult = await runConfigMenu('Define Equations', equationEntries);
         if (equationResult === 'back') {
             return;
@@ -521,6 +585,7 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
             }
             sys.name = name;
         } else if (action === 'Edit Equations') {
+            printExpressionContextHelp(sys.type);
             while (true) {
                 const choices: any[] = sys.varNames.map((v, i) => {
                     const prefix = sys.type === 'map' ? `${v}_{n+1}` : `d${v}/dt`;
@@ -719,10 +784,30 @@ async function createOrbit(sysName: string): Promise<NavigationRequest | void> {
     const durationLabel = isMap ? 'Iterations (n)' : 'Duration (t)';
     const defaultDurationValue = isMap ? 1000 : 100;
     const defaultDtValue = isMap ? 1 : 0.01;
+    let originInput = '0';
     let durationInput = defaultDurationValue.toString();
     let dtInput = defaultDtValue.toString();
 
     const simEntries: ConfigEntry[] = [
+        {
+            id: 'origin',
+            label: isMap ? 'Initial index (n₀)' : 'Initial time (t₀)',
+            getDisplay: () => formatUnset(originInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: isMap ? 'Initial iteration index (n₀):' : 'Initial time (t₀):',
+                    default: originInput,
+                    validate: (input: string) => {
+                        const parsed = Number(input);
+                        if (!Number.isFinite(parsed)) return 'Please enter a finite number.';
+                        if (isMap && !Number.isSafeInteger(parsed)) return 'n₀ must be an integer.';
+                        return true;
+                    }
+                });
+                originInput = value;
+            }
+        },
         {
             id: 'duration',
             label: durationLabel,
@@ -771,19 +856,21 @@ async function createOrbit(sysName: string): Promise<NavigationRequest | void> {
         return;
     }
 
-    const t_end = parseFloatOrDefault(durationInput, defaultDurationValue);
+    const duration = parseFloatOrDefault(durationInput, defaultDurationValue);
+    const initialContext = parseFloatOrDefault(originInput, 0);
     const dt = isMap ? defaultDtValue : parseFloatOrDefault(dtInput, defaultDtValue);
 
     console.log(chalk.cyan("Initializing WASM Engine..."));
 
     try {
         const bridge = new WasmBridge(sysConfig);
+        bridge.set_t(initialContext);
         bridge.set_state(ic);
 
-        const steps = Math.ceil(t_end / dt);
+        const steps = Math.ceil(duration / dt);
         const data = [];
 
-        let current_t = 0;
+        let current_t = initialContext;
         data.push([current_t, ...bridge.get_state()]);
 
         const updateInterval = isMap ? 10000 : 1000;
@@ -806,7 +893,7 @@ async function createOrbit(sysName: string): Promise<NavigationRequest | void> {
             systemName: sysConfig.name,
             parameters: [...sysConfig.params],
             data,
-            t_start: 0,
+            t_start: initialContext,
             t_end: current_t,
             dt
         };
@@ -818,6 +905,112 @@ async function createOrbit(sysName: string): Promise<NavigationRequest | void> {
     } catch (e) {
         console.error(chalk.red("Simulation Failed:"), e);
     }
+}
+
+async function rerunOrbit(sysName: string, orbit: OrbitObject): Promise<OrbitObject | null> {
+    const system = Storage.loadSystem(sysName);
+    const isMap = system.type === 'map';
+    const initialState = (orbit.data[0]?.slice(1) ?? system.varNames.map(() => 0)).map(String);
+    let originInput = String(orbit.t_start ?? 0);
+    let durationInput = String(Math.max(orbit.t_end - orbit.t_start, isMap ? 1 : orbit.dt));
+    let dtInput = String(isMap ? 1 : orbit.dt || 0.01);
+    const entries: ConfigEntry[] = [
+        {
+            id: 'origin',
+            label: isMap ? 'Initial index (n₀)' : 'Initial time (t₀)',
+            getDisplay: () => originInput,
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: isMap ? 'Initial iteration index (n₀):' : 'Initial time (t₀):',
+                    default: originInput,
+                    validate: (input: string) => {
+                        const parsed = Number(input);
+                        if (!Number.isFinite(parsed)) return 'Enter a finite number.';
+                        if (isMap && !Number.isSafeInteger(parsed)) return 'n₀ must be an integer.';
+                        return true;
+                    }
+                });
+                originInput = value;
+            }
+        },
+        ...system.varNames.map((name, index): ConfigEntry => ({
+            id: `initial_${index}`,
+            label: `Initial ${name}`,
+            getDisplay: () => initialState[index],
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: `Initial ${name}:`,
+                    default: initialState[index],
+                    validate: (input: string) => Number.isFinite(Number(input)) || 'Enter a number.'
+                });
+                initialState[index] = value;
+            }
+        })),
+        {
+            id: 'duration',
+            label: isMap ? 'Iterations' : 'Duration',
+            getDisplay: () => durationInput,
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: isMap ? 'Iterations:' : 'Duration:',
+                    default: durationInput,
+                    validate: (input: string) => {
+                        const parsed = Number(input);
+                        if (!Number.isFinite(parsed) || parsed <= 0) return 'Enter a positive number.';
+                        if (isMap && !Number.isSafeInteger(parsed)) return 'Iterations must be an integer.';
+                        return true;
+                    }
+                });
+                durationInput = value;
+            }
+        },
+        ...(!isMap ? [{
+            id: 'dt',
+            label: 'Step size (dt)',
+            getDisplay: () => dtInput,
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Step size (dt):',
+                    default: dtInput,
+                    validate: (input: string) => Number(input) > 0 || 'Enter a positive number.'
+                });
+                dtInput = value;
+            }
+        } satisfies ConfigEntry] : [])
+    ];
+    if ((await runConfigMenu(`Rerun Orbit: ${orbit.name}`, entries)) === 'back') return null;
+
+    const initialContext = Number(originInput);
+    const duration = Number(durationInput);
+    const dt = isMap ? 1 : Number(dtInput);
+    const steps = Math.ceil(duration / dt);
+    const bridge = new WasmBridge(configForObject(system, orbit));
+    bridge.set_t(initialContext);
+    bridge.set_state(initialState.map(Number));
+    const data: number[][] = [[initialContext, ...bridge.get_state()]];
+    let current = initialContext;
+    printProgress(0, steps, 'Simulating');
+    for (let index = 0; index < steps; index += 1) {
+        bridge.step(dt);
+        current += dt;
+        data.push([current, ...bridge.get_state()]);
+        if (index % (isMap ? 10000 : 1000) === 0 || index === steps - 1) {
+            printProgress(index + 1, steps, 'Simulating');
+        }
+    }
+    printProgressComplete('Simulating');
+    orbit.data = data;
+    orbit.t_start = initialContext;
+    orbit.t_end = current;
+    orbit.dt = dt;
+    orbit.lyapunovExponents = undefined;
+    orbit.covariantVectors = undefined;
+    Storage.saveObject(sysName, orbit);
+    return orbit;
 }
 
 async function createEquilibrium(sysName: string): Promise<NavigationRequest | void> {
@@ -1149,12 +1342,22 @@ async function manageLimitCycle(
             continue;
         }
 
+        const limitCycleSystem = Storage.loadSystem(sysName);
         printHeader(obj.name, 'limit cycle');
         printField('System', obj.systemName);
         printField('Mesh', `${obj.ntst}×${obj.ncol}`);
         printField('Period', Number.isFinite(obj.period) ? obj.period.toString() : 'NaN');
         if (obj.parameters) {
             printArray('Parameters', obj.parameters);
+        }
+        if (usesEquationContext(limitCycleSystem)) {
+            const symbol = equationContextSymbol(limitCycleSystem);
+            printField(
+                'Equation Context',
+                obj.frozenEquationContext
+                    ? `frozen ${symbol} = ${obj.frozenEquationContext.value}`
+                    : `live ${symbol}`
+            );
         }
         printBlank();
 
@@ -1165,6 +1368,9 @@ async function manageLimitCycle(
             choices: [
                 { name: 'Branches', value: 'Branches' },
                 { name: 'Inspect State', value: 'Inspect State' },
+                ...(usesEquationContext(limitCycleSystem)
+                    ? [{ name: 'Equation Forcing Context', value: 'Equation Forcing Context' }]
+                    : []),
                 new inquirer.Separator(),
                 { name: 'Rename Object', value: 'Rename Object' },
                 { name: 'Delete Object', value: 'Delete Object' },
@@ -1179,6 +1385,11 @@ async function manageLimitCycle(
         }
 
         if (action === 'Branches') {
+            const contextError = autonomousContextError(limitCycleSystem, obj);
+            if (contextError) {
+                console.error(chalk.red(contextError));
+                continue;
+            }
             const branchNav = await limitCycleBranchesMenu(sysName, obj);
             if (branchNav) return branchNav;
             obj = Storage.loadObject(sysName, obj.name) as LimitCycleObject;
@@ -1190,6 +1401,12 @@ async function manageLimitCycle(
             printField('State length', obj.state.length.toString());
             printField('Origin', obj.origin?.type ?? 'unknown');
             printBlank();
+            continue;
+        }
+
+        if (action === 'Equation Forcing Context') {
+            await configureEquationForcingContext(sysName, obj, limitCycleSystem);
+            obj = Storage.loadObject(sysName, obj.name) as LimitCycleObject;
             continue;
         }
 
@@ -1297,6 +1514,16 @@ async function manageOrbit(
             printArray('Parameters', obj.parameters);
         }
         printField('Data Points', obj.data.length.toLocaleString());
+        const orbitSystem = Storage.loadSystem(sysName);
+        if (usesEquationContext(orbitSystem)) {
+            const symbol = equationContextSymbol(orbitSystem);
+            printField(
+                'Equation Context',
+                obj.frozenEquationContext
+                    ? `frozen ${symbol} = ${obj.frozenEquationContext.value}`
+                    : `live ${symbol}`
+            );
+        }
         printBlank();
 
         const { action } = await inquirer.prompt([{
@@ -1305,8 +1532,12 @@ async function manageOrbit(
             message: 'Object Actions',
             choices: [
                 { name: 'Inspect Data', value: 'Inspect Data' },
+                { name: 'Rerun Orbit', value: 'Rerun Orbit' },
                 { name: 'Extend Orbit', value: 'Extend Orbit' },
                 { name: 'Oseledets Solver', value: 'Oseledets Solver' },
+                ...(usesEquationContext(orbitSystem)
+                    ? [{ name: 'Equation Forcing Context', value: 'Equation Forcing Context' }]
+                    : []),
                 { name: 'Create Limit Cycle Object (from this orbit)', value: 'Create Limit Cycle Object' },
                 { name: 'Continue Heteroclinic Connection (between two equilibria)', value: 'Create Heteroclinic Curve' },
                 ...(Storage.listBranches(sysName, obj.name).length > 0
@@ -1366,12 +1597,30 @@ async function manageOrbit(
             continue;
         }
 
+
+        if (action === 'Rerun Orbit') {
+            const rerun = await rerunOrbit(sysName, obj);
+            if (rerun) obj = rerun;
+            continue;
+        }
+
+        if (action === 'Equation Forcing Context') {
+            await configureEquationForcingContext(sysName, obj, orbitSystem);
+            obj = Storage.loadObject(sysName, obj.name) as OrbitObject;
+            continue;
+        }
+
         if (action === 'Oseledets Solver') {
             await oseledetsSolverMenu(sysName, obj);
             continue;
         }
 
         if (action === 'Create Limit Cycle Object') {
+            const contextError = autonomousContextError(orbitSystem, obj);
+            if (contextError) {
+                console.error(chalk.red(contextError));
+                continue;
+            }
             const newBranch = await initiateLCFromOrbit(sysName, obj, { autoInspect: false });
             if (newBranch) {
                 return {
@@ -1385,6 +1634,11 @@ async function manageOrbit(
         }
 
         if (action === 'Create Heteroclinic Curve') {
+            const contextError = autonomousContextError(orbitSystem, obj);
+            if (contextError) {
+                console.error(chalk.red(contextError));
+                continue;
+            }
             const newBranch = await initiateHeteroclinicFromOrbit(sysName, obj, {
                 autoInspect: false
             });
@@ -1411,7 +1665,7 @@ async function manageOrbit(
             const isMap = sysConfig.type === 'map';
 
             try {
-                const bridge = new WasmBridge(sysConfig);
+                const bridge = new WasmBridge(configForObject(sysConfig, obj));
                 const lastPoint = obj.data[obj.data.length - 1];
                 const lastT = lastPoint[0];
                 const lastState = lastPoint.slice(1);
@@ -1636,7 +1890,7 @@ async function runLyapunovExponents(sysName: string, obj: OrbitObject) {
     const startTime = obj.data[startIndex][0];
 
     try {
-        const bridge = new WasmBridge(sysConfig);
+        const bridge = new WasmBridge(configForObject(sysConfig, obj));
         console.log(chalk.yellow("Computing Lyapunov exponents..."));
         const runner = bridge.createLyapunovRunner(
             startState,
@@ -1869,7 +2123,7 @@ async function runCovariantLyapunovVectors(sysName: string, obj: OrbitObject) {
     const startTime = obj.data[startIndex][0];
 
     try {
-        const bridge = new WasmBridge(sysConfig);
+        const bridge = new WasmBridge(configForObject(sysConfig, obj));
         console.log(chalk.yellow("Computing covariant Lyapunov vectors..."));
         const runner = bridge.createCovariantLyapunovRunner(
             startState,
@@ -2052,6 +2306,15 @@ async function manageEquilibrium(
         }
         const solutionStatus = obj.solution ? chalk.green('✓ solved') : chalk.yellow('○ not computed');
         printField('Solution', solutionStatus);
+        if (usesEquationContext(sysConfig)) {
+            const symbol = equationContextSymbol(sysConfig);
+            printField(
+                'Equation Context',
+                obj.frozenEquationContext
+                    ? `frozen ${symbol} = ${obj.frozenEquationContext.value}`
+                    : `live ${symbol}`
+            );
+        }
         printBlank();
 
         const { action } = await inquirer.prompt([{
@@ -2062,6 +2325,9 @@ async function manageEquilibrium(
                 { name: 'Inspect Data', value: 'Inspect Data' },
                 { name: `${equilibriumLabel} Solver`, value: 'Equilibrium Solver' },
                 { name: 'Branches', value: 'Branches' },
+                ...(usesEquationContext(sysConfig)
+                    ? [{ name: 'Equation Forcing Context', value: 'Equation Forcing Context' }]
+                    : []),
                 new inquirer.Separator(),
                 { name: 'Rename Object', value: 'Rename Object' },
                 { name: 'Delete Object', value: 'Delete Object' },
@@ -2112,6 +2378,11 @@ async function manageEquilibrium(
         }
 
         if (action === 'Branches') {
+            const contextError = autonomousContextError(sysConfig, obj);
+            if (contextError) {
+                console.error(chalk.red(contextError));
+                continue;
+            }
             const branchNav = await equilibriumBranchesMenu(sysName, obj);
             if (branchNav) return branchNav;
             obj = Storage.loadObject(sysName, obj.name) as EquilibriumObject;
@@ -2125,11 +2396,22 @@ async function manageEquilibrium(
         }
 
         if (action === 'Equilibrium Solver') {
+            const contextError = autonomousContextError(sysConfig, obj);
+            if (contextError) {
+                console.error(chalk.red(contextError));
+                continue;
+            }
             updateEquilibriumMetadata(sysName, obj, sysConfig);
             const converged = await executeEquilibriumSolver(sysName, obj, sysConfig);
             if (converged) {
                 await inspectEquilibriumData(sysName, obj, sysConfig);
             }
+            continue;
+        }
+
+        if (action === 'Equation Forcing Context') {
+            await configureEquationForcingContext(sysName, obj, sysConfig);
+            obj = Storage.loadObject(sysName, obj.name) as EquilibriumObject;
             continue;
         }
     }
@@ -2299,7 +2581,7 @@ async function executeEquilibriumSolver(
 
     try {
         console.log(chalk.cyan(`Running ${equilibriumLabelLower} solver...`));
-        const bridge = new WasmBridge(sysConfig);
+        const bridge = new WasmBridge(configForObject(sysConfig, obj));
         const mapIterationsValue =
             sysConfig.type === 'map' ? solverParams.mapIterations ?? 1 : 1;
         const runner = bridge.createEquilibriumSolverRunner(

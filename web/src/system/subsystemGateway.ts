@@ -5,9 +5,13 @@ import type {
   SystemConfig,
 } from './types'
 import { normalizePeriodicVariables } from './periodicity'
+import { normalizeFrozenEquationContext } from './expressionContext'
 
 export const FROZEN_VARIABLE_LABEL_PREFIX = 'var:'
 export const FROZEN_PARAMETER_PREFIX = 'fv__'
+export const FROZEN_CONTEXT_LABEL = 'ctx:t'
+export const FROZEN_CONTEXT_DISPLAY_LABEL = 't (frozen forcing context)'
+export const FROZEN_CONTEXT_PARAMETER_PREFIX = 'fc__'
 
 type FrozenVariableOptions = {
   maxFreeVariables?: number
@@ -102,12 +106,29 @@ function makeFrozenParamName(
   return candidate
 }
 
+function makeFrozenContextParamName(symbol: 't' | 'n', occupied: Set<string>): string {
+  const base = `${FROZEN_CONTEXT_PARAMETER_PREFIX}${symbol}`
+  if (!occupied.has(base)) {
+    occupied.add(base)
+    return base
+  }
+  let suffix = 1
+  while (occupied.has(`${base}_${suffix}`)) suffix += 1
+  const candidate = `${base}_${suffix}`
+  occupied.add(candidate)
+  return candidate
+}
+
 export function normalizeFrozenVariablesConfig(
   system: SystemConfig,
   frozenConfig?: FrozenVariablesConfig | null
 ): FrozenVariablesConfig {
   return {
     frozenValuesByVarName: normalizeFrozenMap(system, frozenConfig),
+    frozenEquationContext: normalizeFrozenEquationContext(
+      system,
+      frozenConfig?.frozenEquationContext
+    ),
   }
 }
 
@@ -133,6 +154,11 @@ export function buildSubsystemSnapshot(
     freeVariableIndices.push(index)
   }
 
+  const frozenEquationContext = normalized.frozenEquationContext
+  const frozenContextParameterName = frozenEquationContext
+    ? makeFrozenContextParamName(frozenEquationContext.symbol, occupied)
+    : undefined
+
   const requireAtLeastOneFree = options?.requireAtLeastOneFree ?? true
   if (requireAtLeastOneFree && freeVariableNames.length === 0) {
     throw new Error('At least one free variable is required.')
@@ -152,6 +178,8 @@ export function buildSubsystemSnapshot(
     freeVariableIndices,
     frozenValuesByVarName,
     frozenParameterNamesByVarName,
+    frozenEquationContext,
+    frozenContextParameterName,
   }
   return {
     ...base,
@@ -172,7 +200,11 @@ export function isSubsystemSnapshotCompatible(
   snapshot?: SubsystemSnapshot | null
 ): boolean {
   if (!snapshot) return false
+  const contextCompatible =
+    !snapshot.frozenEquationContext ||
+    snapshot.frozenEquationContext.symbol === (system.type === 'map' ? 'n' : 't')
   return (
+    contextCompatible &&
     snapshot.baseVarNames.length === system.varNames.length &&
     snapshot.baseVarNames.every((name, index) => name === system.varNames[index]) &&
     snapshot.baseParamNames.length === system.paramNames.length &&
@@ -213,12 +245,27 @@ export function buildReducedRunConfig(
     appendedParamNames.push(generated)
     appendedParamValues.push(snapshot.frozenValuesByVarName[varName])
   }
+  if (snapshot.frozenEquationContext) {
+    if (!snapshot.frozenContextParameterName) {
+      throw new Error('Missing generated frozen equation-context parameter.')
+    }
+    appendedParamNames.push(snapshot.frozenContextParameterName)
+    appendedParamValues.push(snapshot.frozenEquationContext.value)
+  }
 
   const rewrittenEquations = snapshot.freeVariableIndices.map((baseIndex) => {
     const source = system.equations[baseIndex] ?? ''
-    return Object.entries(snapshot.frozenParameterNamesByVarName).reduce(
+    const variablesRewritten = Object.entries(snapshot.frozenParameterNamesByVarName).reduce(
       (expr, [varName, frozenParamName]) => replaceIdentifier(expr, varName, frozenParamName),
       source
+    )
+    if (!snapshot.frozenEquationContext || !snapshot.frozenContextParameterName) {
+      return variablesRewritten
+    }
+    return replaceIdentifier(
+      variablesRewritten,
+      snapshot.frozenEquationContext.symbol,
+      snapshot.frozenContextParameterName
     )
   })
 
@@ -232,6 +279,49 @@ export function buildReducedRunConfig(
     params: [...baseParams, ...appendedParamValues],
     paramNames: [...system.paramNames, ...appendedParamNames],
   }
+}
+
+/** Apply only the equation-context freeze while retaining the full state space. */
+export function buildContextFrozenRunConfig(
+  system: SystemConfig,
+  snapshot: SubsystemSnapshot,
+  parameterValues?: number[]
+): SystemConfig {
+  ensureSnapshotForSystem(system, snapshot)
+  const params =
+    Array.isArray(parameterValues) && parameterValues.length === system.params.length
+      ? parameterValues
+      : system.params
+  if (!snapshot.frozenEquationContext) {
+    return { ...system, params: [...params] }
+  }
+  if (!snapshot.frozenContextParameterName) {
+    throw new Error('Missing generated frozen equation-context parameter.')
+  }
+  const generatedName = snapshot.frozenContextParameterName
+  const { symbol, value } = snapshot.frozenEquationContext
+  return {
+    ...system,
+    equations: system.equations.map((expression) =>
+      replaceIdentifier(expression, symbol, generatedName)
+    ),
+    params: [...params, value],
+    paramNames: [...system.paramNames, generatedName],
+  }
+}
+
+export function rewriteExpressionForFrozenContext(
+  expression: string,
+  snapshot: SubsystemSnapshot
+): string {
+  if (!snapshot.frozenEquationContext || !snapshot.frozenContextParameterName) {
+    return expression
+  }
+  return replaceIdentifier(
+    expression,
+    snapshot.frozenEquationContext.symbol,
+    snapshot.frozenContextParameterName
+  )
 }
 
 export function projectStateToReduced(
@@ -324,7 +414,12 @@ export function stateVectorToDisplay(
 
 export function formatParameterRefLabel(ref: ParameterRef): string {
   if (ref.kind === 'native_param') return ref.name
+  if (ref.kind === 'frozen_context') return FROZEN_CONTEXT_LABEL
   return `${FROZEN_VARIABLE_LABEL_PREFIX}${ref.variableName}`
+}
+
+export function formatContinuationParameterDisplayLabel(label: string): string {
+  return label === FROZEN_CONTEXT_LABEL ? FROZEN_CONTEXT_DISPLAY_LABEL : label
 }
 
 export function parseParameterRefLabel(
@@ -332,6 +427,12 @@ export function parseParameterRefLabel(
   snapshot: SubsystemSnapshot,
   label: string
 ): ParameterRef {
+  if (label === FROZEN_CONTEXT_LABEL) {
+    if (snapshot.frozenEquationContext?.symbol !== 't') {
+      throw new Error('Frozen flow-time context is not available in this subsystem.')
+    }
+    return { kind: 'frozen_context', symbol: 't' }
+  }
   if (label.startsWith(FROZEN_VARIABLE_LABEL_PREFIX)) {
     const variableName = label.slice(FROZEN_VARIABLE_LABEL_PREFIX.length)
     if (
@@ -353,6 +454,12 @@ export function resolveRuntimeParameterName(
   ref: ParameterRef
 ): string {
   if (ref.kind === 'native_param') return ref.name
+  if (ref.kind === 'frozen_context') {
+    if (!snapshot.frozenContextParameterName) {
+      throw new Error('Frozen flow-time context is not available in this subsystem.')
+    }
+    return snapshot.frozenContextParameterName
+  }
   const generated = snapshot.frozenParameterNamesByVarName[ref.variableName]
   if (!generated) {
     throw new Error(`Frozen variable "${ref.variableName}" is not available in this subsystem.`)
@@ -376,7 +483,16 @@ export function continuationParameterOptions(
       label: `${FROZEN_VARIABLE_LABEL_PREFIX}${variableName}`,
     })
   )
-  return [...native, ...frozen]
+  const context: ContinuationParameterOption[] =
+    snapshot.frozenEquationContext?.symbol === 't'
+      ? [
+          {
+            ref: { kind: 'frozen_context', symbol: 't' },
+            label: FROZEN_CONTEXT_LABEL,
+          },
+        ]
+      : []
+  return [...native, ...frozen, ...context]
 }
 
 export function isVariableFrozen(

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { SystemConfig } from '../src/types';
+import { configForObject, usesEquationContext } from '../src/expression-context';
 
 type TestCase = { name: string; fn: () => void | Promise<void> };
 
@@ -59,6 +60,21 @@ function makeSystemConfig(name: string, params: number[] = [1, 2]): SystemConfig
     type: 'flow'
   };
 }
+
+test('contextual expression helpers rewrite frozen t collision-safely', () => {
+  const system: SystemConfig = {
+    ...makeSystemConfig('forced', [7]),
+    equations: ['x + t'],
+    paramNames: ['fc__t'],
+  };
+  assert.equal(usesEquationContext(system), true);
+  const frozen = configForObject(system, {
+    frozenEquationContext: { symbol: 't', value: 1.5 },
+  });
+  assert.deepEqual(frozen.equations, ['x + fc__t_1']);
+  assert.deepEqual(frozen.paramNames, ['fc__t', 'fc__t_1']);
+  assert.deepEqual(frozen.params, [7, 1.5]);
+});
 
 function makeContinuationBranch(options: { name: string; systemName: string; parentObject: string; params?: number[] }) {
   return {

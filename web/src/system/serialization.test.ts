@@ -33,6 +33,10 @@ describe('system serialization', () => {
       t_start: 0,
       t_end: 0,
       dt: 0.1,
+      frozenVariables: {
+        frozenValuesByVarName: {},
+        frozenEquationContext: { symbol: 't', value: 2.5 },
+      },
     }
     const { system: withObject, nodeId } = addObject(withScene, orbit)
     const analysisAdded = addAnalysisViewport(withObject, 'Return Map 1')
@@ -65,6 +69,10 @@ describe('system serialization', () => {
     expect(restored.nodes[nodeId].render.color).toBe('#ff0000')
     expect(restored.nodes[nodeId].render.lineWidth).toBe(5)
     expect(restored.objects[nodeId].name).toBe('Orbit A')
+    expect((restored.objects[nodeId] as OrbitObject).frozenVariables?.frozenEquationContext).toEqual({
+      symbol: 't',
+      value: 2.5,
+    })
     expect(restored.analysisViewports).toEqual(withRender.analysisViewports)
   })
 

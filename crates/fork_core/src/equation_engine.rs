@@ -5,6 +5,23 @@ use crate::{
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpressionContext {
+    None,
+    FlowTime,
+    MapIteration,
+}
+
+impl ExpressionContext {
+    pub fn symbol(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::FlowTime => Some("t"),
+            Self::MapIteration => Some("n"),
+        }
+    }
+}
+
 /// OpCodes for the Stack-based Virtual Machine.
 /// The VM operates on a stack of `Scalar` values (f64 or Dual).
 #[derive(Debug, Clone, Copy)]
@@ -16,6 +33,8 @@ pub enum OpCode {
     LoadVar(usize),
     /// Pushes the value of a parameter (by index) onto the stack.
     LoadParam(usize),
+    /// Pushes the current flow time or map iteration supplied by the caller.
+    LoadContext,
     /// Pops top two values (b, a), pushes (a + b).
     Add,
     /// Pops top two values (b, a), pushes (a - b).
@@ -381,6 +400,10 @@ impl Bytecode {
     pub fn new() -> Self {
         Self { ops: Vec::new() }
     }
+
+    pub fn uses_context(&self) -> bool {
+        self.ops.iter().any(|op| matches!(op, OpCode::LoadContext))
+    }
 }
 
 /// Stack-based Virtual Machine for evaluating equations.
@@ -405,6 +428,16 @@ impl VM {
         params: &[T],
         stack: &mut Vec<T>,
     ) -> T {
+        Self::execute_at(bytecode, vars, params, T::from_f64(0.0).unwrap(), stack)
+    }
+
+    pub fn execute_at<T: ExpressionScalar>(
+        bytecode: &Bytecode,
+        vars: &[T],
+        params: &[T],
+        context: T,
+        stack: &mut Vec<T>,
+    ) -> T {
         stack.clear();
 
         for op in &bytecode.ops {
@@ -417,6 +450,9 @@ impl VM {
                 }
                 OpCode::LoadParam(idx) => {
                     stack.push(params[*idx]);
+                }
+                OpCode::LoadContext => {
+                    stack.push(context);
                 }
                 OpCode::Add => {
                     let b = stack.pop().unwrap();
@@ -752,10 +788,19 @@ pub const PIECEWISE_FUNCTION_SIGNATURES: &[&str] = &[
 pub struct Compiler {
     pub var_map: HashMap<String, usize>,
     pub param_map: HashMap<String, usize>,
+    pub context: ExpressionContext,
 }
 
 impl Compiler {
     pub fn new(var_names: &[String], param_names: &[String]) -> Self {
+        Self::new_with_context(var_names, param_names, ExpressionContext::None)
+    }
+
+    pub fn new_with_context(
+        var_names: &[String],
+        param_names: &[String],
+        context: ExpressionContext,
+    ) -> Self {
         let mut var_map = HashMap::new();
         for (i, name) in var_names.iter().enumerate() {
             var_map.insert(name.clone(), i);
@@ -766,7 +811,11 @@ impl Compiler {
             param_map.insert(name.clone(), i);
         }
 
-        Self { var_map, param_map }
+        Self {
+            var_map,
+            param_map,
+            context,
+        }
     }
 
     pub fn compile(&self, expr: &Expr) -> Bytecode {
@@ -789,8 +838,15 @@ impl Compiler {
                     ops.push(OpCode::LoadVar(idx));
                 } else if let Some(&idx) = self.param_map.get(name) {
                     ops.push(OpCode::LoadParam(idx));
+                } else if self.context.symbol() == Some(name.as_str()) {
+                    ops.push(OpCode::LoadContext);
                 } else if let Some(value) = builtin_constant(name) {
                     ops.push(OpCode::LoadConst(value));
+                } else if name == "t" || name == "n" {
+                    let expected = self.context.symbol().unwrap_or("no contextual symbol");
+                    return Err(format!(
+                        "Context symbol {name} is not available here; this expression context provides {expected}"
+                    ));
                 } else {
                     return Err(format!("Unknown variable or parameter: {name}"));
                 }
@@ -1290,7 +1346,7 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, Compiler, Dual, EquationSystem};
+    use super::{parse, Compiler, Dual, EquationSystem, ExpressionContext};
     use crate::traits::DynamicalSystem;
 
     fn eval_with_x_and_p(expr: &str, x: f64, p: f64) -> f64 {
@@ -1338,6 +1394,69 @@ mod tests {
     fn numeric_derivative_wrt_p(expr: &str, x: f64, p: f64) -> f64 {
         let h = 1e-6;
         (eval_with_x_and_p(expr, x, p + h) - eval_with_x_and_p(expr, x, p - h)) / (2.0 * h)
+    }
+
+    #[test]
+    fn contextual_symbols_are_system_kind_specific() {
+        let vars = vec!["x".to_string()];
+        let flow = Compiler::new_with_context(&vars, &[], ExpressionContext::FlowTime);
+        let map = Compiler::new_with_context(&vars, &[], ExpressionContext::MapIteration);
+
+        let flow_code = flow
+            .try_compile(&parse("t + x").expect("flow expression should parse"))
+            .expect("flow time should compile");
+        assert!(flow_code.uses_context());
+        assert_eq!(
+            flow.try_compile(&parse("n + x").expect("map symbol should parse"))
+                .unwrap_err(),
+            "Context symbol n is not available here; this expression context provides t"
+        );
+
+        let map_code = map
+            .try_compile(&parse("n + x").expect("map expression should parse"))
+            .expect("map iteration should compile");
+        assert!(map_code.uses_context());
+        assert_eq!(
+            map.try_compile(&parse("t + x").expect("flow symbol should parse"))
+                .unwrap_err(),
+            "Context symbol t is not available here; this expression context provides n"
+        );
+    }
+
+    #[test]
+    fn declared_names_shadow_contextual_symbols() {
+        let flow = Compiler::new_with_context(
+            &["t".to_string()],
+            &["n".to_string()],
+            ExpressionContext::FlowTime,
+        );
+        let code = flow
+            .try_compile(&parse("t + n").expect("expression should parse"))
+            .expect("declared names should compile");
+        assert!(!code.uses_context());
+
+        let system = EquationSystem::new(vec![code], vec![4.0]);
+        let mut out = vec![0.0];
+        system.apply(99.0, &[3.0], &mut out);
+        assert_close(out[0], 7.0);
+    }
+
+    #[test]
+    fn equation_system_evaluates_f64_and_dual_context() {
+        let compiler =
+            Compiler::new_with_context(&["x".to_string()], &[], ExpressionContext::FlowTime);
+        let code = compiler.compile(&parse("t * x").expect("expression should parse"));
+        let system = EquationSystem::new(vec![code], Vec::new());
+        assert!(system.uses_context());
+
+        let mut out = vec![0.0];
+        system.apply(2.5, &[4.0], &mut out);
+        assert_close(out[0], 10.0);
+
+        let mut dual_out = vec![Dual::new(0.0, 0.0)];
+        system.apply(Dual::new(2.5, 1.0), &[Dual::new(4.0, 0.0)], &mut dual_out);
+        assert_close(dual_out[0].val, 10.0);
+        assert_close(dual_out[0].eps, 4.0);
     }
 
     #[test]
@@ -1638,6 +1757,10 @@ impl EquationSystem {
         self.var_map = var_map;
     }
 
+    pub fn uses_context(&self) -> bool {
+        self.equations.iter().any(Bytecode::uses_context)
+    }
+
     pub fn ensure_dual_params(&self) {
         let mut params_dual = self.params_dual.borrow_mut();
         if params_dual.len() != self.params.len() {
@@ -1653,6 +1776,16 @@ impl EquationSystem {
     /// Evaluates the equations using Dual numbers, differentiating with respect to a specific parameter.
     /// The state variables `x` are treated as constants.
     pub fn evaluate_dual_wrt_param(&self, x: &[f64], param_idx: usize, out: &mut [Dual]) {
+        self.evaluate_dual_wrt_param_at(x, param_idx, 0.0, out);
+    }
+
+    pub fn evaluate_dual_wrt_param_at(
+        &self,
+        x: &[f64],
+        param_idx: usize,
+        context: f64,
+        out: &mut [Dual],
+    ) {
         self.ensure_dual_params();
 
         {
@@ -1665,7 +1798,7 @@ impl EquationSystem {
         let params = self.params_dual.borrow();
         let mut stack = self.stack_dual.borrow_mut();
         for (i, eq) in self.equations.iter().enumerate() {
-            out[i] = VM::execute(eq, &x_dual, &params, &mut stack);
+            out[i] = VM::execute_at(eq, &x_dual, &params, Dual::new(context, 0.0), &mut stack);
         }
     }
 }
@@ -1675,10 +1808,10 @@ impl DynamicalSystem<f64> for EquationSystem {
         self.equations.len()
     }
 
-    fn apply(&self, _t: f64, x: &[f64], out: &mut [f64]) {
+    fn apply(&self, t: f64, x: &[f64], out: &mut [f64]) {
         let mut stack = self.stack_f64.borrow_mut();
         for (i, eq) in self.equations.iter().enumerate() {
-            out[i] = VM::execute(eq, x, &self.params, &mut stack);
+            out[i] = VM::execute_at(eq, x, &self.params, t, &mut stack);
         }
     }
 }
@@ -1688,12 +1821,12 @@ impl DynamicalSystem<Dual> for EquationSystem {
         self.equations.len()
     }
 
-    fn apply(&self, _t: Dual, x: &[Dual], out: &mut [Dual]) {
+    fn apply(&self, t: Dual, x: &[Dual], out: &mut [Dual]) {
         self.ensure_dual_params();
         let params = self.params_dual.borrow();
         let mut stack = self.stack_dual.borrow_mut();
         for (i, eq) in self.equations.iter().enumerate() {
-            out[i] = VM::execute(eq, x, &params, &mut stack);
+            out[i] = VM::execute_at(eq, x, &params, t, &mut stack);
         }
     }
 }

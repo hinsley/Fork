@@ -24,23 +24,30 @@ export function SelectionInspectorView({
     WorkflowActionList,
     WorkflowFocusToolbar,
     activeFrozenVariableRef,
+    autonomousAnalysisError,
     commitSelectionName,
     currentObjectFrozenValues,
+    currentFrozenEquationContext,
+    equationContextName,
+    equationContextUsed,
     formatComplexValue,
     formatFixed,
     formatLimitCycleOrigin,
     formatNumber,
     formatPointValues,
     frozenVariableDrafts,
+    frozenEquationContextDraft,
     handleClearParamOverride,
     handleComputeLimitCycleFloquetModes,
     handleFrozenVariableValueChange,
+    handleFrozenEquationContextValueChange,
     handleLimitCycleFloquetColorChange,
     handleLimitCycleFloquetVisibilityChange,
     handleLimitCyclePreviewJump,
     handleParamOverrideChange,
     handlePasteParamOverride,
     handleToggleFrozenVariable,
+    handleToggleFrozenEquationContext,
     hasParamOverride,
     isRealEigenvalue,
     isocline,
@@ -295,7 +302,7 @@ export function SelectionInspectorView({
 
           <LimitCycleInspectorSections scope={scope} />
 
-          {paramOverrideTarget && !isocline ? (
+          {paramOverrideTarget ? (
             <InspectorDisclosure
               key={`${selectionKey}-frozen-variables`}
               title={
@@ -314,6 +321,11 @@ export function SelectionInspectorView({
               actionOnly
             >
               <div className="inspector-section" data-testid="frozen-variables-section">
+                {autonomousAnalysisError ? (
+                  <div className="field-warning" data-testid="autonomous-context-warning">
+                    {autonomousAnalysisError}
+                  </div>
+                ) : null}
                 <div className="state-table__wrap" role="region" aria-label="Frozen variables">
                   <table className="state-table__grid">
                     <thead>
@@ -324,7 +336,35 @@ export function SelectionInspectorView({
                       </tr>
                     </thead>
                     <tbody>
-                      {systemDraft.varNames.map((name, index) => {
+                      {equationContextUsed ? (
+                        <tr key="frozen-equation-context-row">
+                          <td>{`${equationContextName} (equation forcing context)`}</td>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(currentFrozenEquationContext)}
+                              onChange={(event) =>
+                                handleToggleFrozenEquationContext(event.target.checked)
+                              }
+                              data-testid="frozen-equation-context-toggle"
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step={equationContextName === 'n' ? 1 : 'any'}
+                              className="state-table__input"
+                              value={frozenEquationContextDraft}
+                              disabled={!currentFrozenEquationContext}
+                              onChange={(event) =>
+                                handleFrozenEquationContextValueChange(event.target.value)
+                              }
+                              data-testid="frozen-equation-context-value"
+                            />
+                          </td>
+                        </tr>
+                      ) : null}
+                      {!isocline ? systemDraft.varNames.map((name, index) => {
                         const isFrozen = Object.prototype.hasOwnProperty.call(
                           currentObjectFrozenValues,
                           name
@@ -369,12 +409,13 @@ export function SelectionInspectorView({
                             </td>
                           </tr>
                         )
-                      })}
+                      }) : null}
                     </tbody>
                   </table>
                 </div>
                 <p className="empty-state">
-                  Frozen variables are embedded as constants across this object's computations.
+                  Frozen variables and equation context are embedded as constants across this
+                  object's computations.
                 </p>
               </div>
             </InspectorDisclosure>

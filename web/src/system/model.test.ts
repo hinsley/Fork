@@ -1046,4 +1046,41 @@ describe('system model', () => {
     ])
   })
 
+  it('drops an incompatible frozen forcing context when system type changes', () => {
+    const base = createSystem({
+      name: 'Forced',
+      config: {
+        name: 'Forced',
+        type: 'flow',
+        solver: 'rk4',
+        varNames: ['x'],
+        equations: ['t-x'],
+        params: [],
+        paramNames: [],
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit',
+      systemName: 'Forced',
+      data: [],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.01,
+      frozenVariables: {
+        frozenValuesByVarName: {},
+        frozenEquationContext: { symbol: 't', value: 2 },
+      },
+    }
+    const added = addObject(base, orbit)
+    const changed = updateSystem(added.system, {
+      ...added.system.config,
+      type: 'map',
+      solver: 'discrete',
+      equations: ['n-x'],
+    })
+    const updated = changed.objects[added.nodeId] as OrbitObject
+    expect(updated.frozenVariables?.frozenEquationContext).toBeUndefined()
+  })
+
 })

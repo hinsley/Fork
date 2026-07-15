@@ -1321,6 +1321,24 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  position: relative;
+}
+
+.viewport-context-notice {
+  position: absolute;
+  z-index: 4;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  padding: 6px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-align: center;
+  pointer-events: none;
 }
 
 .viewport-resize-handle {

@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 
 export function LimitCycleCodim1CurveWorkflow({
@@ -119,7 +120,7 @@ export function LimitCycleCodim1CurveWorkflow({
               const value = branchValue ?? fallbackValue
               return (
                 <option key={name} value={name}>
-                  {`${name} (current: ${formatNumber(value ?? Number.NaN, 6)})`}
+                  {`${formatContinuationParameterDisplayLabel(name)} (current: ${formatNumber(value ?? Number.NaN, 6)})`}
                 </option>
               )
             })}

@@ -21,6 +21,27 @@ References:
 
 ---
 
+### 2026-07-14: Keep forcing context external to state and freeze it object-locally
+Context:
+Flows need equation time `t` and maps need iteration index `n`, but unconditional state
+augmentation would change dimensions, continuation contracts, and Lyapunov spectra.
+Decision:
+Supply `t`/`n` through contextual bytecode during direct dynamics. Autonomous workflows require an
+object-local frozen equation context, rewritten to a collision-safe hidden parameter. Only frozen
+flow time may be varied continuously as `ctx:t`.
+Why:
+This preserves every existing state dimension and autonomous solver while supporting live forced
+orbits, events, observables, Lyapunov exponents, and CLVs. Frozen skeletons remain explicit
+diagnostics rather than pretending to be true forced-periodic continuation.
+Impact:
+Orbit requests carry `t0`/`n0`; static analyses are gated; snapshots include the context and hidden
+name; one-dimensional forced maps suppress ambiguous static graphs. Stroboscopic maps, forcing
+periods, compact phase augmentation, and true periodic/quasiperiodic continuation remain follow-up.
+References:
+`crates/fork_core/src/equation_engine.rs`, `crates/fork_wasm/src/system.rs`,
+`web/src/system/subsystemGateway.ts`, `cli/src/expression-context.ts`,
+`docs/frozen_variable_subsystems.md`
+
 ### 2026-07-14: Continue multidimensional inclination tests in exterior coordinates
 Context:
 A complex conjugate principal pair or a cluster of equally weak real modes has real dimension

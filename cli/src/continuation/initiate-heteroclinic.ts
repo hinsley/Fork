@@ -10,6 +10,7 @@ import type {
   SystemConfig,
 } from '../types';
 import { WasmBridge } from '../wasm';
+import { configForObject } from '../expression-context';
 import { buildCollocationAdaptivitySettings } from './collocation-adaptivity';
 import { inspectBranch } from './inspect';
 import { runHeteroclinicContinuationWithProgress } from './progress';
@@ -294,7 +295,9 @@ export async function initiateHeteroclinicFromOrbit(
 
   try {
     printInfo('Initializing independent source and target projector charts...');
-    const bridge = new WasmBridge({ ...system, params: orbitParams });
+    const bridge = new WasmBridge(
+      configForObject({ ...system, params: orbitParams }, orbit)
+    );
     const collocationSetup = bridge.initHeteroclinicFromOrbit(
       orbit.data.map((row) => row[0]),
       orbit.data.map((row) => row.slice(1)),

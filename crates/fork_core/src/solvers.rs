@@ -278,6 +278,19 @@ mod tests_accuracy {
         offset: f64,
     }
 
+    #[derive(Clone, Copy)]
+    struct ContextSystem;
+
+    impl DynamicalSystem<f64> for ContextSystem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn apply(&self, t: f64, _x: &[f64], out: &mut [f64]) {
+            out[0] = t;
+        }
+    }
+
     impl DynamicalSystem<f64> for AffineMap {
         fn dimension(&self) -> usize {
             1
@@ -299,6 +312,29 @@ mod tests_accuracy {
         let expected = (system.rate * dt).exp();
         assert!((state[0] - expected).abs() < 1e-6);
         assert!((t - dt).abs() < 1e-12);
+    }
+
+    #[test]
+    fn rk4_uses_stage_times_for_context_dependent_flows() {
+        let mut solver = RK4::new(1);
+        let mut t = 2.0;
+        let mut state = vec![0.0];
+        solver.step(&ContextSystem, &mut t, &mut state, 0.5);
+        assert!((state[0] - 1.125).abs() < 1e-12);
+        assert!((t - 2.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn discrete_map_receives_current_iteration_context() {
+        let mut solver = DiscreteMap::new(1);
+        let mut n = -2.0;
+        let mut state = vec![0.0];
+        solver.step(&ContextSystem, &mut n, &mut state, 1.0);
+        assert_eq!(state[0], -2.0);
+        assert_eq!(n, -1.0);
+        solver.step(&ContextSystem, &mut n, &mut state, 1.0);
+        assert_eq!(state[0], -1.0);
+        assert_eq!(n, 0.0);
     }
 
     #[test]

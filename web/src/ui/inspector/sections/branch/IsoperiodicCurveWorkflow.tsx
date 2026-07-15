@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 
 export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionController }) {
@@ -95,7 +96,7 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                                 : undefined
                             const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
                             const value = branchValue ?? fallbackValue
-                            const label = `${name} (current: ${formatNumber(
+                            const label = `${formatContinuationParameterDisplayLabel(name)} (current: ${formatNumber(
                               value ?? Number.NaN,
                               6
                             )})`
@@ -128,7 +129,7 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                                 : undefined
                             const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
                             const value = branchValue ?? fallbackValue
-                            const label = `${name} (current: ${formatNumber(
+                            const label = `${formatContinuationParameterDisplayLabel(name)} (current: ${formatNumber(
                               value ?? Number.NaN,
                               6
                             )})`

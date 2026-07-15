@@ -18,11 +18,20 @@ export interface SystemConfig {
 
 export interface FrozenVariablesConfig {
   frozenValuesByVarName: Record<string, number>
+  frozenEquationContext?: FrozenEquationContext
+}
+
+export type EquationContextSymbol = 't' | 'n'
+
+export interface FrozenEquationContext {
+  symbol: EquationContextSymbol
+  value: number
 }
 
 export type ParameterRef =
   | { kind: 'native_param'; name: string }
   | { kind: 'frozen_var'; variableName: string }
+  | { kind: 'frozen_context'; symbol: 't' }
 
 export interface SubsystemSnapshot {
   baseVarNames: string[]
@@ -31,6 +40,8 @@ export interface SubsystemSnapshot {
   freeVariableIndices: number[]
   frozenValuesByVarName: Record<string, number>
   frozenParameterNamesByVarName: Record<string, string>
+  frozenEquationContext?: FrozenEquationContext
+  frozenContextParameterName?: string
   hash: string
 }
 

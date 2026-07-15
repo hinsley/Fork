@@ -1,6 +1,5 @@
 use crate::{
-    equation_engine::{Bytecode, VM},
-    isocline::compile_scalar_expression,
+    equation_engine::{Bytecode, ExpressionContext, VM},
     solvers::{DiscreteMap, Tsit5, RK4},
     state_periodicity::StatePeriodicity,
     traits::{DynamicalSystem, Steppable},
@@ -91,13 +90,35 @@ pub fn compile_event_series_expressions(
     var_names: &[String],
     param_names: &[String],
 ) -> Result<CompiledEventSeriesExpressions> {
-    let event = compile_scalar_expression(event_expression, var_names, param_names)?;
+    compile_event_series_expressions_with_context(
+        event_expression,
+        observable_expressions,
+        var_names,
+        param_names,
+        ExpressionContext::None,
+    )
+}
+
+pub fn compile_event_series_expressions_with_context(
+    event_expression: &str,
+    observable_expressions: &[String],
+    var_names: &[String],
+    param_names: &[String],
+    context: ExpressionContext,
+) -> Result<CompiledEventSeriesExpressions> {
+    let event = crate::isocline::compile_scalar_expression_with_context(
+        event_expression,
+        var_names,
+        param_names,
+        context,
+    )?;
     let mut observables = Vec::with_capacity(observable_expressions.len());
     for expression in observable_expressions {
-        observables.push(compile_scalar_expression(
+        observables.push(crate::isocline::compile_scalar_expression_with_context(
             expression,
             var_names,
             param_names,
+            context,
         )?);
     }
     Ok(CompiledEventSeriesExpressions { event, observables })
@@ -145,6 +166,7 @@ pub fn extract_event_series_from_samples(
                     &compiled.observables,
                     &sample.state,
                     params,
+                    sample.time.unwrap_or(0.0),
                     &mut observable_stack,
                 ),
             });
@@ -152,25 +174,37 @@ pub fn extract_event_series_from_samples(
         return Ok(EventSeriesResult { hits });
     }
 
-    let mut prev_value =
-        evaluate_scalar(&compiled.event, &samples[0].state, params, &mut event_stack) - level;
+    let mut prev_value = evaluate_scalar(
+        &compiled.event,
+        &samples[0].state,
+        params,
+        samples[0].time.unwrap_or(0.0),
+        &mut event_stack,
+    ) - level;
     for sample_index in 1..samples.len() {
         let next = &samples[sample_index];
-        let next_value =
-            evaluate_scalar(&compiled.event, &next.state, params, &mut event_stack) - level;
+        let next_value = evaluate_scalar(
+            &compiled.event,
+            &next.state,
+            params,
+            next.time.unwrap_or(0.0),
+            &mut event_stack,
+        ) - level;
         if matches_crossing(prev_value, next_value, mode) {
             let prev = &samples[sample_index - 1];
             let tau = interpolate_factor(prev_value, next_value);
             let state = lerp_state(&prev.state, &next.state, tau);
+            let time = lerp_time(prev.time, next.time, tau);
             hits.push(EventSeriesHit {
                 order: hits.len(),
                 sample_index,
-                time: lerp_time(prev.time, next.time, tau),
+                time,
                 state: state.clone(),
                 observable_values: evaluate_observables(
                     &compiled.observables,
                     &state,
                     params,
+                    time.unwrap_or(0.0),
                     &mut observable_stack,
                 ),
             });
@@ -248,7 +282,8 @@ where
     let mut t = initial_time;
     let mut state = initial_state.to_vec();
     periodicity.wrap_state(&mut state);
-    let mut prev_value = evaluate_scalar(&compiled.event, &state, params, &mut event_stack) - level;
+    let mut prev_value =
+        evaluate_scalar(&compiled.event, &state, params, t, &mut event_stack) - level;
 
     if mode == EventSeriesMode::EveryIterate {
         hits.push(EventSeriesHit {
@@ -260,6 +295,7 @@ where
                 &compiled.observables,
                 &state,
                 params,
+                t,
                 &mut observable_stack,
             ),
         });
@@ -270,7 +306,8 @@ where
         let prev_state = state.clone();
         orbit_stepper.step(&system, &mut t, &mut state, dt);
         periodicity.wrap_state(&mut state);
-        let next_value = evaluate_scalar(&compiled.event, &state, params, &mut event_stack) - level;
+        let next_value =
+            evaluate_scalar(&compiled.event, &state, params, t, &mut event_stack) - level;
 
         match mode {
             EventSeriesMode::EveryIterate => {
@@ -283,6 +320,7 @@ where
                         &compiled.observables,
                         &state,
                         params,
+                        t,
                         &mut observable_stack,
                     ),
                 });
@@ -319,6 +357,7 @@ where
                             &compiled.observables,
                             &hit_state,
                             params,
+                            hit_time.unwrap_or(0.0),
                             &mut observable_stack,
                         ),
                     });
@@ -336,20 +375,22 @@ fn evaluate_scalar(
     bytecode: &Bytecode,
     state: &[f64],
     params: &[f64],
+    context: f64,
     stack: &mut Vec<f64>,
 ) -> f64 {
-    VM::execute(bytecode, state, params, stack)
+    VM::execute_at(bytecode, state, params, context, stack)
 }
 
 fn evaluate_observables(
     observables: &[Bytecode],
     state: &[f64],
     params: &[f64],
+    context: f64,
     stack: &mut Vec<f64>,
 ) -> Vec<f64> {
     observables
         .iter()
-        .map(|observable| evaluate_scalar(observable, state, params, stack))
+        .map(|observable| evaluate_scalar(observable, state, params, context, stack))
         .collect()
 }
 
@@ -443,7 +484,13 @@ where
         if mid_state.len() != dim {
             bail!("Refined state dimension changed during event extraction.");
         }
-        let mid_value = evaluate_scalar(event, &mid_state, params, &mut event_stack) - level;
+        let mid_value = evaluate_scalar(
+            event,
+            &mid_state,
+            params,
+            segment_start_time + mid_time,
+            &mut event_stack,
+        ) - level;
 
         if mid_value.abs() <= CROSS_EPS {
             hit_time = segment_start_time + mid_time;
@@ -561,6 +608,43 @@ mod tests {
         assert_eq!(hit.observable_values.len(), 2);
         assert!((hit.observable_values[0] - 2.0).abs() < 1e-9);
         assert!((hit.observable_values[1] - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sampled_event_series_uses_live_context_for_events_and_observables() {
+        let (var_names, param_names) = names();
+        let compiled = compile_event_series_expressions_with_context(
+            "t - 2.5",
+            &["t".to_string()],
+            &var_names,
+            &param_names,
+            ExpressionContext::FlowTime,
+        )
+        .expect("compile contextual expressions");
+
+        let result = extract_event_series_from_samples(
+            &[0.0],
+            &[
+                OrderedSample {
+                    time: Some(2.0),
+                    state: vec![10.0],
+                },
+                OrderedSample {
+                    time: Some(3.0),
+                    state: vec![20.0],
+                },
+            ],
+            &compiled,
+            EventSeriesMode::CrossUp,
+            0.0,
+        )
+        .expect("event series");
+
+        assert_eq!(result.hits.len(), 1);
+        let hit = &result.hits[0];
+        assert!((hit.time.expect("time") - 2.5).abs() < 1e-12);
+        assert!((hit.state[0] - 15.0).abs() < 1e-12);
+        assert!((hit.observable_values[0] - 2.5).abs() < 1e-12);
     }
 
     #[test]
