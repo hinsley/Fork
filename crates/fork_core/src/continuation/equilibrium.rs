@@ -977,4 +977,77 @@ mod tests {
             pd_param
         );
     }
+
+    #[test]
+    fn test_logistic_map_backward_continuation_never_emits_homoclinic_events() {
+        let equation = "r * x * (1 - x)";
+        let param_names = vec!["r".to_string()];
+        let var_names = vec!["x".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let expr = parse(equation).expect("logistic map equation should parse");
+        let bytecode = compiler.compile(&expr);
+
+        let mut system = EquationSystem::new(vec![bytecode], vec![3.9]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+
+        let equilibrium = solve_equilibrium(
+            &system,
+            SystemKind::Map { iterations: 1 },
+            &[0.5],
+            NewtonSettings::default(),
+        )
+        .expect("logistic map fixed point should converge");
+
+        let branch = continue_parameter(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &equilibrium.state,
+            0,
+            ContinuationSettings {
+                step_size: 0.1,
+                min_step_size: 1e-6,
+                max_step_size: 0.2,
+                max_steps: 30,
+                corrector_steps: 5,
+                corrector_tolerance: 1e-8,
+                step_tolerance: 1e-8,
+            },
+            false,
+        )
+        .expect("backward continuation should succeed");
+
+        assert!(
+            branch.points.iter().all(|point| !matches!(
+                point.stability,
+                BifurcationType::HomoclinicNeutralSaddle
+                    | BifurcationType::HomoclinicNeutralSaddleFocus
+                    | BifurcationType::HomoclinicNeutralBiFocus
+                    | BifurcationType::HomoclinicDoubleRealStable
+                    | BifurcationType::HomoclinicDoubleRealUnstable
+                    | BifurcationType::HomoclinicNeutrallyDivergentStable
+                    | BifurcationType::HomoclinicNeutrallyDivergentUnstable
+                    | BifurcationType::HomoclinicThreeLeadingStable
+                    | BifurcationType::HomoclinicThreeLeadingUnstable
+                    | BifurcationType::HomoclinicNonCentral
+                    | BifurcationType::HomoclinicShilnikovHopf
+                    | BifurcationType::HomoclinicBogdanovTakens
+                    | BifurcationType::HomoclinicOrbitFlipUnstable
+                    | BifurcationType::HomoclinicOrbitFlipStable
+            )),
+            "ordinary map continuation must not emit homoclinic special-point labels: {:?}",
+            branch
+                .points
+                .iter()
+                .filter(|point| point.stability != BifurcationType::None)
+                .map(|point| (point.param_value, point.stability))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            branch
+                .points
+                .iter()
+                .all(|point| point.homoclinic_events.is_none()),
+            "ordinary map continuation must not attach homoclinic diagnostics"
+        );
+    }
 }

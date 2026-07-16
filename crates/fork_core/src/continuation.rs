@@ -3979,14 +3979,19 @@ fn homoclinic_event_crossing(
     previous: Option<&HomoclinicEventDiagnostics>,
     current: Option<&HomoclinicEventDiagnostics>,
 ) -> Option<BifurcationType> {
+    // Tracked center and leading-spectrum crossings are homoclinic special
+    // points only when both corrected endpoints belong to a homoclinic
+    // problem. Ordinary equilibrium and map continuations also carry spectra;
+    // without this payload gate, a map multiplier crossing zero can be
+    // mislabeled as a non-central homoclinic event.
+    let (Some(previous), Some(current)) = (previous, current) else {
+        return None;
+    };
     if let Some(tracked) =
         tracked_homoclinic_event_crossing(previous_diagnostics, current_diagnostics)
     {
         return Some(tracked);
     }
-    let (Some(previous), Some(current)) = (previous, current) else {
-        return None;
-    };
     [
         HomoclinicEventKind::NeutralSaddle,
         HomoclinicEventKind::NeutralSaddleFocus,
