@@ -1,5 +1,7 @@
 # Logistic map: from one orbit to the period-doubling route to chaos
 
+> **Note:** This tutorial was written by GPT-5.6 Sol. It is intended to adhere to the ASD-STE100 Simplified Technical English writing standard.
+
 This tutorial uses the [Fork web application](https://forkdynamics.com). It starts with the default **LogisticMap** system. You do not need prior knowledge of dynamical systems or Fork.
 
 The logistic map updates one number. The next value depends on the present value:

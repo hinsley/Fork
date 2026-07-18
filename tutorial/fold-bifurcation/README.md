@@ -1,5 +1,7 @@
 # Continue a fold bifurcation in a one-variable ODE
 
+> **Note:** This tutorial was written by GPT-5.6 Sol. It is intended to adhere to the ASD-STE100 Simplified Technical English writing standard.
+
 This tutorial uses the live Fork application at [forkdynamics.com](https://forkdynamics.com).
 
 You will make a small mathematical model. You will calculate an orbit and an equilibrium. Then, you will continue the equilibrium through a fold bifurcation.
