@@ -730,6 +730,7 @@ export interface ContinuationObject {
     | 'cycle_manifold_2d';
   data: ContinuationBranchData;
   settings: any; // Store settings used
+  manifoldGroupId?: string;
   timestamp: string;
   params?: number[];  // Full parameter snapshot at branch creation
   mapIterations?: number;

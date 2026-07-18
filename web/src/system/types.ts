@@ -883,6 +883,7 @@ export interface ContinuationObject {
     | EquilibriumManifold2DSettings
     | LimitCycleManifold2DSettings
   manifoldFingerprint?: string
+  manifoldGroupId?: string
   timestamp: string
   params?: number[]
   mapIterations?: number

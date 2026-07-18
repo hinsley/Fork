@@ -129,7 +129,9 @@ Targeting:
 - Primary target is `target_arclength`.
 - Flow curves are traced once with RK4 from the corrected equilibrium and resampled from that single trajectory; `max_steps`, `max_time`, bounds, and non-finite exits preserve the last valid prefix.
 - Map curves use fundamental-domain growth and adaptive refinement.
+- For a period-`p > 1` map cycle, the selected eigenvector is transported to every cycle phase and each directed half-branch is solved against physical arclength locally. All emitted phases/directions finish at one common length.
 - If the target is not reachable under the configured budgets, the valid prefix is returned with a precise `solver_diagnostics.termination_reason`.
+- For multi-point map cycles, the shortest cap- or bounds-limited result becomes the common group length and diagnostics identify the limiting phase.
 - Periodic state coordinates are evaluated and stored canonically, with arclength measured using shortest modular displacements.
 
 Output:
@@ -137,6 +139,7 @@ Output:
 - Branch points use `param_value = arclength`.
 - Full curve geometry is persisted in `manifold_geometry`.
 - Map runs also store `map_iterations` and `cycle_point_index` in `branch_type` metadata for each emitted branch.
+- Web and CLI continuation objects persist `manifoldGroupId`; extending any member of a multi-point map manifold advances all sibling phases/directions atomically.
 
 ## 2D Geodesic Ring-Growth Solver
 

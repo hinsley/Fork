@@ -122,6 +122,7 @@ import {
 } from './systemTreeCommands'
 import { validateSystemConfig } from './systemValidation'
 import { isCliSafeName } from '../utils/naming'
+import { makeStableId } from '../utils/determinism'
 import {
   DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT,
   DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS,
@@ -163,6 +164,62 @@ function resolveBranchParentObjectId(system: System, branch: ContinuationObject)
     return branch.parentObjectId
   }
   return findObjectIdByName(system, branch.parentObject)
+}
+
+function resolvePeriodicMapManifoldGroup(
+  system: System,
+  branchId: string
+): { entries: Array<[string, ContinuationObject]>; groupId: string } {
+  const source = system.branches[branchId]
+  if (!source) throw new Error('The selected manifold branch no longer exists.')
+  if (source.manifoldGroupId) {
+    const entries = Object.entries(system.branches).filter(
+      ([, branch]) => branch.manifoldGroupId === source.manifoldGroupId
+    )
+    if (entries.length === 0) {
+      throw new Error('The selected manifold group contains no branches.')
+    }
+    return { entries, groupId: source.manifoldGroupId }
+  }
+
+  const sourceMatch = /^(.*)_p(\d+)_(plus|minus)$/.exec(source.name)
+  const sourceType = source.data.branch_type
+  if (!sourceMatch || sourceType?.type !== 'ManifoldEq1D') {
+    throw new Error(
+      'This legacy cycle manifold has no group metadata and its sibling branches cannot be identified. Rebuild the manifold group.'
+    )
+  }
+  const parentObjectId = resolveBranchParentObjectId(system, source)
+  const baseName = sourceMatch[1]
+  const mapIterations = source.mapIterations ?? sourceType.map_iterations
+  const entries = Object.entries(system.branches)
+    .filter(([, branch]) => {
+      const match = /^(.*)_p(\d+)_(plus|minus)$/.exec(branch.name)
+      const branchType = branch.data.branch_type
+      return (
+        match?.[1] === baseName &&
+        resolveBranchParentObjectId(system, branch) === parentObjectId &&
+        branch.branchType === 'eq_manifold_1d' &&
+        branchType?.type === 'ManifoldEq1D' &&
+        branchType.stability === sourceType.stability &&
+        branchType.eig_index === sourceType.eig_index &&
+        (branch.mapIterations ?? branchType.map_iterations) === mapIterations &&
+        branch.manifoldFingerprint === source.manifoldFingerprint
+      )
+    })
+    .sort(([, left], [, right]) => {
+      const leftType = left.data.branch_type
+      const rightType = right.data.branch_type
+      if (leftType?.type !== 'ManifoldEq1D' || rightType?.type !== 'ManifoldEq1D') return 0
+      const phaseOrder =
+        (leftType.cycle_point_index ?? 0) - (rightType.cycle_point_index ?? 0)
+      if (phaseOrder !== 0) return phaseOrder
+      return leftType.direction.localeCompare(rightType.direction)
+    })
+  if (entries.length === 0) {
+    throw new Error('The legacy cycle manifold group is incomplete. Rebuild it before extending.')
+  }
+  return { entries, groupId: makeStableId('manifold_group') }
 }
 
 function resolveEntityName(system: System, entityId: string | null, fallback: string): string {
@@ -4033,6 +4090,9 @@ export function AppProvider({
         const reservedNames = new Set<string>()
         const createdNodeIds: string[] = []
         const useMapCycleNaming = system.type === 'map' && (mapIterations ?? 1) > 1
+        const manifoldGroupId = useMapCycleNaming
+          ? makeStableId('manifold_group')
+          : undefined
         for (let index = 0; index < branchDataList.length; index += 1) {
           const branchData = branchDataList[index]
           const normalized = normalizeBranchEigenvalues(branchData, {
@@ -4085,6 +4145,7 @@ export function AppProvider({
               caps: { ...normalizedCaps },
             },
             manifoldFingerprint: equilibriumSolutionFingerprint(runConfig, mapIterations),
+            manifoldGroupId,
             timestamp: new Date().toISOString(),
             params: [...baseParams],
             mapIterations: system.type === 'map' ? mapIterations : undefined,
@@ -4207,40 +4268,84 @@ export function AppProvider({
           },
         })
 
-        const updatedData = await client.runEquilibriumManifold1DExtension(
-          {
-            system: runConfig,
-            branchData: serializeBranchDataForWasm(sourceBranch),
-            mapIterations,
-            settings: {
-              ...settings,
-              eig_index: branchType.eig_index,
-              caps: { ...normalizedCaps },
+        const progressOptions = {
+          onProgress: (progress: ContinuationProgress) =>
+            dispatch({
+              type: 'SET_CONTINUATION_PROGRESS' as const,
+              progress: { label: 'Extend Invariant Manifold (1D)', progress },
+            }),
+        }
+        let updated = state.system
+        const timestamp = new Date().toISOString()
+        if (system.type === 'map' && (mapIterations ?? 1) > 1) {
+          const group = resolvePeriodicMapManifoldGroup(state.system, request.branchId)
+          const updatedDataList = await client.runEquilibriumManifold1DGroupExtension(
+            {
+              system: runConfig,
+              branchDataList: group.entries.map(([, branch]) =>
+                serializeBranchDataForWasm(branch)
+              ),
+              mapIterations: mapIterations!,
+              settings: {
+                ...settings,
+                eig_index: branchType.eig_index,
+                caps: { ...normalizedCaps },
+              },
             },
-          },
-          {
-            onProgress: (progress) =>
-              dispatch({
-                type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Extend Invariant Manifold (1D)', progress },
-              }),
-          }
-        )
-        const normalized = normalizeBranchEigenvalues(updatedData, {
-          stateDimension: snapshot.freeVariableNames.length,
-        })
-        if (normalized.points.length <= sourceBranch.data.points.length) {
-          throw new Error(
-            'Manifold extension produced no new points. Increase the applicable caps or change the bounds.'
+            progressOptions
           )
+          if (updatedDataList.length !== group.entries.length) {
+            throw new Error('Manifold group extension returned an incomplete branch group.')
+          }
+          let madeProgress = false
+          for (let index = 0; index < group.entries.length; index += 1) {
+            const [branchId, groupBranch] = group.entries[index]
+            const normalized = normalizeBranchEigenvalues(updatedDataList[index], {
+              stateDimension: snapshot.freeVariableNames.length,
+            })
+            madeProgress ||= normalized.points.length > groupBranch.data.points.length
+            updated = updateBranch(updated, branchId, {
+              ...groupBranch,
+              data: normalized,
+              manifoldGroupId: group.groupId,
+              timestamp,
+              subsystemSnapshot: snapshot,
+            })
+          }
+          if (!madeProgress) {
+            throw new Error(
+              'Manifold group extension produced no new points. Increase the applicable caps or change the bounds.'
+            )
+          }
+        } else {
+          const updatedData = await client.runEquilibriumManifold1DExtension(
+            {
+              system: runConfig,
+              branchData: serializeBranchDataForWasm(sourceBranch),
+              mapIterations,
+              settings: {
+                ...settings,
+                eig_index: branchType.eig_index,
+                caps: { ...normalizedCaps },
+              },
+            },
+            progressOptions
+          )
+          const normalized = normalizeBranchEigenvalues(updatedData, {
+            stateDimension: snapshot.freeVariableNames.length,
+          })
+          if (normalized.points.length <= sourceBranch.data.points.length) {
+            throw new Error(
+              'Manifold extension produced no new points. Increase the applicable caps or change the bounds.'
+            )
+          }
+          updated = updateBranch(updated, request.branchId, {
+            ...sourceBranch,
+            data: normalized,
+            timestamp,
+            subsystemSnapshot: snapshot,
+          })
         }
-        const updatedBranch: ContinuationObject = {
-          ...sourceBranch,
-          data: normalized,
-          timestamp: new Date().toISOString(),
-          subsystemSnapshot: snapshot,
-        }
-        const updated = updateBranch(state.system, request.branchId, updatedBranch)
         const selected = selectNode(updated, request.branchId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)

@@ -4890,6 +4890,141 @@ describe('appState equilibrium manifold actions', () => {
     })
   })
 
+  it('extends every branch in a periodic-map manifold group atomically', async () => {
+    const fixture = createStoredFlowManifold()
+    fixture.system.config.type = 'map'
+    fixture.system.config.solver = 'discrete'
+    const source = fixture.system.branches[fixture.nodeId]
+    const groupId = 'manifold_group_test'
+    const fingerprint = JSON.stringify({
+      type: fixture.system.config.type,
+      equations: fixture.system.config.equations,
+      params: fixture.system.config.params,
+      paramNames: fixture.system.config.paramNames,
+      varNames: fixture.system.config.varNames,
+      periodicVariables: fixture.system.config.periodicVariables ?? [],
+      mapIterations: 2,
+    })
+    let system = fixture.system
+    const branchIds: string[] = []
+    for (const [phase, direction] of [
+      [0, 'Plus'],
+      [0, 'Minus'],
+      [1, 'Plus'],
+      [1, 'Minus'],
+    ] as const) {
+      const branch: ContinuationObject = {
+        ...structuredClone(source),
+        id: undefined,
+        name: `cycle_p${phase + 1}_${direction.toLowerCase()}`,
+        manifoldGroupId: groupId,
+        manifoldFingerprint: fingerprint,
+        mapIterations: 2,
+        data: {
+          ...structuredClone(source.data),
+          branch_type: {
+            type: 'ManifoldEq1D',
+            stability: 'Unstable',
+            direction,
+            eig_index: 0,
+            method: 'test',
+            caps: manifoldCaps,
+            map_iterations: 2,
+            cycle_point_index: phase,
+          },
+        },
+      }
+      if (phase === 0 && direction === 'Plus') {
+        system.branches[fixture.nodeId] = { ...branch, id: fixture.nodeId }
+        branchIds.push(fixture.nodeId)
+      } else {
+        const added = addBranch(system, branch, source.parentObjectId!)
+        system = added.system
+        branchIds.push(added.nodeId)
+      }
+    }
+
+    const client = new MockForkCoreClient(0)
+    let capturedGroupSize = 0
+    client.runEquilibriumManifold1DGroupExtension = async (request) => {
+      capturedGroupSize = request.branchDataList.length
+      return request.branchDataList.map((branch) =>
+        normalizeBranchEigenvalues({
+          ...branch,
+          points: [
+            ...branch.points,
+            {
+              state: [0.151],
+              param_value: 0.15,
+              stability: 'None' as const,
+              eigenvalues: [],
+            },
+          ],
+          indices: [...branch.indices, 2],
+        })
+      )
+    }
+    const singleExtensionSpy = vi.spyOn(client, 'runEquilibriumManifold1DExtension')
+    const { getContext } = setupApp(system, client)
+
+    await act(async () => {
+      await getContext().actions.extendEquilibriumManifold1D({
+        branchId: fixture.nodeId,
+        settings: {
+          stability: 'Unstable',
+          direction: 'Plus',
+          eig_index: 0,
+          eps: 1e-3,
+          integration_dt: 1,
+          target_arclength: 0.05,
+          caps: { ...manifoldCaps, max_iterations: 10 },
+        },
+      })
+    })
+
+    expect(capturedGroupSize).toBe(4)
+    expect(singleExtensionSpy).not.toHaveBeenCalled()
+    for (const branchId of branchIds) {
+      const branch = getContext().state.system!.branches[branchId]
+      expect(branch.data.points).toHaveLength(3)
+      expect(branch.manifoldGroupId).toBe(groupId)
+    }
+    expect(getContext().state.system!.ui.selectedNodeId).toBe(fixture.nodeId)
+
+    const pointsBeforeFailure = new Map(
+      branchIds.map((branchId) => [
+        branchId,
+        structuredClone(getContext().state.system!.branches[branchId].data.points),
+      ])
+    )
+    client.runEquilibriumManifold1DGroupExtension = async () => {
+      throw new Error(
+        'Map manifold group extension failed atomically; raise limits or rebuild the group.'
+      )
+    }
+    await act(async () => {
+      await getContext().actions.extendEquilibriumManifold1D({
+        branchId: fixture.nodeId,
+        settings: {
+          stability: 'Unstable',
+          direction: 'Plus',
+          eig_index: 0,
+          eps: 1e-3,
+          integration_dt: 1,
+          target_arclength: 0.05,
+          caps: { ...manifoldCaps, max_iterations: 10 },
+        },
+      })
+    })
+
+    expect(getContext().state.error).toContain('failed atomically')
+    for (const branchId of branchIds) {
+      expect(getContext().state.system!.branches[branchId].data.points).toEqual(
+        pointsBeforeFailure.get(branchId)
+      )
+    }
+  })
+
   it('rejects extension when the stored manifold fingerprint is stale', async () => {
     const fixture = createStoredFlowManifold('stale-fingerprint')
     const client = new MockForkCoreClient(0)
@@ -5164,11 +5299,15 @@ describe('appState equilibrium manifold actions', () => {
         'map_branch_p2_plus',
         'map_branch_p2_minus',
       ]
+      const groupIds = new Set<string>()
       for (const name of expectedNames) {
         const branchId = findBranchIdByName(next!, name)
         expect(next!.branches[branchId].mapIterations).toBe(2)
         expect(next!.branches[branchId].manifoldSettings?.target_arclength).toBe(0.05)
+        groupIds.add(next!.branches[branchId].manifoldGroupId ?? '')
       }
+      expect(groupIds.size).toBe(1)
+      expect([...groupIds][0]).toMatch(/^manifold_group_/)
     })
   })
 

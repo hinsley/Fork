@@ -498,6 +498,23 @@ export function runEquilibriumManifold1DExtensionWithProgress(
   return runContinuationRunnerWithProgress(runner, label);
 }
 
+/** Extend every phase/direction branch in a periodic-map 1D manifold group. */
+export function runEquilibriumManifold1DGroupExtensionWithProgress(
+  bridge: WasmBridge,
+  branchDataList: ContinuationBranchData[],
+  settings: EquilibriumManifold1DSettings,
+  label: string,
+  mapIterations: number
+): ContinuationBranchData[] {
+  const runner = bridge.createEquilibriumManifold1DGroupExtensionRunner(
+    branchDataList,
+    settings,
+    mapIterations
+  );
+
+  return runContinuationRunnerWithProgress(runner, label);
+}
+
 /** Extend a stored 2D manifold with progress updates. */
 export function runManifold2DExtensionWithProgress(
   bridge: WasmBridge,

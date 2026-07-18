@@ -1117,6 +1117,65 @@ async function run() {
     assert.equal(Storage.listBranches(sysName, 'eq_seed').length, 0);
   });
 
+  test('storage saves manifold groups atomically and rolls back a failed batch', () => {
+    const sysName = nextSystemName();
+    Storage.saveSystem(makeSystemConfig(sysName));
+    Storage.saveObject(sysName, {
+      type: 'equilibrium',
+      name: 'eq_seed',
+      systemName: sysName
+    } as any);
+    const first = makeContinuationBranch({
+      name: 'group_p1_plus',
+      systemName: sysName,
+      parentObject: 'eq_seed'
+    });
+    const second = makeContinuationBranch({
+      name: 'group_p2_plus',
+      systemName: sysName,
+      parentObject: 'eq_seed'
+    });
+    Storage.saveBranchesAtomically(sysName, 'eq_seed', [first as any, second as any]);
+
+    const updatedTimestamp = new Date(1).toISOString();
+    const updated = [
+      { ...first, timestamp: updatedTimestamp },
+      { ...second, timestamp: updatedTimestamp }
+    ];
+    const originalRenameSync = fs.renameSync;
+    (fs as any).renameSync = (oldPath: any, newPath: any) => {
+      if (String(oldPath).endsWith('.tmp') && String(newPath).endsWith('group_p2_plus.json')) {
+        throw new Error('injected batch promotion failure');
+      }
+      return originalRenameSync(oldPath, newPath);
+    };
+    try {
+      assert.throws(
+        () => Storage.saveBranchesAtomically(sysName, 'eq_seed', updated as any[]),
+        /injected batch promotion failure/
+      );
+    } finally {
+      (fs as any).renameSync = originalRenameSync;
+    }
+
+    assert.equal(
+      (Storage.loadBranch(sysName, 'eq_seed', 'group_p1_plus') as any).timestamp,
+      first.timestamp
+    );
+    assert.equal(
+      (Storage.loadBranch(sysName, 'eq_seed', 'group_p2_plus') as any).timestamp,
+      second.timestamp
+    );
+    const branchDir = path.join(
+      systemsDir,
+      sysName,
+      'objects',
+      'eq_seed',
+      'branches'
+    );
+    assert.ok(fs.readdirSync(branchDir).every(name => !name.endsWith('.tmp') && !name.endsWith('.bak')));
+  });
+
   test('storage purges legacy branch layouts', () => {
     const sysName = nextSystemName();
     Storage.saveSystem(makeSystemConfig(sysName));

@@ -18,6 +18,8 @@ import type {
   EquilibriumManifold1DResult,
   EquilibriumManifold1DExtensionRequest,
   EquilibriumManifold1DExtensionResult,
+  EquilibriumManifold1DGroupExtensionRequest,
+  EquilibriumManifold1DGroupExtensionResult,
   EquilibriumManifold2DRequest,
   EquilibriumManifold2DResult,
   EquilibriumContinuationRequest,
@@ -827,6 +829,54 @@ export class MockForkCoreClient implements ForkCoreClient {
           current_param: branch.points.at(-1)?.param_value ?? 0,
         })
         return normalizeBranchEigenvalues(branch)
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runEquilibriumManifold1DGroupExtension(
+    request: EquilibriumManifold1DGroupExtensionRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<EquilibriumManifold1DGroupExtensionResult> {
+    const job = this.queue.enqueue(
+      'runEquilibriumManifold1DGroupExtension',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        const baseline = request.branchDataList.reduce(
+          (largest, branch) => Math.max(largest, branch.points.at(-1)?.param_value ?? 0),
+          0
+        )
+        const target = baseline + request.settings.target_arclength
+        const branches = request.branchDataList.map((source) => {
+          const branch = structuredClone(source)
+          const endpoint = branch.points.at(-1)
+          if (endpoint && endpoint.param_value < target) {
+            branch.points.push({
+              ...endpoint,
+              state: endpoint.state.map((value, index) =>
+                index === 0 ? value + target - endpoint.param_value : value
+              ),
+              param_value: target,
+            })
+            branch.indices.push((branch.indices.at(-1) ?? -1) + 1)
+          }
+          return normalizeBranchEigenvalues(branch)
+        })
+        opts?.onProgress?.({
+          done: true,
+          current_step: branches.length,
+          max_steps: branches.length,
+          points_computed: branches.length,
+          bifurcations_found: 0,
+          current_param: target,
+        })
+        return branches
       },
       opts
     )

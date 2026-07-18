@@ -97,7 +97,9 @@ For map branches, `BranchType::ManifoldEq1D` stores:
 - `map_iterations`
 - `cycle_point_index` (0-based)
 
-Curve geometry also stores `solver_diagnostics` (stop reason, requested/achieved length, growth counts, correction size, and least period). Cycle-phase curves store `source_arclength` separately from physical arclength.
+Curve geometry also stores `solver_diagnostics` (stop reason, requested/achieved length, growth counts, correction size, and least period). For cycles of period greater than one, every phase is solved in its own physical arclength; `source_arclength` is intentionally absent because there is no longer a representative-sample parameterization.
+
+The return-map eigenvector is transported from one cycle point to the next with the one-step map Jacobian and normalized without changing its sign. Each requested direction is then initialized and grown independently at every phase. All phase/direction branches share the requested physical target. If bounds or a point/iteration cap stops one solve early, every sibling is recomputed to the shortest achieved length and diagnostics report `group_limit` with the limiting phase and reason.
 
 Curve geometry stores a versioned map resume state containing the current cycle anchor, adaptive
 fundamental domain, pending mapped samples/cursor, spacing target, effective iterate count, and
@@ -106,12 +108,18 @@ For stable maps, a target inside an inverse-grown domain rolls that cut into a n
 domain whose endpoints remain related by the effective return. Repeated extension therefore resumes
 locally from the saved endpoint and does not first solve the unused, potentially enormous remainder
 of the old inverse domain.
-Each emitted cycle phase receives the corresponding state propagated by `F^k`, so it can be resumed
-independently. Legacy branches without this field are replayed to their saved endpoint on first
-extension and upgraded when the extension result is saved.
-After a nonrepresentative phase is extended independently, `source_arclength` is cleared rather than
-claiming a representative-sample correspondence for newly adapted points; physical arclength is
-preserved for the entire branch.
+Each emitted cycle phase receives its own local resume state, so it can be advanced without replaying
+or propagating another phase. Legacy branches without this field are replayed to their saved endpoint
+on first extension and upgraded when the extension result is saved.
+
+Web and CLI storage assign one `manifoldGroupId` to all phases/directions emitted by a calculation.
+Extending any member advances the complete group to one common final physical arclength. Legacy
+generated names (`name_p{idx}_{plus|minus}`) are grouped and upgraded on first successful extension.
+The longest stored branch is the extension baseline, allowing shorter legacy phases to catch up; if
+the configured limits cannot reach that baseline, no member is saved and the user must raise the
+limits or rebuild the group. Renamed, incomplete, or ambiguous legacy groups are rejected instead of
+guessing at sibling membership. Batch progress reports the minimum achieved group arclength, and
+persistence occurs only after every sibling has completed successfully.
 
 Naming behavior:
 

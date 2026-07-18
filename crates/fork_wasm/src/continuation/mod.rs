@@ -7,6 +7,7 @@ mod codim1_extension_runner;
 mod curve_runners;
 mod cycle_manifold_2d_runner;
 mod eq_manifold_1d_extension_runner;
+mod eq_manifold_1d_group_extension_runner;
 mod eq_manifold_1d_runner;
 mod eq_manifold_2d_runner;
 mod eq_runner;
@@ -35,6 +36,7 @@ pub use curve_runners::{
 };
 pub use cycle_manifold_2d_runner::WasmCycleManifold2DRunner;
 pub use eq_manifold_1d_extension_runner::WasmEqManifold1DExtensionRunner;
+pub use eq_manifold_1d_group_extension_runner::WasmEqManifold1DGroupExtensionRunner;
 pub use eq_manifold_1d_runner::WasmEqManifold1DRunner;
 pub use eq_manifold_2d_runner::WasmEqManifold2DRunner;
 pub use eq_runner::WasmEquilibriumRunner;
@@ -51,12 +53,12 @@ pub use manifold_2d_extension_runner::WasmManifold2DExtensionRunner;
 mod tests {
     use super::{
         WasmCodim1CurveExtensionRunner, WasmContinuationExtensionRunner, WasmCycleManifold2DRunner,
-        WasmEqManifold1DExtensionRunner, WasmEqManifold1DRunner, WasmEqManifold2DRunner,
-        WasmEquilibriumRunner, WasmFoldCurveRunner, WasmHeteroclinicRunner,
-        WasmHeteroclinicShootingRunner, WasmHomoclinicRunner, WasmHomoclinicShootingRunner,
-        WasmHomotopySaddleRunner, WasmHopfCurveRunner, WasmIsoperiodicCurveRunner,
-        WasmLPCCurveRunner, WasmLimitCycleRunner, WasmManifold2DExtensionRunner, WasmNSCurveRunner,
-        WasmPDCurveRunner,
+        WasmEqManifold1DExtensionRunner, WasmEqManifold1DGroupExtensionRunner,
+        WasmEqManifold1DRunner, WasmEqManifold2DRunner, WasmEquilibriumRunner, WasmFoldCurveRunner,
+        WasmHeteroclinicRunner, WasmHeteroclinicShootingRunner, WasmHomoclinicRunner,
+        WasmHomoclinicShootingRunner, WasmHomotopySaddleRunner, WasmHopfCurveRunner,
+        WasmIsoperiodicCurveRunner, WasmLPCCurveRunner, WasmLimitCycleRunner,
+        WasmManifold2DExtensionRunner, WasmNSCurveRunner, WasmPDCurveRunner,
     };
 
     #[test]
@@ -72,6 +74,10 @@ mod tests {
         assert!(std::any::type_name::<WasmEqManifold1DRunner>().ends_with("WasmEqManifold1DRunner"));
         assert!(std::any::type_name::<WasmEqManifold1DExtensionRunner>()
             .ends_with("WasmEqManifold1DExtensionRunner"));
+        assert!(
+            std::any::type_name::<WasmEqManifold1DGroupExtensionRunner>()
+                .ends_with("WasmEqManifold1DGroupExtensionRunner")
+        );
         assert!(std::any::type_name::<WasmEqManifold2DRunner>().ends_with("WasmEqManifold2DRunner"));
         assert!(std::any::type_name::<WasmCycleManifold2DRunner>()
             .ends_with("WasmCycleManifold2DRunner"));

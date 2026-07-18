@@ -55,6 +55,7 @@ export const computeOperationMetadata = {
   runContinuationExtension: { reportsProgress: true },
   runEquilibriumManifold1D: { reportsProgress: true },
   runEquilibriumManifold1DExtension: { reportsProgress: true },
+  runEquilibriumManifold1DGroupExtension: { reportsProgress: true },
   runManifold2DExtension: { reportsProgress: true },
   runEquilibriumManifold2D: { reportsProgress: true },
   runLimitCycleManifold2D: { reportsProgress: true },

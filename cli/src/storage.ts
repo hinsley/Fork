@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { SystemConfig, AnalysisObject } from './types';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -275,6 +276,48 @@ export const Storage = {
     const branchesDir = getObjectBranchesDir(systemName, objectName);
     if (!fs.existsSync(branchesDir)) fs.mkdirSync(branchesDir, { recursive: true });
     fs.writeFileSync(path.join(branchesDir, `${(branch as any).name}.json`), JSON.stringify(branch, null, 2));
+  },
+
+  saveBranchesAtomically: (
+    systemName: string,
+    objectName: string,
+    branches: AnalysisObject[]
+  ) => {
+    const branchesDir = getObjectBranchesDir(systemName, objectName);
+    if (!fs.existsSync(branchesDir)) fs.mkdirSync(branchesDir, { recursive: true });
+    const transactionId = randomUUID();
+    const entries = branches.map(branch => {
+      const target = path.join(branchesDir, `${(branch as any).name}.json`);
+      return {
+        target,
+        staged: `${target}.${transactionId}.tmp`,
+        backup: `${target}.${transactionId}.bak`,
+        existed: fs.existsSync(target),
+        content: JSON.stringify(branch, null, 2)
+      };
+    });
+
+    try {
+      for (const entry of entries) fs.writeFileSync(entry.staged, entry.content);
+      for (const entry of entries) {
+        if (entry.existed) fs.renameSync(entry.target, entry.backup);
+        fs.renameSync(entry.staged, entry.target);
+      }
+      for (const entry of entries) {
+        if (fs.existsSync(entry.backup)) fs.unlinkSync(entry.backup);
+      }
+    } catch (error) {
+      for (const entry of entries) {
+        if (fs.existsSync(entry.staged)) fs.unlinkSync(entry.staged);
+        if (fs.existsSync(entry.backup)) {
+          if (fs.existsSync(entry.target)) fs.unlinkSync(entry.target);
+          fs.renameSync(entry.backup, entry.target);
+        } else if (!entry.existed && fs.existsSync(entry.target)) {
+          fs.unlinkSync(entry.target);
+        }
+      }
+      throw error;
+    }
   },
 
   loadBranch: (systemName: string, objectName: string, branchName: string): AnalysisObject => {

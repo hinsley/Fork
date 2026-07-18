@@ -16,6 +16,8 @@ import type {
   EquilibriumManifold1DResult,
   EquilibriumManifold1DExtensionRequest,
   EquilibriumManifold1DExtensionResult,
+  EquilibriumManifold1DGroupExtensionRequest,
+  EquilibriumManifold1DGroupExtensionResult,
   EquilibriumManifold2DRequest,
   EquilibriumManifold2DResult,
   EquilibriumContinuationRequest,
@@ -283,6 +285,24 @@ export class WasmForkCoreClient implements ForkCoreClient {
       (signal) =>
         this.runWorker(
           'runEquilibriumManifold1DExtension',
+          request,
+          signal,
+          opts?.onProgress
+        ),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runEquilibriumManifold1DGroupExtension(
+    request: EquilibriumManifold1DGroupExtensionRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<EquilibriumManifold1DGroupExtensionResult> {
+    const job = this.queue.enqueue(
+      'runEquilibriumManifold1DGroupExtension',
+      (signal) =>
+        this.runWorker(
+          'runEquilibriumManifold1DGroupExtension',
           request,
           signal,
           opts?.onProgress

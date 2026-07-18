@@ -367,6 +367,30 @@ export class WasmBridge {
         ) as ManifoldRunner<ContinuationBranchData>;
     }
 
+    createEquilibriumManifold1DGroupExtensionRunner(
+        branchDataList: ContinuationBranchData[],
+        settings: EquilibriumManifold1DSettings,
+        mapIterations: number
+    ): ManifoldRunner<ContinuationBranchData[]> {
+        if (!wasmModule) throw new Error("WASM module not loaded");
+        if (typeof wasmModule.WasmEqManifold1DGroupExtensionRunner !== 'function') {
+            throw new Error(
+                "Equilibrium 1D manifold group extension runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+        return new wasmModule.WasmEqManifold1DGroupExtensionRunner(
+            this.config.equations,
+            new Float64Array(this.config.params),
+            this.config.paramNames,
+            this.config.varNames,
+            this.config.type || "flow",
+            Math.max(2, Math.trunc(mapIterations)),
+            branchDataList,
+            settings,
+            new Float64Array(periodicPeriodsForConfig(this.config))
+        ) as ManifoldRunner<ContinuationBranchData[]>;
+    }
+
     createEquilibriumManifold2DRunner(
         equilibriumState: number[],
         settings: EquilibriumManifold2DSettings

@@ -20,6 +20,8 @@ import type {
   EquilibriumManifold1DResult,
   EquilibriumManifold1DExtensionRequest,
   EquilibriumManifold1DExtensionResult,
+  EquilibriumManifold1DGroupExtensionRequest,
+  EquilibriumManifold1DGroupExtensionResult,
   EquilibriumManifold2DRequest,
   EquilibriumManifold2DResult,
   EventSeriesResult,
@@ -646,6 +648,27 @@ async function runEquilibriumManifold1DExtension(
     request.system.type,
     request.mapIterations ?? 1,
     request.branchData,
+    { ...request.settings },
+    new Float64Array(periodicPeriodsForConfig(request.system))
+  )
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
+}
+
+async function runEquilibriumManifold1DGroupExtension(
+  request: EquilibriumManifold1DGroupExtensionRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<EquilibriumManifold1DGroupExtensionResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const runner = new wasm.WasmEqManifold1DGroupExtensionRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    request.mapIterations,
+    request.branchDataList,
     { ...request.settings },
     new Float64Array(periodicPeriodsForConfig(request.system))
   )
@@ -2248,6 +2271,7 @@ const handlers = {
   runContinuationExtension,
   runEquilibriumManifold1D,
   runEquilibriumManifold1DExtension,
+  runEquilibriumManifold1DGroupExtension,
   runManifold2DExtension,
   runEquilibriumManifold2D,
   runLimitCycleManifold2D,

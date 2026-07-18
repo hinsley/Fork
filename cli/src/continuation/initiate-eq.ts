@@ -6,6 +6,7 @@
 
 import inquirer from 'inquirer';
 import chalk from 'chalk';
+import { randomUUID } from 'node:crypto';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
 import {
@@ -732,6 +733,8 @@ export async function initiateEquilibriumManifold1DFromPoint(
 
       const savedBranches: ContinuationObject[] = [];
       const existingNames = new Set(Storage.listBranches(sysName, parentObject));
+      const manifoldGroupId =
+        sysConfig.type === 'map' && mapIterations > 1 ? randomUUID() : undefined;
       const saveBranch = (
         branchData: ContinuationBranchData,
         resolvedDirection: ManifoldDirection,
@@ -776,6 +779,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
           branchType: 'eq_manifold_1d',
           data: branchData,
           settings: branchSettings,
+          manifoldGroupId,
           timestamp: new Date().toISOString(),
           params: [...runConfig.params],
           mapIterations: sysConfig.type === 'map' ? mapIterations : undefined

@@ -210,7 +210,7 @@ pub fn extend_manifold_eq_1d_with_kind_and_periodicity(
 ) -> Result<ContinuationBranch> {
     let dim = system.equations.len();
     validate_manifold_1d_settings(dim, kind, &settings)?;
-    let (branch_stability, branch_direction, branch_eig_index, map_iterations, cycle_point_index) =
+    let (branch_stability, branch_direction, branch_eig_index, map_iterations, _cycle_point_index) =
         match &branch.branch_type {
             BranchType::ManifoldEq1D {
                 stability,
@@ -301,7 +301,7 @@ pub fn extend_manifold_eq_1d_with_kind_and_periodicity(
                 resume_state,
             )?;
             let local_source_arclength = solved.arclength.clone();
-            let source_extension = if cycle_point_index.unwrap_or(0) > 0 {
+            let source_extension = if map_iterations.unwrap_or(1) > 1 {
                 if let Some(ManifoldGeometry::Curve(geometry)) = branch.manifold_geometry.as_mut() {
                     geometry.source_arclength = None;
                 }
@@ -312,6 +312,260 @@ pub fn extend_manifold_eq_1d_with_kind_and_periodicity(
             merge_manifold_curve_extension(branch, solved, source_extension)
         }
     }
+}
+
+/// Extend every phase/direction branch belonging to one periodic-map 1D manifold.
+///
+/// `settings.target_arclength` is the requested additional common physical arclength.
+/// The returned group is equalized to the greatest final length reached by every branch.
+pub fn extend_manifold_eq_1d_group_with_kind_and_periodicity(
+    system: &mut EquationSystem,
+    kind: SystemKind,
+    branches: Vec<ContinuationBranch>,
+    settings: Manifold1DSettings,
+    periodicity: &StatePeriodicity,
+) -> Result<Vec<ContinuationBranch>> {
+    if branches.is_empty() {
+        bail!("A 1D manifold extension group cannot be empty.");
+    }
+    let SystemKind::Map { iterations } = kind else {
+        if branches.len() != 1 {
+            bail!("Flow manifold extension accepts exactly one branch.");
+        }
+        return Ok(vec![extend_manifold_eq_1d_with_kind_and_periodicity(
+            system,
+            kind,
+            branches.into_iter().next().unwrap(),
+            settings,
+            periodicity,
+        )?]);
+    };
+    if iterations <= 1 {
+        if branches.len() != 1 {
+            bail!("A map fixed-point manifold extension accepts exactly one branch.");
+        }
+        return Ok(vec![extend_manifold_eq_1d_with_kind_and_periodicity(
+            system,
+            kind,
+            branches.into_iter().next().unwrap(),
+            settings,
+            periodicity,
+        )?]);
+    }
+    if !settings.target_arclength.is_finite() || settings.target_arclength <= 0.0 {
+        bail!("Additional common manifold arclength must be positive.");
+    }
+
+    validate_map_manifold_extension_group(&branches, iterations, settings.stability)?;
+    let original_lengths = branches
+        .iter()
+        .map(branch_physical_arclength)
+        .collect::<Result<Vec<_>>>()?;
+    let baseline = original_lengths.iter().copied().fold(0.0_f64, f64::max);
+    let requested_final = baseline + settings.target_arclength;
+    let attempted = extend_map_manifold_group_to_total(
+        system,
+        kind,
+        &branches,
+        &original_lengths,
+        requested_final,
+        &settings,
+        periodicity,
+    )?;
+    let (limiting_index, common_final) = attempted
+        .iter()
+        .enumerate()
+        .map(|(index, branch)| Ok((index, branch_physical_arclength(branch)?)))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .min_by(|left, right| left.1.total_cmp(&right.1))
+        .ok_or_else(|| anyhow!("Map manifold extension group produced no branches."))?;
+    if common_final + 1e-10 < baseline {
+        bail!(
+            "A legacy manifold phase could not catch up to the existing common baseline arclength {}. Increase the point/iteration limits or rebuild the manifold group.",
+            baseline
+        );
+    }
+    if common_final + 1e-10 >= requested_final {
+        return Ok(attempted);
+    }
+
+    let limiter = &attempted[limiting_index];
+    let (limiting_direction, limiting_phase) = manifold_branch_direction_and_phase(limiter)?;
+    let limiting_reason = manifold_curve_diagnostics(limiter)
+        .map(|diagnostics| diagnostics.termination_reason.clone())
+        .unwrap_or_else(|| "unknown_limit".to_string());
+    let mut equalized = extend_map_manifold_group_to_total(
+        system,
+        kind,
+        &branches,
+        &original_lengths,
+        common_final,
+        &settings,
+        periodicity,
+    )?;
+    for branch in &mut equalized {
+        let achieved = branch_physical_arclength(branch)?;
+        if (achieved - common_final).abs() > 1e-8 * (1.0 + common_final) {
+            bail!("Map manifold extension could not produce a common final arclength.");
+        }
+        if let Some(diagnostics) = manifold_curve_diagnostics_mut(branch) {
+            diagnostics.requested_arclength = requested_final;
+            diagnostics.achieved_arclength = common_final;
+            diagnostics.target_reached = false;
+            diagnostics.termination_reason = "group_limit".to_string();
+            diagnostics.termination_detail = Some(format!(
+                "common arclength limited by phase {} {:?} ({})",
+                limiting_phase + 1,
+                limiting_direction,
+                limiting_reason
+            ));
+        }
+    }
+    Ok(equalized)
+}
+
+fn branch_physical_arclength(branch: &ContinuationBranch) -> Result<f64> {
+    let length = branch
+        .points
+        .last()
+        .map(|point| point.param_value)
+        .ok_or_else(|| anyhow!("Manifold branch has no endpoint."))?;
+    if !length.is_finite() || length <= 0.0 {
+        bail!("Manifold branch has invalid physical arclength metadata.");
+    }
+    Ok(length)
+}
+
+fn manifold_branch_direction_and_phase(
+    branch: &ContinuationBranch,
+) -> Result<(ManifoldDirection, usize)> {
+    match branch.branch_type {
+        BranchType::ManifoldEq1D {
+            direction,
+            cycle_point_index: Some(phase),
+            ..
+        } => Ok((direction, phase)),
+        _ => bail!("Map manifold group contains invalid branch metadata."),
+    }
+}
+
+fn manifold_curve_diagnostics(
+    branch: &ContinuationBranch,
+) -> Option<&ManifoldCurveSolverDiagnostics> {
+    match branch.manifold_geometry.as_ref() {
+        Some(ManifoldGeometry::Curve(geometry)) => geometry.solver_diagnostics.as_ref(),
+        _ => None,
+    }
+}
+
+fn manifold_curve_diagnostics_mut(
+    branch: &mut ContinuationBranch,
+) -> Option<&mut ManifoldCurveSolverDiagnostics> {
+    match branch.manifold_geometry.as_mut() {
+        Some(ManifoldGeometry::Curve(geometry)) => geometry.solver_diagnostics.as_mut(),
+        _ => None,
+    }
+}
+
+fn validate_map_manifold_extension_group(
+    branches: &[ContinuationBranch],
+    iterations: usize,
+    stability: ManifoldStability,
+) -> Result<()> {
+    let mut plus = vec![false; iterations];
+    let mut minus = vec![false; iterations];
+    let mut eig_index = None;
+    for branch in branches {
+        let BranchType::ManifoldEq1D {
+            stability: branch_stability,
+            direction,
+            eig_index: branch_eig_index,
+            map_iterations: Some(branch_iterations),
+            cycle_point_index: Some(phase),
+            ..
+        } = branch.branch_type
+        else {
+            bail!("Map manifold extension group contains invalid branch metadata.");
+        };
+        if branch_stability != stability || branch_iterations != iterations || phase >= iterations {
+            bail!("Map manifold extension group metadata is inconsistent.");
+        }
+        if eig_index.is_some_and(|index| index != branch_eig_index) {
+            bail!("Map manifold extension group mixes different eigenmodes.");
+        }
+        eig_index = Some(branch_eig_index);
+        let seen = match direction {
+            ManifoldDirection::Plus => &mut plus[phase],
+            ManifoldDirection::Minus => &mut minus[phase],
+            ManifoldDirection::Both => {
+                bail!("Stored manifold group branches must be directed half-branches.")
+            }
+        };
+        if *seen {
+            bail!("Map manifold extension group contains a duplicate phase/direction branch.");
+        }
+        *seen = true;
+    }
+    for (label, phases) in [("Plus", plus), ("Minus", minus)] {
+        let present = phases.iter().any(|value| *value);
+        if present && phases.iter().any(|value| !*value) {
+            bail!("Map manifold extension group is missing a {label} cycle phase.");
+        }
+    }
+    Ok(())
+}
+
+fn extend_map_manifold_group_to_total(
+    system: &mut EquationSystem,
+    kind: SystemKind,
+    branches: &[ContinuationBranch],
+    original_lengths: &[f64],
+    target_total: f64,
+    settings: &Manifold1DSettings,
+    periodicity: &StatePeriodicity,
+) -> Result<Vec<ContinuationBranch>> {
+    let mut extended = Vec::with_capacity(branches.len());
+    for (branch, old_length) in branches
+        .iter()
+        .cloned()
+        .zip(original_lengths.iter().copied())
+    {
+        let additional = (target_total - old_length).max(0.0);
+        if additional <= 1e-10 * (1.0 + target_total) {
+            extended.push(branch);
+            continue;
+        }
+        let (direction, phase) = manifold_branch_direction_and_phase(&branch)?;
+        let eig_index = match branch.branch_type {
+            BranchType::ManifoldEq1D { eig_index, .. } => eig_index,
+            _ => unreachable!(),
+        };
+        let mut branch_settings = settings.clone();
+        branch_settings.direction = direction;
+        branch_settings.eig_index = Some(eig_index);
+        branch_settings.target_arclength = additional;
+        extended.push(
+            extend_manifold_eq_1d_with_kind_and_periodicity(
+                system,
+                kind,
+                branch,
+                branch_settings,
+                periodicity,
+            )
+            .map_err(|error| {
+                anyhow!(
+                    "Map manifold group extension failed atomically while extending phase {} {:?} from arclength {} to {}. No group result was produced; raise bounds or point/iteration limits, or rebuild the manifold group. Cause: {}",
+                    phase + 1,
+                    direction,
+                    old_length,
+                    target_total,
+                    error
+                )
+            })?,
+        );
+    }
+    Ok(extended)
 }
 
 fn validate_manifold_1d_settings(
@@ -408,8 +662,6 @@ fn continue_manifold_eq_1d_map(
     if source.cycle_points.is_empty() {
         bail!("Map cycle seed generation failed: no cycle points available.");
     }
-    let dim = system.equations.len();
-    let representative = &source.state;
     let growth_iterations = if source.mode.value.re < 0.0 {
         map_iterations
             .checked_mul(2)
@@ -417,138 +669,227 @@ fn continue_manifold_eq_1d_map(
     } else {
         map_iterations
     };
-    let mut branches = Vec::new();
-    for direction in directions.iter().copied() {
-        let sign = if direction == ManifoldDirection::Minus {
-            -1.0
-        } else {
-            1.0
-        };
-        let mut seed = representative.clone();
-        for i in 0..dim {
-            seed[i] += sign * settings.eps * source.mode.vector[i];
-        }
-        periodicity.wrap_state(&mut seed);
 
-        let base = build_map_manifold_curve(
+    if map_iterations == 1 {
+        return continue_manifold_eq_1d_map_fixed_point(
             system,
-            &seed,
-            representative,
-            settings.stability,
+            source,
+            settings,
+            directions,
             growth_iterations,
-            settings.target_arclength,
-            settings.caps,
-            settings.bounds.as_ref(),
             periodicity,
-            source.correction_norm,
-            source.least_period,
-        )?;
+        );
+    }
 
-        for cycle_point_index in 0..map_iterations {
-            let points = if cycle_point_index == 0 {
-                base.points.clone()
-            } else {
-                propagate_curve_by_map_steps(
-                    system,
-                    &base.points,
-                    cycle_point_index,
-                    settings.bounds.as_ref(),
-                    periodicity,
-                )
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Map manifold phase {} could not be propagated.",
-                        cycle_point_index + 1
-                    )
-                })?
-            };
-            if points.len() < 2 {
-                bail!(
-                    "Map manifold phase {} contains no meaningful growth.",
-                    cycle_point_index + 1
-                );
-            }
-            let arclength = cumulative_polyline_arclength(&points, periodicity);
-            let source_arclength = cycle_component_arclength(&base.arclength, points.len());
-            let mut diagnostics = base.diagnostics.clone();
-            diagnostics.achieved_arclength = *arclength.last().unwrap_or(&0.0);
-            let resume_state = if cycle_point_index == 0 {
-                base.resume_state.clone()
-            } else {
-                propagate_map_resume_state(
-                    system,
-                    base.resume_state.as_ref(),
-                    cycle_point_index,
-                    periodicity,
-                )?
-            };
-
-            branches.push(build_eq_1d_branch(
-                &points,
-                &arclength,
-                Some(&source_arclength),
-                Some(diagnostics),
-                resume_state,
-                settings.stability,
+    let phase_sources = map_cycle_phase_sources(system, source, map_iterations, periodicity)?;
+    let requested_arclength = settings.target_arclength;
+    let mut solved_phases = Vec::with_capacity(directions.len() * phase_sources.len());
+    for direction in directions.iter().copied() {
+        for (cycle_point_index, (phase_point, phase_vector)) in phase_sources.iter().enumerate() {
+            solved_phases.push((
                 direction,
-                source.mode.index,
-                settings.caps,
-                "map_fundamental_domain",
-                Some(map_iterations),
-                Some(cycle_point_index),
+                cycle_point_index,
+                build_map_phase_curve(
+                    system,
+                    phase_point,
+                    phase_vector,
+                    direction,
+                    growth_iterations,
+                    requested_arclength,
+                    &settings,
+                    periodicity,
+                    source.correction_norm,
+                    source.least_period,
+                )?,
             ));
         }
+    }
+
+    let (limiting_direction, limiting_phase, common_arclength, limiting_reason) = solved_phases
+        .iter()
+        .map(|(direction, phase, solved)| {
+            (
+                *direction,
+                *phase,
+                solved.arclength.last().copied().unwrap_or(0.0),
+                solved.diagnostics.termination_reason.clone(),
+            )
+        })
+        .min_by(|left, right| left.2.total_cmp(&right.2))
+        .ok_or_else(|| anyhow!("Map cycle manifold produced no phase branches."))?;
+    if !common_arclength.is_finite() || common_arclength <= NORM_EPS {
+        bail!("Map cycle manifold limits permit no meaningful common arclength.");
+    }
+
+    let group_limited = common_arclength + 1e-10 < requested_arclength;
+    if group_limited {
+        solved_phases.clear();
+        for direction in directions.iter().copied() {
+            for (cycle_point_index, (phase_point, phase_vector)) in phase_sources.iter().enumerate()
+            {
+                solved_phases.push((
+                    direction,
+                    cycle_point_index,
+                    build_map_phase_curve(
+                        system,
+                        phase_point,
+                        phase_vector,
+                        direction,
+                        growth_iterations,
+                        common_arclength,
+                        &settings,
+                        periodicity,
+                        source.correction_norm,
+                        source.least_period,
+                    )?,
+                ));
+            }
+        }
+    }
+
+    let mut branches = Vec::new();
+    for (direction, cycle_point_index, mut solved) in solved_phases {
+        if solved.points.len() < 2 {
+            bail!(
+                "Map manifold phase {} contains no meaningful growth.",
+                cycle_point_index + 1
+            );
+        }
+        if group_limited {
+            solved.diagnostics.requested_arclength = requested_arclength;
+            solved.diagnostics.achieved_arclength = common_arclength;
+            solved.diagnostics.target_reached = false;
+            solved.diagnostics.termination_reason = "group_limit".to_string();
+            solved.diagnostics.termination_detail = Some(format!(
+                "common arclength limited by phase {} {:?} ({})",
+                limiting_phase + 1,
+                limiting_direction,
+                limiting_reason
+            ));
+        }
+        branches.push(build_eq_1d_branch(
+            &solved.points,
+            &solved.arclength,
+            None,
+            Some(solved.diagnostics),
+            solved.resume_state,
+            settings.stability,
+            direction,
+            source.mode.index,
+            settings.caps,
+            "map_phase_fundamental_domain",
+            Some(map_iterations),
+            Some(cycle_point_index),
+        ));
     }
     Ok(branches)
 }
 
-fn propagate_map_resume_state(
+fn continue_manifold_eq_1d_map_fixed_point(
     system: &EquationSystem,
-    resume_state: Option<&ManifoldCurveResumeState>,
-    steps: usize,
+    source: &PreparedManifold1DSource,
+    settings: Manifold1DSettings,
+    directions: &[ManifoldDirection],
+    growth_iterations: usize,
     periodicity: &StatePeriodicity,
-) -> Result<Option<ManifoldCurveResumeState>> {
-    let Some(ManifoldCurveResumeState::Map {
-        version,
-        cycle_anchor,
-        active_domain,
-        pending_points,
-        cursor,
-        spacing_target,
-        map_step_iterations,
+) -> Result<Vec<ContinuationBranch>> {
+    let mut branches = Vec::with_capacity(directions.len());
+    for direction in directions.iter().copied() {
+        let solved = build_map_phase_curve(
+            system,
+            &source.state,
+            &source.mode.vector,
+            direction,
+            growth_iterations,
+            settings.target_arclength,
+            &settings,
+            periodicity,
+            source.correction_norm,
+            source.least_period,
+        )?;
+        branches.push(build_eq_1d_branch(
+            &solved.points,
+            &solved.arclength,
+            Some(&solved.arclength),
+            Some(solved.diagnostics),
+            solved.resume_state,
+            settings.stability,
+            direction,
+            source.mode.index,
+            settings.caps,
+            "map_fundamental_domain",
+            Some(1),
+            Some(0),
+        ));
+    }
+    Ok(branches)
+}
+
+fn build_map_phase_curve(
+    system: &EquationSystem,
+    phase_point: &[f64],
+    phase_vector: &[f64],
+    direction: ManifoldDirection,
+    growth_iterations: usize,
+    target_arclength: f64,
+    settings: &Manifold1DSettings,
+    periodicity: &StatePeriodicity,
+    source_correction_norm: f64,
+    least_period: Option<usize>,
+) -> Result<ManifoldCurveSolve> {
+    let sign = if direction == ManifoldDirection::Minus {
+        -1.0
+    } else {
+        1.0
+    };
+    let mut seed = phase_point.to_vec();
+    for (value, direction_value) in seed.iter_mut().zip(phase_vector.iter()) {
+        *value += sign * settings.eps * direction_value;
+    }
+    periodicity.wrap_state(&mut seed);
+    build_map_manifold_curve(
+        system,
+        &seed,
+        phase_point,
+        settings.stability,
         growth_iterations,
-    }) = resume_state
-    else {
-        return Ok(None);
-    };
-    let propagate_point = |point: &[f64]| -> Result<Vec<f64>> {
-        apply_map_iterates_with_periodicity(system, point, steps, periodicity)
-            .ok_or_else(|| anyhow!("Map manifold resume state propagation was non-finite."))
-    };
-    let propagated_anchor = propagate_point(cycle_anchor)?;
-    let propagated_domain = active_domain
-        .iter()
-        .map(|point| propagate_point(point))
-        .collect::<Result<Vec<_>>>()?;
-    let propagated_pending = pending_points
-        .as_ref()
-        .map(|points| {
-            points
-                .iter()
-                .map(|point| propagate_point(point))
-                .collect::<Result<Vec<_>>>()
-        })
-        .transpose()?;
-    Ok(Some(ManifoldCurveResumeState::Map {
-        version: *version,
-        cycle_anchor: propagated_anchor,
-        active_domain: propagated_domain,
-        pending_points: propagated_pending,
-        cursor: cursor.clone(),
-        spacing_target: *spacing_target,
-        map_step_iterations: *map_step_iterations,
-        growth_iterations: *growth_iterations,
-    }))
+        target_arclength,
+        settings.caps,
+        settings.bounds.as_ref(),
+        periodicity,
+        source_correction_norm,
+        least_period,
+    )
+}
+
+fn map_cycle_phase_sources(
+    system: &EquationSystem,
+    source: &PreparedManifold1DSource,
+    map_iterations: usize,
+    periodicity: &StatePeriodicity,
+) -> Result<Vec<(Vec<f64>, Vec<f64>)>> {
+    let dim = source.state.len();
+    let mut phase_point = source.state.clone();
+    let mut phase_vector = source.mode.vector.clone();
+    let mut phases = Vec::with_capacity(map_iterations);
+    for phase in 0..map_iterations {
+        phases.push((phase_point.clone(), phase_vector.clone()));
+        if phase + 1 == map_iterations {
+            break;
+        }
+        let jacobian = compute_system_jacobian_with_periodicity(
+            system,
+            SystemKind::Map { iterations: 1 },
+            &phase_point,
+            periodicity,
+        )?;
+        let matrix = DMatrix::from_row_slice(dim, dim, &jacobian);
+        let transported = matrix * DMatrix::from_column_slice(dim, 1, &phase_vector);
+        phase_vector = normalize(transported.column(0).iter().copied().collect())?;
+        phase_point = apply_map_iterates_with_periodicity(system, &phase_point, 1, periodicity)
+            .ok_or_else(|| anyhow!("Map cycle phase propagation produced a non-finite state."))?;
+    }
+    Ok(phases)
 }
 
 fn build_eq_1d_branch(
@@ -8221,6 +8562,7 @@ fn periodic_lerp(from: &[f64], to: &[f64], alpha: f64, periodicity: &StatePeriod
     point
 }
 
+#[cfg(test)]
 fn cumulative_polyline_arclength(points: &[Vec<f64>], periodicity: &StatePeriodicity) -> Vec<f64> {
     if points.is_empty() {
         return Vec::new();
@@ -9541,23 +9883,6 @@ fn polyline_arclength(points: &[Vec<f64>], periodicity: &StatePeriodicity) -> f6
         .sum()
 }
 
-fn cycle_component_arclength(reference_arclength: &[f64], point_count: usize) -> Vec<f64> {
-    if point_count == 0 {
-        return Vec::new();
-    }
-    if reference_arclength.is_empty() {
-        return vec![0.0; point_count];
-    }
-
-    let take = reference_arclength.len().min(point_count);
-    let mut arclength = reference_arclength[..take].to_vec();
-    if arclength.len() < point_count {
-        let last = *arclength.last().unwrap_or(&0.0);
-        arclength.resize(point_count, last);
-    }
-    arclength
-}
-
 fn apply_map_iterates_with_periodicity(
     system: &EquationSystem,
     state: &[f64],
@@ -9581,36 +9906,6 @@ fn apply_map_iterates_with_periodicity(
         std::mem::swap(&mut current, &mut mapped);
     }
     Some(current)
-}
-
-fn propagate_curve_by_map_steps(
-    system: &EquationSystem,
-    base_points: &[Vec<f64>],
-    steps: usize,
-    bounds: Option<&ManifoldBounds>,
-    periodicity: &StatePeriodicity,
-) -> Option<Vec<Vec<f64>>> {
-    if base_points.is_empty() {
-        return Some(Vec::new());
-    }
-    if steps == 0 {
-        return Some(base_points.to_vec());
-    }
-    let mut out = Vec::with_capacity(base_points.len());
-    for point in base_points {
-        let mapped = apply_map_iterates_with_periodicity(system, point, steps, periodicity)?;
-        if let Some(box_bounds) = bounds {
-            if !inside_bounds(&mapped, box_bounds) {
-                break;
-            }
-        }
-        out.push(mapped);
-    }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
 }
 
 fn solve_map_preimage_newton(
@@ -10445,6 +10740,233 @@ mod tests {
         })
         .expect("representative one-shot cycle-phase branch");
         assert_extension_matches_one_shot(&extended, &one_shot, 1e-8);
+    }
+
+    #[test]
+    fn manifold_eq_1d_group_extension_keeps_henon_cycle_phases_equal() {
+        let mut system = build_system(
+            &["1-a*x^2+y", "b*x"],
+            &["x", "y"],
+            &[("a", 1.4), ("b", 0.3)],
+        );
+        let cycle_point = [-0.4758000511750577, 0.2927400153525173];
+        let mut initial_settings = henon_two_cycle_stable_settings(0.05);
+        initial_settings.direction = ManifoldDirection::Both;
+        let initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            initial_settings,
+        )
+        .expect("initial Henon stable manifold group");
+
+        let extended = extend_manifold_eq_1d_group_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            initial,
+            henon_two_cycle_stable_settings(0.02),
+            &StatePeriodicity::none(),
+        )
+        .expect("extended Henon stable manifold group");
+
+        assert_henon_cycle_group_has_common_physical_arclength(&extended, 0.07);
+        for branch in extended {
+            let ManifoldGeometry::Curve(geometry) = branch.manifold_geometry.unwrap() else {
+                panic!("expected curve geometry");
+            };
+            assert_eq!(
+                geometry
+                    .solver_diagnostics
+                    .expect("extension diagnostics")
+                    .extension_count,
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn manifold_eq_1d_group_extension_catches_legacy_short_phases_up_to_longest() {
+        let mut system = build_system(
+            &["1-a*x^2+y", "b*x"],
+            &["x", "y"],
+            &[("a", 1.4), ("b", 0.3)],
+        );
+        let cycle_point = [-0.4758000511750577, 0.2927400153525173];
+        let mut short_settings = henon_two_cycle_stable_settings(0.03);
+        short_settings.direction = ManifoldDirection::Both;
+        let short = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            short_settings,
+        )
+        .expect("short Henon manifold group");
+        let mut long_settings = henon_two_cycle_stable_settings(0.05);
+        long_settings.direction = ManifoldDirection::Both;
+        let long = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            long_settings,
+        )
+        .expect("long Henon manifold group");
+        let legacy_unequal = long
+            .into_iter()
+            .zip(short)
+            .map(|(long_branch, short_branch)| {
+                let (_, phase) = manifold_branch_direction_and_phase(&long_branch).unwrap();
+                if phase == 0 {
+                    long_branch
+                } else {
+                    short_branch
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let extended = extend_manifold_eq_1d_group_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            legacy_unequal,
+            henon_two_cycle_stable_settings(0.02),
+            &StatePeriodicity::none(),
+        )
+        .expect("legacy phases should catch up before common extension");
+
+        assert_henon_cycle_group_has_common_physical_arclength(&extended, 0.07);
+    }
+
+    #[test]
+    fn manifold_eq_1d_group_extension_uses_common_cap_limited_progress() {
+        let mut system = build_system(
+            &["1-a*x^2+y", "b*x"],
+            &["x", "y"],
+            &[("a", 1.4), ("b", 0.3)],
+        );
+        let cycle_point = [-0.4758000511750577, 0.2927400153525173];
+        let initial_settings = Manifold1DSettings {
+            stability: ManifoldStability::Unstable,
+            direction: ManifoldDirection::Both,
+            eig_index: Some(0),
+            eps: 1e-3,
+            target_arclength: 0.05,
+            integration_dt: 1.0,
+            caps: ManifoldTerminationCaps {
+                max_steps: 2_000,
+                max_points: 2_000,
+                max_time: 1.0,
+                max_iterations: Some(64),
+                ..ManifoldTerminationCaps::default()
+            },
+            bounds: None,
+        };
+        let initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            initial_settings.clone(),
+        )
+        .expect("initial Henon manifold group");
+        let mut extension_settings = initial_settings.clone();
+        extension_settings.direction = ManifoldDirection::Plus;
+        extension_settings.target_arclength = 10.0;
+        extension_settings.caps.max_iterations = Some(1);
+
+        let extended = extend_manifold_eq_1d_group_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            initial,
+            extension_settings,
+            &StatePeriodicity::none(),
+        )
+        .expect("cap-limited group extension");
+
+        let common = branch_physical_arclength(&extended[0]).unwrap();
+        assert!(
+            common >= 0.05 && common < 10.05,
+            "expected cap-limited common length, got {common}"
+        );
+        for branch in extended {
+            assert!((branch_physical_arclength(&branch).unwrap() - common).abs() <= 1e-8);
+            let diagnostics = manifold_curve_diagnostics(&branch).expect("group diagnostics");
+            assert_eq!(diagnostics.termination_reason, "group_limit");
+            assert!(!diagnostics.target_reached);
+            assert!((diagnostics.requested_arclength - 10.05).abs() <= 1e-9);
+        }
+    }
+
+    #[test]
+    fn manifold_eq_1d_group_extension_rejects_legacy_partial_catch_up_atomically() {
+        let mut system = build_system(
+            &["1-a*x^2+y", "b*x"],
+            &["x", "y"],
+            &[("a", 1.4), ("b", 0.3)],
+        );
+        let cycle_point = [-0.4758000511750577, 0.2927400153525173];
+        let mut short_settings = henon_two_cycle_stable_settings(0.02);
+        short_settings.direction = ManifoldDirection::Both;
+        let short = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            short_settings,
+        )
+        .expect("short Henon manifold group");
+        let mut long_settings = henon_two_cycle_stable_settings(0.05);
+        long_settings.direction = ManifoldDirection::Both;
+        let long = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            long_settings,
+        )
+        .expect("long Henon manifold group");
+        let legacy_unequal = long
+            .into_iter()
+            .zip(short)
+            .map(|(long_branch, short_branch)| {
+                let (_, phase) = manifold_branch_direction_and_phase(&long_branch).unwrap();
+                if phase == 0 {
+                    long_branch
+                } else {
+                    short_branch
+                }
+            })
+            .collect::<Vec<_>>();
+        let original_lengths = legacy_unequal
+            .iter()
+            .map(|branch| branch_physical_arclength(branch).unwrap())
+            .collect::<Vec<_>>();
+        let mut extension_settings = henon_two_cycle_stable_settings(0.02);
+        extension_settings.direction = ManifoldDirection::Both;
+        extension_settings.bounds = Some(ManifoldBounds {
+            min: vec![cycle_point[0], -0.1427400153525173],
+            max: vec![0.9758000511750549, cycle_point[1]],
+        });
+
+        let error = extend_manifold_eq_1d_group_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            legacy_unequal.clone(),
+            extension_settings,
+            &StatePeriodicity::none(),
+        )
+        .expect_err("legacy short phase must not be partially saved");
+
+        assert!(
+            error.to_string().contains("failed atomically")
+                && error
+                    .to_string()
+                    .contains("raise bounds or point/iteration limits"),
+            "unexpected atomic failure: {error:#}"
+        );
+        assert_eq!(
+            legacy_unequal
+                .iter()
+                .map(|branch| branch_physical_arclength(branch).unwrap())
+                .collect::<Vec<_>>(),
+            original_lengths,
+            "failed group extension must leave the caller's stored geometry untouched"
+        );
     }
 
     #[test]
@@ -11463,7 +11985,7 @@ mod tests {
     }
 
     #[test]
-    fn manifold_eq_1d_map_cycle_branches_propagate_from_representative_curve() {
+    fn manifold_eq_1d_map_cycle_branches_use_phase_local_physical_arclength() {
         let r = 3.5;
         let cycle_point = logistic_period_two_point(r);
         let mut system = build_system(&["r*x*(1-x)"], &["x"], &[("r", r)]);
@@ -11489,8 +12011,8 @@ mod tests {
         )
         .expect("map cycle manifold");
         assert_eq!(branches.len(), 2, "expected one branch per cycle point");
-        let mut rep_branch: Option<&ContinuationBranch> = None;
-        let mut propagated_branch: Option<&ContinuationBranch> = None;
+        let mut phase_zero_branch: Option<&ContinuationBranch> = None;
+        let mut phase_one_branch: Option<&ContinuationBranch> = None;
         for branch in &branches {
             let BranchType::ManifoldEq1D {
                 cycle_point_index, ..
@@ -11499,62 +12021,59 @@ mod tests {
                 panic!("expected 1D manifold branch type");
             };
             match cycle_point_index {
-                Some(0) => rep_branch = Some(branch),
-                Some(1) => propagated_branch = Some(branch),
+                Some(0) => phase_zero_branch = Some(branch),
+                Some(1) => phase_one_branch = Some(branch),
                 _ => {}
             }
         }
-        let rep_branch = rep_branch.expect("missing representative branch");
-        let propagated_branch = propagated_branch.expect("missing propagated branch");
+        let phase_zero_branch = phase_zero_branch.expect("missing phase-zero branch");
+        let phase_one_branch = phase_one_branch.expect("missing phase-one branch");
         assert!(
-            rep_branch.points.len() > 8,
-            "expected representative branch to contain enough points"
+            phase_zero_branch.points.len() > 8 && phase_one_branch.points.len() > 8,
+            "expected both phase-local branches to contain enough points"
         );
-        assert_eq!(
-            rep_branch.points.len(),
-            propagated_branch.points.len(),
-            "propagated branch should preserve representative sampling"
+        let mut mapped_anchor = vec![0.0; 1];
+        system.apply(0.0, &phase_zero_branch.points[0].state, &mut mapped_anchor);
+        assert!(
+            l2_distance(&mapped_anchor, &phase_one_branch.points[0].state) <= 1e-10,
+            "phase-one branch should start at the next cycle point"
         );
-
-        for (rep_point, propagated_point) in rep_branch
-            .points
-            .iter()
-            .zip(propagated_branch.points.iter())
-        {
-            let mut mapped = vec![0.0; rep_point.state.len()];
-            system.apply(0.0, &rep_point.state, &mut mapped);
-            assert!(
-                l2_distance(&mapped, &propagated_point.state) <= 1e-10,
-                "expected cycle phase branch to be one map iterate of representative branch"
-            );
+        let ManifoldGeometry::Curve(phase_zero_geometry) = phase_zero_branch
+            .manifold_geometry
+            .as_ref()
+            .expect("phase-zero geometry")
+        else {
+            panic!("expected curve geometry");
+        };
+        let ManifoldGeometry::Curve(phase_one_geometry) = phase_one_branch
+            .manifold_geometry
+            .as_ref()
+            .expect("phase-one geometry")
+        else {
+            panic!("expected curve geometry");
+        };
+        assert!(phase_zero_geometry.source_arclength.is_none());
+        assert!(phase_one_geometry.source_arclength.is_none());
+        let phase_zero_length = *phase_zero_geometry.arclength.last().unwrap();
+        let phase_one_length = *phase_one_geometry.arclength.last().unwrap();
+        assert!((phase_zero_length - phase_one_length).abs() <= 1e-9);
+        assert!(phase_zero_length <= 0.25 + 1e-10);
+        if phase_zero_length + 1e-10 < 0.25 {
+            for geometry in [phase_zero_geometry, phase_one_geometry] {
+                let diagnostics = geometry
+                    .solver_diagnostics
+                    .as_ref()
+                    .expect("group diagnostics");
+                assert_eq!(diagnostics.termination_reason, "group_limit");
+                assert!(!diagnostics.target_reached);
+                assert!((diagnostics.requested_arclength - 0.25).abs() <= 1e-10);
+                assert!((diagnostics.achieved_arclength - phase_zero_length).abs() <= 1e-9);
+            }
         }
-        let ManifoldGeometry::Curve(rep_geometry) = rep_branch
-            .manifold_geometry
-            .as_ref()
-            .expect("representative geometry")
-        else {
-            panic!("expected curve geometry");
-        };
-        let ManifoldGeometry::Curve(propagated_geometry) = propagated_branch
-            .manifold_geometry
-            .as_ref()
-            .expect("propagated geometry")
-        else {
-            panic!("expected curve geometry");
-        };
-        assert_eq!(
-            propagated_geometry.source_arclength.as_deref(),
-            Some(rep_geometry.arclength.as_slice())
-        );
-        assert_ne!(
-            propagated_geometry.arclength.last(),
-            rep_geometry.arclength.last(),
-            "non-isometric phase propagation should record physical arclength"
-        );
     }
 
     #[test]
-    fn manifold_eq_1d_map_cycle_stable_branches_record_source_and_physical_arclength() {
+    fn manifold_eq_1d_map_cycle_stable_branches_record_equal_physical_arclength() {
         let r = 3.2;
         let cycle_point = logistic_period_two_point(r);
         let mut system = build_system(&["r*x*(1-x)"], &["x"], &[("r", r)]);
@@ -11580,7 +12099,7 @@ mod tests {
         )
         .expect("stable map cycle manifold");
         assert_eq!(branches.len(), 2, "expected one branch per cycle point");
-        let rep_branch = branches
+        let phase_zero_branch = branches
             .iter()
             .find(|branch| {
                 matches!(
@@ -11591,8 +12110,8 @@ mod tests {
                     }
                 )
             })
-            .expect("missing representative branch");
-        let propagated_branch = branches
+            .expect("missing phase-zero branch");
+        let phase_one_branch = branches
             .iter()
             .find(|branch| {
                 matches!(
@@ -11603,34 +12122,33 @@ mod tests {
                     }
                 )
             })
-            .expect("missing propagated branch");
-        assert_eq!(
-            rep_branch.points.len(),
-            propagated_branch.points.len(),
-            "propagated stable branch should preserve representative sampling"
-        );
-        let ManifoldGeometry::Curve(rep_geometry) = rep_branch
+            .expect("missing phase-one branch");
+        let ManifoldGeometry::Curve(phase_zero_geometry) = phase_zero_branch
             .manifold_geometry
             .as_ref()
-            .expect("representative geometry")
+            .expect("phase-zero geometry")
         else {
             panic!("expected curve geometry");
         };
-        let ManifoldGeometry::Curve(propagated_geometry) = propagated_branch
+        let ManifoldGeometry::Curve(phase_one_geometry) = phase_one_branch
             .manifold_geometry
             .as_ref()
-            .expect("propagated geometry")
+            .expect("phase-one geometry")
         else {
             panic!("expected curve geometry");
         };
-        assert_eq!(
-            propagated_geometry.source_arclength.as_deref(),
-            Some(rep_geometry.arclength.as_slice())
+        assert!(phase_zero_geometry.source_arclength.is_none());
+        assert!(phase_one_geometry.source_arclength.is_none());
+        assert!(
+            (phase_zero_geometry.arclength.last().unwrap()
+                - phase_one_geometry.arclength.last().unwrap())
+            .abs()
+                <= 1e-9
         );
         assert_eq!(
-            propagated_geometry.arclength,
+            phase_one_geometry.arclength,
             cumulative_polyline_arclength(
-                &propagated_branch
+                &phase_one_branch
                     .points
                     .iter()
                     .map(|point| point.state.clone())
@@ -11763,6 +12281,232 @@ mod tests {
             ];
             dot(&offset, &stable_direction) > -1e-8
         }));
+    }
+
+    fn assert_henon_cycle_group_has_common_physical_arclength(
+        branches: &[ContinuationBranch],
+        target_arclength: f64,
+    ) {
+        assert_eq!(
+            branches.len(),
+            4,
+            "expected both directions at both cycle phases"
+        );
+        let mut phase_anchors: Vec<Option<Vec<f64>>> = vec![None; 2];
+        for branch in branches {
+            let (_, phase) =
+                manifold_branch_direction_and_phase(branch).expect("directed phase metadata");
+            let achieved = branch
+                .points
+                .last()
+                .map(|point| point.param_value)
+                .expect("cycle branch endpoint");
+            assert!(
+                (achieved - target_arclength).abs() <= 1e-9,
+                "cycle branch ended at {achieved}, expected {target_arclength}: {:?}",
+                branch.branch_type
+            );
+            let ManifoldGeometry::Curve(geometry) = branch
+                .manifold_geometry
+                .as_ref()
+                .expect("cycle curve geometry")
+            else {
+                panic!("expected curve geometry");
+            };
+            assert!(
+                geometry.source_arclength.is_none(),
+                "periodic-map phases must use their own physical arclength"
+            );
+            let diagnostics = geometry
+                .solver_diagnostics
+                .as_ref()
+                .expect("cycle curve diagnostics");
+            assert_eq!(diagnostics.termination_reason, "target_arclength");
+            assert!(diagnostics.target_reached);
+            assert!((diagnostics.achieved_arclength - target_arclength).abs() <= 1e-9);
+            assert!((diagnostics.requested_arclength - target_arclength).abs() <= 1e-9);
+            let Some(ManifoldCurveResumeState::Map { cycle_anchor, .. }) =
+                geometry.resume_state.as_ref()
+            else {
+                panic!("expected phase-local map resume state");
+            };
+            assert!(
+                l2_distance(
+                    cycle_anchor,
+                    &branch.points.first().expect("cycle anchor point").state,
+                ) <= 1e-10,
+                "resume anchor must belong to its own cycle phase"
+            );
+            match phase_anchors[phase].as_ref() {
+                Some(anchor) => assert!(l2_distance(anchor, cycle_anchor) <= 1e-10),
+                None => phase_anchors[phase] = Some(cycle_anchor.clone()),
+            }
+        }
+        let phase_zero = phase_anchors[0].as_ref().expect("phase-one resume anchor");
+        let phase_one = phase_anchors[1].as_ref().expect("phase-two resume anchor");
+        assert!(
+            l2_distance(phase_zero, phase_one) > 1e-3,
+            "cycle phases must not share one representative resume anchor"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_1d_henon_two_cycle_stable_phases_have_equal_physical_arclength() {
+        let mut system = build_system(
+            &["1-a*x^2+y", "b*x"],
+            &["x", "y"],
+            &[("a", 1.4), ("b", 0.3)],
+        );
+        let cycle_point = [-0.4758000511750577, 0.2927400153525173];
+        let mut settings = henon_two_cycle_stable_settings(10.0);
+        settings.direction = ManifoldDirection::Both;
+
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            settings,
+        )
+        .expect("Henon two-cycle stable manifold");
+
+        assert_henon_cycle_group_has_common_physical_arclength(&branches, 10.0);
+    }
+
+    #[test]
+    fn manifold_eq_1d_henon_two_cycle_directed_groups_cover_and_extend_every_phase() {
+        for direction in [ManifoldDirection::Plus, ManifoldDirection::Minus] {
+            let mut system = build_system(
+                &["1-a*x^2+y", "b*x"],
+                &["x", "y"],
+                &[("a", 1.4), ("b", 0.3)],
+            );
+            let cycle_point = [-0.4758000511750577, 0.2927400153525173];
+            let mut initial_settings = henon_two_cycle_stable_settings(0.05);
+            initial_settings.direction = direction;
+            let initial = continue_manifold_eq_1d_with_kind(
+                &mut system,
+                SystemKind::Map { iterations: 2 },
+                &cycle_point,
+                initial_settings,
+            )
+            .expect("directed Henon manifold group");
+
+            assert_eq!(initial.len(), 2, "expected one directed branch per phase");
+            let mut phases = initial
+                .iter()
+                .map(|branch| {
+                    let (stored_direction, phase) =
+                        manifold_branch_direction_and_phase(branch).unwrap();
+                    assert_eq!(stored_direction, direction);
+                    phase
+                })
+                .collect::<Vec<_>>();
+            phases.sort_unstable();
+            assert_eq!(phases, vec![0, 1]);
+
+            let mut extension_settings = henon_two_cycle_stable_settings(0.02);
+            extension_settings.direction = direction;
+            let extended = extend_manifold_eq_1d_group_with_kind_and_periodicity(
+                &mut system,
+                SystemKind::Map { iterations: 2 },
+                initial,
+                extension_settings,
+                &StatePeriodicity::none(),
+            )
+            .expect("directed Henon manifold group extension");
+            assert_eq!(extended.len(), 2);
+            for branch in extended {
+                assert!((branch_physical_arclength(&branch).unwrap() - 0.07).abs() <= 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn manifold_eq_1d_henon_two_cycle_transports_direction_without_phase_sign_flip() {
+        let mut system = build_system(
+            &["1-a*x^2+y", "b*x"],
+            &["x", "y"],
+            &[("a", 1.4), ("b", 0.3)],
+        );
+        let cycle_point = [-0.4758000511750577, 0.2927400153525173];
+        let mut settings = henon_two_cycle_stable_settings(0.02);
+        settings.direction = ManifoldDirection::Both;
+        let source = prepare_manifold_1d_source(
+            &system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            settings.stability,
+            settings.eig_index,
+            &StatePeriodicity::none(),
+        )
+        .expect("prepared Henon cycle source");
+        let phase_sources = map_cycle_phase_sources(&system, &source, 2, &StatePeriodicity::none())
+            .expect("transported phase sources");
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            settings,
+        )
+        .expect("Henon stable cycle branches");
+
+        for branch in branches {
+            let (direction, phase) =
+                manifold_branch_direction_and_phase(&branch).expect("directed phase metadata");
+            let offset = periodic_difference(
+                &branch.points[0].state,
+                &branch.points.last().expect("phase branch endpoint").state,
+                &StatePeriodicity::none(),
+            );
+            let oriented = dot(&offset, &phase_sources[phase].1);
+            match direction {
+                ManifoldDirection::Plus => assert!(
+                    oriented > 0.0,
+                    "plus direction flipped at phase {phase}: {oriented}"
+                ),
+                ManifoldDirection::Minus => assert!(
+                    oriented < 0.0,
+                    "minus direction flipped at phase {phase}: {oriented}"
+                ),
+                ManifoldDirection::Both => panic!("stored branch cannot contain both directions"),
+            }
+        }
+    }
+
+    #[test]
+    fn manifold_eq_1d_henon_two_cycle_unstable_phases_have_equal_physical_arclength() {
+        let mut system = build_system(
+            &["1-a*x^2+y", "b*x"],
+            &["x", "y"],
+            &[("a", 1.4), ("b", 0.3)],
+        );
+        let cycle_point = [-0.4758000511750577, 0.2927400153525173];
+        let settings = Manifold1DSettings {
+            stability: ManifoldStability::Unstable,
+            direction: ManifoldDirection::Both,
+            eig_index: Some(0),
+            eps: 1e-3,
+            target_arclength: 2.0,
+            integration_dt: 1.0,
+            caps: ManifoldTerminationCaps {
+                max_steps: 2_000,
+                max_points: 2_000,
+                max_time: 1.0,
+                max_iterations: Some(64),
+                ..ManifoldTerminationCaps::default()
+            },
+            bounds: None,
+        };
+
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            settings,
+        )
+        .expect("Henon two-cycle unstable manifold");
+
+        assert_henon_cycle_group_has_common_physical_arclength(&branches, 2.0);
     }
 
     #[test]

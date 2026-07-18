@@ -611,7 +611,7 @@ const henonStableRunner = new wasm.WasmEqManifold1DRunner(
   new Float64Array([-0.4758000511750577, 0.2927400153525173]),
   {
     stability: 'Stable',
-    direction: 'Plus',
+    direction: 'Both',
     eig_index: 1,
     eps: 1e-3,
     target_arclength: 10,
@@ -631,27 +631,29 @@ while (!henonStableRunner.get_progress().done) {
   henonStableRunner.run_steps(1);
 }
 const henonStableBranches = henonStableRunner.get_result();
-assert.equal(henonStableBranches.length, 2, 'Expected one stable branch per Henon cycle phase');
+assert.equal(
+  henonStableBranches.length,
+  4,
+  'Expected both stable directions at both Henon cycle phases'
+);
 for (const branch of henonStableBranches) {
   assert.equal(branch.manifold_geometry.solver_diagnostics.termination_reason, 'target_arclength');
   assert.equal(branch.manifold_geometry.solver_diagnostics.target_reached, true);
+  assert.ok(Math.abs(branch.points.at(-1).param_value - 10) <= 1e-9);
+  assert.equal(branch.manifold_geometry.source_arclength, undefined);
 }
-const henonStableRepresentative = henonStableBranches.find(
-  (branch: any) => branch.branch_type.cycle_point_index === 0
-);
-assert.ok(henonStableRepresentative, 'Expected a representative Henon cycle-phase branch');
-const henonStablePointCount = henonStableRepresentative.points.length;
-const henonStableExtensionRunner = new wasm.WasmEqManifold1DExtensionRunner(
+const henonStablePointCounts = henonStableBranches.map((branch: any) => branch.points.length);
+const henonStableExtensionRunner = new wasm.WasmEqManifold1DGroupExtensionRunner(
   ['1-a*x^2+y', 'b*x'],
   new Float64Array([1.4, 0.3]),
   ['a', 'b'],
   ['x', 'y'],
   'map',
   2,
-  henonStableRepresentative,
+  henonStableBranches,
   {
     stability: 'Stable',
-    direction: henonStableRepresentative.branch_type.direction,
+    direction: 'Plus',
     eig_index: 1,
     eps: 1e-3,
     target_arclength: 10,
@@ -667,17 +669,24 @@ const henonStableExtensionRunner = new wasm.WasmEqManifold1DExtensionRunner(
   },
   new Float64Array([0, 0])
 );
+assert.equal(henonStableExtensionRunner.get_progress().max_steps, 4);
 while (!henonStableExtensionRunner.get_progress().done) {
   henonStableExtensionRunner.run_steps(10);
 }
+const henonStableExtensionProgress = henonStableExtensionRunner.get_progress();
+assert.equal(henonStableExtensionProgress.current_step, 4);
+assert.equal(henonStableExtensionProgress.max_steps, 4);
+assert.ok(Math.abs(henonStableExtensionProgress.current_param - 20) <= 1e-8);
 const extendedHenonStable = henonStableExtensionRunner.get_result();
-assert.ok(extendedHenonStable.points.length > henonStablePointCount);
-assert.equal(
-  extendedHenonStable.manifold_geometry.solver_diagnostics.termination_reason,
-  'target_arclength'
-);
-assert.equal(extendedHenonStable.manifold_geometry.solver_diagnostics.target_reached, true);
-assert.equal(extendedHenonStable.manifold_geometry.solver_diagnostics.extension_count, 1);
+assert.equal(extendedHenonStable.length, 4);
+for (let index = 0; index < extendedHenonStable.length; index += 1) {
+  const branch = extendedHenonStable[index];
+  assert.ok(branch.points.length > henonStablePointCounts[index]);
+  assert.ok(Math.abs(branch.points.at(-1).param_value - 20) <= 1e-8);
+  assert.equal(branch.manifold_geometry.solver_diagnostics.termination_reason, 'target_arclength');
+  assert.equal(branch.manifold_geometry.solver_diagnostics.target_reached, true);
+  assert.equal(branch.manifold_geometry.solver_diagnostics.extension_count, 1);
+}
 
 const storedBranch = manifoldBranches[0];
 const storedPointCount = storedBranch.points.length;

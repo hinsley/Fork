@@ -6,6 +6,7 @@
 
 import inquirer from 'inquirer';
 import chalk from 'chalk';
+import { randomUUID } from 'node:crypto';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
 import { configForObject } from '../expression-context';
@@ -34,6 +35,7 @@ import {
   runContinuationExtensionWithProgress,
   runForcedPeriodicResponseContinuationWithProgress,
   runEquilibriumManifold1DExtensionWithProgress,
+  runEquilibriumManifold1DGroupExtensionWithProgress,
   runManifold2DExtensionWithProgress
 } from './progress';
 import {
@@ -48,7 +50,62 @@ type ManifoldEq1DBranchMetadata = {
   direction: ManifoldDirection;
   eig_index: number;
   map_iterations?: number;
+  cycle_point_index?: number;
 };
+
+function resolvePeriodicMapManifoldGroup(
+  sysName: string,
+  source: ContinuationObject
+): { branches: ContinuationObject[]; groupId: string } {
+  const stored = Storage.listBranches(sysName, source.parentObject)
+    .map(name => Storage.loadBranch(sysName, source.parentObject, name) as ContinuationObject)
+    .filter(candidate => candidate.branchType === 'eq_manifold_1d');
+  if (source.manifoldGroupId) {
+    const branches = stored.filter(
+      candidate => candidate.manifoldGroupId === source.manifoldGroupId
+    );
+    if (branches.length === 0) {
+      throw new Error('The selected manifold group contains no stored branches.');
+    }
+    return { branches, groupId: source.manifoldGroupId };
+  }
+
+  const sourceMatch = /^(.*)_p(\d+)_(plus|minus)$/.exec(source.name);
+  const sourceMetadata = source.data.branch_type as ManifoldEq1DBranchMetadata | undefined;
+  if (!sourceMatch || sourceMetadata?.type !== 'ManifoldEq1D') {
+    throw new Error(
+      'This legacy cycle manifold has no group metadata and its siblings cannot be identified. Rebuild the manifold group.'
+    );
+  }
+  const baseName = sourceMatch[1];
+  const iterations = source.mapIterations ?? sourceMetadata.map_iterations;
+  const branches = stored
+    .filter(candidate => {
+      const match = /^(.*)_p(\d+)_(plus|minus)$/.exec(candidate.name);
+      const metadata = candidate.data.branch_type as ManifoldEq1DBranchMetadata | undefined;
+      return (
+        match?.[1] === baseName &&
+        metadata?.type === 'ManifoldEq1D' &&
+        metadata.stability === sourceMetadata.stability &&
+        metadata.eig_index === sourceMetadata.eig_index &&
+        (candidate.mapIterations ?? metadata.map_iterations) === iterations &&
+        JSON.stringify(candidate.params ?? []) === JSON.stringify(source.params ?? [])
+      );
+    })
+    .sort((left, right) => {
+      const leftMetadata = left.data.branch_type as ManifoldEq1DBranchMetadata;
+      const rightMetadata = right.data.branch_type as ManifoldEq1DBranchMetadata;
+      const phaseOrder =
+        (leftMetadata.cycle_point_index ?? 0) - (rightMetadata.cycle_point_index ?? 0);
+      return phaseOrder !== 0
+        ? phaseOrder
+        : leftMetadata.direction.localeCompare(rightMetadata.direction);
+    });
+  if (branches.length === 0) {
+    throw new Error('The legacy cycle manifold group is incomplete. Rebuild it before extending.');
+  }
+  return { branches, groupId: randomUUID() };
+}
 
 export function supportsContinuationBranchExtension(
   branchType: ContinuationObject['branchType']
@@ -208,6 +265,47 @@ async function extendEquilibriumManifold1D(
       sysConfig.type === 'map'
         ? branch.mapIterations ?? metadata.map_iterations ?? 1
         : 1;
+    if (sysConfig.type === 'map' && mapIterations > 1) {
+      const group = resolvePeriodicMapManifoldGroup(sysName, branch);
+      const updatedDataList = runEquilibriumManifold1DGroupExtensionWithProgress(
+        bridge,
+        group.branches.map(candidate => serializeBranchDataForWasm(candidate.data)),
+        settings,
+        'Manifold Group Extension',
+        mapIterations
+      );
+      if (updatedDataList.length !== group.branches.length) {
+        throw new Error('The manifold extension returned an incomplete branch group.');
+      }
+      const timestamp = new Date().toISOString();
+      let madeProgress = false;
+      let selectedBranch: ContinuationObject | undefined;
+      const updatedBranches = group.branches.map((candidate, index) => {
+        const normalized = normalizeBranchEigenvalues(updatedDataList[index]);
+        madeProgress ||= normalized.points.length > candidate.data.points.length;
+        const updated = {
+          ...candidate,
+          data: normalized,
+          settings: { ...settings, direction: (candidate.data.branch_type as ManifoldEq1DBranchMetadata).direction },
+          manifoldGroupId: group.groupId,
+          timestamp
+        };
+        if (candidate.name === branch.name) selectedBranch = updated;
+        return updated;
+      });
+      if (!madeProgress) {
+        throw new Error('No new points were produced. Increase the applicable limits.');
+      }
+      Storage.saveBranchesAtomically(sysName, branch.parentObject, updatedBranches);
+      if (!selectedBranch) {
+        throw new Error('The selected branch is missing from its manifold group.');
+      }
+      printSuccess(
+        `Manifold group extension successful! Updated ${updatedBranches.length} branches.`
+      );
+      return await inspectBranch(sysName, selectedBranch);
+    }
+
     const previousPointCount = branch.data.points.length;
     const updatedData = runEquilibriumManifold1DExtensionWithProgress(
       bridge,
