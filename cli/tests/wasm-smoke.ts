@@ -601,6 +601,42 @@ for (const branch of manifoldBranches) {
   assert.equal(branch.manifold_geometry.solver_diagnostics.target_reached, true);
 }
 
+const henonStableRunner = new wasm.WasmEqManifold1DRunner(
+  ['1-a*x^2+y', 'b*x'],
+  new Float64Array([1.4, 0.3]),
+  ['a', 'b'],
+  ['x', 'y'],
+  'map',
+  2,
+  new Float64Array([-0.4758000511750577, 0.2927400153525173]),
+  {
+    stability: 'Stable',
+    direction: 'Plus',
+    eig_index: 1,
+    eps: 1e-3,
+    target_arclength: 0.05,
+    integration_dt: 1,
+    caps: {
+      max_steps: 2000,
+      max_points: 2000,
+      max_rings: 1,
+      max_vertices: 1,
+      max_time: 1,
+      max_iterations: 64,
+    },
+  },
+  new Float64Array([0, 0])
+);
+while (!henonStableRunner.get_progress().done) {
+  henonStableRunner.run_steps(1);
+}
+const henonStableBranches = henonStableRunner.get_result();
+assert.equal(henonStableBranches.length, 2, 'Expected one stable branch per Henon cycle phase');
+for (const branch of henonStableBranches) {
+  assert.equal(branch.manifold_geometry.solver_diagnostics.termination_reason, 'target_arclength');
+  assert.equal(branch.manifold_geometry.solver_diagnostics.target_reached, true);
+}
+
 const storedBranch = manifoldBranches[0];
 const storedPointCount = storedBranch.points.length;
 const manifoldExtensionRunner = new wasm.WasmEqManifold1DExtensionRunner(

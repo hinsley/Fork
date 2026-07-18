@@ -8535,14 +8535,14 @@ fn grow_map_manifold_domain(
                 } else if let (Some(prev_q), Some(prev_mapped)) =
                     (previous_q.as_ref(), previous_mapped.as_ref())
                 {
-                    let offset = periodic_difference(prev_q, q, periodicity);
-                    let mut guess = prev_mapped
-                        .iter()
-                        .zip(offset.iter())
-                        .map(|(value, delta)| value + delta)
-                        .collect::<Vec<_>>();
-                    periodicity.wrap_state(&mut guess);
-                    guess
+                    predict_map_preimage(
+                        system,
+                        q,
+                        prev_q,
+                        prev_mapped,
+                        map_step_iterations,
+                        periodicity,
+                    )?
                 } else {
                     domain_samples.last().cloned().unwrap_or_else(|| q.clone())
                 };
@@ -8776,34 +8776,31 @@ fn build_map_manifold_curve(
     let step_limit = caps.max_iterations.unwrap_or(caps.max_steps);
     let domain_subdivisions = ((max_points as f64).sqrt().round() as usize).clamp(8, 32);
 
-    let domain_end = match stability {
-        ManifoldStability::Unstable => {
-            apply_map_iterates_with_periodicity(system, seed, map_step_iterations, periodicity)
-                .ok_or_else(|| anyhow!("Map manifold initial image is non-finite."))?
-        }
-        ManifoldStability::Stable => {
-            let preimage = solve_map_preimage_newton(
-                system,
-                seed,
-                representative_point,
-                representative_point,
-                representative_point,
-                map_step_iterations,
-                periodicity,
-            )?;
-            preimage.ok_or_else(|| {
-                anyhow!("Stable map manifold could not construct its initial inverse domain.")
-            })?
-        }
+    let mapped_seed =
+        apply_map_iterates_with_periodicity(system, seed, map_step_iterations, periodicity)
+            .ok_or_else(|| anyhow!("Map manifold initial image is non-finite."))?;
+    // Keep `eps` as the outer local scale on a stable branch.  The forward
+    // image is the inner endpoint, so the initial domain is exact without a
+    // potentially nonlocal inverse solve (especially for a doubled return).
+    let (domain_start, domain_end) = match stability {
+        ManifoldStability::Unstable => (seed.to_vec(), mapped_seed),
+        ManifoldStability::Stable => (mapped_seed, seed.to_vec()),
     };
-    if domain_end.iter().any(|value| !value.is_finite()) {
+    if domain_start.iter().any(|value| !value.is_finite())
+        || domain_end.iter().any(|value| !value.is_finite())
+    {
         bail!("Map manifold initial fundamental domain is non-finite.");
     }
 
     let mut domain_samples = Vec::with_capacity(domain_subdivisions + 1);
     for sub in 0..=domain_subdivisions {
         let alpha = (sub as f64) / (domain_subdivisions as f64);
-        domain_samples.push(periodic_lerp(seed, &domain_end, alpha, periodicity));
+        domain_samples.push(periodic_lerp(
+            &domain_start,
+            &domain_end,
+            alpha,
+            periodicity,
+        ));
     }
     let initial_domain_arc = polyline_arclength(&domain_samples, periodicity);
     let mut spacing_target = if target > 0.0 && max_points > 2 {
@@ -8822,25 +8819,25 @@ fn build_map_manifold_curve(
 
     let mut anchor = representative_point.to_vec();
     periodicity.wrap_state(&mut anchor);
-    let mut seed = seed.to_vec();
-    periodicity.wrap_state(&mut seed);
+    let mut domain_start = domain_start;
+    periodicity.wrap_state(&mut domain_start);
     let mut points = vec![anchor.clone()];
     let mut arclength = vec![0.0];
     if let Some(box_bounds) = bounds {
-        if !inside_bounds(&anchor, box_bounds) || !inside_bounds(&seed, box_bounds) {
+        if !inside_bounds(&anchor, box_bounds) || !inside_bounds(&domain_start, box_bounds) {
             bail!("Map manifold source or local seed lies outside configured bounds.");
         }
     }
-    let seed_arc = periodic_l2_distance(&anchor, &seed, periodicity);
+    let seed_arc = periodic_l2_distance(&anchor, &domain_start, periodicity);
     if target <= seed_arc && seed_arc > NORM_EPS {
         points.push(periodic_lerp(
             &anchor,
-            &seed,
+            &domain_start,
             target / seed_arc,
             periodicity,
         ));
         arclength.push(target);
-        let mut pending_points = vec![anchor.clone(), seed.clone()];
+        let mut pending_points = vec![anchor.clone(), domain_start.clone()];
         pending_points.extend(domain_samples.iter().skip(1).cloned());
         return Ok(map_curve_solve(
             points,
@@ -8866,7 +8863,7 @@ fn build_map_manifold_curve(
             )),
         ));
     }
-    points.push(seed);
+    points.push(domain_start);
     arclength.push(seed_arc);
     let mut cumulative_arc = seed_arc;
     let mut map_growth_steps = 0usize;
@@ -9005,14 +9002,14 @@ fn build_map_manifold_curve(
                     } else if let (Some(prev_q), Some(prev_mapped)) =
                         (previous_q.as_ref(), previous_mapped.as_ref())
                     {
-                        let offset = periodic_difference(prev_q, q, periodicity);
-                        let mut guess = prev_mapped
-                            .iter()
-                            .zip(offset.iter())
-                            .map(|(value, delta)| value + delta)
-                            .collect::<Vec<_>>();
-                        periodicity.wrap_state(&mut guess);
-                        guess
+                        predict_map_preimage(
+                            system,
+                            q,
+                            prev_q,
+                            prev_mapped,
+                            map_step_iterations,
+                            periodicity,
+                        )?
                     } else {
                         domain_samples.last().cloned().unwrap_or_else(|| q.clone())
                     };
@@ -9662,6 +9659,37 @@ fn solve_map_preimage_newton(
     }
 }
 
+fn predict_map_preimage(
+    system: &EquationSystem,
+    target: &[f64],
+    previous_target: &[f64],
+    previous_preimage: &[f64],
+    map_iterations: usize,
+    periodicity: &StatePeriodicity,
+) -> Result<Vec<f64>> {
+    // A stable return can be strongly contracting, so copying the target step
+    // into state space is a poor continuation predictor.  Transport it through
+    // the local inverse derivative at the last converged preimage instead.
+    let target_step = periodic_difference(previous_target, target, periodicity);
+    let jacobian = compute_system_jacobian_with_periodicity(
+        system,
+        SystemKind::Map {
+            iterations: map_iterations.max(1),
+        },
+        previous_preimage,
+        periodicity,
+    )?;
+    let preimage_step =
+        solve_dense_linear_system(target.len(), &jacobian, &target_step).unwrap_or(target_step);
+    let mut guess = previous_preimage
+        .iter()
+        .zip(preimage_step.iter())
+        .map(|(value, delta)| value + delta)
+        .collect::<Vec<_>>();
+    periodicity.wrap_state(&mut guess);
+    Ok(guess)
+}
+
 fn solve_dense_linear_system(dim: usize, matrix: &[f64], rhs: &[f64]) -> Option<Vec<f64>> {
     if dim == 0 {
         return Some(Vec::new());
@@ -10031,6 +10059,25 @@ mod tests {
         settings
     }
 
+    fn henon_two_cycle_stable_settings(target_arclength: f64) -> Manifold1DSettings {
+        Manifold1DSettings {
+            stability: ManifoldStability::Stable,
+            direction: ManifoldDirection::Plus,
+            eig_index: Some(1),
+            eps: 1e-3,
+            target_arclength,
+            integration_dt: 1.0,
+            caps: ManifoldTerminationCaps {
+                max_steps: 2_000,
+                max_points: 2_000,
+                max_time: 1.0,
+                max_iterations: Some(64),
+                ..ManifoldTerminationCaps::default()
+            },
+            bounds: None,
+        }
+    }
+
     fn assert_extension_matches_one_shot(
         extended: &ContinuationBranch,
         one_shot: &ContinuationBranch,
@@ -10220,6 +10267,61 @@ mod tests {
         .unwrap()
         .remove(0);
         assert_extension_matches_one_shot(&extended, &one_shot, 1e-9);
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_matches_one_shot_henon_two_cycle_stable_manifold() {
+        let mut system = build_system(
+            &["1-a*x^2+y", "b*x"],
+            &["x", "y"],
+            &[("a", 1.4), ("b", 0.3)],
+        );
+        let cycle_point = [-0.4758000511750577, 0.2927400153525173];
+        let initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            henon_two_cycle_stable_settings(0.02),
+        )
+        .expect("initial Henon stable manifold")
+        .into_iter()
+        .find(|branch| {
+            matches!(
+                branch.branch_type,
+                BranchType::ManifoldEq1D {
+                    cycle_point_index: Some(0),
+                    ..
+                }
+            )
+        })
+        .expect("representative cycle-phase branch");
+        let extended = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            initial,
+            henon_two_cycle_stable_settings(0.03),
+            &StatePeriodicity::none(),
+        )
+        .expect("extended Henon stable manifold");
+        let one_shot = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            henon_two_cycle_stable_settings(0.05),
+        )
+        .expect("one-shot Henon stable manifold")
+        .into_iter()
+        .find(|branch| {
+            matches!(
+                branch.branch_type,
+                BranchType::ManifoldEq1D {
+                    cycle_point_index: Some(0),
+                    ..
+                }
+            )
+        })
+        .expect("representative one-shot cycle-phase branch");
+        assert_extension_matches_one_shot(&extended, &one_shot, 1e-8);
     }
 
     #[test]
@@ -11375,6 +11477,60 @@ mod tests {
             nonzero.iter().all(|value| value.signum() == sign),
             "directed half-branch crossed the fixed point: {nonzero:?}"
         );
+    }
+
+    #[test]
+    fn manifold_eq_1d_henon_two_cycle_negative_stable_multiplier_grows_locally() {
+        let mut system = build_system(
+            &["1-a*x^2+y", "b*x"],
+            &["x", "y"],
+            &[("a", 1.4), ("b", 0.3)],
+        );
+        let cycle_point = [-0.4758000511750577, 0.2927400153525173];
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            henon_two_cycle_stable_settings(0.05),
+        )
+        .expect("Henon two-cycle stable manifold");
+
+        assert_eq!(branches.len(), 2, "expected one branch per cycle phase");
+        let representative = branches
+            .iter()
+            .find(|branch| {
+                matches!(
+                    branch.branch_type,
+                    BranchType::ManifoldEq1D {
+                        cycle_point_index: Some(0),
+                        ..
+                    }
+                )
+            })
+            .expect("representative cycle-phase branch");
+        let ManifoldGeometry::Curve(geometry) = representative
+            .manifold_geometry
+            .as_ref()
+            .expect("curve geometry")
+        else {
+            panic!("expected curve geometry");
+        };
+        let diagnostics = geometry
+            .solver_diagnostics
+            .as_ref()
+            .expect("solver diagnostics");
+        assert_eq!(diagnostics.termination_reason, "target_arclength");
+        assert!(diagnostics.target_reached);
+        assert!((diagnostics.achieved_arclength - 0.05).abs() <= 1e-10);
+
+        let stable_direction = [-0.636578, 0.77121232];
+        assert!(representative.points.iter().skip(1).all(|point| {
+            let offset = [
+                point.state[0] - cycle_point[0],
+                point.state[1] - cycle_point[1],
+            ];
+            dot(&offset, &stable_direction) > -1e-8
+        }));
     }
 
     #[test]

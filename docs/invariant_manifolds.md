@@ -109,13 +109,15 @@ The 1D workflow computes a trajectory branch seeded from the equilibrium along a
     - stable manifold uses reversed flow internally
   - Map systems:
     - for `mapIterations = n`, solve a representative branch on the `n`-iterate map `F^n`
-    - unstable manifold growth uses forward `F^n` mapping
-    - stable manifold growth uses inverse-map stepping on `F^n` via Newton preimages
-      - solve `F^n(y) = x_k` for `y`
-      - use Jacobian of `F^n` in the Newton solve
+    - define the effective return `G = F^n` for positive multipliers and `G = F^(2n)` for negative multipliers
+    - unstable manifold growth uses forward `G` mapping
+    - stable initialization uses the exact local domain from `G(x_seed)` to `x_seed`, keeping `eps` as the outer local scale without an initial inverse solve
+    - stable manifold growth uses inverse-map stepping on `G` via Newton preimages
+      - solve `G(y) = x_k` for `y`
+      - transport target steps through the local inverse Jacobian for continuation prediction, then use the Jacobian of `G` in the damped Newton correction
     - emit additional cycle-phase branches by forward propagation of the representative curve phase-by-phase (`p0 -> p1 -> ...`), equivalent to `F^k` at phase `k`
     - cycle-phase branches store their own physical arclength in `param_value`; `source_arclength` preserves correspondence to the representative samples
-    - negative multipliers use `F^(2n)` growth for each directed half-branch so `Plus` and `Minus` do not alternate and overlap
+    - the doubled return for negative multipliers keeps `Plus` and `Minus` as distinct directed half-branches
     - mapped fundamental-domain samples are adaptively refined (spacing + turn/curvature checks) before appending branch points
 - Directed modes:
   - `Both` computes `Plus` and `Minus`
