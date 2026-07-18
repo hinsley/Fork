@@ -4189,6 +4189,7 @@ function buildSceneTraces(
     if (!node || node.kind !== 'branch' || !isNodeEffectivelyVisible(system.nodes, nodeId)) continue
     const branch = system.branches[nodeId]
     if (!branch || branch.data.points.length === 0) continue
+    if (isTimeSeries && branch.branchType === 'equilibrium') continue
 
     const indices = ensureBranchIndices(branch.data)
     const order = buildSortedArrayOrder(indices)

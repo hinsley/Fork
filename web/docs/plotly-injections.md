@@ -144,7 +144,8 @@ maps use the existing cobweb builder. Selecting a forced-response branch point o
 - `web/src/ui/ViewportPanel.tsx`: Scene branch rendering policy for continuation
   objects:
   - equilibrium and codim-1 bifurcation curves render as `lines` (no per-point
-    markers);
+    markers) in state-space projections; equilibrium branches are omitted from
+    1-axis flow time-series scenes because continuation indices are not time;
   - invariant manifold branches render from persisted `manifold_geometry`:
     `eq_manifold_1d` as line traces, and `eq_manifold_2d` /
     `cycle_manifold_2d` as per-ring closed line traces in both 3-axis and
