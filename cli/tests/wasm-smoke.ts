@@ -614,7 +614,7 @@ const henonStableRunner = new wasm.WasmEqManifold1DRunner(
     direction: 'Plus',
     eig_index: 1,
     eps: 1e-3,
-    target_arclength: 0.05,
+    target_arclength: 10,
     integration_dt: 1,
     caps: {
       max_steps: 2000,
@@ -636,6 +636,48 @@ for (const branch of henonStableBranches) {
   assert.equal(branch.manifold_geometry.solver_diagnostics.termination_reason, 'target_arclength');
   assert.equal(branch.manifold_geometry.solver_diagnostics.target_reached, true);
 }
+const henonStableRepresentative = henonStableBranches.find(
+  (branch: any) => branch.branch_type.cycle_point_index === 0
+);
+assert.ok(henonStableRepresentative, 'Expected a representative Henon cycle-phase branch');
+const henonStablePointCount = henonStableRepresentative.points.length;
+const henonStableExtensionRunner = new wasm.WasmEqManifold1DExtensionRunner(
+  ['1-a*x^2+y', 'b*x'],
+  new Float64Array([1.4, 0.3]),
+  ['a', 'b'],
+  ['x', 'y'],
+  'map',
+  2,
+  henonStableRepresentative,
+  {
+    stability: 'Stable',
+    direction: henonStableRepresentative.branch_type.direction,
+    eig_index: 1,
+    eps: 1e-3,
+    target_arclength: 10,
+    integration_dt: 1,
+    caps: {
+      max_steps: 2000,
+      max_points: 20000,
+      max_rings: 1,
+      max_vertices: 1,
+      max_time: 1,
+      max_iterations: 2000,
+    },
+  },
+  new Float64Array([0, 0])
+);
+while (!henonStableExtensionRunner.get_progress().done) {
+  henonStableExtensionRunner.run_steps(10);
+}
+const extendedHenonStable = henonStableExtensionRunner.get_result();
+assert.ok(extendedHenonStable.points.length > henonStablePointCount);
+assert.equal(
+  extendedHenonStable.manifold_geometry.solver_diagnostics.termination_reason,
+  'target_arclength'
+);
+assert.equal(extendedHenonStable.manifold_geometry.solver_diagnostics.target_reached, true);
+assert.equal(extendedHenonStable.manifold_geometry.solver_diagnostics.extension_count, 1);
 
 const storedBranch = manifoldBranches[0];
 const storedPointCount = storedBranch.points.length;

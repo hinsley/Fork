@@ -8454,6 +8454,8 @@ fn build_map_manifold_extension(
             max_points.saturating_sub(points.len()).max(2),
             settings.bounds.as_ref(),
             periodicity,
+            (stability == ManifoldStability::Stable && target > cumulative)
+                .then_some(target - cumulative),
         )? {
             MapDomainGrowth::Accepted(mut next_domain) => {
                 if let Some(first) = next_domain.first_mut() {
@@ -8466,6 +8468,41 @@ fn build_map_manifold_extension(
                 });
                 state.growth_iterations += 1;
                 growth_steps += 1;
+            }
+            MapDomainGrowth::TargetReached {
+                active_domain,
+                mut output_points,
+            } => {
+                if let Some(first) = output_points.first_mut() {
+                    *first = current_endpoint;
+                }
+                let final_output_index = output_points.len().saturating_sub(1);
+                for (index, point) in output_points.iter().enumerate().skip(1) {
+                    let previous = points.last().cloned().unwrap_or_else(|| point.clone());
+                    cumulative += periodic_l2_distance(&previous, point, periodicity);
+                    points.push(point.clone());
+                    arclength.push(if index == final_output_index {
+                        target
+                    } else {
+                        cumulative
+                    });
+                }
+                state.active_domain = active_domain;
+                state.pending_points = None;
+                state.cursor = None;
+                state.growth_iterations += 1;
+                growth_steps += 1;
+                return Ok(map_extension_solve(
+                    points,
+                    arclength,
+                    target,
+                    "target_arclength".to_string(),
+                    None,
+                    true,
+                    growth_steps,
+                    preimage_failures,
+                    &state,
+                ));
             }
             MapDomainGrowth::Stopped { reason, detail } => {
                 if reason == "preimage_failed" {
@@ -8493,6 +8530,10 @@ fn build_map_manifold_extension(
 
 enum MapDomainGrowth {
     Accepted(Vec<Vec<f64>>),
+    TargetReached {
+        active_domain: Vec<Vec<f64>>,
+        output_points: Vec<Vec<f64>>,
+    },
     Stopped {
         reason: String,
         detail: Option<String>,
@@ -8509,16 +8550,20 @@ fn grow_map_manifold_domain(
     max_domain_samples: usize,
     bounds: Option<&ManifoldBounds>,
     periodicity: &StatePeriodicity,
+    output_arclength_limit: Option<f64>,
 ) -> Result<MapDomainGrowth> {
-    let mut next_samples = Vec::with_capacity(domain_samples.len());
+    let mut next_samples: Vec<Vec<f64>> = Vec::with_capacity(domain_samples.len());
     let mut previous_q: Option<Vec<f64>> = None;
     let mut previous_mapped: Option<Vec<f64>> = None;
-    for (sample_index, q) in domain_samples.iter().enumerate() {
+    let mut output_arclength = 0.0;
+    let mut sample_index = 0usize;
+    while sample_index < domain_samples.len() {
+        let q = domain_samples[sample_index].clone();
         let mapped = match stability {
             ManifoldStability::Unstable => {
                 let Some(value) = apply_map_iterates_with_periodicity(
                     system,
-                    q,
+                    &q,
                     map_step_iterations,
                     periodicity,
                 ) else {
@@ -8537,7 +8582,7 @@ fn grow_map_manifold_domain(
                 {
                     predict_map_preimage(
                         system,
-                        q,
+                        &q,
                         prev_q,
                         prev_mapped,
                         map_step_iterations,
@@ -8548,7 +8593,7 @@ fn grow_map_manifold_domain(
                 };
                 let Some(value) = solve_map_preimage_newton(
                     system,
-                    q,
+                    &q,
                     &guess,
                     cycle_anchor,
                     cycle_anchor,
@@ -8556,9 +8601,24 @@ fn grow_map_manifold_domain(
                     periodicity,
                 )?
                 else {
+                    if sample_index > 0 && domain_samples.len() < max_domain_samples {
+                        let previous_target = &domain_samples[sample_index - 1];
+                        let target_step = periodic_l2_distance(previous_target, &q, periodicity);
+                        let minimum_step = 1e-12 * (1.0 + l2_norm(&q));
+                        if target_step > minimum_step {
+                            domain_samples.insert(
+                                sample_index,
+                                periodic_lerp(previous_target, &q, 0.5, periodicity),
+                            );
+                            continue;
+                        }
+                    }
                     return Ok(MapDomainGrowth::Stopped {
                         reason: "preimage_failed".to_string(),
-                        detail: Some("map preimage solve failed during extension".to_string()),
+                        detail: Some(format!(
+                            "map preimage continuation failed at fundamental-domain sample {}",
+                            sample_index
+                        )),
                     });
                 };
                 value
@@ -8578,9 +8638,75 @@ fn grow_map_manifold_domain(
                 });
             }
         }
-        previous_q = Some(q.clone());
+        if stability == ManifoldStability::Stable && sample_index > 0 {
+            if let (Some(limit), Some(previous_output)) =
+                (output_arclength_limit, next_samples.last())
+            {
+                let step_arc = periodic_l2_distance(previous_output, &mapped, periodicity);
+                if !step_arc.is_finite() {
+                    return Ok(MapDomainGrowth::Stopped {
+                        reason: "non_finite_image".to_string(),
+                        detail: Some(
+                            "map preimage continuation produced non-finite arclength".to_string(),
+                        ),
+                    });
+                }
+                if output_arclength + step_arc >= limit && step_arc > NORM_EPS {
+                    let fraction = ((limit - output_arclength) / step_arc).clamp(0.0, 1.0);
+                    let target_point =
+                        periodic_lerp(previous_output, &mapped, fraction, periodicity);
+                    let Some(target_image) = apply_map_iterates_with_periodicity(
+                        system,
+                        &target_point,
+                        map_step_iterations,
+                        periodicity,
+                    ) else {
+                        return Ok(MapDomainGrowth::Stopped {
+                            reason: "non_finite_image".to_string(),
+                            detail: Some(
+                                "map image of the truncated stable domain was non-finite"
+                                    .to_string(),
+                            ),
+                        });
+                    };
+                    // The requested endpoint lies inside this inverse-grown
+                    // domain. Preserve the unused source suffix, append the
+                    // accepted inverse prefix, and close the rolled domain
+                    // exactly with G(target_point) = target_image. The next
+                    // extension can therefore resume locally instead of
+                    // solving the remote end of the discarded inverse domain.
+                    let mut active_domain = vec![target_image.clone()];
+                    let suffix_start = if periodic_l2_distance(
+                        &target_image,
+                        &domain_samples[sample_index],
+                        periodicity,
+                    ) <= NORM_EPS
+                    {
+                        sample_index + 1
+                    } else {
+                        sample_index
+                    };
+                    active_domain.extend(domain_samples.iter().skip(suffix_start).cloned());
+                    active_domain.extend(next_samples.iter().skip(1).cloned());
+                    if active_domain.last().is_none_or(|point| {
+                        periodic_l2_distance(point, &target_point, periodicity) > NORM_EPS
+                    }) {
+                        active_domain.push(target_point.clone());
+                    }
+                    let mut output_points = next_samples;
+                    output_points.push(target_point);
+                    return Ok(MapDomainGrowth::TargetReached {
+                        active_domain,
+                        output_points,
+                    });
+                }
+                output_arclength += step_arc;
+            }
+        }
+        previous_q = Some(q);
         previous_mapped = Some(mapped.clone());
         next_samples.push(mapped);
+        sample_index += 1;
     }
     let max_domain_samples = max_domain_samples.max(next_samples.len());
     refine_map_domain_samples(
@@ -8976,118 +9102,87 @@ fn build_map_manifold_curve(
             break;
         }
 
-        let mut next_samples = Vec::with_capacity(domain_samples.len());
-        let mut previous_q: Option<Vec<f64>> = None;
-        let mut previous_mapped: Option<Vec<f64>> = None;
-        let mut failed = false;
-
-        for (sample_index, q) in domain_samples.iter().enumerate() {
-            let mapped = match stability {
-                ManifoldStability::Unstable => {
-                    let Some(value) = apply_map_iterates_with_periodicity(
-                        system,
-                        q,
-                        map_step_iterations,
-                        periodicity,
-                    ) else {
-                        failed = true;
-                        termination_reason = "non_finite_image".to_string();
-                        break;
-                    };
-                    value
+        let remaining_room = max_points.saturating_sub(points.len());
+        let base_add = domain_samples.len().saturating_sub(1);
+        let extra_capacity = remaining_room.saturating_sub(base_add);
+        let max_domain_samples = domain_samples
+            .len()
+            .saturating_add(extra_capacity.min(MAP_DOMAIN_MAX_INSERTIONS_PER_PASS * 2));
+        let mut next_samples = match grow_map_manifold_domain(
+            system,
+            &mut domain_samples,
+            representative_point,
+            stability,
+            map_step_iterations,
+            spacing_target,
+            max_domain_samples,
+            bounds,
+            periodicity,
+            (stability == ManifoldStability::Stable && target > cumulative_arc)
+                .then_some(target - cumulative_arc),
+        )? {
+            MapDomainGrowth::Accepted(next_samples) => next_samples,
+            MapDomainGrowth::TargetReached {
+                active_domain,
+                mut output_points,
+            } => {
+                if let (Some(first), Some(current)) = (output_points.first_mut(), points.last()) {
+                    *first = current.clone();
                 }
-                ManifoldStability::Stable => {
-                    let guess = if sample_index == 0 {
-                        domain_samples.last().cloned().unwrap_or_else(|| q.clone())
-                    } else if let (Some(prev_q), Some(prev_mapped)) =
-                        (previous_q.as_ref(), previous_mapped.as_ref())
-                    {
-                        predict_map_preimage(
-                            system,
-                            q,
-                            prev_q,
-                            prev_mapped,
-                            map_step_iterations,
-                            periodicity,
-                        )?
+                let final_output_index = output_points.len().saturating_sub(1);
+                for (index, point) in output_points.iter().enumerate().skip(1) {
+                    let previous = points.last().cloned().unwrap_or_else(|| point.clone());
+                    cumulative_arc += periodic_l2_distance(&previous, point, periodicity);
+                    points.push(point.clone());
+                    arclength.push(if index == final_output_index {
+                        target
                     } else {
-                        domain_samples.last().cloned().unwrap_or_else(|| q.clone())
-                    };
-                    let preimage = solve_map_preimage_newton(
-                        system,
-                        q,
-                        &guess,
-                        representative_point,
-                        representative_point,
-                        map_step_iterations,
-                        periodicity,
-                    )?;
-                    let Some(value) = preimage else {
-                        failed = true;
-                        termination_reason = "preimage_failed".to_string();
-                        break;
-                    };
-                    value
+                        cumulative_arc
+                    });
                 }
-            };
-
-            if mapped.iter().any(|value| !value.is_finite()) {
-                failed = true;
+                return Ok(map_curve_solve(
+                    points,
+                    arclength,
+                    target,
+                    "target_arclength",
+                    None,
+                    true,
+                    map_growth_steps,
+                    source_correction_norm,
+                    least_period,
+                    Some(map_resume_state(
+                        &anchor,
+                        active_domain,
+                        None,
+                        None,
+                        spacing_target,
+                        map_step_iterations,
+                        map_growth_steps,
+                    )),
+                ));
+            }
+            MapDomainGrowth::Stopped { reason, detail } => {
+                termination_reason = reason;
+                termination_detail = detail.or_else(|| {
+                    Some(format!(
+                        "map growth stopped on fundamental-domain step {}",
+                        map_growth_steps
+                    ))
+                });
                 break;
             }
-            if let Some(box_bounds) = bounds {
-                if !inside_bounds(&mapped, box_bounds) {
-                    failed = true;
-                    termination_reason = "bounds_exit".to_string();
-                    break;
-                }
-            }
-
-            previous_q = Some(q.clone());
-            previous_mapped = Some(mapped.clone());
-            next_samples.push(mapped);
-        }
-
-        if failed || next_samples.len() != domain_samples.len() {
-            termination_detail = Some(format!(
-                "map growth stopped on fundamental-domain step {}",
-                map_growth_steps
-            ));
-            break;
-        }
+        };
         if let Some(last_point) = points.last() {
             if !next_samples.is_empty() {
                 next_samples[0] = last_point.clone();
             }
         }
 
-        let remaining_room = max_points.saturating_sub(points.len());
-        if remaining_room > 1 {
-            let base_add = next_samples.len().saturating_sub(1);
-            let extra_capacity = remaining_room.saturating_sub(base_add);
-            let max_domain_samples = next_samples
-                .len()
-                .saturating_add(extra_capacity.min(MAP_DOMAIN_MAX_INSERTIONS_PER_PASS * 2));
-            refine_map_domain_samples(
-                system,
-                &mut domain_samples,
-                &mut next_samples,
-                representative_point,
-                stability,
-                map_step_iterations,
-                spacing_target,
-                max_domain_samples,
-                bounds,
-                periodicity,
-            )?;
-        }
-
         for (mapped_index, mapped) in next_samples.iter().enumerate().skip(1) {
             let last_point = points.last().cloned().unwrap_or_else(|| mapped.clone());
             let step_arc = periodic_l2_distance(&last_point, mapped, periodicity);
             if !step_arc.is_finite() {
-                failed = true;
-                break;
+                bail!("Map manifold arclength became non-finite.");
             }
             if target > 0.0 && cumulative_arc + step_arc >= target && step_arc > NORM_EPS {
                 let alpha_hit = ((target - cumulative_arc) / step_arc).clamp(0.0, 1.0);
@@ -9152,10 +9247,6 @@ fn build_map_manifold_curve(
                 ));
             }
         }
-        if failed {
-            break;
-        }
-
         if target <= 0.0 && next_samples.len() >= 2 {
             let current_avg = polyline_arclength(&next_samples, periodicity)
                 / ((next_samples.len().saturating_sub(1)) as f64);
@@ -10103,6 +10194,38 @@ mod tests {
             .all(|pair| pair[1].param_value > pair[0].param_value));
     }
 
+    fn assert_map_resume_domain_closes(
+        system: &EquationSystem,
+        branch: &ContinuationBranch,
+        tolerance: f64,
+    ) {
+        let Some(ManifoldGeometry::Curve(geometry)) = branch.manifold_geometry.as_ref() else {
+            panic!("expected curve geometry");
+        };
+        let Some(ManifoldCurveResumeState::Map {
+            active_domain,
+            map_step_iterations,
+            ..
+        }) = geometry.resume_state.as_ref()
+        else {
+            panic!("expected map resume state");
+        };
+        let mapped_endpoint = apply_map_iterates_with_periodicity(
+            system,
+            active_domain.last().expect("resume-domain endpoint"),
+            *map_step_iterations,
+            &StatePeriodicity::none(),
+        )
+        .expect("finite resume-domain endpoint image");
+        assert!(
+            l2_distance(
+                &mapped_endpoint,
+                active_domain.first().expect("resume-domain start")
+            ) <= tolerance,
+            "the stored stable fundamental domain must close under the return map"
+        );
+    }
+
     #[test]
     fn manifold_eq_1d_extension_matches_one_shot_unstable_flow() {
         let mut system = build_system(&["x"], &["x"], &[]);
@@ -10322,6 +10445,115 @@ mod tests {
         })
         .expect("representative one-shot cycle-phase branch");
         assert_extension_matches_one_shot(&extended, &one_shot, 1e-8);
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_resumes_henon_stable_cycle_after_multiple_domains() {
+        let mut system = build_system(
+            &["1-a*x^2+y", "b*x"],
+            &["x", "y"],
+            &[("a", 1.4), ("b", 0.3)],
+        );
+        let cycle_point = [-0.4758000511750577, 0.2927400153525173];
+        let initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &cycle_point,
+            henon_two_cycle_stable_settings(10.0),
+        )
+        .expect("initial Henon stable manifold")
+        .into_iter()
+        .find(|branch| {
+            matches!(
+                branch.branch_type,
+                BranchType::ManifoldEq1D {
+                    cycle_point_index: Some(0),
+                    ..
+                }
+            )
+        })
+        .expect("representative cycle-phase branch");
+        let ManifoldGeometry::Curve(initial_geometry) = initial
+            .manifold_geometry
+            .as_ref()
+            .expect("initial curve geometry")
+        else {
+            panic!("expected curve geometry");
+        };
+        let initial_diagnostics = initial_geometry
+            .solver_diagnostics
+            .as_ref()
+            .expect("initial diagnostics");
+        assert_eq!(initial_diagnostics.termination_reason, "target_arclength");
+        assert!(initial_diagnostics.target_reached);
+        assert!((initial.points.last().unwrap().param_value - 10.0).abs() <= 1e-12);
+        assert_map_resume_domain_closes(&system, &initial, 1e-9);
+        let initial_count = initial.points.len();
+        let initial_endpoint = initial
+            .points
+            .last()
+            .expect("initial endpoint")
+            .state
+            .clone();
+
+        let extended = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            initial,
+            henon_two_cycle_stable_settings(10.0),
+            &StatePeriodicity::none(),
+        )
+        .expect("extended Henon stable manifold");
+
+        assert!(extended.points.len() > initial_count);
+        assert!(
+            periodic_l2_distance(
+                &initial_endpoint,
+                &extended.points.last().expect("extended endpoint").state,
+                &StatePeriodicity::none(),
+            ) > 1.0
+        );
+        let ManifoldGeometry::Curve(geometry) =
+            extended.manifold_geometry.as_ref().expect("curve geometry")
+        else {
+            panic!("expected curve geometry");
+        };
+        let diagnostics = geometry
+            .solver_diagnostics
+            .as_ref()
+            .expect("extension diagnostics");
+        assert_eq!(diagnostics.termination_reason, "target_arclength");
+        assert!(diagnostics.target_reached);
+        assert_eq!(diagnostics.extension_count, 1);
+        assert!((extended.points.last().unwrap().param_value - 20.0).abs() <= 1e-12);
+        assert_map_resume_domain_closes(&system, &extended, 1e-9);
+
+        let first_extension_count = extended.points.len();
+        let extended_twice = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            extended,
+            henon_two_cycle_stable_settings(10.0),
+            &StatePeriodicity::none(),
+        )
+        .expect("second Henon stable-manifold extension");
+        assert!(extended_twice.points.len() > first_extension_count);
+        let ManifoldGeometry::Curve(geometry) = extended_twice
+            .manifold_geometry
+            .as_ref()
+            .expect("twice-extended curve geometry")
+        else {
+            panic!("expected curve geometry");
+        };
+        let diagnostics = geometry
+            .solver_diagnostics
+            .as_ref()
+            .expect("second-extension diagnostics");
+        assert_eq!(diagnostics.termination_reason, "target_arclength");
+        assert!(diagnostics.target_reached);
+        assert_eq!(diagnostics.extension_count, 2);
+        assert!((extended_twice.points.last().unwrap().param_value - 30.0).abs() <= 1e-12);
+        assert_map_resume_domain_closes(&system, &extended_twice, 1e-9);
     }
 
     #[test]

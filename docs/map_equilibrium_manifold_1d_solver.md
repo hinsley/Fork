@@ -44,6 +44,7 @@ For each branch direction:
    - unstable: apply `G`
    - stable: solve `G(y) = x_k` with damped Newton
    - stable continuation predictors transport each target-sample step through the local inverse Jacobian at the preceding converged preimage
+   - if the requested endpoint falls inside a stable inverse domain, stop there instead of solving its potentially remote far endpoint; combine the unused source-domain suffix with the accepted preimage prefix to form a new exact local fundamental domain for later extension
 5. Adaptive remeshing (mapped-domain quality control):
    - checks segment spacing and local turn/curvature proxies
    - inserts new domain midpoints
@@ -101,6 +102,10 @@ Curve geometry also stores `solver_diagnostics` (stop reason, requested/achieved
 Curve geometry stores a versioned map resume state containing the current cycle anchor, adaptive
 fundamental domain, pending mapped samples/cursor, spacing target, effective iterate count, and
 growth counter. This permits exact endpoint extension without reconstructing accepted geometry.
+For stable maps, a target inside an inverse-grown domain rolls that cut into a new fundamental
+domain whose endpoints remain related by the effective return. Repeated extension therefore resumes
+locally from the saved endpoint and does not first solve the unused, potentially enormous remainder
+of the old inverse domain.
 Each emitted cycle phase receives the corresponding state propagated by `F^k`, so it can be resumed
 independently. Legacy branches without this field are replayed to their saved endpoint on first
 extension and upgraded when the extension result is saved.

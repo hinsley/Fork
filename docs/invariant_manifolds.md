@@ -408,6 +408,9 @@ and optional bounds are inherited from the stored branch and cannot be changed d
 - Flow branches resume integration from the terminal state.
 - Map branches resume the adaptive fundamental domain, including an unfinished domain when a prior
   run stopped on a point or iteration cap.
+- Stable map branches cut inverse growth at the requested endpoint and roll that cut into a new
+  local fundamental domain, so later extensions do not need to solve an unused far-field preimage
+  before producing new points.
 - Each map-cycle phase branch carries an independently propagated resume state, so any saved phase
   can be extended directly.
 - Extending a nonrepresentative cycle phase clears `source_arclength`, because its independently
