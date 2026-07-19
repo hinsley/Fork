@@ -652,3 +652,9 @@ These early ratios move toward the Feigenbaum value of approximately 4.669. The 
 ## Result
 
 You started with the irregular default Rössler orbit. You then calculated a stable equilibrium and followed it to a supercritical Hopf bifurcation. From that Hopf point, you followed stable limit cycles through four period doublings. The State Space Scene showed the full three-dimensional motion. The Event Map reduced each orbit to successive local maxima of $-y(t)$ and showed the repeated doubling in a cobweb plot.
+
+The completed diagram must use the prescribed branch colors: blue for `Equilibrium_a`, purple for `Period_1`, orange for `Period_2`, green for `Period_4`, and red for `Period_8`.
+
+The result should resemble the bifurcation diagram in the [logistic-map period-doubling tutorial](../logistic-map-period-doubling/README.md). However, this Rössler diagram shows only two outer pieces of each limit-cycle branch. These pieces are the uppermost and lowermost values of **y** on the cycle. Thus, the diagram does not show the complete fork-like branching structure that you see in the logistic-map diagram.
+
+![The final Rössler bifurcation diagram with all prescribed branch colors](images/42-final-bifurcation-diagram.png)
