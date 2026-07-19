@@ -37,7 +37,7 @@ jobs:
         run: |
           mkdir -p coverage
           if [ "$FULL_COVERAGE" = "true" ]; then
-            cargo llvm-cov nextest --workspace --all-features --run-ignored all -E 'not binary(published_cycle_references)' --lcov --output-path coverage/rust.lcov
+            cargo llvm-cov nextest --release --workspace --all-features --run-ignored all --lcov --output-path coverage/rust.lcov
           else
             cargo llvm-cov nextest --workspace --all-features --lcov --output-path coverage/rust.lcov
           fi

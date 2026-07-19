@@ -89,12 +89,11 @@ async function runFullOnly() {
     run('rust-coverage', 'cargo', [
       'llvm-cov',
       'nextest',
+      '--release',
       '--workspace',
       '--all-features',
       '--run-ignored',
       'all',
-      '-E',
-      'not binary(published_cycle_references)',
       '--lcov',
       '--output-path',
       'target/test-timings/coverage/rust.lcov',

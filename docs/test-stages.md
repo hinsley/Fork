@@ -35,7 +35,9 @@ ending in `:prepared` never invoke `wasm-pack`.
 ## Full
 
 Runs `medium`, the split manifold and generalized-period-doubling benchmarks,
-the published cycle references in release mode, and Rust/web/CLI coverage.
+the published cycle references in release mode, and Rust/web/CLI coverage. Full
+Rust coverage also uses the release profile so every ignored numerical and
+published reference test is included in one workspace-level coverage run.
 Install `cargo-nextest` and `cargo-llvm-cov` before running this stage locally.
 
 ## Profile
