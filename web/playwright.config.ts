@@ -15,8 +15,20 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${port}`,
     headless: true,
   },
+  projects: [
+    {
+      name: 'mocked',
+      testIgnore: /\.real\.spec\.ts$/,
+    },
+    {
+      name: 'real-wasm',
+      testMatch: /\.real\.spec\.ts$/,
+      fullyParallel: false,
+      workers: 1,
+    },
+  ],
   webServer: {
-    command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,
+    command: `npm run dev:prepared -- --host 127.0.0.1 --port ${port} --strictPort`,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

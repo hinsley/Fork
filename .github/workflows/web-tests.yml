@@ -3,9 +3,101 @@ name: quality-gates
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  web:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+      wasm: ${{ steps.filter.outputs.wasm }}
+      web: ${{ steps.filter.outputs.web }}
+      cli: ${{ steps.filter.outputs.cli }}
+      tests: ${{ steps.filter.outputs.tests }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            core:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/fork_core/**'
+            wasm:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/fork_wasm/**'
+            web:
+              - 'web/**'
+            cli:
+              - 'cli/**'
+            tests:
+              - '.config/nextest.toml'
+              - 'scripts/test-*.mjs'
+              - '.github/workflows/**'
+
+  rust-archive:
+    needs: changes
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.wasm == 'true' || needs.changes.outputs.tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - name: Build reusable Rust test archive
+        run: cargo nextest archive --workspace --archive-file target/nextest-archive.tar.zst
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-test-archive
+          path: target/nextest-archive.tar.zst
+
+  rust-fast:
+    needs: [changes, rust-archive]
+    if: needs.rust-archive.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-test-archive
+          path: target
+      - name: Run fast Rust tests from archive
+        run: cargo nextest run --archive-file target/nextest-archive.tar.zst --profile ci
+      - name: Run Rust doctests
+        run: cargo test --workspace --doc
+
+  rust-medium:
+    needs: [changes, rust-archive]
+    if: needs.changes.outputs.core == 'true' && needs.rust-archive.result == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-test-archive
+          path: target
+      - name: Run medium numerical shard
+        env:
+          NEXTEST_ARCHIVE_FILE: target/nextest-archive.tar.zst
+          NEXTEST_PARTITION: count:${{ matrix.shard }}/2
+        run: node scripts/test-rust-tier.mjs medium
+
+  prepare-node-wasm:
+    needs: changes
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.wasm == 'true' || needs.changes.outputs.cli == 'true' || needs.changes.outputs.tests == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,42 +107,141 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
-      - name: Install Playwright browsers
-        working-directory: web
-        run: npx playwright install --with-deps
-      - name: Lint web
-        working-directory: web
-        run: npm run lint
-      - name: Build web
-        working-directory: web
-        run: npm run build
-      - name: Test web
-        working-directory: web
-        run: npm test
+      - name: Prepare Node WASM once
+        working-directory: cli
+        run: npm run prepare:wasm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-wasm
+          path: crates/fork_wasm/pkg
 
-  cli:
+  prepare-web-wasm:
+    needs: changes
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.wasm == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.tests == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: jetli/wasm-pack-action@v0.4.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare web WASM once
+        working-directory: web
+        run: npm run prepare:wasm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-wasm
+          path: crates/fork_wasm/pkg-web
+
+  cli:
+    needs: [changes, prepare-node-wasm]
+    if: needs.prepare-node-wasm.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: cli/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: node-wasm
+          path: crates/fork_wasm/pkg
       - name: Install CLI dependencies
         working-directory: cli
         run: npm ci
-      - name: Build CLI
+      - name: Build CLI with prepared WASM
         working-directory: cli
-        run: npm run build
-      - name: Test CLI
+        run: npm run build:prepared
+      - name: Run CLI unit and menu tests
         working-directory: cli
         run: npm test
+      - name: Run prepared Node-WASM smoke
+        working-directory: cli
+        run: npm run test:wasm:prepared
+
+  web:
+    needs: [changes, prepare-web-wasm]
+    if: needs.prepare-web-wasm.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-wasm
+          path: crates/fork_wasm/pkg-web
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Lint, build, and unit test web with prepared WASM
+        working-directory: web
+        run: npm run ci
+
+  playwright-mocked:
+    needs: changes
+    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install web dependencies and browser
+        working-directory: web
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Run mocked browser project without generated WASM
+        working-directory: web
+        run: npm run test:e2e:mocked
+
+  playwright-real-wasm:
+    needs: [changes, prepare-web-wasm]
+    if: needs.prepare-web-wasm.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-wasm
+          path: crates/fork_wasm/pkg-web
+      - name: Install web dependencies and browser
+        working-directory: web
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Run real-WASM browser project with no rebuild
+        working-directory: web
+        run: npm run test:e2e:real
+
+  summary:
+    if: always()
+    needs:
+      - changes
+      - rust-archive
+      - rust-fast
+      - rust-medium
+      - prepare-node-wasm
+      - prepare-web-wasm
+      - cli
+      - web
+      - playwright-mocked
+      - playwright-real-wasm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every selected quality gate
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node -e "const jobs=JSON.parse(process.env.RESULTS); const bad=Object.entries(jobs).filter(([,job])=>['failure','cancelled'].includes(job.result)); if(bad.length){console.error(bad.map(([name,job])=>name+': '+job.result).join('\n')); process.exit(1)}"

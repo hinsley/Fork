@@ -232,6 +232,7 @@ fn continuation_labels_a_generic_periodic_plus_one_crossing_as_a_branch_point() 
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn period_doubling_normal_form_matches_an_analytic_suspension() {
     let stable_exponent = -0.4;
     let cubic = -0.2;
@@ -259,6 +260,7 @@ fn period_doubling_normal_form_matches_an_analytic_suspension() {
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn neimark_sacker_normal_form_matches_a_complex_cubic_suspension() {
     let theta = 0.37;
     let omega = theta / TAU;
@@ -291,6 +293,7 @@ fn neimark_sacker_normal_form_matches_a_complex_cubic_suspension() {
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn neimark_sacker_normal_form_includes_orbit_drift_and_quadratic_terms() {
     // With z = (u-mu*sx) + i(v-mu*sy), the transverse equation is
     //
@@ -369,6 +372,7 @@ fn periodic_neimark_sacker_normal_form_rejects_first_through_fourth_order_resona
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn targeted_ns_normal_form_tracks_the_requested_pair_when_modulus_order_switches() {
     let theta_1 = 0.37;
     let theta_2 = 0.91;

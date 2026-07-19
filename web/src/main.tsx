@@ -5,11 +5,13 @@ import App from './App'
 import { AppProvider } from './state/appState'
 import { MemorySystemStore, type SystemStore } from './system/store'
 import {
+  CODIM2_GH_E2E_FIXTURE,
   HOMOCLINIC_PRODUCT_E2E_FIXTURE,
   HOMOCLINIC_PRODUCT_E2E_SYSTEM_NAME,
   HomoclinicProductE2EClient,
   createAxisPickerMapSystem,
   createAxisPickerSystem,
+  createCodim2GeneralizedHopfE2ESystem,
   createDemoSystem,
   createHomoclinicProductE2ESystem,
   createLimitCycleManifoldSystem,
@@ -50,7 +52,8 @@ async function bootstrap() {
     import.meta.env.VITE_DETERMINISTIC_TEST === 'true'
   const deterministic = deterministicFromUrl || deterministicFromEnv
   const fixture = params.get('fixture')
-  const useMock = params.has('mock') || Boolean(fixture)
+  const useRealWasmFixture = import.meta.env.DEV && fixture === CODIM2_GH_E2E_FIXTURE
+  const useMock = params.has('mock') || (Boolean(fixture) && !useRealWasmFixture)
   const useHomoclinicProductFixture =
     import.meta.env.DEV && fixture === HOMOCLINIC_PRODUCT_E2E_FIXTURE
 
@@ -89,6 +92,10 @@ async function bootstrap() {
     const memory = new MemorySystemStore()
     const { system } = createAxisPickerMapSystem()
     await memory.save(system)
+    store = memory
+  } else if (useRealWasmFixture) {
+    const memory = new MemorySystemStore()
+    await memory.save(createCodim2GeneralizedHopfE2ESystem().system)
     store = memory
   } else if (useHomoclinicProductFixture) {
     // Unlike the in-memory visual fixtures, this product fixture deliberately

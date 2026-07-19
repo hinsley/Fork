@@ -1,0 +1,41 @@
+[profile.default]
+fail-fast = false
+slow-timeout = { period = "60s", terminate-after = 3 }
+
+[profile.ci]
+status-level = "skip"
+final-status-level = "slow"
+failure-output = "immediate-final"
+slow-timeout = { period = "45s", terminate-after = 4 }
+junit = { path = "../../test-timings/nextest/ci.xml", store-success-output = false }
+
+[profile.profile]
+status-level = "slow"
+final-status-level = "slow"
+slow-timeout = { period = "60s", terminate-after = 10 }
+junit = { path = "../../test-timings/nextest/profile.xml", store-success-output = false }
+
+[profile.profile-published]
+status-level = "slow"
+final-status-level = "slow"
+slow-timeout = { period = "60s", terminate-after = 10 }
+junit = { path = "../../test-timings/nextest/published.xml", store-success-output = false }
+
+[test-groups]
+numerical-regressions = { max-threads = 2 }
+
+[[profile.default.overrides]]
+filter = 'test(/(manifold|normal_form|codim2|heteroclinic|published|curve_refines|suspension|transverse_pair|stable_orbit|test_pd|test_hopf|duffing)/)'
+test-group = "numerical-regressions"
+
+[[profile.ci.overrides]]
+filter = 'test(/(manifold|normal_form|codim2|heteroclinic|published|curve_refines|suspension|transverse_pair|stable_orbit|test_pd|test_hopf|duffing)/)'
+test-group = "numerical-regressions"
+
+[[profile.profile.overrides]]
+filter = 'test(/(manifold|normal_form|codim2|heteroclinic|published|curve_refines|suspension|transverse_pair|stable_orbit|test_pd|test_hopf|duffing)/)'
+test-group = "numerical-regressions"
+
+[[profile.profile-published.overrides]]
+filter = 'all()'
+test-group = "numerical-regressions"

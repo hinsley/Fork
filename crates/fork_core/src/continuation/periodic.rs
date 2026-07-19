@@ -7248,6 +7248,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn test_hopf_continuation_direction() {
         // Supercritical Hopf Normal Form:
         // dx/dt = mu*x - y - x*(x^2 + y^2)
@@ -7430,6 +7431,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn test_pd_branch_is_period_doubled() {
         let ntst = 10;
         let ncol = 3;

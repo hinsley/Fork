@@ -122,6 +122,7 @@ fn complex_inclination_seed() -> HeteroclinicOrbitSeed {
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn transported_inclination_tests_cross_on_analytic_connections() {
     for (source_flip, kind, bifurcation) in [
         (
@@ -240,6 +241,7 @@ fn transported_inclination_tests_cross_on_analytic_connections() {
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn complex_principal_blocks_localize_transport_rank_loss() {
     for (source_flip, kind, bifurcation) in [
         (
@@ -679,6 +681,7 @@ fn setup_rejects_a_connection_without_codimension_one_endpoint_indices() {
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn underresolved_connection_adapts_and_persists_its_exact_mesh() {
     let mut system = analytic_system(vec![0.0, 0.0]);
     let mut setup = heteroclinic_setup_from_orbit(

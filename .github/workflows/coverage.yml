@@ -2,64 +2,99 @@ name: Coverage
 
 on:
   push:
-    branches: [ "main", "rewrite" ]
+    branches: [main, rewrite]
+    paths-ignore:
+      - 'docs/**'
+      - '.beads/**'
+      - '**/*.md'
   pull_request:
-    branches: [ "main", "rewrite" ]
+    branches: [main, rewrite]
+    paths-ignore:
+      - 'docs/**'
+      - '.beads/**'
+      - '**/*.md'
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Include ignored medium and full Rust regressions
+        type: boolean
+        default: false
+  schedule:
+    - cron: '41 6 * * 1'
 
 jobs:
-  coverage:
+  rust-coverage:
     runs-on: ubuntu-latest
-    env:
-      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install Rust
-        run: rustup update stable
-        
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-        
-      - name: Generate Rust coverage
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate workspace Rust coverage once
+        env:
+          FULL_COVERAGE: ${{ github.event_name == 'schedule' || inputs.full == true }}
         run: |
           mkdir -p coverage
-          cargo llvm-cov --all-features -p fork_core --lcov --output-path coverage/fork_core.lcov
-          cargo llvm-cov --all-features -p fork_wasm --lcov --output-path coverage/fork_wasm.lcov
+          if [ "$FULL_COVERAGE" = "true" ]; then
+            cargo llvm-cov nextest --workspace --all-features --run-ignored all -E 'not binary(published_cycle_references)' --lcov --output-path coverage/rust.lcov
+          else
+            cargo llvm-cov nextest --workspace --all-features --lcov --output-path coverage/rust.lcov
+          fi
+      - uses: codecov/codecov-action@v5
+        with:
+          files: coverage/rust.lcov
+          flags: rust
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+  web-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: |
-            web/package-lock.json
-            cli/package-lock.json
-
-      - name: Install web dependencies
+          cache-dependency-path: web/package-lock.json
+      - name: Run clean-checkout web coverage with the test-only WASM alias
         working-directory: web
-        run: npm ci
+        run: npm ci && npm run test:unit:coverage
+      - uses: codecov/codecov-action@v5
+        with:
+          files: web/coverage/lcov.info
+          flags: web
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
 
-      - name: Run web unit coverage
-        working-directory: web
-        run: npm run test:unit:coverage
-
-      - name: Install CLI dependencies
-        working-directory: cli
-        run: npm ci
-
-      - name: Run CLI coverage
+  cli-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cli/package-lock.json
+      - name: Run CLI coverage without rebuilding WASM
         working-directory: cli
         env:
           TS_NODE_COMPILER_OPTIONS: '{"sourceMap":true,"inlineSources":true}'
-        run: npm run test:coverage
-        
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        run: npm ci && npm run test:coverage
+      - uses: codecov/codecov-action@v5
         with:
-          files: |
-            coverage/fork_core.lcov
-            coverage/fork_wasm.lcov
-            web/coverage/lcov.info
-            cli/coverage/lcov.info
+          files: cli/coverage/lcov.info
+          flags: cli
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  summary:
+    if: always()
+    needs: [rust-coverage, web-coverage, cli-coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all language reports
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node -e "const jobs=JSON.parse(process.env.RESULTS); const bad=Object.entries(jobs).filter(([,job])=>job.result!=='success'); if(bad.length){console.error(bad.map(([name,job])=>name+': '+job.result).join('\n')); process.exit(1)}"

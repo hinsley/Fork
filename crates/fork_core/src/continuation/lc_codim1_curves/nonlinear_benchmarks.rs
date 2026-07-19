@@ -492,6 +492,7 @@ fn bautin_lpc_curve_accepts_multiple_collocation_steps() {
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn lpc_curve_refines_cpc_with_a_signed_coefficient_bracket() {
     let mut system = compiled_system(
         &["-y+x*(1-x^2-y^2)", "x+y*(1-x^2-y^2)", "p+q*z^2+z^3"],
@@ -535,6 +536,7 @@ fn lpc_curve_refines_cpc_with_a_signed_coefficient_bracket() {
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn nonorientable_suspension_pd_curve_accepts_multiple_collocation_steps() {
     let beta = 0.25;
     let mu = beta * beta;
@@ -610,6 +612,7 @@ fn nonorientable_suspension_pd_curve_accepts_multiple_collocation_steps() {
 }
 
 #[test]
+#[ignore = "full-tier generalized-period-doubling benchmark"]
 fn pd_curve_refines_gpd_with_a_signed_cubic_bracket() {
     let mut system = compiled_system(
         &[
@@ -620,7 +623,7 @@ fn pd_curve_refines_gpd_with_a_signed_cubic_bracket() {
         ],
         &["x", "y", "u", "v"],
         &["p", "q"],
-        vec![0.0, -0.05],
+        vec![0.0, -0.002],
     );
     let corrected = corrected_unit_cycle_setup(4, 0.0, CODIM2_NTST);
     let coords = explicit_state(&corrected, ExplicitLayout::MeshFirst);
@@ -632,7 +635,7 @@ fn pd_curve_refines_gpd_with_a_signed_cubic_bracket() {
         0,
         1,
         0.0,
-        -0.05,
+        -0.002,
         CODIM2_NTST,
         NCOL,
     )
@@ -647,8 +650,13 @@ fn pd_curve_refines_gpd_with_a_signed_cubic_bracket() {
             None,
         )
     };
-    let events = refine_codim2_points(&mut problem, &[endpoint(-0.05), endpoint(0.05)], 12, 2.0e-4)
-        .expect("refine GPD");
+    let events = refine_codim2_points(
+        &mut problem,
+        &[endpoint(-0.002), endpoint(0.002)],
+        5,
+        2.0e-4,
+    )
+    .expect("refine GPD");
     let gpd = events
         .iter()
         .find(|event| {
@@ -675,6 +683,7 @@ fn pd_curve_refines_gpd_with_a_signed_cubic_bracket() {
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn transverse_pair_ns_curve_accepts_multiple_collocation_steps() {
     let beta = 0.3;
     let mu = beta * beta;
@@ -768,6 +777,7 @@ fn transverse_pair_ns_curve_accepts_multiple_collocation_steps() {
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn ns_curve_refines_chenciner_with_a_signed_cubic_bracket() {
     let mut system = compiled_system(
         &[

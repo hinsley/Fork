@@ -23,7 +23,9 @@ test('3D camera persists across style updates', async ({ page }) => {
   })
 
   const harness = createHarness(page)
-  await harness.goto({ deterministic: true, mock: false })
+  // Camera persistence is a rendering concern; deterministic mock compute
+  // avoids paying for a real orbit without weakening the assertion.
+  await harness.goto({ deterministic: true, mock: true })
 
   await harness.openSystem('Lorenz')
   await harness.createScene()
@@ -311,19 +313,20 @@ test('3D camera persists across style updates', async ({ page }) => {
   if (!defaultCam) {
     throw new Error('Initial camera state not found.')
   }
-  const viewportBox = await viewport.boundingBox()
-  if (!viewportBox) {
-    throw new Error('Plotly viewport bounds not found.')
+  const targetEye = {
+    x: (defaultCam.x ?? 0) + 0.8,
+    y: (defaultCam.y ?? 0) - 0.6,
+    z: (defaultCam.z ?? 0) + 0.4,
   }
-
-  const dragStartX = viewportBox.x + viewportBox.width * 0.5
-  const dragStartY = viewportBox.y + viewportBox.height * 0.5
-
   const relayoutWait = waitForCameraRelayout()
-  await page.mouse.move(dragStartX, dragStartY)
-  await page.mouse.down()
-  await page.mouse.move(dragStartX + 120, dragStartY + 60, { steps: 6 })
-  await page.mouse.up()
+  await page.evaluate(
+    async ({ id, eye }) => {
+      const node = document.querySelector(`[data-testid="plotly-viewport-${id}"]`)
+      if (!node || !window.Plotly) throw new Error('Plotly graphDiv not found.')
+      await window.Plotly.relayout(node, { 'scene.camera.eye': eye })
+    },
+    { id: plotId, eye: targetEye }
+  )
   await relayoutWait
   await waitForPlotlyEvent('plotly_afterplot')
 

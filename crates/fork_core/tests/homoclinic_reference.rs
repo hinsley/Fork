@@ -403,6 +403,7 @@ fn standard_single_and_multiple_shooting_advance_from_the_same_duffing_large_cyc
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn decoupled_duffing_saddle_focus_advances_with_nsf_diagnostics() {
     let mut collocation_system = duffing_saddle_focus_system(vec![0.0, 0.0]);
     let collocation_setup = homoclinic_setup_from_large_cycle(

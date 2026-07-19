@@ -88,6 +88,7 @@ fn distance_to_multiplier(point: &ContinuationPoint, target: Complex<f64>) -> f6
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn stable_orbit_reaches_matcont_pd_and_continues_the_pd_curve() {
     let mut system = adaptive_control_system(0.8, 1.0);
     let (orbit_times, orbit_states) = settled_stable_orbit(&system);

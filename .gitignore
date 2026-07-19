@@ -11,6 +11,7 @@ dist-ssr
 coverage/
 *.local
 target
+target/test-timings/
 web/.vite/
 web/test-results/
 web/playwright-report/

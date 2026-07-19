@@ -53,7 +53,9 @@ export default defineConfig({
   plugins: [standaloneEmbedDependencies(), react()],
   resolve: {
     alias: {
-      '@fork-wasm': path.resolve(__dirname, '..', 'crates', 'fork_wasm', 'pkg-web'),
+      '@fork-wasm': process.env.VITEST || process.env.VITE_USE_WASM_STUB === '1'
+        ? path.resolve(__dirname, 'src', 'test', 'forkWasmStub.ts')
+        : path.resolve(__dirname, '..', 'crates', 'fork_wasm', 'pkg-web'),
     },
   },
   worker: {

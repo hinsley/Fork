@@ -21,6 +21,7 @@ import type {
 
 export const HOMOCLINIC_PRODUCT_E2E_FIXTURE = 'homoclinic-product'
 export const HOMOCLINIC_PRODUCT_E2E_SYSTEM_NAME = 'Homoclinic_Product_E2E'
+export const CODIM2_GH_E2E_FIXTURE = 'codim2-generalized-hopf'
 
 function homoclinicFixtureDiagnostics(
   primary: 'NNS' | 'NSF'
@@ -227,6 +228,106 @@ export function createDemoSystem(): {
     objectNodeId: result.nodeId,
     branchNodeId: branchResult.nodeId,
   }
+}
+
+/**
+ * Analytic generalized-Hopf source data for the real-WASM LPC switch test.
+ * The fixture removes equilibrium and Hopf-curve construction from browser
+ * setup while leaving the WASM predictor, corrector, and LPC continuation real.
+ */
+export function createCodim2GeneralizedHopfE2ESystem(): { system: System } {
+  const config = {
+    name: 'Codim2_Switch_E2E',
+    equations: [
+      'mu*x-y+beta*x*(x^2+y^2)+x*(x^2+y^2)^2',
+      'x+mu*y+beta*y*(x^2+y^2)+y*(x^2+y^2)^2',
+    ],
+    params: [0, 0],
+    paramNames: ['mu', 'beta'],
+    varNames: ['x', 'y'],
+    solver: 'rk4',
+    type: 'flow' as const,
+  }
+  const base = createSystem({ name: config.name, config })
+  const equilibrium = addObject(base, {
+    type: 'equilibrium',
+    name: 'Equilibrium_GH',
+    systemName: config.name,
+    parameters: [...config.params],
+  })
+  const codim2: NonNullable<ContinuationPoint['codim2']> = {
+    type: 'GeneralizedHopf',
+    refined: true,
+    candidate: false,
+    test_function: 'first_lyapunov_coefficient',
+    test_function_value: 0,
+    residual_norm: 0,
+    iterations: 0,
+    tolerance: 1e-10,
+    source_segment: [0, 1],
+    source_test_values: [-0.002, 0.002],
+    method: 'analytic_fixture',
+    coefficients: [
+      { name: 'l1', value: 0 },
+      { name: 'l2', value: 1 },
+    ],
+    conditioning: {},
+    certification: {
+      defining_conditions_verified: true,
+      nondegeneracy_evaluated: true,
+      nondegenerate: true,
+      reason: 'Analytic radial generalized-Hopf normal form.',
+    },
+  }
+  const branch: ContinuationObject = {
+    type: 'continuation',
+    name: 'hopf_codim2_fixture',
+    systemName: config.name,
+    parameterName: 'mu, beta',
+    parentObject: 'Equilibrium_GH',
+    startObject: 'Equilibrium_GH',
+    branchType: 'hopf_curve',
+    data: {
+      points: [
+        {
+          state: [0, 0],
+          param_value: 0,
+          param2_value: -0.002,
+          stability: 'None',
+          eigenvalues: [{ re: 0, im: 1 }, { re: 0, im: -1 }],
+          auxiliary: 1,
+        },
+        {
+          state: [0, 0],
+          param_value: 0,
+          param2_value: 0,
+          stability: 'GeneralizedHopf',
+          eigenvalues: [{ re: 0, im: 1 }, { re: 0, im: -1 }],
+          auxiliary: 1,
+          codim2,
+        },
+      ],
+      bifurcations: [1],
+      indices: [0, 1],
+      branch_type: {
+        type: 'HopfCurve',
+        param1_name: 'mu',
+        param2_name: 'beta',
+      },
+    },
+    settings: {
+      step_size: 0.01,
+      min_step_size: 1e-5,
+      max_step_size: 0.1,
+      max_steps: 50,
+      corrector_steps: 10,
+      corrector_tolerance: 1e-8,
+      step_tolerance: 1e-8,
+    },
+    timestamp: nowIso(),
+    params: [...config.params],
+  }
+  return { system: addBranch(equilibrium.system, branch, equilibrium.nodeId).system }
 }
 
 export function createPeriodDoublingSystem(): { system: System } {

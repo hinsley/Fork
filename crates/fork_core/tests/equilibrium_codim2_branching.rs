@@ -328,6 +328,7 @@ fn continue_ns_seed(
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn zero_hopf_ns_predictor_corrects_and_continues_multiple_curve_steps() {
     let mut flow = system(
         &["x", "u", "v"],
@@ -363,6 +364,7 @@ fn zero_hopf_ns_predictor_corrects_and_continues_multiple_curve_steps() {
 }
 
 #[test]
+#[ignore = "medium-tier numerical regression"]
 fn hopf_hopf_ns_predictors_correct_both_modes_and_continue() {
     let mut flow = system(
         &["x1", "y1", "x2", "y2"],

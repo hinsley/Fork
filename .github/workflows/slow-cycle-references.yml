@@ -6,16 +6,21 @@ on:
     - cron: '17 6 * * 1'
 
 jobs:
-  published-cycle-references:
+  full-rust-regressions:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        run: rustup update stable
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
 
-      - name: Run published Orbit-to-curve references
-        run: >-
-          cargo test -p fork_core --test published_cycle_references --release --
-          --ignored --test-threads=1
+      - name: Run medium numerical regressions
+        run: node scripts/test-rust-tier.mjs medium
+
+      - name: Run extreme numerical regressions
+        run: node scripts/test-rust-tier.mjs extreme
+
+      - name: Run published Orbit-to-curve references in release mode
+        run: node scripts/test-rust-tier.mjs published

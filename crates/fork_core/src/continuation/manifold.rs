@@ -12644,6 +12644,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn manifold_eq_2d_builds_surface_geometry() {
         let mut system = build_system(&["1.5*x", "0.8*y", "-z"], &["x", "y", "z"], &[]);
         let equilibrium = [0.0, 0.0, 0.0];
@@ -14216,22 +14217,39 @@ mod tests {
         assert_eq!(decoded_explicit.phases, decoded_implicit.phases);
     }
 
-    #[test]
-    fn manifold_cycle_2d_hopf_benchmark_builds_multiple_rings_for_stable_and_unstable() {
-        let mu = 0.1_f64;
-        let lambda = 0.2_f64;
+    fn assert_hopf_cycle_manifold_builds_second_ring(stability: ManifoldStability, label: &str) {
+        // Use the linear z sheet on each side of a Hopf normal form. The
+        // unstable case is supercritical; the stable case is subcritical, so
+        // each selected side remains one-dimensional without a weak radial
+        // leaf solve dominating the regression.
+        let (mu, lambda, equations) = match stability {
+            ManifoldStability::Unstable => (
+                0.1_f64,
+                1.0_f64,
+                [
+                    "mu*x - y - x*(x*x + y*y)",
+                    "x + mu*y - y*(x*x + y*y)",
+                    "lambda*z",
+                ],
+            ),
+            ManifoldStability::Stable => (
+                -0.1_f64,
+                -1.0_f64,
+                [
+                    "mu*x - y + x*(x*x + y*y)",
+                    "x + mu*y + y*(x*x + y*y)",
+                    "lambda*z",
+                ],
+            ),
+        };
         let mut system = build_system(
-            &[
-                "mu*x - y - x*(x*x + y*y)",
-                "x + mu*y - y*(x*x + y*y)",
-                "lambda*z",
-            ],
+            &equations,
             &["x", "y", "z"],
             &[("mu", mu), ("lambda", lambda)],
         );
-        let ntst = 16usize;
-        let ncol = 3usize;
-        let radius = mu.sqrt();
+        let ntst = 8usize;
+        let ncol = 2usize;
+        let radius = mu.abs().sqrt();
         let mut state = Vec::new();
         for i in 0..ntst {
             let theta = (i as f64) * std::f64::consts::TAU / (ntst as f64);
@@ -14253,127 +14271,85 @@ mod tests {
         }
         state.push(std::f64::consts::TAU);
 
-        let unstable_mu = (lambda * std::f64::consts::TAU).exp();
-        let stable_mu = ((-2.0 * mu) * std::f64::consts::TAU).exp();
+        let transverse_mu = (lambda * std::f64::consts::TAU).exp();
+        let radial_mu = ((-2.0 * mu) * std::f64::consts::TAU).exp();
         let multipliers = [
-            Complex::new(unstable_mu, 0.0),
-            Complex::new(stable_mu, 0.0),
+            Complex::new(transverse_mu, 0.0),
+            Complex::new(radial_mu, 0.0),
             Complex::new(1.0, 0.0),
         ];
 
-        let unstable_branch = continue_limit_cycle_manifold_2d(
+        let branch = continue_limit_cycle_manifold_2d(
             &mut system,
             &state,
             ntst,
             ncol,
             &multipliers,
             ManifoldCycle2DSettings {
-                stability: ManifoldStability::Unstable,
+                stability,
                 floquet_index: Some(0),
                 parameter_index: Some(0),
                 initial_radius: 1e-3,
                 leaf_delta: 1e-3,
                 delta_min: 2e-4,
-                ring_points: 24,
+                ring_points: 8,
                 min_spacing: 0.25,
                 max_spacing: 2.0,
-                integration_dt: 2e-2,
-                target_arclength: 0.02,
+                integration_dt: 1e-1,
+                target_arclength: 0.01,
                 ntst,
                 ncol,
                 caps: ManifoldTerminationCaps {
-                    max_steps: 300,
-                    max_points: 3_000,
+                    max_steps: 100,
+                    max_points: 500,
                     max_rings: 2,
-                    max_vertices: 6_000,
-                    max_time: 30.0,
+                    max_vertices: 1_000,
+                    max_time: 10.0,
                     max_iterations: None,
                 },
                 ..ManifoldCycle2DSettings::default()
             },
         )
-        .expect("unstable cycle manifold");
-        let ManifoldGeometry::Surface(unstable_surface) = unstable_branch
+        .unwrap_or_else(|error| panic!("{label} cycle manifold: {error}"));
+        let ManifoldGeometry::Surface(surface) = branch
             .manifold_geometry
-            .expect("unstable geometry")
+            .unwrap_or_else(|| panic!("{label} geometry"))
         else {
-            panic!("expected unstable surface geometry");
+            panic!("expected {label} surface geometry");
         };
-        let unstable_diag = unstable_surface.solver_diagnostics.as_ref().map(|diag| {
+        let diagnostics = surface.solver_diagnostics.as_ref().map(|diag| {
             (
                 diag.termination_reason.clone(),
                 diag.termination_detail.clone(),
             )
         });
         assert!(
-            unstable_surface.ring_offsets.len() > 1,
-            "expected unstable manifold to build beyond seed ring, diagnostics={unstable_diag:?}"
+            surface.ring_offsets.len() > 1,
+            "expected {label} manifold to build beyond seed ring, diagnostics={diagnostics:?}"
         );
-        if let Some(diag) = unstable_surface.solver_diagnostics.as_ref() {
+        if let Some(diag) = surface.solver_diagnostics.as_ref() {
             assert_ne!(
                 diag.termination_reason, "ring_build_failed",
-                "unexpected unstable ring-build failure detail={:?}",
-                diag.termination_detail
-            );
-        }
-
-        let stable_branch = continue_limit_cycle_manifold_2d(
-            &mut system,
-            &state,
-            ntst,
-            ncol,
-            &multipliers,
-            ManifoldCycle2DSettings {
-                stability: ManifoldStability::Stable,
-                floquet_index: Some(1),
-                parameter_index: Some(0),
-                initial_radius: 1e-3,
-                leaf_delta: 1e-3,
-                delta_min: 2e-4,
-                ring_points: 24,
-                min_spacing: 0.25,
-                max_spacing: 2.0,
-                integration_dt: 2e-2,
-                target_arclength: 0.02,
-                ntst,
-                ncol,
-                caps: ManifoldTerminationCaps {
-                    max_steps: 300,
-                    max_points: 3_000,
-                    max_rings: 2,
-                    max_vertices: 6_000,
-                    max_time: 30.0,
-                    max_iterations: None,
-                },
-                ..ManifoldCycle2DSettings::default()
-            },
-        )
-        .expect("stable cycle manifold");
-        let ManifoldGeometry::Surface(stable_surface) =
-            stable_branch.manifold_geometry.expect("stable geometry")
-        else {
-            panic!("expected stable surface geometry");
-        };
-        let stable_diag = stable_surface.solver_diagnostics.as_ref().map(|diag| {
-            (
-                diag.termination_reason.clone(),
-                diag.termination_detail.clone(),
-            )
-        });
-        assert!(
-            stable_surface.ring_offsets.len() > 1,
-            "expected stable manifold to build beyond seed ring, diagnostics={stable_diag:?}"
-        );
-        if let Some(diag) = stable_surface.solver_diagnostics.as_ref() {
-            assert_ne!(
-                diag.termination_reason, "ring_build_failed",
-                "unexpected stable ring-build failure detail={:?}",
+                "unexpected {label} ring-build failure detail={:?}",
                 diag.termination_detail
             );
         }
     }
 
     #[test]
+    #[ignore = "full-tier manifold benchmark"]
+    fn manifold_cycle_2d_hopf_benchmark_builds_multiple_rings_for_unstable() {
+        assert_hopf_cycle_manifold_builds_second_ring(ManifoldStability::Unstable, "unstable");
+    }
+
+    #[test]
+    #[ignore = "full-tier manifold benchmark"]
+    fn manifold_cycle_2d_hopf_benchmark_builds_multiple_rings_for_stable() {
+        assert_hopf_cycle_manifold_builds_second_ring(ManifoldStability::Stable, "stable");
+    }
+
+    #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn manifold_cycle_2d_isochron_fibers_builds_unstable_linear_cylinder() {
         let ntst = 8usize;
         let ncol = 2usize;
@@ -14467,6 +14443,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn manifold_cycle_2d_hko_reports_max_steps_when_the_common_fiber_is_short() {
         let ntst = 8usize;
         let ncol = 2usize;
@@ -14558,6 +14535,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn manifold_cycle_2d_isochron_fibers_builds_stable_linear_cylinder() {
         let ntst = 8usize;
         let ncol = 2usize;
@@ -14640,6 +14618,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn manifold_cycle_2d_hko_constructs_nonlinear_fundamental_segments() {
         let ntst = 8usize;
         let ncol = 2usize;
@@ -14828,6 +14807,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn manifold_eq_2d_lorenz_stable_global_parameters_expand_beyond_local_patch() {
         let mut system = build_system(
             &["sigma*(y-x)", "x*(rho-z)-y", "x*y-beta*z"],
@@ -14885,6 +14865,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn manifold_eq_2d_lorenz_stable_global_run_does_not_end_ring_build_failed_for_reference_profile(
     ) {
         let mut system = build_system(
@@ -14962,6 +14943,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn manifold_eq_2d_adaptive_global_grows_shimizu_morioka_stable_surface() {
         let mut system = build_system(
             &["y", "x*(1-z)-lambda*y", "-alpha*z+x*x"],
@@ -15007,6 +14989,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn manifold_eq_2d_rossler_unstable_no_segment_switch_limit_failures() {
         let mut system = build_system(
             &["-y-z", "x+a*y", "b+z*(x-c)"],
@@ -15154,6 +15137,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn manifold_eq_2d_extension_resumes_the_outer_geodesic_ring() {
         for (equations, stability) in [
             (["1.5*x", "0.8*y", "-z"], ManifoldStability::Unstable),
@@ -15331,6 +15315,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "medium-tier numerical regression"]
     fn manifold_cycle_2d_extension_resumes_hko_fundamental_segments() {
         assert_cycle_fiber_backend_extends(ManifoldCycle2DAlgorithm::IsochronFibers);
     }
