@@ -325,10 +325,14 @@ function App() {
               <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
                 Systems menu
               </button>
-              <span className="empty-card__resource-link" role="link" aria-disabled="true">
+              <a
+                className="empty-card__resource-link"
+                href="https://github.com/hinsley/Fork/tree/main/tutorial"
+                target="_blank"
+                rel="noreferrer"
+              >
                 Documentation and tutorials
-                <span>Coming soon</span>
-              </span>
+              </a>
             </div>
           </div>
         </main>

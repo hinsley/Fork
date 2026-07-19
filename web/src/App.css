@@ -2212,16 +2212,23 @@
 
 .empty-card__resource-link {
   display: inline-flex;
-  align-items: baseline;
-  gap: 7px;
+  align-items: center;
   color: var(--text-muted);
   font-size: 0.75rem;
-  cursor: not-allowed;
+  font-weight: 600;
+  text-decoration: none;
+  text-underline-offset: 3px;
 }
 
-.empty-card__resource-link > span {
-  color: var(--text-faint);
-  font-size: 0.64rem;
+.empty-card__resource-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.empty-card__resource-link:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .dialog-backdrop {

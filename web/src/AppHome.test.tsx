@@ -45,6 +45,10 @@ describe('App home', () => {
       )
     ).toBeInTheDocument()
     expect(screen.getByTestId('open-systems-empty')).toHaveTextContent('Systems menu')
+    expect(screen.getByRole('link', { name: 'Documentation and tutorials' })).toHaveAttribute(
+      'href',
+      'https://github.com/hinsley/Fork/tree/main/tutorial'
+    )
     expect(await store.list()).toHaveLength(1)
   })
 })
