@@ -71,6 +71,12 @@ impl Default for DeflationSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeflationTarget {
+    pub root: Vec<f64>,
+    pub settings: DeflationSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComplexNumber {
     pub re: f64,
     pub im: f64,
@@ -125,13 +131,37 @@ pub fn solve_equilibrium_with_deflation(
     deflated_roots: &[Vec<f64>],
     deflation: DeflationSettings,
 ) -> Result<EquilibriumResult> {
-    solve_equilibrium_with_deflation_and_periodicity(
+    let targets = deflated_roots
+        .iter()
+        .cloned()
+        .map(|root| DeflationTarget {
+            root,
+            settings: deflation,
+        })
+        .collect::<Vec<_>>();
+    solve_equilibrium_with_deflation_targets_and_periodicity(
         system,
         kind,
         initial_guess,
         settings,
-        deflated_roots,
-        deflation,
+        &targets,
+        &StatePeriodicity::none(),
+    )
+}
+
+pub fn solve_equilibrium_with_deflation_targets(
+    system: &EquationSystem,
+    kind: SystemKind,
+    initial_guess: &[f64],
+    settings: NewtonSettings,
+    deflation_targets: &[DeflationTarget],
+) -> Result<EquilibriumResult> {
+    solve_equilibrium_with_deflation_targets_and_periodicity(
+        system,
+        kind,
+        initial_guess,
+        settings,
+        deflation_targets,
         &StatePeriodicity::none(),
     )
 }
@@ -163,6 +193,32 @@ pub fn solve_equilibrium_with_deflation_and_periodicity(
     deflation: DeflationSettings,
     periodicity: &StatePeriodicity,
 ) -> Result<EquilibriumResult> {
+    let targets = deflated_roots
+        .iter()
+        .cloned()
+        .map(|root| DeflationTarget {
+            root,
+            settings: deflation,
+        })
+        .collect::<Vec<_>>();
+    solve_equilibrium_with_deflation_targets_and_periodicity(
+        system,
+        kind,
+        initial_guess,
+        settings,
+        &targets,
+        periodicity,
+    )
+}
+
+pub fn solve_equilibrium_with_deflation_targets_and_periodicity(
+    system: &EquationSystem,
+    kind: SystemKind,
+    initial_guess: &[f64],
+    settings: NewtonSettings,
+    deflation_targets: &[DeflationTarget],
+    periodicity: &StatePeriodicity,
+) -> Result<EquilibriumResult> {
     let map_iterations = kind.checked_map_iterations()?;
     let dim = system.equations.len();
     if dim == 0 {
@@ -184,8 +240,7 @@ pub fn solve_equilibrium_with_deflation_and_periodicity(
     if settings.tolerance <= 0.0 {
         bail!("tolerance must be positive.");
     }
-    validate_deflation_settings(deflation)?;
-    validate_deflation_roots(deflated_roots, dim)?;
+    validate_deflation_targets(deflation_targets, dim)?;
 
     let mut state = initial_guess.to_vec();
     periodicity.wrap_state(&mut state);
@@ -199,7 +254,7 @@ pub fn solve_equilibrium_with_deflation_and_periodicity(
     )?;
     let mut residual_norm = l2_norm(&residual);
     let mut deflation_evaluation =
-        evaluate_deflation(&state, &residual, deflated_roots, deflation, periodicity)?;
+        evaluate_deflation(&state, &residual, deflation_targets, periodicity)?;
     let mut iterations = 0usize;
 
     loop {
@@ -208,7 +263,7 @@ pub fn solve_equilibrium_with_deflation_and_periodicity(
         }
 
         if iterations >= settings.max_steps {
-            if deflated_roots.is_empty() {
+            if deflation_targets.is_empty() {
                 bail!(
                     "Newton solver failed to converge in {} steps (||f(x)|| = {}).",
                     settings.max_steps,
@@ -248,7 +303,7 @@ pub fn solve_equilibrium_with_deflation_and_periodicity(
         )?;
         residual_norm = l2_norm(&residual);
         deflation_evaluation =
-            evaluate_deflation(&state, &residual, deflated_roots, deflation, periodicity)?;
+            evaluate_deflation(&state, &residual, deflation_targets, periodicity)?;
     }
 
     let jacobian = compute_system_jacobian_with_periodicity(system, kind, &state, periodicity)?;
@@ -282,8 +337,24 @@ pub fn compute_deflated_residual_norm(
     deflation: DeflationSettings,
     periodicity: &StatePeriodicity,
 ) -> Result<f64> {
-    validate_deflation_settings(deflation)?;
-    validate_deflation_roots(deflated_roots, state.len())?;
+    let targets = deflated_roots
+        .iter()
+        .cloned()
+        .map(|root| DeflationTarget {
+            root,
+            settings: deflation,
+        })
+        .collect::<Vec<_>>();
+    compute_deflated_residual_norm_with_targets(state, residual, &targets, periodicity)
+}
+
+pub fn compute_deflated_residual_norm_with_targets(
+    state: &[f64],
+    residual: &[f64],
+    deflation_targets: &[DeflationTarget],
+    periodicity: &StatePeriodicity,
+) -> Result<f64> {
+    validate_deflation_targets(deflation_targets, state.len())?;
     if residual.len() != state.len() {
         bail!(
             "Residual dimension mismatch for deflation. Expected {}, got {}.",
@@ -291,7 +362,7 @@ pub fn compute_deflated_residual_norm(
             residual.len()
         );
     }
-    Ok(evaluate_deflation(state, residual, deflated_roots, deflation, periodicity)?.residual_norm)
+    Ok(evaluate_deflation(state, residual, deflation_targets, periodicity)?.residual_norm)
 }
 
 pub fn apply_deflation_to_jacobian(
@@ -302,8 +373,25 @@ pub fn apply_deflation_to_jacobian(
     deflation: DeflationSettings,
     periodicity: &StatePeriodicity,
 ) -> Result<()> {
-    validate_deflation_settings(deflation)?;
-    validate_deflation_roots(deflated_roots, state.len())?;
+    let targets = deflated_roots
+        .iter()
+        .cloned()
+        .map(|root| DeflationTarget {
+            root,
+            settings: deflation,
+        })
+        .collect::<Vec<_>>();
+    apply_deflation_targets_to_jacobian(state, residual, jacobian, &targets, periodicity)
+}
+
+pub fn apply_deflation_targets_to_jacobian(
+    state: &[f64],
+    residual: &[f64],
+    jacobian: &mut [f64],
+    deflation_targets: &[DeflationTarget],
+    periodicity: &StatePeriodicity,
+) -> Result<()> {
+    validate_deflation_targets(deflation_targets, state.len())?;
     if residual.len() != state.len() {
         bail!(
             "Residual dimension mismatch for deflation. Expected {}, got {}.",
@@ -318,7 +406,7 @@ pub fn apply_deflation_to_jacobian(
             jacobian.len()
         );
     }
-    let evaluation = evaluate_deflation(state, residual, deflated_roots, deflation, periodicity)?;
+    let evaluation = evaluate_deflation(state, residual, deflation_targets, periodicity)?;
     apply_deflation_gradient(state.len(), residual, &evaluation.log_gradient, jacobian);
     Ok(())
 }
@@ -338,17 +426,18 @@ fn validate_deflation_settings(settings: DeflationSettings) -> Result<()> {
     Ok(())
 }
 
-fn validate_deflation_roots(deflated_roots: &[Vec<f64>], dim: usize) -> Result<()> {
-    for (index, root) in deflated_roots.iter().enumerate() {
-        if root.len() != dim {
+fn validate_deflation_targets(deflation_targets: &[DeflationTarget], dim: usize) -> Result<()> {
+    for (index, target) in deflation_targets.iter().enumerate() {
+        validate_deflation_settings(target.settings)?;
+        if target.root.len() != dim {
             bail!(
                 "Deflation target dimension mismatch at index {}. Expected {}, got {}.",
                 index,
                 dim,
-                root.len()
+                target.root.len()
             );
         }
-        if root.iter().any(|value| !value.is_finite()) {
+        if target.root.iter().any(|value| !value.is_finite()) {
             bail!(
                 "Deflation target at index {} contains a non-finite value.",
                 index
@@ -361,12 +450,11 @@ fn validate_deflation_roots(deflated_roots: &[Vec<f64>], dim: usize) -> Result<(
 fn evaluate_deflation(
     state: &[f64],
     residual: &[f64],
-    deflated_roots: &[Vec<f64>],
-    settings: DeflationSettings,
+    deflation_targets: &[DeflationTarget],
     periodicity: &StatePeriodicity,
 ) -> Result<DeflationEvaluation> {
     let original_norm = l2_norm(residual);
-    if deflated_roots.is_empty() {
+    if deflation_targets.is_empty() {
         return Ok(DeflationEvaluation {
             residual_norm: original_norm,
             log_gradient: vec![0.0; state.len()],
@@ -375,7 +463,9 @@ fn evaluate_deflation(
 
     let mut log_multiplier = 0.0;
     let mut log_gradient = vec![0.0; state.len()];
-    for (root_index, root) in deflated_roots.iter().enumerate() {
+    for (root_index, target) in deflation_targets.iter().enumerate() {
+        let root = &target.root;
+        let settings = target.settings;
         let deltas = state
             .iter()
             .zip(root)
@@ -769,10 +859,10 @@ fn normalize_complex_vector(vec: &mut [Complex<f64>]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_deflated_residual_norm, compute_jacobian, compute_map_cycle_points,
-        evaluate_equilibrium_residual_with_periodicity, solve_equilibrium,
-        solve_equilibrium_with_deflation, solve_equilibrium_with_periodicity, DeflationSettings,
-        NewtonSettings, SystemKind,
+        compute_deflated_residual_norm, compute_deflated_residual_norm_with_targets,
+        compute_jacobian, compute_map_cycle_points, evaluate_equilibrium_residual_with_periodicity,
+        solve_equilibrium, solve_equilibrium_with_deflation, solve_equilibrium_with_periodicity,
+        DeflationSettings, DeflationTarget, NewtonSettings, SystemKind,
     };
     use crate::equation_engine::{parse, Compiler, EquationSystem};
     use crate::state_periodicity::StatePeriodicity;
@@ -1135,6 +1225,34 @@ mod tests {
         let defaults = DeflationSettings::default();
         assert_eq!(defaults.exponent, 2.0);
         assert_eq!(defaults.shift, 1.0);
+    }
+
+    #[test]
+    fn deflation_uses_distinct_settings_for_each_target() {
+        let norm = compute_deflated_residual_norm_with_targets(
+            &[2.0],
+            &[1.0],
+            &[
+                DeflationTarget {
+                    root: vec![0.0],
+                    settings: DeflationSettings {
+                        exponent: 1.0,
+                        shift: 1.0,
+                    },
+                },
+                DeflationTarget {
+                    root: vec![1.0],
+                    settings: DeflationSettings {
+                        exponent: 2.0,
+                        shift: 2.0,
+                    },
+                },
+            ],
+            &StatePeriodicity::none(),
+        )
+        .expect("deflated residual norm");
+
+        assert!((norm - 4.5).abs() < 1e-12);
     }
 
     #[test]

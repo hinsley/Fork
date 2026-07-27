@@ -95,7 +95,14 @@ export interface EquilibriumSolverParams {
 }
 
 export interface EquilibriumDeflationConfig {
-  targetObjectIds: string[]
+  targets?: EquilibriumDeflationTargetConfig[]
+  targetObjectIds?: string[]
+  exponent?: number
+  shift?: number
+}
+
+export interface EquilibriumDeflationTargetConfig {
+  targetObjectId: string
   exponent: number
   shift: number
 }

@@ -70,6 +70,11 @@ export type EquilibriumSolverRunner = {
     is_done(): boolean;
     get_result(): EquilibriumSolution;
     set_deflation(roots: Float64Array, exponent: number, shift: number): void;
+    set_deflation_targets(
+        roots: Float64Array,
+        exponents: Float64Array,
+        shifts: Float64Array
+    ): void;
 };
 
 type HomoclinicShootingRunnerConstructor = new (
@@ -907,9 +912,11 @@ export class WasmBridge {
         dampingFactor: number,
         mapIterations: number,
         deflation?: {
-            roots: number[][];
-            exponent: number;
-            shift: number;
+            targets: Array<{
+                roots: number[][];
+                exponent: number;
+                shift: number;
+            }>;
         }
     ): EquilibriumSolverRunner {
         if (!wasmModule) throw new Error("WASM module not loaded");
@@ -926,11 +933,20 @@ export class WasmBridge {
             dampingFactor,
             new Float64Array(periodicPeriodsForConfig(this.config))
         ) as EquilibriumSolverRunner;
-        if (deflation && deflation.roots.length > 0) {
-            runner.set_deflation(
-                new Float64Array(flattenDeflationRoots(deflation.roots)),
-                deflation.exponent,
-                deflation.shift
+        if (deflation && deflation.targets.length > 0) {
+            const roots = deflation.targets.flatMap(target => target.roots);
+            runner.set_deflation_targets(
+                new Float64Array(flattenDeflationRoots(roots)),
+                new Float64Array(
+                    deflation.targets.flatMap(target =>
+                        target.roots.map(() => target.exponent)
+                    )
+                ),
+                new Float64Array(
+                    deflation.targets.flatMap(target =>
+                        target.roots.map(() => target.shift)
+                    )
+                )
             );
         }
         return runner;

@@ -3,12 +3,13 @@
 use crate::system::{build_system, SystemType, WasmSystem};
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::{
-    apply_deflation_to_jacobian, compute_deflated_residual_norm, compute_jacobian_with_periodicity,
-    compute_map_cycle_points_with_periodicity, compute_system_jacobian_with_periodicity,
-    evaluate_equilibrium_residual_with_periodicity,
+    apply_deflation_targets_to_jacobian, compute_deflated_residual_norm_with_targets,
+    compute_jacobian_with_periodicity, compute_map_cycle_points_with_periodicity,
+    compute_system_jacobian_with_periodicity, evaluate_equilibrium_residual_with_periodicity,
     solve_equilibrium_with_deflation_and_periodicity as core_deflated_equilibrium_solver,
-    solve_equilibrium_with_periodicity as core_equilibrium_solver, DeflationSettings, EigenPair,
-    EquilibriumResult, NewtonSettings, SystemKind,
+    solve_equilibrium_with_deflation_targets_and_periodicity as core_targeted_deflated_equilibrium_solver,
+    solve_equilibrium_with_periodicity as core_equilibrium_solver, DeflationSettings,
+    DeflationTarget, EigenPair, EquilibriumResult, NewtonSettings, SystemKind,
 };
 use fork_core::state_periodicity::StatePeriodicity;
 use nalgebra::linalg::SVD;
@@ -88,6 +89,47 @@ impl WasmSystem {
 
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
+
+    pub fn solve_equilibrium_deflated_targets(
+        &self,
+        initial_guess: Vec<f64>,
+        max_steps: u32,
+        damping: f64,
+        map_iterations: u32,
+        flattened_roots: Vec<f64>,
+        exponents: Vec<f64>,
+        shifts: Vec<f64>,
+    ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("equilibrium or map cycle analysis")?;
+        let settings = NewtonSettings {
+            max_steps: max_steps as usize,
+            damping,
+            ..NewtonSettings::default()
+        };
+        let kind = match self.system_type {
+            SystemType::Flow => SystemKind::Flow,
+            SystemType::Map => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
+        };
+        let targets = build_deflation_targets(
+            flattened_roots,
+            exponents,
+            shifts,
+            self.system.equations.len(),
+        )?;
+        let result = core_targeted_deflated_equilibrium_solver(
+            &self.system,
+            kind,
+            &initial_guess,
+            settings,
+            &targets,
+            &self.periodicity,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Deflated equilibrium solve failed: {}", e)))?;
+
+        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
 }
 
 /// Progress payload for the stepped equilibrium solver.
@@ -108,8 +150,7 @@ struct EquilibriumSolverState {
     deflated_residual_norm: f64,
     iterations: usize,
     settings: NewtonSettings,
-    deflated_roots: Vec<Vec<f64>>,
-    deflation: DeflationSettings,
+    deflation_targets: Vec<DeflationTarget>,
     periodicity: StatePeriodicity,
     done: bool,
 }
@@ -171,8 +212,6 @@ impl WasmEquilibriumSolverRunner {
         )
         .map_err(|e| JsValue::from_str(&format!("Residual failed: {}", e)))?;
         let residual_norm = l2_norm(&residual);
-        let deflation = DeflationSettings::default();
-
         Ok(WasmEquilibriumSolverRunner {
             state: Some(EquilibriumSolverState {
                 system,
@@ -183,8 +222,7 @@ impl WasmEquilibriumSolverRunner {
                 deflated_residual_norm: residual_norm,
                 iterations: 0,
                 settings,
-                deflated_roots: Vec::new(),
-                deflation,
+                deflation_targets: Vec::new(),
                 periodicity,
                 done: false,
             }),
@@ -197,6 +235,31 @@ impl WasmEquilibriumSolverRunner {
         exponent: f64,
         shift: f64,
     ) -> Result<(), JsValue> {
+        let dimension = self
+            .state
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?
+            .system
+            .equations
+            .len();
+        let root_count = if dimension == 0 {
+            0
+        } else {
+            flattened_roots.len() / dimension
+        };
+        self.set_deflation_targets(
+            flattened_roots,
+            vec![exponent; root_count],
+            vec![shift; root_count],
+        )
+    }
+
+    pub fn set_deflation_targets(
+        &mut self,
+        flattened_roots: Vec<f64>,
+        exponents: Vec<f64>,
+        shifts: Vec<f64>,
+    ) -> Result<(), JsValue> {
         let state = self
             .state
             .as_mut()
@@ -206,18 +269,20 @@ impl WasmEquilibriumSolverRunner {
                 "Deflation must be configured before Newton iterations begin.",
             ));
         }
-        let roots = unflatten_deflation_roots(flattened_roots, state.system.equations.len())?;
-        let deflation = DeflationSettings { exponent, shift };
-        let deflated_residual_norm = compute_deflated_residual_norm(
+        let targets = build_deflation_targets(
+            flattened_roots,
+            exponents,
+            shifts,
+            state.system.equations.len(),
+        )?;
+        let deflated_residual_norm = compute_deflated_residual_norm_with_targets(
             &state.state,
             &state.residual,
-            &roots,
-            deflation,
+            &targets,
             &state.periodicity,
         )
         .map_err(|e| JsValue::from_str(&format!("Invalid deflation configuration: {}", e)))?;
-        state.deflated_roots = roots;
-        state.deflation = deflation;
+        state.deflation_targets = targets;
         state.deflated_residual_norm = deflated_residual_norm;
         state.done = false;
         Ok(())
@@ -264,12 +329,11 @@ impl WasmEquilibriumSolverRunner {
                 &state.periodicity,
             )
             .map_err(|e| JsValue::from_str(&format!("Jacobian failed: {}", e)))?;
-            apply_deflation_to_jacobian(
+            apply_deflation_targets_to_jacobian(
                 &state.state,
                 &state.residual,
                 &mut jacobian,
-                &state.deflated_roots,
-                state.deflation,
+                &state.deflation_targets,
                 &state.periodicity,
             )
             .map_err(|e| JsValue::from_str(&format!("Deflation failed: {}", e)))?;
@@ -292,11 +356,10 @@ impl WasmEquilibriumSolverRunner {
             )
             .map_err(|e| JsValue::from_str(&format!("Residual failed: {}", e)))?;
             state.residual_norm = l2_norm(&state.residual);
-            state.deflated_residual_norm = compute_deflated_residual_norm(
+            state.deflated_residual_norm = compute_deflated_residual_norm_with_targets(
                 &state.state,
                 &state.residual,
-                &state.deflated_roots,
-                state.deflation,
+                &state.deflation_targets,
                 &state.periodicity,
             )
             .map_err(|e| JsValue::from_str(&format!("Deflation failed: {}", e)))?;
@@ -391,6 +454,29 @@ fn unflatten_deflation_roots(
     Ok(flattened_roots
         .chunks_exact(dim)
         .map(|root| root.to_vec())
+        .collect())
+}
+
+fn build_deflation_targets(
+    flattened_roots: Vec<f64>,
+    exponents: Vec<f64>,
+    shifts: Vec<f64>,
+    dimension: usize,
+) -> Result<Vec<DeflationTarget>, JsValue> {
+    let roots = unflatten_deflation_roots(flattened_roots, dimension)?;
+    if exponents.len() != roots.len() || shifts.len() != roots.len() {
+        return Err(JsValue::from_str(
+            "Deflation roots, exponents, and shifts must have matching lengths.",
+        ));
+    }
+    Ok(roots
+        .into_iter()
+        .zip(exponents)
+        .zip(shifts)
+        .map(|((root, exponent), shift)| DeflationTarget {
+            root,
+            settings: DeflationSettings { exponent, shift },
+        })
         .collect())
 }
 
@@ -646,6 +732,32 @@ mod wasm_value_tests {
         let result_value = runner.get_result().expect("get result");
         let result: EquilibriumResult = from_value(result_value).expect("decode result");
         assert!((result.state[0] + 1.0).abs() < 1e-8);
+    }
+
+    #[wasm_bindgen_test]
+    fn equilibrium_runner_keeps_settings_per_deflation_target() {
+        let mut runner = WasmEquilibriumSolverRunner::new(
+            vec!["x^3 - x".to_string()],
+            vec![],
+            vec![],
+            vec!["x".to_string()],
+            "flow",
+            1,
+            vec![0.2],
+            25,
+            1.0,
+            Vec::new(),
+        )
+        .expect("runner");
+        runner
+            .set_deflation_targets(vec![0.0, 1.0], vec![1.0, 3.0], vec![0.5, 2.0])
+            .expect("set deflation targets");
+
+        let state = runner.state.as_ref().expect("state");
+        assert_eq!(state.deflation_targets[0].settings.exponent, 1.0);
+        assert_eq!(state.deflation_targets[0].settings.shift, 0.5);
+        assert_eq!(state.deflation_targets[1].settings.exponent, 3.0);
+        assert_eq!(state.deflation_targets[1].settings.shift, 2.0);
     }
 
     #[wasm_bindgen_test]

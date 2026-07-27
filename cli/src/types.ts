@@ -67,7 +67,14 @@ export interface EquilibriumSolverParams {
 }
 
 export interface EquilibriumDeflationConfig {
-  targetObjectNames: string[];
+  targets?: EquilibriumDeflationTargetConfig[];
+  targetObjectNames?: string[];
+  exponent?: number;
+  shift?: number;
+}
+
+export interface EquilibriumDeflationTargetConfig {
+  targetObjectName: string;
   exponent: number;
   shift: number;
 }

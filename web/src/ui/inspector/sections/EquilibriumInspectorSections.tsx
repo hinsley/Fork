@@ -1,6 +1,10 @@
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
 import { formatContinuationParameterDisplayLabel } from '../../../system/subsystemGateway'
 import type { ManifoldStability, ManifoldDirection } from '../../../system/types'
+import {
+  DEFAULT_DEFLATION_EXPONENT,
+  DEFAULT_DEFLATION_SHIFT,
+} from '../../../system/deflation'
 import type { EquilibriumManifoldProfileDraft } from '../../manifoldProfileDrafts'
 import { InspectorSubDisclosure } from '../selectionSession'
 
@@ -153,34 +157,98 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         {systemDraft.type === 'flow'
                           ? 'Select solved equilibria that this solver should avoid.'
                           : 'Select solved map cycles that this solver should avoid. Every stored phase point is avoided.'}
+                        {' Each selected target has its own exponent and shift.'}
                       </p>
                       {equilibriumDeflationTargetOptions.length > 0 ? (
                         <div className="inspector-list">
-                          {equilibriumDeflationTargetOptions.map((option) => (
-                            <label key={option.id}>
-                              <input
-                                type="checkbox"
-                                checked={equilibriumDraft.deflationTargetObjectIds.includes(
-                                  option.id
-                                )}
-                                onChange={(event) =>
-                                  setEquilibriumDraft((previous) => ({
-                                    ...previous,
-                                    deflationTargetObjectIds: event.target.checked
-                                      ? [
-                                          ...previous.deflationTargetObjectIds,
-                                          option.id,
-                                        ]
-                                      : previous.deflationTargetObjectIds.filter(
-                                          (id) => id !== option.id
-                                        ),
-                                  }))
-                                }
-                                data-testid={`equilibrium-deflation-target-${option.id}`}
-                              />
-                              {option.name}
-                            </label>
-                          ))}
+                          {equilibriumDeflationTargetOptions.map((option) => {
+                            const selectedTarget = equilibriumDraft.deflationTargets.find(
+                              (target) => target.targetObjectId === option.id
+                            )
+                            return (
+                              <div key={option.id} className="inspector-section">
+                                <label>
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(selectedTarget)}
+                                    onChange={(event) =>
+                                      setEquilibriumDraft((previous) => ({
+                                        ...previous,
+                                        deflationTargets: event.target.checked
+                                          ? [
+                                              ...previous.deflationTargets,
+                                              {
+                                                targetObjectId: option.id,
+                                                exponent:
+                                                  DEFAULT_DEFLATION_EXPONENT.toString(),
+                                                shift: DEFAULT_DEFLATION_SHIFT.toString(),
+                                              },
+                                            ]
+                                          : previous.deflationTargets.filter(
+                                              (target) =>
+                                                target.targetObjectId !== option.id
+                                            ),
+                                      }))
+                                    }
+                                    data-testid={`equilibrium-deflation-target-${option.id}`}
+                                  />
+                                  {option.name}
+                                </label>
+                                {selectedTarget ? (
+                                  <>
+                                    <label>
+                                      Exponent
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        step="0.1"
+                                        value={selectedTarget.exponent}
+                                        onChange={(event) =>
+                                          setEquilibriumDraft((previous) => ({
+                                            ...previous,
+                                            deflationTargets:
+                                              previous.deflationTargets.map((target) =>
+                                                target.targetObjectId === option.id
+                                                  ? {
+                                                      ...target,
+                                                      exponent: event.target.value,
+                                                    }
+                                                  : target
+                                              ),
+                                          }))
+                                        }
+                                        data-testid={`equilibrium-deflation-exponent-${option.id}`}
+                                      />
+                                    </label>
+                                    <label>
+                                      Shift
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.1"
+                                        value={selectedTarget.shift}
+                                        onChange={(event) =>
+                                          setEquilibriumDraft((previous) => ({
+                                            ...previous,
+                                            deflationTargets:
+                                              previous.deflationTargets.map((target) =>
+                                                target.targetObjectId === option.id
+                                                  ? {
+                                                      ...target,
+                                                      shift: event.target.value,
+                                                    }
+                                                  : target
+                                              ),
+                                          }))
+                                        }
+                                        data-testid={`equilibrium-deflation-shift-${option.id}`}
+                                      />
+                                    </label>
+                                  </>
+                                ) : null}
+                              </div>
+                            )
+                          })}
                         </div>
                       ) : (
                         <p className="empty-state">
@@ -189,45 +257,13 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                           } are available.`}
                         </p>
                       )}
-                      <label>
-                        Exponent
-                        <input
-                          type="number"
-                          min="1"
-                          step="0.1"
-                          value={equilibriumDraft.deflationExponent}
-                          onChange={(event) =>
-                            setEquilibriumDraft((previous) => ({
-                              ...previous,
-                              deflationExponent: event.target.value,
-                            }))
-                          }
-                          data-testid="equilibrium-deflation-exponent"
-                        />
-                      </label>
-                      <label>
-                        Shift
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.1"
-                          value={equilibriumDraft.deflationShift}
-                          onChange={(event) =>
-                            setEquilibriumDraft((previous) => ({
-                              ...previous,
-                              deflationShift: event.target.value,
-                            }))
-                          }
-                          data-testid="equilibrium-deflation-shift"
-                        />
-                      </label>
-                      {equilibriumDraft.deflationTargetObjectIds.length > 0 ? (
+                      {equilibriumDraft.deflationTargets.length > 0 ? (
                         <button
                           type="button"
                           onClick={() =>
                             setEquilibriumDraft((previous) => ({
                               ...previous,
-                              deflationTargetObjectIds: [],
+                              deflationTargets: [],
                             }))
                           }
                           data-testid="equilibrium-deflation-clear"

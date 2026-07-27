@@ -43,6 +43,7 @@ import { formatEquilibriumLabel } from '../../system/labels'
 import {
   DEFAULT_DEFLATION_EXPONENT,
   DEFAULT_DEFLATION_SHIFT,
+  equilibriumDeflationTargets,
   mapCycleDeflationStates,
 } from '../../system/deflation'
 import {
@@ -341,9 +342,11 @@ type EquilibriumSolveDraft = {
   maxSteps: string
   dampingFactor: string
   mapIterations: string
-  deflationTargetObjectIds: string[]
-  deflationExponent: string
-  deflationShift: string
+  deflationTargets: Array<{
+    targetObjectId: string
+    exponent: string
+    shift: string
+  }>
 }
 
 type ForcedPeriodicResponseSolveDraft = {
@@ -1259,11 +1262,11 @@ function makeEquilibriumSolveDraft(
     maxSteps: defaultMaxSteps.toString(),
     dampingFactor: defaultDamping.toString(),
     mapIterations: defaultMapIterations.toString(),
-    deflationTargetObjectIds: [...(storedDeflation?.targetObjectIds ?? [])],
-    deflationExponent: (
-      storedDeflation?.exponent ?? DEFAULT_DEFLATION_EXPONENT
-    ).toString(),
-    deflationShift: (storedDeflation?.shift ?? DEFAULT_DEFLATION_SHIFT).toString(),
+    deflationTargets: equilibriumDeflationTargets(storedDeflation).map((target) => ({
+      targetObjectId: target.targetObjectId,
+      exponent: target.exponent.toString(),
+      shift: target.shift.toString(),
+    })),
   }
 }
 
@@ -3410,15 +3413,16 @@ function useInspectorSelectionController({
       equilibriumDeflationTargetOptions.map((option) => option.id)
     )
     setEquilibriumDraft((previous) => {
-      const nextIds = previous.deflationTargetObjectIds.filter(
-        (id) =>
-          allowed.has(id) ||
-          (Boolean(system.index.objects[id]) && !system.objects[id])
+      const nextTargets = previous.deflationTargets.filter(
+        (target) =>
+          allowed.has(target.targetObjectId) ||
+          (Boolean(system.index.objects[target.targetObjectId]) &&
+            !system.objects[target.targetObjectId])
       )
-      if (nextIds.length === previous.deflationTargetObjectIds.length) {
+      if (nextTargets.length === previous.deflationTargets.length) {
         return previous
       }
-      return { ...previous, deflationTargetObjectIds: nextIds }
+      return { ...previous, deflationTargets: nextTargets }
     })
   }, [
     equilibriumDeflationTargetIdsKey,
@@ -6004,8 +6008,6 @@ function useInspectorSelectionController({
     const maxSteps = parseNumber(equilibriumDraft.maxSteps)
     const dampingFactor = parseNumber(equilibriumDraft.dampingFactor)
     const mapIterations = parseNumber(equilibriumDraft.mapIterations)
-    const deflationExponent = parseNumber(equilibriumDraft.deflationExponent)
-    const deflationShift = parseNumber(equilibriumDraft.deflationShift)
     const initialGuess = equilibriumDraft.initialGuess.map((value) => parseNumber(value))
 
     if (maxSteps === null || maxSteps <= 0) {
@@ -6016,13 +6018,20 @@ function useInspectorSelectionController({
       setEquilibriumError('Damping factor must be a positive number.')
       return
     }
-    if (deflationExponent === null || deflationExponent < 1) {
-      setEquilibriumError('Deflation exponent must be at least 1.')
-      return
-    }
-    if (deflationShift === null || deflationShift < 0) {
-      setEquilibriumError('Deflation shift must be non-negative.')
-      return
+    const deflationTargets = equilibriumDraft.deflationTargets.map((target) => ({
+      targetObjectId: target.targetObjectId,
+      exponent: parseNumber(target.exponent),
+      shift: parseNumber(target.shift),
+    }))
+    for (const target of deflationTargets) {
+      if (target.exponent === null || target.exponent < 1) {
+        setEquilibriumError('Each deflation exponent must be at least 1.')
+        return
+      }
+      if (target.shift === null || target.shift < 0) {
+        setEquilibriumError('Each deflation shift must be non-negative.')
+        return
+      }
     }
     if (systemDraft.type === 'map') {
       if (
@@ -6047,9 +6056,11 @@ function useInspectorSelectionController({
       dampingFactor,
       ...(systemDraft.type === 'map' ? { mapIterations: mapIterations ?? 1 } : {}),
       deflation: {
-        targetObjectIds: [...equilibriumDraft.deflationTargetObjectIds],
-        exponent: deflationExponent,
-        shift: deflationShift,
+        targets: deflationTargets.map((target) => ({
+          targetObjectId: target.targetObjectId,
+          exponent: target.exponent ?? DEFAULT_DEFLATION_EXPONENT,
+          shift: target.shift ?? DEFAULT_DEFLATION_SHIFT,
+        })),
       },
     }
     await onSolveEquilibrium(request)

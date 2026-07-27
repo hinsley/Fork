@@ -552,9 +552,18 @@ describe('appState lazy hydration', () => {
         dampingFactor: 1,
         mapIterations: 1,
         deflation: {
-          targetObjectIds: [fixed.nodeId, target.nodeId],
-          exponent: 2,
-          shift: 1,
+          targets: [
+            {
+              targetObjectId: fixed.nodeId,
+              exponent: 1,
+              shift: 0.5,
+            },
+            {
+              targetObjectId: target.nodeId,
+              exponent: 3,
+              shift: 2,
+            },
+          ],
         },
       })
     })
@@ -563,9 +572,18 @@ describe('appState lazy hydration', () => {
       expect.objectContaining({
         mapIterations: 1,
         deflation: {
-          roots: [[0], [0.5130445095326298], [0.7994554904673701]],
-          exponent: 2,
-          shift: 1,
+          targets: [
+            {
+              roots: [[0]],
+              exponent: 1,
+              shift: 0.5,
+            },
+            {
+              roots: [[0.5130445095326298], [0.7994554904673701]],
+              exponent: 3,
+              shift: 2,
+            },
+          ],
         },
       })
     )
@@ -573,9 +591,18 @@ describe('appState lazy hydration', () => {
     expect(stored?.type).toBe('equilibrium')
     if (stored?.type === 'equilibrium') {
       expect(stored.lastSolverParams?.deflation).toEqual({
-        targetObjectIds: [fixed.nodeId, target.nodeId],
-        exponent: 2,
-        shift: 1,
+        targets: [
+          {
+            targetObjectId: fixed.nodeId,
+            exponent: 1,
+            shift: 0.5,
+          },
+          {
+            targetObjectId: target.nodeId,
+            exponent: 3,
+            shift: 2,
+          },
+        ],
       })
     }
   })

@@ -445,15 +445,24 @@ async function runSolveEquilibrium(
   abortIfNeeded(signal)
   const mapIterations =
     request.system.type === 'map' ? request.mapIterations ?? 1 : 1
-  if (request.deflation && request.deflation.roots.length > 0) {
-    return system.solve_equilibrium_deflated(
+  if (request.deflation && request.deflation.targets.length > 0) {
+    const roots = request.deflation.targets.flatMap((target) => target.roots)
+    return system.solve_equilibrium_deflated_targets(
       new Float64Array(request.initialGuess),
       request.maxSteps,
       request.dampingFactor,
       mapIterations,
-      new Float64Array(request.deflation.roots.flat()),
-      request.deflation.exponent,
-      request.deflation.shift
+      new Float64Array(roots.flat()),
+      new Float64Array(
+        request.deflation.targets.flatMap((target) =>
+          target.roots.map(() => target.exponent)
+        )
+      ),
+      new Float64Array(
+        request.deflation.targets.flatMap((target) =>
+          target.roots.map(() => target.shift)
+        )
+      )
     )
   }
   return system.solve_equilibrium(

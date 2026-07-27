@@ -6309,14 +6309,12 @@ describe('InspectorDetailsPanel', () => {
       maxSteps: 10,
       dampingFactor: 0.8,
       deflation: {
-        targetObjectIds: [],
-        exponent: 2,
-        shift: 1,
+        targets: [],
       },
     })
   })
 
-  it('configures flow-equilibrium deflation with persisted defaults', async () => {
+  it('configures exponent and shift on each selected deflation target', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({ name: 'Deflated_Flow' })
     const target = addObject(baseSystem, {
@@ -6332,7 +6330,20 @@ describe('InspectorDetailsPanel', () => {
       },
       parameters: [...baseSystem.config.params],
     } satisfies EquilibriumObject)
-    const current = addObject(target.system, {
+    const secondTarget = addObject(target.system, {
+      type: 'equilibrium',
+      name: 'Known node',
+      systemName: baseSystem.config.name,
+      solution: {
+        state: [-1, 0],
+        residual_norm: 0,
+        iterations: 3,
+        jacobian: [],
+        eigenpairs: [],
+      },
+      parameters: [...baseSystem.config.params],
+    } satisfies EquilibriumObject)
+    const current = addObject(secondTarget.system, {
       type: 'equilibrium',
       name: 'Search setup',
       systemName: baseSystem.config.name,
@@ -6362,15 +6373,55 @@ describe('InspectorDetailsPanel', () => {
     await user.click(
       screen.getByTestId(`equilibrium-deflation-target-${target.nodeId}`)
     )
+    await user.click(
+      screen.getByTestId(`equilibrium-deflation-target-${secondTarget.nodeId}`)
+    )
+    await user.clear(
+      screen.getByTestId(`equilibrium-deflation-exponent-${target.nodeId}`)
+    )
+    await user.type(
+      screen.getByTestId(`equilibrium-deflation-exponent-${target.nodeId}`),
+      '3'
+    )
+    await user.clear(
+      screen.getByTestId(`equilibrium-deflation-shift-${target.nodeId}`)
+    )
+    await user.type(
+      screen.getByTestId(`equilibrium-deflation-shift-${target.nodeId}`),
+      '0.5'
+    )
+    await user.clear(
+      screen.getByTestId(`equilibrium-deflation-exponent-${secondTarget.nodeId}`)
+    )
+    await user.type(
+      screen.getByTestId(`equilibrium-deflation-exponent-${secondTarget.nodeId}`),
+      '4'
+    )
+    await user.clear(
+      screen.getByTestId(`equilibrium-deflation-shift-${secondTarget.nodeId}`)
+    )
+    await user.type(
+      screen.getByTestId(`equilibrium-deflation-shift-${secondTarget.nodeId}`),
+      '2'
+    )
     await user.click(screen.getByTestId('equilibrium-solve-submit'))
 
     expect(onSolveEquilibrium).toHaveBeenCalledWith(
       expect.objectContaining({
         equilibriumId: current.nodeId,
         deflation: {
-          targetObjectIds: [target.nodeId],
-          exponent: 2,
-          shift: 1,
+          targets: [
+            {
+              targetObjectId: target.nodeId,
+              exponent: 3,
+              shift: 0.5,
+            },
+            {
+              targetObjectId: secondTarget.nodeId,
+              exponent: 4,
+              shift: 2,
+            },
+          ],
         },
       })
     )

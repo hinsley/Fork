@@ -21,6 +21,7 @@ import {
 import {
     DEFAULT_DEFLATION_EXPONENT,
     DEFAULT_DEFLATION_SHIFT,
+    equilibriumDeflationTargets,
     mapCycleDeflationStates
 } from './deflation';
 import { WasmBridge, CovariantLyapunovResponse } from './wasm';
@@ -1121,9 +1122,7 @@ async function createEquilibrium(sysName: string): Promise<NavigationRequest | v
         dampingFactor: 1,
         mapIterations: sysConfig.type === 'map' ? 1 : undefined,
         deflation: {
-            targetObjectNames: [],
-            exponent: DEFAULT_DEFLATION_EXPONENT,
-            shift: DEFAULT_DEFLATION_SHIFT
+            targets: []
         }
     };
 
@@ -2855,13 +2854,11 @@ async function executeEquilibriumSolver(
     let dampingInput = defaultDamping.toString();
     let mapIterationsInput = defaultMapIterations.toString();
     const storedDeflation = obj.lastSolverParams?.deflation;
-    let deflationTargetNames = [...(storedDeflation?.targetObjectNames ?? [])];
-    let deflationExponentInput = (
-        storedDeflation?.exponent ?? DEFAULT_DEFLATION_EXPONENT
-    ).toString();
-    let deflationShiftInput = (
-        storedDeflation?.shift ?? DEFAULT_DEFLATION_SHIFT
-    ).toString();
+    let deflationTargets = equilibriumDeflationTargets(storedDeflation).map(target => ({
+        targetObjectName: target.targetObjectName,
+        exponentInput: target.exponent.toString(),
+        shiftInput: target.shift.toString()
+    }));
 
     const solverEntries: ConfigEntry[] = [
         ...sysConfig.varNames.map((varName, idx) => ({
@@ -2952,9 +2949,9 @@ async function executeEquilibriumSolver(
             id: 'deflation',
             label: 'Deflation',
             getDisplay: () =>
-                deflationTargetNames.length === 0
+                deflationTargets.length === 0
                     ? 'Off'
-                    : `${deflationTargetNames.length} selected; exponent ${formatUnset(deflationExponentInput)}; shift ${formatUnset(deflationShiftInput)}`,
+                    : `${deflationTargets.length} selected`,
             edit: async () => {
                 const targets = listEquilibriumDeflationTargets(
                     sysName,
@@ -2962,8 +2959,8 @@ async function executeEquilibriumSolver(
                     sysConfig.type
                 );
                 const availableNames = new Set(targets.map(target => target.name));
-                deflationTargetNames = deflationTargetNames.filter(name =>
-                    availableNames.has(name)
+                deflationTargets = deflationTargets.filter(target =>
+                    availableNames.has(target.targetObjectName)
                 );
 
                 const deflationEntries: ConfigEntry[] = [
@@ -2973,8 +2970,10 @@ async function executeEquilibriumSolver(
                             ? 'Equilibria'
                             : 'Cycles',
                         getDisplay: () =>
-                            deflationTargetNames.length > 0
-                                ? deflationTargetNames.join(', ')
+                            deflationTargets.length > 0
+                                ? deflationTargets
+                                    .map(target => target.targetObjectName)
+                                    .join(', ')
                                 : '(none)',
                         edit: async () => {
                             if (targets.length === 0) {
@@ -2994,51 +2993,77 @@ async function executeEquilibriumSolver(
                                 choices: targets.map(target => ({
                                     name: target.name,
                                     value: target.name,
-                                    checked: deflationTargetNames.includes(target.name)
+                                    checked: deflationTargets.some(
+                                        selected =>
+                                            selected.targetObjectName === target.name
+                                    )
                                 })),
                                 pageSize: MENU_PAGE_SIZE
                             });
-                            deflationTargetNames = selected;
+                            deflationTargets = selected.map((targetObjectName: string) => {
+                                const existing = deflationTargets.find(
+                                    target =>
+                                        target.targetObjectName === targetObjectName
+                                );
+                                return existing ?? {
+                                    targetObjectName,
+                                    exponentInput:
+                                        DEFAULT_DEFLATION_EXPONENT.toString(),
+                                    shiftInput: DEFAULT_DEFLATION_SHIFT.toString()
+                                };
+                            });
                         }
                     },
-                    {
-                        id: 'exponent',
-                        label: 'Exponent',
-                        getDisplay: () => formatUnset(deflationExponentInput),
+                    ...targets.map((target): ConfigEntry => ({
+                        id: `target_${target.name}`,
+                        label: target.name,
+                        section: 'Target parameters',
+                        getDisplay: () => {
+                            const selected = deflationTargets.find(
+                                candidate =>
+                                    candidate.targetObjectName === target.name
+                            );
+                            return selected
+                                ? `exponent ${formatUnset(selected.exponentInput)}; shift ${formatUnset(selected.shiftInput)}`
+                                : '(not selected)';
+                        },
                         edit: async () => {
-                            const { value } = await inquirer.prompt({
-                                name: 'value',
-                                message: 'Deflation exponent:',
-                                default: deflationExponentInput,
-                                validate: (input: string) => {
-                                    const parsed = parseFloat(input);
-                                    return Number.isFinite(parsed) && parsed >= 1
-                                        ? true
-                                        : 'Enter a number at least 1.';
+                            const selected = deflationTargets.find(
+                                candidate =>
+                                    candidate.targetObjectName === target.name
+                            );
+                            if (!selected) {
+                                printInfo('Select this target first.');
+                                return;
+                            }
+                            const values = await inquirer.prompt([
+                                {
+                                    name: 'exponent',
+                                    message: `${target.name} exponent:`,
+                                    default: selected.exponentInput,
+                                    validate: (input: string) => {
+                                        const parsed = parseFloat(input);
+                                        return Number.isFinite(parsed) && parsed >= 1
+                                            ? true
+                                            : 'Enter a number at least 1.';
+                                    }
+                                },
+                                {
+                                    name: 'shift',
+                                    message: `${target.name} shift:`,
+                                    default: selected.shiftInput,
+                                    validate: (input: string) => {
+                                        const parsed = parseFloat(input);
+                                        return Number.isFinite(parsed) && parsed >= 0
+                                            ? true
+                                            : 'Enter a non-negative number.';
+                                    }
                                 }
-                            });
-                            deflationExponentInput = value;
+                            ]);
+                            selected.exponentInput = values.exponent;
+                            selected.shiftInput = values.shift;
                         }
-                    },
-                    {
-                        id: 'shift',
-                        label: 'Shift',
-                        getDisplay: () => formatUnset(deflationShiftInput),
-                        edit: async () => {
-                            const { value } = await inquirer.prompt({
-                                name: 'value',
-                                message: 'Deflation shift:',
-                                default: deflationShiftInput,
-                                validate: (input: string) => {
-                                    const parsed = parseFloat(input);
-                                    return Number.isFinite(parsed) && parsed >= 0
-                                        ? true
-                                        : 'Enter a non-negative number.';
-                                }
-                            });
-                            deflationShiftInput = value;
-                        }
-                    }
+                    }))
                 ];
                 await runConfigMenu('Deflation', deflationEntries);
             }
@@ -3066,15 +3091,31 @@ async function executeEquilibriumSolver(
         ? Math.max(parseIntOrDefault(mapIterationsInput, defaultMapIterations), 1)
         : undefined;
     const deflation: EquilibriumDeflationConfig = {
-        targetObjectNames: [...new Set(deflationTargetNames)],
-        exponent: Math.max(
-            parseFloatOrDefault(deflationExponentInput, DEFAULT_DEFLATION_EXPONENT),
-            1
-        ),
-        shift: Math.max(
-            parseFloatOrDefault(deflationShiftInput, DEFAULT_DEFLATION_SHIFT),
-            0
-        )
+        targets: deflationTargets
+            .filter(
+                (target, index, allTargets) =>
+                    allTargets.findIndex(
+                        candidate =>
+                            candidate.targetObjectName === target.targetObjectName
+                    ) === index
+            )
+            .map(target => ({
+                targetObjectName: target.targetObjectName,
+                exponent: Math.max(
+                    parseFloatOrDefault(
+                        target.exponentInput,
+                        DEFAULT_DEFLATION_EXPONENT
+                    ),
+                    1
+                ),
+                shift: Math.max(
+                    parseFloatOrDefault(
+                        target.shiftInput,
+                        DEFAULT_DEFLATION_SHIFT
+                    ),
+                    0
+                )
+            }))
     };
 
     const solverParams: EquilibriumSolverParams = {
@@ -3103,7 +3144,7 @@ async function executeEquilibriumSolver(
         const bridge = new WasmBridge(configForObject(sysConfig, obj));
         const mapIterationsValue =
             sysConfig.type === 'map' ? solverParams.mapIterations ?? 1 : 1;
-        const deflationRoots = buildEquilibriumDeflationRoots(
+        const preparedDeflationTargets = buildEquilibriumDeflationTargets(
             sysName,
             obj,
             sysConfig,
@@ -3115,9 +3156,7 @@ async function executeEquilibriumSolver(
             solverParams.dampingFactor,
             mapIterationsValue,
             {
-                roots: deflationRoots,
-                exponent: deflation.exponent,
-                shift: deflation.shift
+                targets: preparedDeflationTargets
             }
         );
         const result = runEquilibriumSolveWithProgress(runner, equilibriumLabel);
@@ -3158,16 +3197,24 @@ function listEquilibriumDeflationTargets(
         .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function buildEquilibriumDeflationRoots(
+type PreparedEquilibriumDeflationTarget = {
+    roots: number[][];
+    exponent: number;
+    shift: number;
+};
+
+function buildEquilibriumDeflationTargets(
     sysName: string,
     currentObject: EquilibriumObject,
     systemConfig: SystemConfig,
     deflation: EquilibriumDeflationConfig
-): number[][] {
-    if (deflation.targetObjectNames.length === 0) return [];
+): PreparedEquilibriumDeflationTarget[] {
+    const configuredTargets = equilibriumDeflationTargets(deflation);
+    if (configuredTargets.length === 0) return [];
     const currentRunConfig = configForObject(systemConfig, currentObject);
-    const roots: number[][] = [];
-    for (const targetName of deflation.targetObjectNames) {
+    const preparedTargets: PreparedEquilibriumDeflationTarget[] = [];
+    for (const configuredTarget of configuredTargets) {
+        const targetName = configuredTarget.targetObjectName;
         const loaded = Storage.loadObject(sysName, targetName);
         if (loaded.type !== 'equilibrium' || !loaded.solution) {
             throw new Error(`Deflation target "${targetName}" must be a solved object.`);
@@ -3193,6 +3240,7 @@ function buildEquilibriumDeflationRoots(
         const targetStates = systemConfig.type === 'flow'
             ? [solution.state]
             : mapCycleDeflationStates(target);
+        const roots: number[][] = [];
         for (const root of targetStates) {
             if (root.length !== currentRunConfig.varNames.length) {
                 throw new Error(`Deflation target "${targetName}" has the wrong state dimension.`);
@@ -3206,8 +3254,13 @@ function buildEquilibriumDeflationRoots(
             );
             if (!duplicate) roots.push([...root]);
         }
+        preparedTargets.push({
+            roots,
+            exponent: configuredTarget.exponent,
+            shift: configuredTarget.shift
+        });
     }
-    return roots;
+    return preparedTargets;
 }
 
 async function inspectEquilibriumData(
@@ -3296,15 +3349,15 @@ function renderEquilibriumData(obj: EquilibriumObject, sysConfig: SystemConfig) 
         console.log(`  Damping : ${obj.lastSolverParams.dampingFactor}`);
         const deflation = obj.lastSolverParams.deflation;
         if (deflation) {
+            const targets = equilibriumDeflationTargets(deflation);
             console.log(
-                `  Deflation: ${
-                    deflation.targetObjectNames.length > 0
-                        ? deflation.targetObjectNames.join(', ')
-                        : 'Off'
-                }`
+                `  Deflation: ${targets.length > 0 ? `${targets.length} target(s)` : 'Off'}`
             );
-            console.log(`  Deflation exponent: ${deflation.exponent}`);
-            console.log(`  Deflation shift   : ${deflation.shift}`);
+            for (const target of targets) {
+                console.log(
+                    `    ${target.targetObjectName}: exponent ${target.exponent}; shift ${target.shift}`
+                );
+            }
         }
         const guessPreview = obj.lastSolverParams.initialGuess
             .map((val, idx) => `${sysConfig.varNames[idx] || `x${idx + 1}`}:${val.toPrecision(4)}`)

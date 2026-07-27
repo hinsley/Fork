@@ -1,7 +1,25 @@
-import type { EquilibriumObject } from './types'
+import type {
+  EquilibriumDeflationConfig,
+  EquilibriumDeflationTargetConfig,
+  EquilibriumObject,
+} from './types'
 
 export const DEFAULT_DEFLATION_EXPONENT = 2
 export const DEFAULT_DEFLATION_SHIFT = 1
+
+export function equilibriumDeflationTargets(
+  config: EquilibriumDeflationConfig | undefined
+): EquilibriumDeflationTargetConfig[] {
+  if (!config) return []
+  if (Array.isArray(config.targets)) {
+    return config.targets.map((target) => ({ ...target }))
+  }
+  return (config.targetObjectIds ?? []).map((targetObjectId) => ({
+    targetObjectId,
+    exponent: config.exponent ?? DEFAULT_DEFLATION_EXPONENT,
+    shift: config.shift ?? DEFAULT_DEFLATION_SHIFT,
+  }))
+}
 
 export function equilibriumMapIterations(object: EquilibriumObject): number {
   const value =

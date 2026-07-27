@@ -228,6 +228,17 @@ async function run() {
     assert.deepEqual(deflation.mapCycleDeflationStates(fixedPoint), [[0]]);
     assert.deepEqual(deflation.mapCycleDeflationStates(cycle), [[0.2], [0.8]]);
     assert.deepEqual(deflation.flattenDeflationRoots(cycle.solution.cycle_points), [0.2, 0.8]);
+    assert.deepEqual(
+      deflation.equilibriumDeflationTargets({
+        targetObjectNames: ['fixed_1', 'cycle_2'],
+        exponent: 3,
+        shift: 0.5
+      }),
+      [
+        { targetObjectName: 'fixed_1', exponent: 3, shift: 0.5 },
+        { targetObjectName: 'cycle_2', exponent: 3, shift: 0.5 }
+      ]
+    );
   });
 
   test('CLI bridge and eligibility expose genuine two-equilibrium heteroclinics', () => {

@@ -145,6 +145,26 @@ deflatedRunner.set_deflation(new Float64Array([1]), 2, 1);
 while (!deflatedRunner.get_progress().done) deflatedRunner.run_steps(1);
 assert.ok(Math.abs(deflatedRunner.get_result().state[0] + 1) < 1e-8);
 
+const perTargetRunner = new wasm.WasmEquilibriumSolverRunner(
+  ['x^3 - x'],
+  new Float64Array(),
+  [],
+  ['x'],
+  'flow',
+  1,
+  new Float64Array([0.2]),
+  50,
+  1,
+  new Float64Array([Number.NaN])
+);
+perTargetRunner.set_deflation_targets(
+  new Float64Array([0, 1]),
+  new Float64Array([1, 3]),
+  new Float64Array([0.5, 2])
+);
+while (!perTargetRunner.get_progress().done) perTargetRunner.run_steps(1);
+assert.ok(Math.abs(perTargetRunner.get_result().state[0] + 1) < 1e-8);
+
 const logisticMap = new wasm.WasmSystem(
   ['mu * x * (1 - x)'],
   new Float64Array([3.2]),

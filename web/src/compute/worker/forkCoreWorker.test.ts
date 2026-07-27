@@ -56,8 +56,8 @@ const wasmState = {
   lastForcedResponseInitialGuess: null as number[] | null,
   lastDeflationArgs: null as null | {
     roots: number[]
-    exponent: number
-    shift: number
+    exponents: number[]
+    shifts: number[]
   },
   initPromise: Promise.resolve() as Promise<void>,
   initResolver: null as null | (() => void),
@@ -162,11 +162,11 @@ beforeAll(async () => {
           eigenpairs: [],
         }
       }
-      solve_equilibrium_deflated(...args: unknown[]) {
+      solve_equilibrium_deflated_targets(...args: unknown[]) {
         wasmState.lastDeflationArgs = {
           roots: Array.from(args[4] as Float64Array),
-          exponent: args[5] as number,
-          shift: args[6] as number,
+          exponents: Array.from(args[5] as Float64Array),
+          shifts: Array.from(args[6] as Float64Array),
         }
         return this.solve_equilibrium()
       }
@@ -1881,9 +1881,18 @@ describe('forkCoreWorker', () => {
           maxSteps: 10,
           dampingFactor: 1,
           deflation: {
-            roots: [[1], [-1]],
-            exponent: 2,
-            shift: 1,
+            targets: [
+              {
+                roots: [[1]],
+                exponent: 2,
+                shift: 1,
+              },
+              {
+                roots: [[-1]],
+                exponent: 3,
+                shift: 0.5,
+              },
+            ],
           },
         },
       },
@@ -1891,8 +1900,8 @@ describe('forkCoreWorker', () => {
 
     expect(wasmState.lastDeflationArgs).toEqual({
       roots: [1, -1],
-      exponent: 2,
-      shift: 1,
+      exponents: [2, 3],
+      shifts: [1, 0.5],
     })
   })
 

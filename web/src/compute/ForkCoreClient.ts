@@ -186,9 +186,11 @@ export type SolveEquilibriumRequest = {
   dampingFactor: number
   mapIterations?: number
   deflation?: {
-    roots: number[][]
-    exponent: number
-    shift: number
+    targets: Array<{
+      roots: number[][]
+      exponent: number
+      shift: number
+    }>
   }
 }
 

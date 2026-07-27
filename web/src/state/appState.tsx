@@ -59,8 +59,7 @@ import type {
   TreeNode,
 } from '../system/types'
 import {
-  DEFAULT_DEFLATION_EXPONENT,
-  DEFAULT_DEFLATION_SHIFT,
+  equilibriumDeflationTargets,
   equilibriumMapIterations,
   mapCycleDeflationStates,
 } from '../system/deflation'
@@ -158,14 +157,21 @@ function equilibriumSolutionFingerprint(
   })
 }
 
-function buildEquilibriumDeflationRoots(
+type PreparedEquilibriumDeflationTarget = {
+  roots: number[][]
+  exponent: number
+  shift: number
+}
+
+function buildEquilibriumDeflationTargets(
   system: System,
   currentObjectId: string,
   runConfig: SystemConfig,
   snapshot: SubsystemSnapshot,
   deflation: EquilibriumDeflationConfig | undefined
-): number[][] {
-  if (!deflation || deflation.targetObjectIds.length === 0) {
+): PreparedEquilibriumDeflationTarget[] {
+  const configuredTargets = equilibriumDeflationTargets(deflation)
+  if (configuredTargets.length === 0) {
     return []
   }
   const currentObject = system.objects[currentObjectId]
@@ -173,8 +179,9 @@ function buildEquilibriumDeflationRoots(
     currentObject?.type === 'equilibrium'
       ? resolveObjectParams(system.config, currentObject.customParameters)
       : system.config.params
-  const roots: number[][] = []
-  for (const targetId of deflation.targetObjectIds) {
+  const preparedTargets: PreparedEquilibriumDeflationTarget[] = []
+  for (const configuredTarget of configuredTargets) {
+    const targetId = configuredTarget.targetObjectId
     if (targetId === currentObjectId) {
       throw new Error('The solver object cannot deflate itself.')
     }
@@ -217,6 +224,7 @@ function buildEquilibriumDeflationRoots(
       )
     }
 
+    const roots: number[][] = []
     for (const targetState of targetStates) {
       const fullState = target.subsystemSnapshot
         ? stateVectorToDisplay(target.subsystemSnapshot, targetState)
@@ -231,8 +239,13 @@ function buildEquilibriumDeflationRoots(
       )
       if (!duplicate) roots.push(root)
     }
+    preparedTargets.push({
+      roots,
+      exponent: configuredTarget.exponent,
+      shift: configuredTarget.shift,
+    })
   }
-  return roots
+  return preparedTargets
 }
 
 function branchNameExists(system: System, parentObjectId: string, name: string): boolean {
@@ -1462,9 +1475,11 @@ export type EquilibriumSolveRequest = {
   dampingFactor: number
   mapIterations?: number
   deflation?: {
-    targetObjectIds: string[]
-    exponent: number
-    shift: number
+    targets: Array<{
+      targetObjectId: string
+      exponent: number
+      shift: number
+    }>
   }
 }
 
@@ -3460,9 +3475,7 @@ export function AppProvider({
           dampingFactor: 1,
           mapIterations: system.type === 'map' ? 1 : undefined,
           deflation: {
-            targetObjectIds: [],
-            exponent: DEFAULT_DEFLATION_EXPONENT,
-            shift: DEFAULT_DEFLATION_SHIFT,
+            targets: [],
           },
         }
 
@@ -3807,12 +3820,14 @@ export function AppProvider({
       try {
         const requestedDeflation = request.deflation
         const knownObject = state.system.objects[request.equilibriumId]
-        const targetObjectIds =
-          requestedDeflation?.targetObjectIds ??
-          (knownObject?.type === 'equilibrium'
-            ? knownObject.lastSolverParams?.deflation?.targetObjectIds
-            : undefined) ??
-          []
+        const requestedTargets = equilibriumDeflationTargets(requestedDeflation)
+        const storedTargets =
+          knownObject?.type === 'equilibrium'
+            ? equilibriumDeflationTargets(knownObject.lastSolverParams?.deflation)
+            : []
+        const targetObjectIds = (
+          requestedDeflation ? requestedTargets : storedTargets
+        ).map((target) => target.targetObjectId)
         const hydrated = await ensureEntitiesLoaded({
           objectIds: [
             request.equilibriumId,
@@ -3848,22 +3863,23 @@ export function AppProvider({
         const configuredDeflation =
           requestedDeflation ?? equilibrium.lastSolverParams?.deflation
         if (configuredDeflation) {
-          if (
-            !Number.isFinite(configuredDeflation.exponent) ||
-            configuredDeflation.exponent < 1
-          ) {
-            throw new Error('Deflation exponent must be at least 1.')
-          }
-          if (
-            !Number.isFinite(configuredDeflation.shift) ||
-            configuredDeflation.shift < 0
-          ) {
-            throw new Error('Deflation shift must be non-negative.')
+          const uniqueTargets = equilibriumDeflationTargets(configuredDeflation).filter(
+            (target, index, targets) =>
+              targets.findIndex(
+                (candidate) =>
+                  candidate.targetObjectId === target.targetObjectId
+              ) === index
+          )
+          for (const target of uniqueTargets) {
+            if (!Number.isFinite(target.exponent) || target.exponent < 1) {
+              throw new Error('Deflation exponent must be at least 1.')
+            }
+            if (!Number.isFinite(target.shift) || target.shift < 0) {
+              throw new Error('Deflation shift must be non-negative.')
+            }
           }
           deflation = {
-            targetObjectIds: [...new Set(configuredDeflation.targetObjectIds)],
-            exponent: configuredDeflation.exponent,
-            shift: configuredDeflation.shift,
+            targets: uniqueTargets,
           }
         }
 
@@ -3895,7 +3911,7 @@ export function AppProvider({
           baseParams
         )
         const reducedInitialGuess = projectStateToReduced(snapshot, solverParams.initialGuess)
-        const deflationRoots = buildEquilibriumDeflationRoots(
+        const deflationTargets = buildEquilibriumDeflationTargets(
           current,
           request.equilibriumId,
           runConfig,
@@ -3908,12 +3924,10 @@ export function AppProvider({
           maxSteps: solverParams.maxSteps,
           dampingFactor: solverParams.dampingFactor,
           mapIterations: solverParams.mapIterations,
-          ...(deflation && deflationRoots.length > 0
+          ...(deflation && deflationTargets.length > 0
             ? {
                 deflation: {
-                  roots: deflationRoots,
-                  exponent: deflation.exponent,
-                  shift: deflation.shift,
+                  targets: deflationTargets,
                 },
               }
             : {}),
