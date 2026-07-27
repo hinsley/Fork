@@ -2750,6 +2750,13 @@ function useInspectorSelectionController({
     plural: true,
     mapIterations: equilibriumMapIterations,
   })
+  const equilibriumSolveMapIterations =
+    systemDraft.type === 'map'
+      ? (() => {
+          const parsed = parseNumber(equilibriumDraft.mapIterations)
+          return parsed !== null && parsed > 0 && Number.isInteger(parsed) ? parsed : 1
+        })()
+      : undefined
   const equilibriumDeflationTargetOptions = useMemo(
     () =>
       Object.entries(system.objects)
@@ -2764,13 +2771,13 @@ function useInspectorSelectionController({
           if (systemDraft.type === 'flow') return true
           return isCompatibleMapCycleTarget(
             candidate,
-            equilibriumMapIterations ?? 1
+            equilibriumSolveMapIterations ?? 1
           )
         })
         .map(([id, candidate]) => ({ id, name: candidate.name }))
         .sort((left, right) => left.name.localeCompare(right.name)),
     [
-      equilibriumMapIterations,
+      equilibriumSolveMapIterations,
       selectedNodeId,
       system.objects,
       systemDraft.type,
