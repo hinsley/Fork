@@ -478,7 +478,7 @@ describe('appState lazy hydration', () => {
     ).toBe(true)
   })
 
-  it('passes every phase of selected map cycles to deflation and persists the setup', async () => {
+  it('passes every selected map-cycle phase without filtering by period', async () => {
     const config: SystemConfig = {
       name: 'Map_Deflation_State',
       equations: ['mu * x * (1 - x)'],
@@ -489,7 +489,26 @@ describe('appState lazy hydration', () => {
       type: 'map',
     }
     const base = createSystem({ name: config.name, config })
-    const target = addObject(base, {
+    const fixed = addObject(base, {
+      type: 'equilibrium',
+      name: 'Fixed_1',
+      systemName: config.name,
+      solution: {
+        state: [0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [],
+      },
+      lastSolverParams: {
+        initialGuess: [0.1],
+        maxSteps: 25,
+        dampingFactor: 1,
+        mapIterations: 1,
+      },
+      parameters: [...config.params],
+    } satisfies EquilibriumObject)
+    const target = addObject(fixed.system, {
       type: 'equilibrium',
       name: 'Cycle_2',
       systemName: config.name,
@@ -517,7 +536,7 @@ describe('appState lazy hydration', () => {
         initialGuess: [0.52],
         maxSteps: 25,
         dampingFactor: 1,
-        mapIterations: 4,
+        mapIterations: 1,
       },
       parameters: [...config.params],
     } satisfies EquilibriumObject)
@@ -531,9 +550,9 @@ describe('appState lazy hydration', () => {
         initialGuess: [0.52],
         maxSteps: 25,
         dampingFactor: 1,
-        mapIterations: 4,
+        mapIterations: 1,
         deflation: {
-          targetObjectIds: [target.nodeId],
+          targetObjectIds: [fixed.nodeId, target.nodeId],
           exponent: 2,
           shift: 1,
         },
@@ -542,9 +561,9 @@ describe('appState lazy hydration', () => {
 
     expect(solveSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        mapIterations: 4,
+        mapIterations: 1,
         deflation: {
-          roots: [[0.5130445095326298], [0.7994554904673701]],
+          roots: [[0], [0.5130445095326298], [0.7994554904673701]],
           exponent: 2,
           shift: 1,
         },
@@ -554,7 +573,7 @@ describe('appState lazy hydration', () => {
     expect(stored?.type).toBe('equilibrium')
     if (stored?.type === 'equilibrium') {
       expect(stored.lastSolverParams?.deflation).toEqual({
-        targetObjectIds: [target.nodeId],
+        targetObjectIds: [fixed.nodeId, target.nodeId],
         exponent: 2,
         shift: 1,
       })

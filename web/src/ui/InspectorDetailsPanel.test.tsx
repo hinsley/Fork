@@ -6376,7 +6376,7 @@ describe('InspectorDetailsPanel', () => {
     )
   })
 
-  it('reveals compatible cycle targets when a fixed-point solver draft changes period', async () => {
+  it('lists every solved map cycle without filtering by period', async () => {
     const user = userEvent.setup()
     const config: SystemConfig = {
       name: 'Deflated_Map',
@@ -6444,16 +6444,10 @@ describe('InspectorDetailsPanel', () => {
 
     await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
     await user.click(screen.getByTestId('equilibrium-deflation-toggle'))
-    expect(
-      screen.getByText(/Deflation applies to map cycles only/)
-    ).toBeVisible()
-    expect(screen.queryByText('Cycle two')).not.toBeInTheDocument()
-    await user.clear(screen.getByTestId('equilibrium-solve-cycle-length'))
-    await user.type(screen.getByTestId('equilibrium-solve-cycle-length'), '4')
     expect(screen.getByText('Cycle two')).toBeVisible()
-    expect(screen.queryByText('Map equilibrium')).not.toBeInTheDocument()
+    expect(screen.getByText('Map equilibrium')).toBeVisible()
     expect(
-      screen.getByText(/Every phase point is avoided/)
+      screen.getByText(/Every stored phase point is avoided/)
     ).toBeVisible()
   })
 

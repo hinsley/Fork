@@ -43,7 +43,7 @@ import { formatEquilibriumLabel } from '../../system/labels'
 import {
   DEFAULT_DEFLATION_EXPONENT,
   DEFAULT_DEFLATION_SHIFT,
-  isCompatibleMapCycleTarget,
+  mapCycleDeflationStates,
 } from '../../system/deflation'
 import {
   autonomousContextError as getAutonomousContextError,
@@ -2750,13 +2750,6 @@ function useInspectorSelectionController({
     plural: true,
     mapIterations: equilibriumMapIterations,
   })
-  const equilibriumSolveMapIterations =
-    systemDraft.type === 'map'
-      ? (() => {
-          const parsed = parseNumber(equilibriumDraft.mapIterations)
-          return parsed !== null && parsed > 0 && Number.isInteger(parsed) ? parsed : 1
-        })()
-      : undefined
   const equilibriumDeflationTargetOptions = useMemo(
     () =>
       Object.entries(system.objects)
@@ -2769,15 +2762,11 @@ function useInspectorSelectionController({
             return false
           }
           if (systemDraft.type === 'flow') return true
-          return isCompatibleMapCycleTarget(
-            candidate,
-            equilibriumSolveMapIterations ?? 1
-          )
+          return mapCycleDeflationStates(candidate).length > 0
         })
         .map(([id, candidate]) => ({ id, name: candidate.name }))
         .sort((left, right) => left.name.localeCompare(right.name)),
     [
-      equilibriumSolveMapIterations,
       selectedNodeId,
       system.objects,
       systemDraft.type,

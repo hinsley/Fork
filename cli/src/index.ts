@@ -21,8 +21,7 @@ import {
 import {
     DEFAULT_DEFLATION_EXPONENT,
     DEFAULT_DEFLATION_SHIFT,
-    equilibriumMapIterations,
-    isCompatibleMapCycleTarget
+    mapCycleDeflationStates
 } from './deflation';
 import { WasmBridge, CovariantLyapunovResponse } from './wasm';
 import {
@@ -2957,14 +2956,10 @@ async function executeEquilibriumSolver(
                     ? 'Off'
                     : `${deflationTargetNames.length} selected; exponent ${formatUnset(deflationExponentInput)}; shift ${formatUnset(deflationShiftInput)}`,
             edit: async () => {
-                const solveIterations = sysConfig.type === 'map'
-                    ? Math.max(parseIntOrDefault(mapIterationsInput, defaultMapIterations), 1)
-                    : 1;
                 const targets = listEquilibriumDeflationTargets(
                     sysName,
                     obj.name,
-                    sysConfig.type,
-                    solveIterations
+                    sysConfig.type
                 );
                 const availableNames = new Set(targets.map(target => target.name));
                 deflationTargetNames = deflationTargetNames.filter(name =>
@@ -2974,7 +2969,9 @@ async function executeEquilibriumSolver(
                 const deflationEntries: ConfigEntry[] = [
                     {
                         id: 'targets',
-                        label: sysConfig.type === 'flow' ? 'Equilibria' : 'Cycles',
+                        label: sysConfig.type === 'flow'
+                            ? 'Equilibria'
+                            : 'Cycles',
                         getDisplay: () =>
                             deflationTargetNames.length > 0
                                 ? deflationTargetNames.join(', ')
@@ -2984,9 +2981,7 @@ async function executeEquilibriumSolver(
                                 printInfo(
                                     sysConfig.type === 'flow'
                                         ? 'No other solved equilibria are available.'
-                                        : solveIterations <= 1
-                                            ? 'Set the cycle length above 1 before selecting cycles.'
-                                            : 'No solved cycles with compatible periods are available.'
+                                        : 'No other solved cycles are available.'
                                 );
                                 return;
                             }
@@ -3112,7 +3107,6 @@ async function executeEquilibriumSolver(
             sysName,
             obj,
             sysConfig,
-            solverParams.mapIterations,
             deflation
         );
         const runner = bridge.createEquilibriumSolverRunner(
@@ -3148,8 +3142,7 @@ async function executeEquilibriumSolver(
 function listEquilibriumDeflationTargets(
     sysName: string,
     currentObjectName: string,
-    systemType: SystemConfig['type'],
-    solveIterations: number
+    systemType: SystemConfig['type']
 ): EquilibriumObject[] {
     return Storage.listObjects(sysName)
         .filter(name => name !== currentObjectName)
@@ -3159,7 +3152,7 @@ function listEquilibriumDeflationTargets(
             Boolean(candidate.solution) &&
             (
                 systemType === 'flow' ||
-                isCompatibleMapCycleTarget(candidate, solveIterations)
+                mapCycleDeflationStates(candidate).length > 0
             )
         )
         .sort((left, right) => left.name.localeCompare(right.name));
@@ -3169,14 +3162,9 @@ function buildEquilibriumDeflationRoots(
     sysName: string,
     currentObject: EquilibriumObject,
     systemConfig: SystemConfig,
-    mapIterations: number | undefined,
     deflation: EquilibriumDeflationConfig
 ): number[][] {
     if (deflation.targetObjectNames.length === 0) return [];
-    if (systemConfig.type === 'map' && (mapIterations ?? 1) <= 1) {
-        throw new Error('Deflation is available for map cycle solves, not map equilibrium solves.');
-    }
-
     const currentRunConfig = configForObject(systemConfig, currentObject);
     const roots: number[][] = [];
     for (const targetName of deflation.targetObjectNames) {
@@ -3204,14 +3192,7 @@ function buildEquilibriumDeflationRoots(
 
         const targetStates = systemConfig.type === 'flow'
             ? [solution.state]
-            : (() => {
-                if (!isCompatibleMapCycleTarget(target, mapIterations ?? 1)) {
-                    throw new Error(
-                        `Cycle "${targetName}" must have a period that divides the requested cycle length.`
-                    );
-                }
-                return solution.cycle_points ?? [];
-            })();
+            : mapCycleDeflationStates(target);
         for (const root of targetStates) {
             if (root.length !== currentRunConfig.varNames.length) {
                 throw new Error(`Deflation target "${targetName}" has the wrong state dimension.`);

@@ -12,16 +12,10 @@ export function equilibriumMapIterations(object: EquilibriumObject): number {
   return Number.isFinite(value) ? Math.max(1, Math.trunc(value)) : 1
 }
 
-export function isCompatibleMapCycleTarget(
-  object: EquilibriumObject,
-  solveIterations: number
-): boolean {
-  if (!object.solution) return false
-  const targetIterations = equilibriumMapIterations(object)
-  return (
-    solveIterations > 1 &&
-    targetIterations > 1 &&
-    solveIterations % targetIterations === 0 &&
-    (object.solution.cycle_points?.length ?? 0) > 1
-  )
+export function mapCycleDeflationStates(object: EquilibriumObject): number[][] {
+  if (!object.solution) return []
+  const cyclePoints = object.solution.cycle_points
+  return cyclePoints && cyclePoints.length > 0
+    ? cyclePoints
+    : [object.solution.state]
 }

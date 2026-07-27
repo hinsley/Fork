@@ -152,9 +152,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                       <p className="field-help">
                         {systemDraft.type === 'flow'
                           ? 'Select solved equilibria that this solver should avoid.'
-                          : Number(equilibriumDraft.mapIterations) > 1
-                            ? 'Select solved cycles whose period divides this cycle length. Every phase point is avoided.'
-                            : 'Deflation applies to map cycles only. Set the cycle length above 1 to select cycles.'}
+                          : 'Select solved map cycles that this solver should avoid. Every stored phase point is avoided.'}
                       </p>
                       {equilibriumDeflationTargetOptions.length > 0 ? (
                         <div className="inspector-list">

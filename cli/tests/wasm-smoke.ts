@@ -145,6 +145,25 @@ deflatedRunner.set_deflation(new Float64Array([1]), 2, 1);
 while (!deflatedRunner.get_progress().done) deflatedRunner.run_steps(1);
 assert.ok(Math.abs(deflatedRunner.get_result().state[0] + 1) < 1e-8);
 
+const logisticMap = new wasm.WasmSystem(
+  ['mu * x * (1 - x)'],
+  new Float64Array([3.2]),
+  ['mu'],
+  ['x'],
+  'discrete',
+  'map'
+);
+const deflatedPeriodOneCycle = logisticMap.solve_equilibrium_deflated(
+  new Float64Array([0.2]),
+  50,
+  1,
+  1,
+  new Float64Array([0]),
+  2,
+  1
+);
+assert.ok(Math.abs(deflatedPeriodOneCycle.state[0] - 0.6875) < 1e-8);
+
 const periodicFlow = new wasm.WasmSystem(
   ['-x + a*cos(omega*t)'],
   new Float64Array([2, 0.4]),

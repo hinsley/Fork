@@ -187,7 +187,25 @@ async function run() {
     );
   });
 
-  test('deflation helpers accept divisor-period cycles and flatten all phases', () => {
+  test('deflation helpers return every stored map-cycle phase without period filtering', () => {
+    const fixedPoint = {
+      type: 'equilibrium' as const,
+      name: 'fixed_1',
+      systemName: 'map',
+      solution: {
+        state: [0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: []
+      },
+      lastSolverParams: {
+        initialGuess: [0.1],
+        maxSteps: 25,
+        dampingFactor: 1,
+        mapIterations: 1
+      }
+    };
     const cycle = {
       type: 'equilibrium' as const,
       name: 'cycle_2',
@@ -207,8 +225,8 @@ async function run() {
         mapIterations: 2
       }
     };
-    assert.equal(deflation.isCompatibleMapCycleTarget(cycle, 4), true);
-    assert.equal(deflation.isCompatibleMapCycleTarget(cycle, 3), false);
+    assert.deepEqual(deflation.mapCycleDeflationStates(fixedPoint), [[0]]);
+    assert.deepEqual(deflation.mapCycleDeflationStates(cycle), [[0.2], [0.8]]);
     assert.deepEqual(deflation.flattenDeflationRoots(cycle.solution.cycle_points), [0.2, 0.8]);
   });
 

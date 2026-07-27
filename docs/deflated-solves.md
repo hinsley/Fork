@@ -3,9 +3,9 @@
 Fork can keep a Newton solve away from selected known solutions. This first slice applies only to:
 
 - equilibria of flow systems;
-- cycles of discrete maps with cycle length greater than one.
+- cycles of discrete maps, including period-one cycles commonly called fixed points.
 
-Flow cycles and map equilibria are not deflated.
+Flow cycles are not deflated.
 
 ## Method
 
@@ -33,11 +33,13 @@ to a selected root.
 
 ## Map cycles
 
-A selected map cycle contributes every stored phase point to the deflation operator. Deflating only
-one point would permit Newton to return the same cycle with a different phase representative.
+A selected map cycle contributes every stored phase point to the deflation operator. A period-one
+cycle contributes its single stored state. Deflating only one point from a higher-period cycle
+would permit Newton to return the same cycle with a different phase representative.
 
-The Solve Cycle menu lists solved cycles whose period divides the requested cycle length. A
-period-\(q\) cycle is a root of the period-\(p\) residual only when \(q\) divides \(p\).
+The Solve Cycle menu lists every other solved map cycle. Target eligibility is not filtered by
+cycle period. Period-one cycles and higher-period cycles use the same selection, persistence, and
+root-expansion path.
 
 ## Solver setup and persistence
 

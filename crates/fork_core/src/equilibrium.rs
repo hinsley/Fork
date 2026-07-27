@@ -164,9 +164,6 @@ pub fn solve_equilibrium_with_deflation_and_periodicity(
     periodicity: &StatePeriodicity,
 ) -> Result<EquilibriumResult> {
     let map_iterations = kind.checked_map_iterations()?;
-    if !deflated_roots.is_empty() && kind.is_map() && map_iterations == 1 {
-        bail!("Deflation is available for map cycle solves, not map equilibrium solves.");
-    }
     let dim = system.equations.len();
     if dim == 0 {
         bail!("System has zero dimension.");
@@ -1036,6 +1033,28 @@ mod tests {
     }
 
     #[test]
+    fn deflation_applies_to_a_period_one_map_cycle() {
+        let system = build_logistic_system(3.2);
+        let settings = NewtonSettings {
+            max_steps: 50,
+            ..NewtonSettings::default()
+        };
+
+        let result = solve_equilibrium_with_deflation(
+            &system,
+            SystemKind::Map { iterations: 1 },
+            &[0.2],
+            settings,
+            &[vec![0.0]],
+            DeflationSettings::default(),
+        )
+        .expect("deflated period-one map solve should converge to the other cycle");
+
+        assert!((result.state[0] - 0.6875).abs() < 1e-8);
+        assert!(result.residual_norm <= settings.tolerance);
+    }
+
+    #[test]
     fn deflation_avoids_every_phase_of_a_selected_map_cycle() {
         let system = build_logistic_system(3.2);
         let settings = NewtonSettings {
@@ -1108,17 +1127,6 @@ mod tests {
                 },
             ),
             "shift",
-        );
-        assert_err_contains(
-            solve_equilibrium_with_deflation(
-                &system,
-                SystemKind::Map { iterations: 1 },
-                &[0.2],
-                settings,
-                &[vec![0.0]],
-                DeflationSettings::default(),
-            ),
-            "map cycle solves",
         );
     }
 

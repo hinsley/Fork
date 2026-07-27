@@ -207,11 +207,6 @@ impl WasmEquilibriumSolverRunner {
             ));
         }
         let roots = unflatten_deflation_roots(flattened_roots, state.system.equations.len())?;
-        if !roots.is_empty() && matches!(state.kind, SystemKind::Map { iterations: 1 }) {
-            return Err(JsValue::from_str(
-                "Deflation is available for map cycle solves, not map equilibrium solves.",
-            ));
-        }
         let deflation = DeflationSettings { exponent, shift };
         let deflated_residual_norm = compute_deflated_residual_norm(
             &state.state,

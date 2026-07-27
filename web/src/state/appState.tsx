@@ -62,7 +62,7 @@ import {
   DEFAULT_DEFLATION_EXPONENT,
   DEFAULT_DEFLATION_SHIFT,
   equilibriumMapIterations,
-  isCompatibleMapCycleTarget,
+  mapCycleDeflationStates,
 } from '../system/deflation'
 import type { LoadedEntities, SystemStore } from '../system/store'
 import {
@@ -163,16 +163,11 @@ function buildEquilibriumDeflationRoots(
   currentObjectId: string,
   runConfig: SystemConfig,
   snapshot: SubsystemSnapshot,
-  mapIterations: number | undefined,
   deflation: EquilibriumDeflationConfig | undefined
 ): number[][] {
   if (!deflation || deflation.targetObjectIds.length === 0) {
     return []
   }
-  if (runConfig.type === 'map' && (mapIterations ?? 1) <= 1) {
-    throw new Error('Deflation is available for map cycle solves, not map equilibrium solves.')
-  }
-
   const currentObject = system.objects[currentObjectId]
   const currentBaseParams =
     currentObject?.type === 'equilibrium'
@@ -194,12 +189,7 @@ function buildEquilibriumDeflationRoots(
       targetStates = [target.solution.state]
     } else {
       targetMapIterations = equilibriumMapIterations(target)
-      if (!isCompatibleMapCycleTarget(target, mapIterations ?? 1)) {
-        throw new Error(
-          `Cycle "${target.name}" must have a period that divides the requested cycle length.`
-        )
-      }
-      targetStates = target.solution.cycle_points ?? []
+      targetStates = mapCycleDeflationStates(target)
     }
 
     if (
@@ -3910,7 +3900,6 @@ export function AppProvider({
           request.equilibriumId,
           runConfig,
           snapshot,
-          mapIterations,
           deflation
         )
         const result = await client.solveEquilibrium({
