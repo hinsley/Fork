@@ -21,6 +21,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
     equilibrium,
     equilibriumContinuationBaseName,
     equilibriumCyclePoints,
+    equilibriumDeflationTargetOptions,
     equilibriumDisplayState,
     equilibriumDraft,
     equilibriumEigenPlot,
@@ -142,6 +143,102 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         data-testid="equilibrium-solve-cycle-length"
                       />
                     </label>
+                  ) : null}
+                  {systemDraft.type === 'flow' ||
+                  Number(equilibriumDraft.mapIterations) > 1 ? (
+                    <InspectorSubDisclosure
+                      title="Deflation"
+                      testId="equilibrium-deflation-toggle"
+                    >
+                      <div className="inspector-section">
+                        <p className="field-help">
+                          {systemDraft.type === 'flow'
+                            ? 'Select solved equilibria that this solver should avoid.'
+                            : 'Select solved cycles whose period divides this cycle length. Every phase point is avoided.'}
+                        </p>
+                        {equilibriumDeflationTargetOptions.length > 0 ? (
+                          <div className="inspector-list">
+                            {equilibriumDeflationTargetOptions.map((option) => (
+                              <label key={option.id}>
+                                <input
+                                  type="checkbox"
+                                  checked={equilibriumDraft.deflationTargetObjectIds.includes(
+                                    option.id
+                                  )}
+                                  onChange={(event) =>
+                                    setEquilibriumDraft((previous) => ({
+                                      ...previous,
+                                      deflationTargetObjectIds: event.target.checked
+                                        ? [
+                                            ...previous.deflationTargetObjectIds,
+                                            option.id,
+                                          ]
+                                        : previous.deflationTargetObjectIds.filter(
+                                            (id) => id !== option.id
+                                          ),
+                                    }))
+                                  }
+                                  data-testid={`equilibrium-deflation-target-${option.id}`}
+                                />
+                                {option.name}
+                              </label>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="empty-state">
+                            {`No other solved ${
+                              systemDraft.type === 'flow' ? 'equilibria' : 'cycles'
+                            } are available.`}
+                          </p>
+                        )}
+                        <label>
+                          Exponent
+                          <input
+                            type="number"
+                            min="1"
+                            step="0.1"
+                            value={equilibriumDraft.deflationExponent}
+                            onChange={(event) =>
+                              setEquilibriumDraft((previous) => ({
+                                ...previous,
+                                deflationExponent: event.target.value,
+                              }))
+                            }
+                            data-testid="equilibrium-deflation-exponent"
+                          />
+                        </label>
+                        <label>
+                          Shift
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            value={equilibriumDraft.deflationShift}
+                            onChange={(event) =>
+                              setEquilibriumDraft((previous) => ({
+                                ...previous,
+                                deflationShift: event.target.value,
+                              }))
+                            }
+                            data-testid="equilibrium-deflation-shift"
+                          />
+                        </label>
+                        {equilibriumDraft.deflationTargetObjectIds.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEquilibriumDraft((previous) => ({
+                                ...previous,
+                                deflationTargetObjectIds: [],
+                              }))
+                            }
+                            data-testid="equilibrium-deflation-clear"
+                          >
+                            Clear targets
+                          </button>
+                        ) : null}
+                      </div>
+                    </InspectorSubDisclosure>
                   ) : null}
                   {equilibriumError ? <div className="field-error">{equilibriumError}</div> : null}
                   <button

@@ -3,10 +3,12 @@
 use crate::system::{build_system, SystemType, WasmSystem};
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::{
-    compute_map_cycle_points_with_periodicity, compute_system_jacobian,
+    apply_deflation_to_jacobian, compute_deflated_residual_norm, compute_jacobian_with_periodicity,
+    compute_map_cycle_points_with_periodicity, compute_system_jacobian_with_periodicity,
     evaluate_equilibrium_residual_with_periodicity,
-    solve_equilibrium_with_periodicity as core_equilibrium_solver, EigenPair, EquilibriumResult,
-    NewtonSettings, SystemKind,
+    solve_equilibrium_with_deflation_and_periodicity as core_deflated_equilibrium_solver,
+    solve_equilibrium_with_periodicity as core_equilibrium_solver, DeflationSettings, EigenPair,
+    EquilibriumResult, NewtonSettings, SystemKind,
 };
 use fork_core::state_periodicity::StatePeriodicity;
 use nalgebra::linalg::SVD;
@@ -49,6 +51,43 @@ impl WasmSystem {
 
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
+
+    pub fn solve_equilibrium_deflated(
+        &self,
+        initial_guess: Vec<f64>,
+        max_steps: u32,
+        damping: f64,
+        map_iterations: u32,
+        flattened_roots: Vec<f64>,
+        exponent: f64,
+        shift: f64,
+    ) -> Result<JsValue, JsValue> {
+        self.require_autonomous("equilibrium or map cycle analysis")?;
+        let settings = NewtonSettings {
+            max_steps: max_steps as usize,
+            damping,
+            ..NewtonSettings::default()
+        };
+        let kind = match self.system_type {
+            SystemType::Flow => SystemKind::Flow,
+            SystemType::Map => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
+        };
+        let roots = unflatten_deflation_roots(flattened_roots, self.system.equations.len())?;
+        let result = core_deflated_equilibrium_solver(
+            &self.system,
+            kind,
+            &initial_guess,
+            settings,
+            &roots,
+            DeflationSettings { exponent, shift },
+            &self.periodicity,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Deflated equilibrium solve failed: {}", e)))?;
+
+        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
 }
 
 /// Progress payload for the stepped equilibrium solver.
@@ -66,8 +105,11 @@ struct EquilibriumSolverState {
     state: Vec<f64>,
     residual: Vec<f64>,
     residual_norm: f64,
+    deflated_residual_norm: f64,
     iterations: usize,
     settings: NewtonSettings,
+    deflated_roots: Vec<Vec<f64>>,
+    deflation: DeflationSettings,
     periodicity: StatePeriodicity,
     done: bool,
 }
@@ -129,6 +171,7 @@ impl WasmEquilibriumSolverRunner {
         )
         .map_err(|e| JsValue::from_str(&format!("Residual failed: {}", e)))?;
         let residual_norm = l2_norm(&residual);
+        let deflation = DeflationSettings::default();
 
         Ok(WasmEquilibriumSolverRunner {
             state: Some(EquilibriumSolverState {
@@ -137,12 +180,52 @@ impl WasmEquilibriumSolverRunner {
                 state,
                 residual,
                 residual_norm,
+                deflated_residual_norm: residual_norm,
                 iterations: 0,
                 settings,
+                deflated_roots: Vec::new(),
+                deflation,
                 periodicity,
                 done: false,
             }),
         })
+    }
+
+    pub fn set_deflation(
+        &mut self,
+        flattened_roots: Vec<f64>,
+        exponent: f64,
+        shift: f64,
+    ) -> Result<(), JsValue> {
+        let state = self
+            .state
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
+        if state.iterations > 0 {
+            return Err(JsValue::from_str(
+                "Deflation must be configured before Newton iterations begin.",
+            ));
+        }
+        let roots = unflatten_deflation_roots(flattened_roots, state.system.equations.len())?;
+        if !roots.is_empty() && matches!(state.kind, SystemKind::Map { iterations: 1 }) {
+            return Err(JsValue::from_str(
+                "Deflation is available for map cycle solves, not map equilibrium solves.",
+            ));
+        }
+        let deflation = DeflationSettings { exponent, shift };
+        let deflated_residual_norm = compute_deflated_residual_norm(
+            &state.state,
+            &state.residual,
+            &roots,
+            deflation,
+            &state.periodicity,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Invalid deflation configuration: {}", e)))?;
+        state.deflated_roots = roots;
+        state.deflation = deflation;
+        state.deflated_residual_norm = deflated_residual_norm;
+        state.done = false;
+        Ok(())
     }
 
     pub fn is_done(&self) -> bool {
@@ -160,14 +243,14 @@ impl WasmEquilibriumSolverRunner {
                 done: true,
                 iterations: state.iterations,
                 max_steps: state.settings.max_steps,
-                residual_norm: state.residual_norm,
+                residual_norm: state.deflated_residual_norm,
             };
             return to_value(&progress)
                 .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)));
         }
 
         for _ in 0..batch_size {
-            if state.residual_norm <= state.settings.tolerance {
+            if state.deflated_residual_norm <= state.settings.tolerance {
                 state.done = true;
                 break;
             }
@@ -175,13 +258,26 @@ impl WasmEquilibriumSolverRunner {
             if state.iterations >= state.settings.max_steps {
                 return Err(JsValue::from_str(&format!(
                     "Newton solver failed to converge in {} steps (‖f(x)‖ = {}).",
-                    state.settings.max_steps, state.residual_norm
+                    state.settings.max_steps, state.deflated_residual_norm
                 )));
             }
 
-            let jacobian =
-                fork_core::equilibrium::compute_jacobian(&state.system, state.kind, &state.state)
-                    .map_err(|e| JsValue::from_str(&format!("Jacobian failed: {}", e)))?;
+            let mut jacobian = compute_jacobian_with_periodicity(
+                &state.system,
+                state.kind,
+                &state.state,
+                &state.periodicity,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Jacobian failed: {}", e)))?;
+            apply_deflation_to_jacobian(
+                &state.state,
+                &state.residual,
+                &mut jacobian,
+                &state.deflated_roots,
+                state.deflation,
+                &state.periodicity,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Deflation failed: {}", e)))?;
             let delta =
                 solve_linear_system(state.system.equations.len(), &jacobian, &state.residual)
                     .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
@@ -201,13 +297,21 @@ impl WasmEquilibriumSolverRunner {
             )
             .map_err(|e| JsValue::from_str(&format!("Residual failed: {}", e)))?;
             state.residual_norm = l2_norm(&state.residual);
+            state.deflated_residual_norm = compute_deflated_residual_norm(
+                &state.state,
+                &state.residual,
+                &state.deflated_roots,
+                state.deflation,
+                &state.periodicity,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Deflation failed: {}", e)))?;
         }
 
         let progress = EquilibriumSolveProgress {
             done: state.done,
             iterations: state.iterations,
             max_steps: state.settings.max_steps,
-            residual_norm: state.residual_norm,
+            residual_norm: state.deflated_residual_norm,
         };
 
         to_value(&progress).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
@@ -223,7 +327,7 @@ impl WasmEquilibriumSolverRunner {
             done: state.done,
             iterations: state.iterations,
             max_steps: state.settings.max_steps,
-            residual_norm: state.residual_norm,
+            residual_norm: state.deflated_residual_norm,
         };
 
         to_value(&progress).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
@@ -235,14 +339,19 @@ impl WasmEquilibriumSolverRunner {
             .as_ref()
             .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
 
-        if state.residual_norm > state.settings.tolerance {
+        if state.deflated_residual_norm > state.settings.tolerance {
             return Err(JsValue::from_str(
                 "Equilibrium solver has not converged yet.",
             ));
         }
 
-        let jacobian = compute_system_jacobian(&state.system, state.kind, &state.state)
-            .map_err(|e| JsValue::from_str(&format!("Jacobian failed: {}", e)))?;
+        let jacobian = compute_system_jacobian_with_periodicity(
+            &state.system,
+            state.kind,
+            &state.state,
+            &state.periodicity,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Jacobian failed: {}", e)))?;
         let eigenpairs = compute_equilibrium_eigenpairs(state.system.equations.len(), &jacobian)
             .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
         let cycle_points = match state.kind {
@@ -268,6 +377,26 @@ impl WasmEquilibriumSolverRunner {
 
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
+}
+
+fn unflatten_deflation_roots(
+    flattened_roots: Vec<f64>,
+    dim: usize,
+) -> Result<Vec<Vec<f64>>, JsValue> {
+    if flattened_roots.is_empty() {
+        return Ok(Vec::new());
+    }
+    if dim == 0 || flattened_roots.len() % dim != 0 {
+        return Err(JsValue::from_str(&format!(
+            "Deflation root data length {} is not divisible by state dimension {}.",
+            flattened_roots.len(),
+            dim
+        )));
+    }
+    Ok(flattened_roots
+        .chunks_exact(dim)
+        .map(|root| root.to_vec())
+        .collect())
 }
 
 fn solve_linear_system(dim: usize, jacobian: &[f64], residual: &[f64]) -> anyhow::Result<Vec<f64>> {
@@ -437,6 +566,18 @@ mod wasm_value_tests {
         .expect("system should build")
     }
 
+    fn build_two_root_flow_system() -> WasmSystem {
+        WasmSystem::new(
+            vec!["x^2 - 1".to_string()],
+            vec![],
+            vec![],
+            vec!["x".to_string()],
+            "rk4",
+            "flow",
+        )
+        .expect("system should build")
+    }
+
     #[wasm_bindgen_test]
     fn solve_equilibrium_converges_for_linear_system() {
         let system = build_linear_system();
@@ -471,6 +612,45 @@ mod wasm_value_tests {
 
         assert!(result.residual_norm.abs() < 1e-12);
         assert_eq!(result.iterations, 0);
+    }
+
+    #[wasm_bindgen_test]
+    fn solve_equilibrium_deflated_avoids_selected_root() {
+        let system = build_two_root_flow_system();
+        let result_val = system
+            .solve_equilibrium_deflated(vec![0.2], 25, 1.0, 1, vec![1.0], 2.0, 1.0)
+            .expect("solve deflated equilibrium");
+        let result: EquilibriumResult = from_value(result_val).expect("decode result");
+
+        assert!((result.state[0] + 1.0).abs() < 1e-8);
+        assert!(result.residual_norm < 1e-9);
+    }
+
+    #[wasm_bindgen_test]
+    fn equilibrium_runner_applies_deflation_before_steps() {
+        let mut runner = WasmEquilibriumSolverRunner::new(
+            vec!["x^2 - 1".to_string()],
+            vec![],
+            vec![],
+            vec!["x".to_string()],
+            "flow",
+            1,
+            vec![0.2],
+            25,
+            1.0,
+            Vec::new(),
+        )
+        .expect("runner");
+        runner
+            .set_deflation(vec![1.0], 2.0, 1.0)
+            .expect("set deflation");
+
+        while !runner.is_done() {
+            runner.run_steps(1).expect("run step");
+        }
+        let result_value = runner.get_result().expect("get result");
+        let result: EquilibriumResult = from_value(result_value).expect("decode result");
+        assert!((result.state[0] + 1.0).abs() < 1e-8);
     }
 
     #[wasm_bindgen_test]

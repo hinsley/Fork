@@ -111,6 +111,40 @@ const frozenEquilibrium = frozenFlow.solve_equilibrium(
 );
 assert.ok(Math.abs(frozenEquilibrium.state[0] - 1.25) < 1e-10);
 
+const twoRootFlow = new wasm.WasmSystem(
+  ['x^2 - 1'],
+  new Float64Array(),
+  [],
+  ['x'],
+  'rk4',
+  'flow'
+);
+const deflatedEquilibrium = twoRootFlow.solve_equilibrium_deflated(
+  new Float64Array([0.2]),
+  25,
+  1,
+  1,
+  new Float64Array([1]),
+  2,
+  1
+);
+assert.ok(Math.abs(deflatedEquilibrium.state[0] + 1) < 1e-8);
+const deflatedRunner = new wasm.WasmEquilibriumSolverRunner(
+  ['x^2 - 1'],
+  new Float64Array(),
+  [],
+  ['x'],
+  'flow',
+  1,
+  new Float64Array([0.2]),
+  25,
+  1,
+  new Float64Array([Number.NaN])
+);
+deflatedRunner.set_deflation(new Float64Array([1]), 2, 1);
+while (!deflatedRunner.get_progress().done) deflatedRunner.run_steps(1);
+assert.ok(Math.abs(deflatedRunner.get_result().state[0] + 1) < 1e-8);
+
 const periodicFlow = new wasm.WasmSystem(
   ['-x + a*cos(omega*t)'],
   new Float64Array([2, 0.4]),

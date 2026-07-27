@@ -136,6 +136,7 @@ async function run() {
   const utils = require('../src/continuation/utils') as typeof import('../src/continuation/utils');
   const format = require('../src/format') as typeof import('../src/format');
   const labels = require('../src/labels') as typeof import('../src/labels');
+  const deflation = require('../src/deflation') as typeof import('../src/deflation');
   const normalForms = require('../src/continuation/normal-forms') as typeof import('../src/continuation/normal-forms');
   const inspect = require('../src/continuation/inspect') as typeof import('../src/continuation/inspect');
   const collocationAdaptivity = require('../src/continuation/collocation-adaptivity') as typeof import('../src/continuation/collocation-adaptivity');
@@ -184,6 +185,31 @@ async function run() {
       typeof wasmBridge.WasmBridge.prototype.createHomoclinicShootingContinuationRunner,
       'function'
     );
+  });
+
+  test('deflation helpers accept divisor-period cycles and flatten all phases', () => {
+    const cycle = {
+      type: 'equilibrium' as const,
+      name: 'cycle_2',
+      systemName: 'map',
+      solution: {
+        state: [0.2],
+        residual_norm: 0,
+        iterations: 2,
+        jacobian: [],
+        eigenpairs: [],
+        cycle_points: [[0.2], [0.8]]
+      },
+      lastSolverParams: {
+        initialGuess: [0.2],
+        maxSteps: 25,
+        dampingFactor: 1,
+        mapIterations: 2
+      }
+    };
+    assert.equal(deflation.isCompatibleMapCycleTarget(cycle, 4), true);
+    assert.equal(deflation.isCompatibleMapCycleTarget(cycle, 3), false);
+    assert.deepEqual(deflation.flattenDeflationRoots(cycle.solution.cycle_points), [0.2, 0.8]);
   });
 
   test('CLI bridge and eligibility expose genuine two-equilibrium heteroclinics', () => {

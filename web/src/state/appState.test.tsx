@@ -23,6 +23,7 @@ import type {
   LimitCycleObject,
   OrbitObject,
   System,
+  SystemConfig,
 } from '../system/types'
 
 const continuationSettings: ContinuationSettings = {
@@ -412,11 +413,11 @@ describe('appState lazy hydration', () => {
     ).toBe(true)
   })
 
-  it('auto-hydrates equilibrium payloads before solve actions', async () => {
+  it('auto-hydrates equilibrium deflation candidates when a solver object is selected', async () => {
     const base = createSystem({ name: 'Lazy_Solve' })
-    const equilibrium: EquilibriumObject = {
+    const target: EquilibriumObject = {
       type: 'equilibrium',
-      name: 'EQ_Lazy',
+      name: 'EQ_Target',
       systemName: base.config.name,
       solution: {
         state: [0, 0],
@@ -427,8 +428,15 @@ describe('appState lazy hydration', () => {
       },
       parameters: [...base.config.params],
     }
-    const withEquilibrium = addObject(base, equilibrium)
+    const withTarget = addObject(base, target)
+    const withEquilibrium = addObject(withTarget.system, {
+      type: 'equilibrium',
+      name: 'EQ_Lazy',
+      systemName: base.config.name,
+      parameters: [...base.config.params],
+    })
     withEquilibrium.system.nodes[withEquilibrium.nodeId].visibility = false
+    withEquilibrium.system.nodes[withTarget.nodeId].visibility = false
     const store = new LazyHydrationStore([withEquilibrium.system])
     const { getContext } = setupAppWithStore(store, {
       clientOverride: new MockForkCoreClient(0),
@@ -438,7 +446,14 @@ describe('appState lazy hydration', () => {
       await getContext().actions.openSystem(withEquilibrium.system.id)
     })
 
-    expect(getContext().state.system?.objects[withEquilibrium.nodeId]).toBeUndefined()
+    await act(async () => {
+      getContext().actions.selectNode(withEquilibrium.nodeId)
+    })
+
+    await waitFor(() => {
+      expect(getContext().state.system?.objects[withEquilibrium.nodeId]).toBeDefined()
+      expect(getContext().state.system?.objects[withTarget.nodeId]).toBeDefined()
+    })
 
     await act(async () => {
       await getContext().actions.solveEquilibrium({
@@ -455,8 +470,95 @@ describe('appState lazy hydration', () => {
       expect(getContext().state.error).toBeNull()
     })
     expect(
-      store.loadEntitiesCalls.some((call) => call.objectIds.includes(withEquilibrium.nodeId))
+      store.loadEntitiesCalls.some(
+        (call) =>
+          call.objectIds.includes(withEquilibrium.nodeId) &&
+          call.objectIds.includes(withTarget.nodeId)
+      )
     ).toBe(true)
+  })
+
+  it('passes every phase of selected map cycles to deflation and persists the setup', async () => {
+    const config: SystemConfig = {
+      name: 'Map_Deflation_State',
+      equations: ['mu * x * (1 - x)'],
+      params: [3.2],
+      paramNames: ['mu'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    const base = createSystem({ name: config.name, config })
+    const target = addObject(base, {
+      type: 'equilibrium',
+      name: 'Cycle_2',
+      systemName: config.name,
+      solution: {
+        state: [0.5130445095326298],
+        residual_norm: 0,
+        iterations: 4,
+        jacobian: [],
+        eigenpairs: [],
+        cycle_points: [[0.5130445095326298], [0.7994554904673701]],
+      },
+      lastSolverParams: {
+        initialGuess: [0.5],
+        maxSteps: 25,
+        dampingFactor: 1,
+        mapIterations: 2,
+      },
+      parameters: [...config.params],
+    } satisfies EquilibriumObject)
+    const current = addObject(target.system, {
+      type: 'equilibrium',
+      name: 'Cycle_Search',
+      systemName: config.name,
+      lastSolverParams: {
+        initialGuess: [0.52],
+        maxSteps: 25,
+        dampingFactor: 1,
+        mapIterations: 4,
+      },
+      parameters: [...config.params],
+    } satisfies EquilibriumObject)
+    const client = new MockForkCoreClient(0)
+    const solveSpy = vi.spyOn(client, 'solveEquilibrium')
+    const { getContext } = setupApp(current.system, client)
+
+    await act(async () => {
+      await getContext().actions.solveEquilibrium({
+        equilibriumId: current.nodeId,
+        initialGuess: [0.52],
+        maxSteps: 25,
+        dampingFactor: 1,
+        mapIterations: 4,
+        deflation: {
+          targetObjectIds: [target.nodeId],
+          exponent: 2,
+          shift: 1,
+        },
+      })
+    })
+
+    expect(solveSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mapIterations: 4,
+        deflation: {
+          roots: [[0.5130445095326298], [0.7994554904673701]],
+          exponent: 2,
+          shift: 1,
+        },
+      })
+    )
+    const stored = getContext().state.system?.objects[current.nodeId]
+    expect(stored?.type).toBe('equilibrium')
+    if (stored?.type === 'equilibrium') {
+      expect(stored.lastSolverParams?.deflation).toEqual({
+        targetObjectIds: [target.nodeId],
+        exponent: 2,
+        shift: 1,
+      })
+    }
   })
 
   it('hydrates limit-cycle render-target branches even when branch nodes are hidden', async () => {

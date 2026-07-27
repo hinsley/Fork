@@ -185,6 +185,11 @@ export type SolveEquilibriumRequest = {
   maxSteps: number
   dampingFactor: number
   mapIterations?: number
+  deflation?: {
+    roots: number[][]
+    exponent: number
+    shift: number
+  }
 }
 
 export type SolveEquilibriumResult = EquilibriumSolution

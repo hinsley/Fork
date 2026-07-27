@@ -63,6 +63,13 @@ export interface EquilibriumSolverParams {
   maxSteps: number;
   dampingFactor: number;
   mapIterations?: number;
+  deflation?: EquilibriumDeflationConfig;
+}
+
+export interface EquilibriumDeflationConfig {
+  targetObjectNames: string[];
+  exponent: number;
+  shift: number;
 }
 
 export interface EquilibriumRunSummary {

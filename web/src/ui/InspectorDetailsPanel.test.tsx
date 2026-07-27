@@ -175,7 +175,8 @@ function renderInspectorForStateSpaceStride(
   onExtendEquilibriumManifold1D: ReturnType<typeof vi.fn> = vi.fn(),
   onExtendManifold2D: ReturnType<typeof vi.fn> = vi.fn(),
   onCreateLimitCycleCodim1CurveFromPoint: ReturnType<typeof vi.fn> = vi.fn(),
-  onCreateCodim2BranchFromPoint: ReturnType<typeof vi.fn> = vi.fn()
+  onCreateCodim2BranchFromPoint: ReturnType<typeof vi.fn> = vi.fn(),
+  onSolveEquilibrium: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue(undefined)
 ) {
   render(
     <InspectorDetailsPanel
@@ -193,7 +194,7 @@ function renderInspectorForStateSpaceStride(
       onRunOrbit={vi.fn().mockResolvedValue(undefined)}
       onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
       onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
-      onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+      onSolveEquilibrium={onSolveEquilibrium}
       onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
       onExtendEquilibriumManifold1D={onExtendEquilibriumManifold1D}
       onExtendManifold2D={onExtendManifold2D}
@@ -6307,7 +6308,147 @@ describe('InspectorDetailsPanel', () => {
       initialGuess: [1, 2],
       maxSteps: 10,
       dampingFactor: 0.8,
+      deflation: {
+        targetObjectIds: [],
+        exponent: 2,
+        shift: 1,
+      },
     })
+  })
+
+  it('configures flow-equilibrium deflation with persisted defaults', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({ name: 'Deflated_Flow' })
+    const target = addObject(baseSystem, {
+      type: 'equilibrium',
+      name: 'Known saddle',
+      systemName: baseSystem.config.name,
+      solution: {
+        state: [1, 0],
+        residual_norm: 0,
+        iterations: 3,
+        jacobian: [],
+        eigenpairs: [],
+      },
+      parameters: [...baseSystem.config.params],
+    } satisfies EquilibriumObject)
+    const current = addObject(target.system, {
+      type: 'equilibrium',
+      name: 'Search setup',
+      systemName: baseSystem.config.name,
+      lastSolverParams: {
+        initialGuess: [0, 0],
+        maxSteps: 25,
+        dampingFactor: 1,
+      },
+      parameters: [...baseSystem.config.params],
+    } satisfies EquilibriumObject)
+    const onSolveEquilibrium = vi.fn().mockResolvedValue(undefined)
+
+    renderInspectorForStateSpaceStride(
+      current.system,
+      current.nodeId,
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      onSolveEquilibrium
+    )
+
+    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
+    await user.click(screen.getByTestId('equilibrium-deflation-toggle'))
+    expect(screen.getByText('Known saddle')).toBeVisible()
+    await user.click(
+      screen.getByTestId(`equilibrium-deflation-target-${target.nodeId}`)
+    )
+    await user.click(screen.getByTestId('equilibrium-solve-submit'))
+
+    expect(onSolveEquilibrium).toHaveBeenCalledWith(
+      expect.objectContaining({
+        equilibriumId: current.nodeId,
+        deflation: {
+          targetObjectIds: [target.nodeId],
+          exponent: 2,
+          shift: 1,
+        },
+      })
+    )
+  })
+
+  it('offers compatible solved cycles but not map equilibria as cycle deflation targets', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Deflated_Map',
+      equations: ['mu * x * (1 - x)'],
+      params: [3.2],
+      paramNames: ['mu'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    const baseSystem = createSystem({ name: config.name, config })
+    const fixed = addObject(baseSystem, {
+      type: 'equilibrium',
+      name: 'Map equilibrium',
+      systemName: config.name,
+      solution: {
+        state: [0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [],
+      },
+      lastSolverParams: {
+        initialGuess: [0.1],
+        maxSteps: 25,
+        dampingFactor: 1,
+        mapIterations: 1,
+      },
+      parameters: [...config.params],
+    } satisfies EquilibriumObject)
+    const cycle = addObject(fixed.system, {
+      type: 'equilibrium',
+      name: 'Cycle two',
+      systemName: config.name,
+      solution: {
+        state: [0.5130445095326298],
+        residual_norm: 0,
+        iterations: 4,
+        jacobian: [],
+        eigenpairs: [],
+        cycle_points: [[0.5130445095326298], [0.7994554904673701]],
+      },
+      lastSolverParams: {
+        initialGuess: [0.5],
+        maxSteps: 25,
+        dampingFactor: 1,
+        mapIterations: 2,
+      },
+      parameters: [...config.params],
+    } satisfies EquilibriumObject)
+    const current = addObject(cycle.system, {
+      type: 'equilibrium',
+      name: 'Cycle search',
+      systemName: config.name,
+      lastSolverParams: {
+        initialGuess: [0.52],
+        maxSteps: 25,
+        dampingFactor: 1,
+        mapIterations: 4,
+      },
+      parameters: [...config.params],
+    } satisfies EquilibriumObject)
+
+    renderInspectorForStateSpaceStride(current.system, current.nodeId, vi.fn())
+
+    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
+    await user.click(screen.getByTestId('equilibrium-deflation-toggle'))
+    expect(screen.getByText('Cycle two')).toBeVisible()
+    expect(screen.queryByText('Map equilibrium')).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/Every phase point is avoided/)
+    ).toBeVisible()
   })
 
   it('hides equilibrium eigenvector controls for 1D systems', async () => {

@@ -9,6 +9,7 @@ import {
     ContinuationObject,
     CovariantLyapunovData,
     EquilibriumObject,
+    EquilibriumDeflationConfig,
     EquilibriumRunSummary,
     EquilibriumSolverParams,
     ForcedPeriodicResponseObject,
@@ -17,6 +18,12 @@ import {
     SystemConfig,
     OrbitObject
 } from './types';
+import {
+    DEFAULT_DEFLATION_EXPONENT,
+    DEFAULT_DEFLATION_SHIFT,
+    equilibriumMapIterations,
+    isCompatibleMapCycleTarget
+} from './deflation';
 import { WasmBridge, CovariantLyapunovResponse } from './wasm';
 import {
     autonomousContextError,
@@ -1113,7 +1120,12 @@ async function createEquilibrium(sysName: string): Promise<NavigationRequest | v
         initialGuess: sysConfig.varNames.map(() => 0),
         maxSteps: 25,
         dampingFactor: 1,
-        mapIterations: sysConfig.type === 'map' ? 1 : undefined
+        mapIterations: sysConfig.type === 'map' ? 1 : undefined,
+        deflation: {
+            targetObjectNames: [],
+            exponent: DEFAULT_DEFLATION_EXPONENT,
+            shift: DEFAULT_DEFLATION_SHIFT
+        }
     };
 
     const eq: EquilibriumObject = {
@@ -2843,6 +2855,14 @@ async function executeEquilibriumSolver(
     let maxStepsInput = defaultMaxSteps.toString();
     let dampingInput = defaultDamping.toString();
     let mapIterationsInput = defaultMapIterations.toString();
+    const storedDeflation = obj.lastSolverParams?.deflation;
+    let deflationTargetNames = [...(storedDeflation?.targetObjectNames ?? [])];
+    let deflationExponentInput = (
+        storedDeflation?.exponent ?? DEFAULT_DEFLATION_EXPONENT
+    ).toString();
+    let deflationShiftInput = (
+        storedDeflation?.shift ?? DEFAULT_DEFLATION_SHIFT
+    ).toString();
 
     const solverEntries: ConfigEntry[] = [
         ...sysConfig.varNames.map((varName, idx) => ({
@@ -2928,6 +2948,105 @@ async function executeEquilibriumSolver(
                 });
                 dampingInput = value;
             }
+        },
+        {
+            id: 'deflation',
+            label: 'Deflation',
+            getDisplay: () =>
+                deflationTargetNames.length === 0
+                    ? 'Off'
+                    : `${deflationTargetNames.length} selected; exponent ${formatUnset(deflationExponentInput)}; shift ${formatUnset(deflationShiftInput)}`,
+            edit: async () => {
+                const solveIterations = sysConfig.type === 'map'
+                    ? Math.max(parseIntOrDefault(mapIterationsInput, defaultMapIterations), 1)
+                    : 1;
+                const targets = listEquilibriumDeflationTargets(
+                    sysName,
+                    obj.name,
+                    sysConfig.type,
+                    solveIterations
+                );
+                const availableNames = new Set(targets.map(target => target.name));
+                deflationTargetNames = deflationTargetNames.filter(name =>
+                    availableNames.has(name)
+                );
+
+                const deflationEntries: ConfigEntry[] = [
+                    {
+                        id: 'targets',
+                        label: sysConfig.type === 'flow' ? 'Equilibria' : 'Cycles',
+                        getDisplay: () =>
+                            deflationTargetNames.length > 0
+                                ? deflationTargetNames.join(', ')
+                                : '(none)',
+                        edit: async () => {
+                            if (targets.length === 0) {
+                                printInfo(
+                                    sysConfig.type === 'flow'
+                                        ? 'No other solved equilibria are available.'
+                                        : solveIterations <= 1
+                                            ? 'Set the cycle length above 1 before selecting cycles.'
+                                            : 'No solved cycles with compatible periods are available.'
+                                );
+                                return;
+                            }
+                            const { selected } = await inquirer.prompt({
+                                type: 'checkbox',
+                                name: 'selected',
+                                message: sysConfig.type === 'flow'
+                                    ? 'Equilibria to avoid:'
+                                    : 'Cycles to avoid:',
+                                choices: targets.map(target => ({
+                                    name: target.name,
+                                    value: target.name,
+                                    checked: deflationTargetNames.includes(target.name)
+                                })),
+                                pageSize: MENU_PAGE_SIZE
+                            });
+                            deflationTargetNames = selected;
+                        }
+                    },
+                    {
+                        id: 'exponent',
+                        label: 'Exponent',
+                        getDisplay: () => formatUnset(deflationExponentInput),
+                        edit: async () => {
+                            const { value } = await inquirer.prompt({
+                                name: 'value',
+                                message: 'Deflation exponent:',
+                                default: deflationExponentInput,
+                                validate: (input: string) => {
+                                    const parsed = parseFloat(input);
+                                    return Number.isFinite(parsed) && parsed >= 1
+                                        ? true
+                                        : 'Enter a number at least 1.';
+                                }
+                            });
+                            deflationExponentInput = value;
+                        }
+                    },
+                    {
+                        id: 'shift',
+                        label: 'Shift',
+                        getDisplay: () => formatUnset(deflationShiftInput),
+                        edit: async () => {
+                            const { value } = await inquirer.prompt({
+                                name: 'value',
+                                message: 'Deflation shift:',
+                                default: deflationShiftInput,
+                                validate: (input: string) => {
+                                    const parsed = parseFloat(input);
+                                    return Number.isFinite(parsed) && parsed >= 0
+                                        ? true
+                                        : 'Enter a non-negative number.';
+                                }
+                            });
+                            deflationShiftInput = value;
+                        }
+                    }
+                ];
+                await runConfigMenu('Deflation', deflationEntries);
+            }
         }
     ];
 
@@ -2951,19 +3070,32 @@ async function executeEquilibriumSolver(
     const mapIterations = sysConfig.type === 'map'
         ? Math.max(parseIntOrDefault(mapIterationsInput, defaultMapIterations), 1)
         : undefined;
+    const deflation: EquilibriumDeflationConfig = {
+        targetObjectNames: [...new Set(deflationTargetNames)],
+        exponent: Math.max(
+            parseFloatOrDefault(deflationExponentInput, DEFAULT_DEFLATION_EXPONENT),
+            1
+        ),
+        shift: Math.max(
+            parseFloatOrDefault(deflationShiftInput, DEFAULT_DEFLATION_SHIFT),
+            0
+        )
+    };
 
     const solverParams: EquilibriumSolverParams = {
         initialGuess: [...initialGuess],
         maxSteps,
         dampingFactor: damping > 0 ? damping : defaultDamping,
-        mapIterations
+        mapIterations,
+        deflation
     };
 
     obj.lastSolverParams = {
         initialGuess: [...solverParams.initialGuess],
         maxSteps: solverParams.maxSteps,
         dampingFactor: solverParams.dampingFactor,
-        mapIterations: solverParams.mapIterations
+        mapIterations: solverParams.mapIterations,
+        deflation: solverParams.deflation
     };
 
     const runRecord: EquilibriumRunSummary = {
@@ -2976,11 +3108,23 @@ async function executeEquilibriumSolver(
         const bridge = new WasmBridge(configForObject(sysConfig, obj));
         const mapIterationsValue =
             sysConfig.type === 'map' ? solverParams.mapIterations ?? 1 : 1;
+        const deflationRoots = buildEquilibriumDeflationRoots(
+            sysName,
+            obj,
+            sysConfig,
+            solverParams.mapIterations,
+            deflation
+        );
         const runner = bridge.createEquilibriumSolverRunner(
             solverParams.initialGuess,
             solverParams.maxSteps,
             solverParams.dampingFactor,
-            mapIterationsValue
+            mapIterationsValue,
+            {
+                roots: deflationRoots,
+                exponent: deflation.exponent,
+                shift: deflation.shift
+            }
         );
         const result = runEquilibriumSolveWithProgress(runner, equilibriumLabel);
 
@@ -2999,6 +3143,90 @@ async function executeEquilibriumSolver(
     }
 
     return runRecord.success;
+}
+
+function listEquilibriumDeflationTargets(
+    sysName: string,
+    currentObjectName: string,
+    systemType: SystemConfig['type'],
+    solveIterations: number
+): EquilibriumObject[] {
+    return Storage.listObjects(sysName)
+        .filter(name => name !== currentObjectName)
+        .map(name => Storage.loadObject(sysName, name))
+        .filter((candidate): candidate is EquilibriumObject =>
+            candidate.type === 'equilibrium' &&
+            Boolean(candidate.solution) &&
+            (
+                systemType === 'flow' ||
+                isCompatibleMapCycleTarget(candidate, solveIterations)
+            )
+        )
+        .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function buildEquilibriumDeflationRoots(
+    sysName: string,
+    currentObject: EquilibriumObject,
+    systemConfig: SystemConfig,
+    mapIterations: number | undefined,
+    deflation: EquilibriumDeflationConfig
+): number[][] {
+    if (deflation.targetObjectNames.length === 0) return [];
+    if (systemConfig.type === 'map' && (mapIterations ?? 1) <= 1) {
+        throw new Error('Deflation is available for map cycle solves, not map equilibrium solves.');
+    }
+
+    const currentRunConfig = configForObject(systemConfig, currentObject);
+    const roots: number[][] = [];
+    for (const targetName of deflation.targetObjectNames) {
+        const loaded = Storage.loadObject(sysName, targetName);
+        if (loaded.type !== 'equilibrium' || !loaded.solution) {
+            throw new Error(`Deflation target "${targetName}" must be a solved object.`);
+        }
+        const target = loaded as EquilibriumObject;
+        const solution = target.solution;
+        if (!solution) {
+            throw new Error(`Deflation target "${targetName}" must be a solved object.`);
+        }
+        const targetRunConfig = configForObject(systemConfig, target);
+        const targetParameters = target.parameters ?? targetRunConfig.params;
+        if (
+            targetRunConfig.equations.join('\u0000') !==
+                currentRunConfig.equations.join('\u0000') ||
+            targetParameters.length !== currentRunConfig.params.length ||
+            targetParameters.some((value, index) => value !== currentRunConfig.params[index])
+        ) {
+            throw new Error(
+                `Deflation target "${targetName}" is stale for the current subsystem or parameter values. Solve it again first.`
+            );
+        }
+
+        const targetStates = systemConfig.type === 'flow'
+            ? [solution.state]
+            : (() => {
+                if (!isCompatibleMapCycleTarget(target, mapIterations ?? 1)) {
+                    throw new Error(
+                        `Cycle "${targetName}" must have a period that divides the requested cycle length.`
+                    );
+                }
+                return solution.cycle_points ?? [];
+            })();
+        for (const root of targetStates) {
+            if (root.length !== currentRunConfig.varNames.length) {
+                throw new Error(`Deflation target "${targetName}" has the wrong state dimension.`);
+            }
+            const duplicate = roots.some(candidate =>
+                candidate.every(
+                    (value, index) =>
+                        Math.abs(value - root[index]) <=
+                        1e-12 * (1 + Math.max(Math.abs(value), Math.abs(root[index] ?? 0)))
+                )
+            );
+            if (!duplicate) roots.push([...root]);
+        }
+    }
+    return roots;
 }
 
 async function inspectEquilibriumData(
@@ -3085,6 +3313,18 @@ function renderEquilibriumData(obj: EquilibriumObject, sysConfig: SystemConfig) 
             console.log(`  Cycle length: ${iterations}`);
         }
         console.log(`  Damping : ${obj.lastSolverParams.dampingFactor}`);
+        const deflation = obj.lastSolverParams.deflation;
+        if (deflation) {
+            console.log(
+                `  Deflation: ${
+                    deflation.targetObjectNames.length > 0
+                        ? deflation.targetObjectNames.join(', ')
+                        : 'Off'
+                }`
+            );
+            console.log(`  Deflation exponent: ${deflation.exponent}`);
+            console.log(`  Deflation shift   : ${deflation.shift}`);
+        }
         const guessPreview = obj.lastSolverParams.initialGuess
             .map((val, idx) => `${sysConfig.varNames[idx] || `x${idx + 1}`}:${val.toPrecision(4)}`)
             .join(', ');

@@ -43,6 +43,9 @@ Fork uses pseudo-arclength continuation (PALC) to follow solution branches throu
 - **Bifurcation-curve continuation** follows that bifurcation in a two-parameter plane.
 - **Codimension-two detection** looks for special points on a bifurcation curve. Fork does not yet continue codimension-two sets.
 
+Flow-equilibrium and discrete-map-cycle solver setups can also use
+[shifted norm deflation](docs/deflated-solves.md) to avoid selected solutions during repeat solves.
+
 **Available** means the main numerical path is implemented and integrated. **Experimental** means a usable code path exists, but it is simplified, contains temporary diagnostics, or still lacks benchmark coverage. **Not implemented** means that only types, placeholders, or no numerical path exist.
 
 ### Maps

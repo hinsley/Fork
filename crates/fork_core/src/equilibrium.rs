@@ -55,6 +55,21 @@ impl Default for NewtonSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DeflationSettings {
+    pub exponent: f64,
+    pub shift: f64,
+}
+
+impl Default for DeflationSettings {
+    fn default() -> Self {
+        Self {
+            exponent: 2.0,
+            shift: 1.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComplexNumber {
     pub re: f64,
@@ -102,6 +117,25 @@ pub fn solve_equilibrium(
     )
 }
 
+pub fn solve_equilibrium_with_deflation(
+    system: &EquationSystem,
+    kind: SystemKind,
+    initial_guess: &[f64],
+    settings: NewtonSettings,
+    deflated_roots: &[Vec<f64>],
+    deflation: DeflationSettings,
+) -> Result<EquilibriumResult> {
+    solve_equilibrium_with_deflation_and_periodicity(
+        system,
+        kind,
+        initial_guess,
+        settings,
+        deflated_roots,
+        deflation,
+        &StatePeriodicity::none(),
+    )
+}
+
 pub fn solve_equilibrium_with_periodicity(
     system: &EquationSystem,
     kind: SystemKind,
@@ -109,7 +143,30 @@ pub fn solve_equilibrium_with_periodicity(
     settings: NewtonSettings,
     periodicity: &StatePeriodicity,
 ) -> Result<EquilibriumResult> {
+    solve_equilibrium_with_deflation_and_periodicity(
+        system,
+        kind,
+        initial_guess,
+        settings,
+        &[],
+        DeflationSettings::default(),
+        periodicity,
+    )
+}
+
+pub fn solve_equilibrium_with_deflation_and_periodicity(
+    system: &EquationSystem,
+    kind: SystemKind,
+    initial_guess: &[f64],
+    settings: NewtonSettings,
+    deflated_roots: &[Vec<f64>],
+    deflation: DeflationSettings,
+    periodicity: &StatePeriodicity,
+) -> Result<EquilibriumResult> {
     let map_iterations = kind.checked_map_iterations()?;
+    if !deflated_roots.is_empty() && kind.is_map() && map_iterations == 1 {
+        bail!("Deflation is available for map cycle solves, not map equilibrium solves.");
+    }
     let dim = system.equations.len();
     if dim == 0 {
         bail!("System has zero dimension.");
@@ -130,6 +187,8 @@ pub fn solve_equilibrium_with_periodicity(
     if settings.tolerance <= 0.0 {
         bail!("tolerance must be positive.");
     }
+    validate_deflation_settings(deflation)?;
+    validate_deflation_roots(deflated_roots, dim)?;
 
     let mut state = initial_guess.to_vec();
     periodicity.wrap_state(&mut state);
@@ -142,22 +201,38 @@ pub fn solve_equilibrium_with_periodicity(
         periodicity,
     )?;
     let mut residual_norm = l2_norm(&residual);
+    let mut deflation_evaluation =
+        evaluate_deflation(&state, &residual, deflated_roots, deflation, periodicity)?;
     let mut iterations = 0usize;
 
     loop {
-        if residual_norm <= settings.tolerance {
+        if deflation_evaluation.residual_norm <= settings.tolerance {
             break;
         }
 
         if iterations >= settings.max_steps {
+            if deflated_roots.is_empty() {
+                bail!(
+                    "Newton solver failed to converge in {} steps (||f(x)|| = {}).",
+                    settings.max_steps,
+                    residual_norm
+                );
+            }
             bail!(
-                "Newton solver failed to converge in {} steps (||f(x)|| = {}).",
+                "Deflated Newton solver failed to converge in {} steps (deflated residual = {}, original residual = {}).",
                 settings.max_steps,
+                deflation_evaluation.residual_norm,
                 residual_norm
             );
         }
 
-        let jacobian = compute_jacobian_with_periodicity(system, kind, &state, periodicity)?;
+        let mut jacobian = compute_jacobian_with_periodicity(system, kind, &state, periodicity)?;
+        apply_deflation_gradient(
+            dim,
+            &residual,
+            &deflation_evaluation.log_gradient,
+            &mut jacobian,
+        );
         let delta = solve_linear_system(dim, &jacobian, &residual)
             .context("Failed to solve linear system during Newton iteration.")?;
 
@@ -175,6 +250,8 @@ pub fn solve_equilibrium_with_periodicity(
             periodicity,
         )?;
         residual_norm = l2_norm(&residual);
+        deflation_evaluation =
+            evaluate_deflation(&state, &residual, deflated_roots, deflation, periodicity)?;
     }
 
     let jacobian = compute_system_jacobian_with_periodicity(system, kind, &state, periodicity)?;
@@ -199,6 +276,185 @@ pub fn solve_equilibrium_with_periodicity(
         eigenpairs,
         cycle_points,
     })
+}
+
+pub fn compute_deflated_residual_norm(
+    state: &[f64],
+    residual: &[f64],
+    deflated_roots: &[Vec<f64>],
+    deflation: DeflationSettings,
+    periodicity: &StatePeriodicity,
+) -> Result<f64> {
+    validate_deflation_settings(deflation)?;
+    validate_deflation_roots(deflated_roots, state.len())?;
+    if residual.len() != state.len() {
+        bail!(
+            "Residual dimension mismatch for deflation. Expected {}, got {}.",
+            state.len(),
+            residual.len()
+        );
+    }
+    Ok(evaluate_deflation(state, residual, deflated_roots, deflation, periodicity)?.residual_norm)
+}
+
+pub fn apply_deflation_to_jacobian(
+    state: &[f64],
+    residual: &[f64],
+    jacobian: &mut [f64],
+    deflated_roots: &[Vec<f64>],
+    deflation: DeflationSettings,
+    periodicity: &StatePeriodicity,
+) -> Result<()> {
+    validate_deflation_settings(deflation)?;
+    validate_deflation_roots(deflated_roots, state.len())?;
+    if residual.len() != state.len() {
+        bail!(
+            "Residual dimension mismatch for deflation. Expected {}, got {}.",
+            state.len(),
+            residual.len()
+        );
+    }
+    if jacobian.len() != state.len() * state.len() {
+        bail!(
+            "Jacobian dimension mismatch for deflation. Expected {}, got {}.",
+            state.len() * state.len(),
+            jacobian.len()
+        );
+    }
+    let evaluation = evaluate_deflation(state, residual, deflated_roots, deflation, periodicity)?;
+    apply_deflation_gradient(state.len(), residual, &evaluation.log_gradient, jacobian);
+    Ok(())
+}
+
+struct DeflationEvaluation {
+    residual_norm: f64,
+    log_gradient: Vec<f64>,
+}
+
+fn validate_deflation_settings(settings: DeflationSettings) -> Result<()> {
+    if !settings.exponent.is_finite() || settings.exponent < 1.0 {
+        bail!("Deflation exponent must be finite and at least 1.");
+    }
+    if !settings.shift.is_finite() || settings.shift < 0.0 {
+        bail!("Deflation shift must be finite and non-negative.");
+    }
+    Ok(())
+}
+
+fn validate_deflation_roots(deflated_roots: &[Vec<f64>], dim: usize) -> Result<()> {
+    for (index, root) in deflated_roots.iter().enumerate() {
+        if root.len() != dim {
+            bail!(
+                "Deflation target dimension mismatch at index {}. Expected {}, got {}.",
+                index,
+                dim,
+                root.len()
+            );
+        }
+        if root.iter().any(|value| !value.is_finite()) {
+            bail!(
+                "Deflation target at index {} contains a non-finite value.",
+                index
+            );
+        }
+    }
+    Ok(())
+}
+
+fn evaluate_deflation(
+    state: &[f64],
+    residual: &[f64],
+    deflated_roots: &[Vec<f64>],
+    settings: DeflationSettings,
+    periodicity: &StatePeriodicity,
+) -> Result<DeflationEvaluation> {
+    let original_norm = l2_norm(residual);
+    if deflated_roots.is_empty() {
+        return Ok(DeflationEvaluation {
+            residual_norm: original_norm,
+            log_gradient: vec![0.0; state.len()],
+        });
+    }
+
+    let mut log_multiplier = 0.0;
+    let mut log_gradient = vec![0.0; state.len()];
+    for (root_index, root) in deflated_roots.iter().enumerate() {
+        let deltas = state
+            .iter()
+            .zip(root)
+            .enumerate()
+            .map(|(index, (value, target))| periodicity.wrapped_delta(index, value - target))
+            .collect::<Vec<_>>();
+        let distance_squared = deltas.iter().map(|value| value * value).sum::<f64>();
+        if distance_squared <= f64::MIN_POSITIVE {
+            bail!(
+                "Newton iterate coincides with deflation target {}. Change the initial guess slightly.",
+                root_index + 1
+            );
+        }
+
+        let log_distance = 0.5 * distance_squared.ln();
+        let log_inverse_power = -settings.exponent * log_distance;
+        let log_factor = if settings.shift == 0.0 {
+            log_inverse_power
+        } else {
+            log_add_exp(log_inverse_power, settings.shift.ln())
+        };
+        log_multiplier += log_factor;
+
+        let inverse_weight = if settings.shift == 0.0 {
+            1.0
+        } else {
+            inverse_one_plus_exp(settings.shift.ln() - log_inverse_power)
+        };
+        let coefficient = -settings.exponent * inverse_weight / distance_squared;
+        for (index, delta) in deltas.iter().enumerate() {
+            log_gradient[index] += coefficient * delta;
+        }
+    }
+
+    let residual_norm = if original_norm == 0.0 {
+        0.0
+    } else {
+        let log_norm = original_norm.ln() + log_multiplier;
+        if log_norm >= f64::MAX.ln() {
+            f64::INFINITY
+        } else {
+            log_norm.exp()
+        }
+    };
+
+    Ok(DeflationEvaluation {
+        residual_norm,
+        log_gradient,
+    })
+}
+
+fn apply_deflation_gradient(
+    dim: usize,
+    residual: &[f64],
+    log_gradient: &[f64],
+    jacobian: &mut [f64],
+) {
+    for row in 0..dim {
+        for col in 0..dim {
+            jacobian[row * dim + col] += residual[row] * log_gradient[col];
+        }
+    }
+}
+
+fn log_add_exp(left: f64, right: f64) -> f64 {
+    let maximum = left.max(right);
+    maximum + ((left - maximum).exp() + (right - maximum).exp()).ln()
+}
+
+fn inverse_one_plus_exp(value: f64) -> f64 {
+    if value >= 0.0 {
+        let inverse = (-value).exp();
+        inverse / (1.0 + inverse)
+    } else {
+        1.0 / (1.0 + value.exp())
+    }
 }
 
 pub fn evaluate_equilibrium_residual(
@@ -516,8 +772,10 @@ fn normalize_complex_vector(vec: &mut [Complex<f64>]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_jacobian, compute_map_cycle_points, evaluate_equilibrium_residual_with_periodicity,
-        solve_equilibrium, solve_equilibrium_with_periodicity, NewtonSettings, SystemKind,
+        compute_deflated_residual_norm, compute_jacobian, compute_map_cycle_points,
+        evaluate_equilibrium_residual_with_periodicity, solve_equilibrium,
+        solve_equilibrium_with_deflation, solve_equilibrium_with_periodicity, DeflationSettings,
+        NewtonSettings, SystemKind,
     };
     use crate::equation_engine::{parse, Compiler, EquationSystem};
     use crate::state_periodicity::StatePeriodicity;
@@ -545,12 +803,37 @@ mod tests {
         system
     }
 
+    fn build_logistic_system(mu: f64) -> EquationSystem {
+        let equation = "mu * x * (1 - x)";
+        let param_names = vec!["mu".to_string()];
+        let var_names = vec!["x".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let expr = parse(equation).expect("logistic equation should parse");
+        let bytecode = compiler.compile(&expr);
+
+        let mut system = EquationSystem::new(vec![bytecode], vec![mu]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+        system
+    }
+
     fn build_constant_system(value: f64) -> EquationSystem {
         let equation = format!("{value}");
         let param_names: Vec<String> = Vec::new();
         let var_names = vec!["x".to_string()];
         let compiler = Compiler::new(&var_names, &param_names);
         let expr = parse(&equation).expect("constant equation should parse");
+        let bytecode = compiler.compile(&expr);
+
+        let mut system = EquationSystem::new(vec![bytecode], Vec::new());
+        system.set_maps(compiler.param_map, compiler.var_map);
+        system
+    }
+
+    fn build_scalar_system(equation: &str) -> EquationSystem {
+        let param_names: Vec<String> = Vec::new();
+        let var_names = vec!["x".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let expr = parse(equation).expect("scalar equation should parse");
         let bytecode = compiler.compile(&expr);
 
         let mut system = EquationSystem::new(vec![bytecode], Vec::new());
@@ -727,6 +1010,138 @@ mod tests {
         assert!(result.state[0].abs() < 1e-9);
         assert!(result.residual_norm <= 1e-9);
         assert_eq!(result.iterations, 1);
+    }
+
+    #[test]
+    fn deflation_avoids_a_selected_flow_equilibrium() {
+        let system = build_scalar_system("x^2 - 1");
+        let settings = NewtonSettings::default();
+
+        let ordinary = solve_equilibrium(&system, SystemKind::Flow, &[0.2], settings)
+            .expect("ordinary solve should converge");
+        assert!((ordinary.state[0] - 1.0).abs() < 1e-8);
+
+        let deflated = solve_equilibrium_with_deflation(
+            &system,
+            SystemKind::Flow,
+            &[0.2],
+            settings,
+            &[vec![1.0]],
+            DeflationSettings::default(),
+        )
+        .expect("deflated solve should converge to the other equilibrium");
+
+        assert!((deflated.state[0] + 1.0).abs() < 1e-8);
+        assert!(deflated.residual_norm <= settings.tolerance);
+    }
+
+    #[test]
+    fn deflation_avoids_every_phase_of_a_selected_map_cycle() {
+        let system = build_logistic_system(3.2);
+        let settings = NewtonSettings {
+            max_steps: 50,
+            ..NewtonSettings::default()
+        };
+        let kind = SystemKind::Map { iterations: 2 };
+        let selected_cycle = [vec![0.5130445095326298], vec![0.7994554904673701]];
+
+        let result = solve_equilibrium_with_deflation(
+            &system,
+            kind,
+            &[0.52],
+            settings,
+            &selected_cycle,
+            DeflationSettings::default(),
+        )
+        .expect("deflated map solve should converge away from the selected cycle");
+
+        assert!(result.residual_norm <= settings.tolerance);
+        assert!(
+            selected_cycle
+                .iter()
+                .all(|target| (result.state[0] - target[0]).abs() > 1e-5),
+            "solver returned a phase of the selected cycle: {:?}",
+            result.state
+        );
+    }
+
+    #[test]
+    fn deflation_rejects_invalid_settings_and_target_dimensions() {
+        let system = build_mu_system(1.0);
+        let settings = NewtonSettings::default();
+
+        assert_err_contains(
+            solve_equilibrium_with_deflation(
+                &system,
+                SystemKind::Flow,
+                &[0.2],
+                settings,
+                &[vec![0.0, 1.0]],
+                DeflationSettings::default(),
+            ),
+            "Deflation target dimension mismatch",
+        );
+        assert_err_contains(
+            solve_equilibrium_with_deflation(
+                &system,
+                SystemKind::Flow,
+                &[0.2],
+                settings,
+                &[vec![0.0]],
+                DeflationSettings {
+                    exponent: 0.5,
+                    ..DeflationSettings::default()
+                },
+            ),
+            "exponent",
+        );
+        assert_err_contains(
+            solve_equilibrium_with_deflation(
+                &system,
+                SystemKind::Flow,
+                &[0.2],
+                settings,
+                &[vec![0.0]],
+                DeflationSettings {
+                    shift: -1.0,
+                    ..DeflationSettings::default()
+                },
+            ),
+            "shift",
+        );
+        assert_err_contains(
+            solve_equilibrium_with_deflation(
+                &system,
+                SystemKind::Map { iterations: 1 },
+                &[0.2],
+                settings,
+                &[vec![0.0]],
+                DeflationSettings::default(),
+            ),
+            "map cycle solves",
+        );
+    }
+
+    #[test]
+    fn deflation_defaults_use_a_shifted_squared_norm() {
+        let defaults = DeflationSettings::default();
+        assert_eq!(defaults.exponent, 2.0);
+        assert_eq!(defaults.shift, 1.0);
+    }
+
+    #[test]
+    fn deflation_distance_wraps_periodic_state_coordinates() {
+        let periodicity = StatePeriodicity::from_periods(&[1.0], 1);
+        let norm = compute_deflated_residual_norm(
+            &[0.05],
+            &[1.0],
+            &[vec![0.95]],
+            DeflationSettings::default(),
+            &periodicity,
+        )
+        .expect("deflated residual norm");
+
+        assert!((norm - 101.0).abs() < 1e-10);
     }
 
     #[test]

@@ -18,6 +18,7 @@ import {
     CollocationAdaptationReport
 } from "./types";
 import type { ComputedNormalForm, HopfHopfNormalForm, ZeroHopfNormalForm } from './normal-form-types';
+import { flattenDeflationRoots } from './deflation';
 
 export type CovariantLyapunovResponse = {
     dimension: number;
@@ -68,6 +69,7 @@ export type EquilibriumSolverRunner = {
     get_progress(): EquilibriumSolveProgress;
     is_done(): boolean;
     get_result(): EquilibriumSolution;
+    set_deflation(roots: Float64Array, exponent: number, shift: number): void;
 };
 
 type HomoclinicShootingRunnerConstructor = new (
@@ -903,11 +905,16 @@ export class WasmBridge {
         initialGuess: number[],
         maxSteps: number,
         dampingFactor: number,
-        mapIterations: number
+        mapIterations: number,
+        deflation?: {
+            roots: number[][];
+            exponent: number;
+            shift: number;
+        }
     ): EquilibriumSolverRunner {
         if (!wasmModule) throw new Error("WASM module not loaded");
 
-        return new wasmModule.WasmEquilibriumSolverRunner(
+        const runner = new wasmModule.WasmEquilibriumSolverRunner(
             this.config.equations,
             new Float64Array(this.config.params),
             this.config.paramNames,
@@ -919,6 +926,14 @@ export class WasmBridge {
             dampingFactor,
             new Float64Array(periodicPeriodsForConfig(this.config))
         ) as EquilibriumSolverRunner;
+        if (deflation && deflation.roots.length > 0) {
+            runner.set_deflation(
+                new Float64Array(flattenDeflationRoots(deflation.roots)),
+                deflation.exponent,
+                deflation.shift
+            );
+        }
+        return runner;
     }
 
     set_state(state: number[]) {

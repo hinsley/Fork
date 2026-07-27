@@ -54,6 +54,11 @@ const wasmState = {
   lastEqManifoldGroupExtensionSize: null as number | null,
   lastManifold2DExtensionPointCount: null as number | null,
   lastForcedResponseInitialGuess: null as number[] | null,
+  lastDeflationArgs: null as null | {
+    roots: number[]
+    exponent: number
+    shift: number
+  },
   initPromise: Promise.resolve() as Promise<void>,
   initResolver: null as null | (() => void),
 }
@@ -156,6 +161,14 @@ beforeAll(async () => {
           jacobian: [],
           eigenpairs: [],
         }
+      }
+      solve_equilibrium_deflated(...args: unknown[]) {
+        wasmState.lastDeflationArgs = {
+          roots: Array.from(args[4] as Float64Array),
+          exponent: args[5] as number,
+          shift: args[6] as number,
+        }
+        return this.solve_equilibrium()
       }
       validate_periodic_forcing(periodExpression: string, iterationPeriod: number) {
         if (!periodExpression && iterationPeriod <= 0) throw new Error('invalid forcing period')
@@ -829,6 +842,7 @@ beforeEach(() => {
   wasmState.lastEqManifoldExtensionPointCount = null
   wasmState.lastManifold2DExtensionPointCount = null
   wasmState.lastForcedResponseInitialGuess = null
+  wasmState.lastDeflationArgs = null
   wasmState.initPromise = Promise.resolve()
   wasmState.initResolver = null
 })
@@ -1855,6 +1869,31 @@ describe('forkCoreWorker', () => {
     }
     expect(equilibriumResponse.ok).toBe(true)
     expect(equilibriumResponse.result.state).toEqual([1])
+
+    workerScope.postMessage.mockClear()
+    await handler({
+      data: {
+        id: 'job-deflated-eq',
+        kind: 'solveEquilibrium',
+        payload: {
+          system: baseSystem,
+          initialGuess: [0],
+          maxSteps: 10,
+          dampingFactor: 1,
+          deflation: {
+            roots: [[1], [-1]],
+            exponent: 2,
+            shift: 1,
+          },
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.lastDeflationArgs).toEqual({
+      roots: [1, -1],
+      exponent: 2,
+      shift: 1,
+    })
   })
 
   it('posts progress and results for continuation runners', async () => {

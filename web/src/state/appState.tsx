@@ -30,6 +30,7 @@ import type {
   ContinuationSettings,
   CovariantLyapunovData,
   EquilibriumObject,
+  EquilibriumDeflationConfig,
   EquilibriumManifold2DSettings,
   EquilibriumSolverParams,
   ForcedPeriodicResponseObject,
@@ -57,6 +58,12 @@ import type {
   SystemConfig,
   TreeNode,
 } from '../system/types'
+import {
+  DEFAULT_DEFLATION_EXPONENT,
+  DEFAULT_DEFLATION_SHIFT,
+  equilibriumMapIterations,
+  isCompatibleMapCycleTarget,
+} from '../system/deflation'
 import type { LoadedEntities, SystemStore } from '../system/store'
 import {
   addAnalysisViewport,
@@ -149,6 +156,93 @@ function equilibriumSolutionFingerprint(
     periodicVariables: config.periodicVariables ?? [],
     mapIterations: config.type === 'map' ? mapIterations ?? 1 : undefined,
   })
+}
+
+function buildEquilibriumDeflationRoots(
+  system: System,
+  currentObjectId: string,
+  runConfig: SystemConfig,
+  snapshot: SubsystemSnapshot,
+  mapIterations: number | undefined,
+  deflation: EquilibriumDeflationConfig | undefined
+): number[][] {
+  if (!deflation || deflation.targetObjectIds.length === 0) {
+    return []
+  }
+  if (runConfig.type === 'map' && (mapIterations ?? 1) <= 1) {
+    throw new Error('Deflation is available for map cycle solves, not map equilibrium solves.')
+  }
+
+  const currentObject = system.objects[currentObjectId]
+  const currentBaseParams =
+    currentObject?.type === 'equilibrium'
+      ? resolveObjectParams(system.config, currentObject.customParameters)
+      : system.config.params
+  const roots: number[][] = []
+  for (const targetId of deflation.targetObjectIds) {
+    if (targetId === currentObjectId) {
+      throw new Error('The solver object cannot deflate itself.')
+    }
+    const target = system.objects[targetId]
+    if (!target || target.type !== 'equilibrium' || !target.solution) {
+      throw new Error('Every deflation target must be an existing solved object.')
+    }
+
+    let targetStates: number[][]
+    let targetMapIterations: number | undefined
+    if (runConfig.type === 'flow') {
+      targetStates = [target.solution.state]
+    } else {
+      targetMapIterations = equilibriumMapIterations(target)
+      if (!isCompatibleMapCycleTarget(target, mapIterations ?? 1)) {
+        throw new Error(
+          `Cycle "${target.name}" must have a period that divides the requested cycle length.`
+        )
+      }
+      targetStates = target.solution.cycle_points ?? []
+    }
+
+    if (
+      target.solutionProvenance &&
+      target.solutionProvenance.fingerprint !==
+        equilibriumSolutionFingerprint(runConfig, targetMapIterations)
+    ) {
+      throw new Error(
+        `Deflation target "${target.name}" is stale for the current system or parameter values. Solve it again first.`
+      )
+    }
+    const targetBaseParams =
+      target.parameters ?? resolveObjectParams(system.config, target.customParameters)
+    if (
+      targetBaseParams.length !== currentBaseParams.length ||
+      targetBaseParams.some((value, index) => value !== currentBaseParams[index])
+    ) {
+      throw new Error(
+        `Deflation target "${target.name}" is stale for the current parameter values. Solve it again first.`
+      )
+    }
+    if (target.subsystemSnapshot && target.subsystemSnapshot.hash !== snapshot.hash) {
+      throw new Error(
+        `Deflation target "${target.name}" uses a different frozen-variable subsystem.`
+      )
+    }
+
+    for (const targetState of targetStates) {
+      const fullState = target.subsystemSnapshot
+        ? stateVectorToDisplay(target.subsystemSnapshot, targetState)
+        : targetState
+      const root = projectStateForSnapshot(snapshot, fullState, `Deflation target "${target.name}"`)
+      const duplicate = roots.some((candidate) =>
+        candidate.every(
+          (value, index) =>
+            Math.abs(value - root[index]) <=
+            1e-12 * (1 + Math.max(Math.abs(value), Math.abs(root[index] ?? 0)))
+        )
+      )
+      if (!duplicate) roots.push(root)
+    }
+  }
+  return roots
 }
 
 function branchNameExists(system: System, parentObjectId: string, name: string): boolean {
@@ -1377,6 +1471,11 @@ export type EquilibriumSolveRequest = {
   maxSteps: number
   dampingFactor: number
   mapIterations?: number
+  deflation?: {
+    targetObjectIds: string[]
+    exponent: number
+    shift: number
+  }
 }
 
 export type EquilibriumContinuationRequest = {
@@ -2148,7 +2247,15 @@ export function AppProvider({
 
   const ensureObjectLoaded = useCallback(
     async (id: string) => {
-      await ensureEntitiesLoaded({ objectIds: [id] })
+      const current = latestSystemRef.current
+      const selectedEntry = current?.index.objects[id]
+      const objectIds =
+        current && selectedEntry?.objectType === 'equilibrium'
+          ? Object.values(current.index.objects)
+              .filter((entry) => entry.objectType === 'equilibrium')
+              .map((entry) => entry.id)
+          : [id]
+      await ensureEntitiesLoaded({ objectIds })
     },
     [ensureEntitiesLoaded]
   )
@@ -3362,6 +3469,11 @@ export function AppProvider({
           maxSteps: 25,
           dampingFactor: 1,
           mapIterations: system.type === 'map' ? 1 : undefined,
+          deflation: {
+            targetObjectIds: [],
+            exponent: DEFAULT_DEFLATION_EXPONENT,
+            shift: DEFAULT_DEFLATION_SHIFT,
+          },
         }
 
         const obj: EquilibriumObject = {
@@ -3701,8 +3813,22 @@ export function AppProvider({
         iterations: undefined as number | undefined,
       }
       let mapIterations: number | undefined
+      let deflation: EquilibriumDeflationConfig | undefined
       try {
-        const hydrated = await ensureEntitiesLoaded({ objectIds: [request.equilibriumId] })
+        const requestedDeflation = request.deflation
+        const knownObject = state.system.objects[request.equilibriumId]
+        const targetObjectIds =
+          requestedDeflation?.targetObjectIds ??
+          (knownObject?.type === 'equilibrium'
+            ? knownObject.lastSolverParams?.deflation?.targetObjectIds
+            : undefined) ??
+          []
+        const hydrated = await ensureEntitiesLoaded({
+          objectIds: [
+            request.equilibriumId,
+            ...targetObjectIds,
+          ],
+        })
         const current = hydrated ?? latestSystemRef.current
         if (!current) {
           throw new Error('No system is currently loaded.')
@@ -3729,6 +3855,27 @@ export function AppProvider({
         if (!Number.isFinite(request.dampingFactor) || request.dampingFactor <= 0) {
           throw new Error('Damping factor must be a positive number.')
         }
+        const configuredDeflation =
+          requestedDeflation ?? equilibrium.lastSolverParams?.deflation
+        if (configuredDeflation) {
+          if (
+            !Number.isFinite(configuredDeflation.exponent) ||
+            configuredDeflation.exponent < 1
+          ) {
+            throw new Error('Deflation exponent must be at least 1.')
+          }
+          if (
+            !Number.isFinite(configuredDeflation.shift) ||
+            configuredDeflation.shift < 0
+          ) {
+            throw new Error('Deflation shift must be non-negative.')
+          }
+          deflation = {
+            targetObjectIds: [...new Set(configuredDeflation.targetObjectIds)],
+            exponent: configuredDeflation.exponent,
+            shift: configuredDeflation.shift,
+          }
+        }
 
         if (system.type === 'map') {
           const iterations =
@@ -3748,6 +3895,7 @@ export function AppProvider({
           maxSteps: request.maxSteps,
           dampingFactor: request.dampingFactor,
           mapIterations,
+          deflation,
         }
 
         const baseParams = resolveObjectParams(system, equilibrium.customParameters)
@@ -3757,12 +3905,29 @@ export function AppProvider({
           baseParams
         )
         const reducedInitialGuess = projectStateToReduced(snapshot, solverParams.initialGuess)
+        const deflationRoots = buildEquilibriumDeflationRoots(
+          current,
+          request.equilibriumId,
+          runConfig,
+          snapshot,
+          mapIterations,
+          deflation
+        )
         const result = await client.solveEquilibrium({
           system: runConfig,
           initialGuess: reducedInitialGuess,
           maxSteps: solverParams.maxSteps,
           dampingFactor: solverParams.dampingFactor,
           mapIterations: solverParams.mapIterations,
+          ...(deflation && deflationRoots.length > 0
+            ? {
+                deflation: {
+                  roots: deflationRoots,
+                  exponent: deflation.exponent,
+                  shift: deflation.shift,
+                },
+              }
+            : {}),
         })
 
         runSummary.success = true
@@ -3793,6 +3958,7 @@ export function AppProvider({
             maxSteps: request.maxSteps,
             dampingFactor: request.dampingFactor,
             mapIterations,
+            deflation,
           },
         })
         dispatch({ type: 'SET_SYSTEM', system: updated })
