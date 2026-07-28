@@ -5313,7 +5313,7 @@ function useInspectorSelectionController({
     workflowActions.push({
       id: 'limit-cycle-from-pd-toggle',
       group: 'Bifurcations',
-      label: `${limitCycleFromPDLabel} from period doubling`,
+      label: limitCycleFromPDLabel,
       description: 'Initialize the doubled cycle and continue it.',
     })
   }
