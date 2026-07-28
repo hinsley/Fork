@@ -3,7 +3,7 @@ name: Apply PD label cleanup
 on:
   push:
     branches:
-      - agent/remove-pd-label-redundancy-10
+      - main
 
 permissions:
   contents: write
@@ -35,6 +35,7 @@ jobs:
               raise SystemExit(f'Expected exactly one matching label; found {count}.')
           path.write_text(text.replace(old, new), encoding='utf-8')
           PY
+          rm .github/workflows/agent-remove-pd-label-redundancy.yml
           git diff --check
           git diff --exit-code --quiet && { echo 'No change produced.'; exit 1; } || true
 
@@ -45,6 +46,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add web/src/ui/inspector/InspectorSelectionController.tsx
+          git add -u .github/workflows/agent-remove-pd-label-redundancy.yml
           git commit -m "fix: remove redundant period-doubling label"
           git push origin HEAD:main
 
