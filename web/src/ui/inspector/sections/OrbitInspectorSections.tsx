@@ -338,7 +338,7 @@ export function OrbitInspectorSections({
                           <thead>
                             <tr>
                               <th>#</th>
-                              <th>t</th>
+                              <th>{isDiscreteMap ? 'n' : 't'}</th>
                               {orbitPreviewVarNames.map((name, index) => (
                                 <th key={`orbit-preview-col-${index}`}>{name}</th>
                               ))}
