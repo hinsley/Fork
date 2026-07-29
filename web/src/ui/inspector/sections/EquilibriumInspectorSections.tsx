@@ -7,6 +7,7 @@ import {
 } from '../../../system/deflation'
 import type { EquilibriumManifoldProfileDraft } from '../../manifoldProfileDrafts'
 import { InspectorSubDisclosure } from '../selectionSession'
+import { OpacityPercentInput } from '../../OpacityPercentInput'
 
 type EquilibriumManifoldMode = 'curve_1d' | 'surface_2d'
 
@@ -32,6 +33,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
     equilibriumEigenpairs,
     equilibriumEigenvectorColors,
     equilibriumEigenvectorIndices,
+    equilibriumEigenvectorOpacities,
     equilibriumEigenvectorRender,
     equilibriumEigenvectorVisibleSet,
     equilibriumError,
@@ -55,6 +57,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
     handleCreateEquilibriumBranch,
     handleCreateEquilibriumManifold,
     handleEquilibriumEigenvectorColorChange,
+    handleEquilibriumEigenvectorOpacityChange,
     handleEquilibriumEigenvectorVisibilityChange,
     handlePasteEquilibriumGuess,
     handleSolveEquilibrium,
@@ -587,6 +590,18 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                                       disabled={!visible}
                                       aria-label={`${label} color`}
                                       data-testid={`equilibrium-eigenvector-color-${index}`}
+                                    />
+                                    <OpacityPercentInput
+                                      value={equilibriumEigenvectorOpacities[idx]}
+                                      onChange={(opacity) =>
+                                        handleEquilibriumEigenvectorOpacityChange(
+                                          index,
+                                          opacity
+                                        )
+                                      }
+                                      disabled={!visible}
+                                      ariaLabel={`${label} opacity percentage`}
+                                      testId={`equilibrium-eigenvector-opacity-${index}`}
                                     />
                                   </div>
                                 )

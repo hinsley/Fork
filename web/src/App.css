@@ -813,11 +813,22 @@
 
 .clv-control-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 6px;
   align-items: center;
   font-size: 0.75rem;
   color: var(--text);
+}
+
+.opacity-percent-field {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  gap: 4px;
+  align-items: center;
+}
+
+.opacity-percent-input {
+  width: 4.5rem;
 }
 
 .clv-control-row__label {

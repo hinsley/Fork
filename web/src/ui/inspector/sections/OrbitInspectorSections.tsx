@@ -2,6 +2,7 @@ import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
 import { formatContinuationParameterDisplayLabel } from '../../../system/subsystemGateway'
 import { InspectorSubDisclosure } from '../selectionSession'
 import { CollocationAdaptivityFields } from './branch/CollocationAdaptivityFields'
+import { OpacityPercentInput } from '../../OpacityPercentInput'
 
 export function OrbitInspectorSections({
   scope,
@@ -18,6 +19,7 @@ export function OrbitInspectorSections({
     clvHasData,
     clvIndices,
     clvNeeds2d,
+    clvOpacities,
     clvRender,
     clvVisibleSet,
     continuationParameterCount,
@@ -29,6 +31,7 @@ export function OrbitInspectorSections({
     formatPointValues,
     frozenVariableHeaderNames,
     handleClvColorChange,
+    handleClvOpacityChange,
     handleClvVisibilityChange,
     handleComputeCovariant,
     handleComputeLyapunov,
@@ -670,6 +673,15 @@ export function OrbitInspectorSections({
                                   disabled={!visible}
                                   aria-label={`CLV ${index + 1} color`}
                                   data-testid={`clv-plot-color-${index}`}
+                                />
+                                <OpacityPercentInput
+                                  value={clvOpacities[idx]}
+                                  onChange={(opacity) =>
+                                    handleClvOpacityChange(index, opacity)
+                                  }
+                                  disabled={!visible}
+                                  ariaLabel={`CLV ${index + 1} opacity percentage`}
+                                  testId={`clv-plot-opacity-${index}`}
                                 />
                               </div>
                             )

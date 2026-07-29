@@ -360,6 +360,65 @@ describe('ViewportPanel view state wiring', () => {
     })
   })
 
+  it('applies independent object and CLV color opacity', () => {
+    let system = createSystem({ name: 'Color_Opacity_System' })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = sceneResult.system
+    const orbitResult = addObject(system, {
+      type: 'orbit',
+      name: 'Opacity_Orbit',
+      systemName: system.config.name,
+      data: [
+        [0, 0, 0],
+        [1, 1, 1],
+      ],
+      t_start: 0,
+      t_end: 1,
+      dt: 1,
+      covariantVectors: {
+        dim: 2,
+        times: [0],
+        vectors: [[[1, 0]]],
+      },
+    })
+    system = updateNodeRender(orbitResult.system, orbitResult.nodeId, {
+      opacity: 0.4,
+      clv: {
+        enabled: true,
+        stride: 1,
+        lengthScale: 0.2,
+        headScale: 0,
+        thickness: 2,
+        vectorIndices: [0],
+        colors: ['#ff0000'],
+        opacities: [0.25],
+      },
+    })
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
+    const orbitTrace = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === orbitResult.nodeId &&
+        'name' in trace &&
+        trace.name === 'Opacity_Orbit'
+    )
+    expect(orbitTrace).toMatchObject({ opacity: 0.4 })
+    const clvTrace = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === orbitResult.nodeId &&
+        'legendgroup' in trace &&
+        trace.legendgroup === 'fork-independent-color-opacity'
+    ) as { line?: { color?: string }; opacity?: number } | undefined
+    expect(clvTrace?.line?.color).toBe('rgba(255, 0, 0, 0.25)')
+    expect(clvTrace?.opacity).toBeUndefined()
+  })
+
   it('renders a selected orbit-point marker in state-space scenes', () => {
     const config: SystemConfig = {
       name: 'Orbit_Selected_Point_System',
@@ -1193,7 +1252,8 @@ describe('ViewportPanel view state wiring', () => {
       headScale: 1,
       thickness: 1,
       vectorIndices: [0],
-      colors: ['#ff0000']
+      colors: ['#ff0000'],
+      opacities: [1]
     }
 
     const equilibrium: EquilibriumObject = {
@@ -1225,6 +1285,7 @@ describe('ViewportPanel view state wiring', () => {
       stride: 1,
       vectorIndices: [0],
       colors: ['#00ff00'],
+      opacities: [1],
       lineLengthScale: 1,
       lineThickness: 1,
       discRadiusScale: 1,
@@ -1629,6 +1690,7 @@ describe('ViewportPanel view state wiring', () => {
       stride: 1,
       vectorIndices: [0, 1],
       colors: ['#00ff00', '#ff00ff'],
+      opacities: [1, 1],
       lineLengthScale: 0.2,
       lineThickness: 2,
       discRadiusScale: 0,
@@ -1722,6 +1784,7 @@ describe('ViewportPanel view state wiring', () => {
       stride: 1,
       vectorIndices: [0, 1],
       colors: ['#00ff00', '#ff00ff'],
+      opacities: [1, 1],
       lineLengthScale: 0.2,
       lineThickness: 2,
       discRadiusScale: 0,
@@ -1827,6 +1890,7 @@ describe('ViewportPanel view state wiring', () => {
       stride: 1,
       vectorIndices: [0],
       colors: ['#ffaa00'],
+      opacities: [1],
       lineLengthScale: 0.2,
       lineThickness: 2,
       discRadiusScale: 0.2,
@@ -5207,6 +5271,7 @@ describe('ViewportPanel view state wiring', () => {
         connectPoints: false,
         showIdentityLine: true,
         identityLineColor: '#112233',
+        identityLineOpacity: 1,
         identityLineStyle: 'dashed'
       }
     })
@@ -5358,6 +5423,7 @@ describe('ViewportPanel view state wiring', () => {
         connectPoints: true,
         showIdentityLine: false,
         identityLineColor: '#787878',
+        identityLineOpacity: 1,
         identityLineStyle: 'dotted'
       }
     })
@@ -5491,6 +5557,7 @@ describe('ViewportPanel view state wiring', () => {
         connectPoints: true,
         showIdentityLine: true,
         identityLineColor: '#224466',
+        identityLineOpacity: 1,
         identityLineStyle: 'dotted'
       }
     })

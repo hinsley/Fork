@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER,
   resolveEquilibriumEigenvalueMarkerColors,
+  resolveEquilibriumEigenvectorRender,
 } from './equilibriumEigenvectors'
 import type { EquilibriumEigenPair } from './types'
 
@@ -44,5 +45,21 @@ describe('resolveEquilibriumEigenvalueMarkerColors', () => {
     )
 
     expect(colors).toEqual(['#123456', '#654321'])
+  })
+
+  it('normalizes and retains per-eigenspace opacity', () => {
+    const render = resolveEquilibriumEigenvectorRender(
+      {
+        vectorIndices: [0, 1],
+        colors: ['#123456', '#654321'],
+        opacities: [-0.2, 0.6],
+      },
+      [0, 1]
+    )
+
+    expect(render.opacities).toEqual([0, 0.6])
+    expect(
+      resolveEquilibriumEigenvectorRender(undefined, [0]).opacities
+    ).toEqual([1])
   })
 })

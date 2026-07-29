@@ -58,7 +58,18 @@ describe('system serialization', () => {
     const withHeights = updateViewportHeights(withLayout, { [viewportId]: 320 })
     const withRender = updateNodeRender(withHeights, nodeId, {
       color: '#ff0000',
+      opacity: 0.42,
       lineWidth: 5,
+      clv: {
+        enabled: true,
+        stride: 10,
+        lengthScale: 0.15,
+        headScale: 1,
+        thickness: 2,
+        vectorIndices: [0],
+        colors: ['#112233'],
+        opacities: [0.65],
+      },
     })
 
     const bundle = serializeSystem(withRender)
@@ -67,6 +78,8 @@ describe('system serialization', () => {
     expect(restored.ui.layout.leftWidth).toBe(360)
     expect(restored.ui.viewportHeights[viewportId]).toBe(320)
     expect(restored.nodes[nodeId].render.color).toBe('#ff0000')
+    expect(restored.nodes[nodeId].render.opacity).toBe(0.42)
+    expect(restored.nodes[nodeId].render.clv?.opacities).toEqual([0.65])
     expect(restored.nodes[nodeId].render.lineWidth).toBe(5)
     expect(restored.objects[nodeId].name).toBe('Orbit A')
     expect((restored.objects[nodeId] as OrbitObject).frozenVariables?.frozenEquationContext).toEqual({

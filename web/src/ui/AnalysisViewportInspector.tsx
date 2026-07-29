@@ -15,6 +15,7 @@ import {
   resolveAnalysisEventExpression,
   resolveAnalysisSourceExpression
 } from '../analysis/analysisViewportUtils'
+import { OpacityPercentInput } from './OpacityPercentInput'
 
 type AnalysisViewportInspectorProps = {
   system: System
@@ -817,6 +818,17 @@ export function AnalysisViewportInspector({
                   updateAdvanced({ identityLineColor: event.target.value })
                 }
                 data-testid="analysis-identity-line-color"
+              />
+            </label>
+            <label>
+              Identity line opacity (%)
+              <OpacityPercentInput
+                value={viewport.advanced.identityLineOpacity}
+                onChange={(identityLineOpacity) =>
+                  updateAdvanced({ identityLineOpacity })
+                }
+                ariaLabel="Identity line opacity percentage"
+                testId="analysis-identity-line-opacity"
               />
             </label>
             <label>

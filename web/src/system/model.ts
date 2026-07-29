@@ -22,6 +22,7 @@ import { resolveSceneAxisSelection } from './sceneAxes'
 import { normalizePeriodicVariables } from './periodicity'
 import { liftReducedFloquetVectorsForDisplay } from './floquetModes'
 import { normalizePeriodicForcing } from './forcing'
+import { normalizeColorOpacity } from './color'
 
 const DEFAULT_SYSTEM: SystemConfig = {
   name: 'Untitled System',
@@ -86,6 +87,7 @@ const DEFAULT_ANALYSIS_ADVANCED: AnalysisViewportAdvanced = {
   connectPoints: false,
   showIdentityLine: true,
   identityLineColor: '#787878',
+  identityLineOpacity: 1,
   identityLineStyle: 'dotted'
 }
 
@@ -174,6 +176,7 @@ function defaultReturnMapViewport(
 
 export const DEFAULT_RENDER: RenderStyle = {
   color: '#e06c3f',
+  opacity: 1,
   lineWidth: 2,
   lineStyle: 'solid',
   pointSize: 4,
@@ -991,6 +994,10 @@ function normalizeAnalysisAdvanced(
       advanced?.identityLineColor,
       DEFAULT_ANALYSIS_ADVANCED.identityLineColor
     ),
+    identityLineOpacity: normalizeColorOpacity(
+      advanced?.identityLineOpacity,
+      DEFAULT_ANALYSIS_ADVANCED.identityLineOpacity
+    ),
     identityLineStyle
   }
 }
@@ -1488,13 +1495,15 @@ export function updateNodeRender(
 ): System {
   const node = system.nodes[nodeId]
   if (!node) return system
+  const nextRender = { ...DEFAULT_RENDER, ...(node.render ?? {}), ...render }
+  nextRender.opacity = normalizeColorOpacity(nextRender.opacity)
   return {
     ...system,
     nodes: {
       ...system.nodes,
       [nodeId]: {
         ...node,
-        render: { ...DEFAULT_RENDER, ...(node.render ?? {}), ...render }
+        render: nextRender
       }
     },
     updatedAt: nowIso()
@@ -1883,6 +1892,7 @@ export function normalizeSystem(system: System): System {
     node.visibility = node.visibility ?? true
     node.expanded = node.expanded ?? true
     node.render = { ...DEFAULT_RENDER, ...(node.render ?? {}) }
+    node.render.opacity = normalizeColorOpacity(node.render.opacity)
   })
 
   Object.values(next.nodes).forEach((node) => {

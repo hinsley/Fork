@@ -977,6 +977,7 @@ describe('InspectorDetailsPanel', () => {
   })
 
   it('preserves Lyapunov drafts when orbit analysis results update', () => {
+    const onUpdateRender = vi.fn()
     const baseSystem = createSystem({
       name: 'Lyapunov_Draft_Lifecycle',
       config: {
@@ -1011,7 +1012,7 @@ describe('InspectorDetailsPanel', () => {
         theme="light"
         onRename={vi.fn()}
         onToggleVisibility={vi.fn()}
-        onUpdateRender={vi.fn()}
+        onUpdateRender={onUpdateRender}
         onUpdateScene={vi.fn()}
         onUpdateBifurcationDiagram={vi.fn()}
         onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
@@ -1046,6 +1047,16 @@ describe('InspectorDetailsPanel', () => {
 
     const withResults = updateObject(added.system, added.nodeId, {
       lyapunovExponents: [0.1, -0.1],
+      covariantVectors: {
+        dim: 2,
+        times: [0],
+        vectors: [
+          [
+            [1, 0],
+            [0, 1],
+          ],
+        ],
+      },
     })
     rendered.rerender(renderPanel(withResults))
 
@@ -1055,6 +1066,16 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByTestId('clv-forward')).toHaveValue(4)
     expect(screen.getByTestId('clv-backward')).toHaveValue(6)
     expect(screen.getByTestId('clv-qr')).toHaveValue(7)
+    fireEvent.click(screen.getByTestId('clv-plot-toggle'))
+    expect(screen.getByTestId('clv-plot-opacity-0')).toHaveValue(100)
+    fireEvent.change(screen.getByTestId('clv-plot-opacity-0'), {
+      target: { value: '60' },
+    })
+    expect(onUpdateRender).toHaveBeenLastCalledWith(added.nodeId, {
+      clv: expect.objectContaining({
+        opacities: expect.arrayContaining([0.6]),
+      }),
+    })
   })
 
   it('hides equilibrium result menus until the equilibrium has been solved', () => {
@@ -1611,6 +1632,12 @@ describe('InspectorDetailsPanel', () => {
     await user.clear(lineWidth)
     await user.type(lineWidth, '3')
     expect(onUpdateRender).toHaveBeenLastCalledWith(objectNodeId, { lineWidth: 3 })
+    fireEvent.change(screen.getByTestId('inspector-color-opacity'), {
+      target: { value: '35' },
+    })
+    expect(onUpdateRender).toHaveBeenLastCalledWith(objectNodeId, {
+      opacity: 0.35,
+    })
   }, 15000)
 
   it('updates branch line style render settings', async () => {
@@ -5289,6 +5316,7 @@ describe('InspectorDetailsPanel', () => {
         computedAt: new Date().toISOString(),
       },
     }
+    const onUpdateRender = vi.fn()
 
     render(
       <InspectorDetailsPanel
@@ -5298,7 +5326,7 @@ describe('InspectorDetailsPanel', () => {
         theme="light"
         onRename={vi.fn()}
         onToggleVisibility={vi.fn()}
-        onUpdateRender={vi.fn()}
+        onUpdateRender={onUpdateRender}
         onUpdateScene={vi.fn()}
         onUpdateBifurcationDiagram={vi.fn()}
         onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
@@ -5324,6 +5352,15 @@ describe('InspectorDetailsPanel', () => {
     await user.click(screen.getByTestId('limit-cycle-data-toggle'))
     await user.click(screen.getByTestId('limit-cycle-data-floquet-toggle'))
     expect(screen.getByTestId('limit-cycle-floquet-show-0')).toBeVisible()
+    expect(screen.getByTestId('limit-cycle-floquet-opacity-0')).toHaveValue(100)
+    fireEvent.change(screen.getByTestId('limit-cycle-floquet-opacity-0'), {
+      target: { value: '25' },
+    })
+    expect(onUpdateRender).toHaveBeenLastCalledWith(limitCycleId, {
+      equilibriumEigenvectors: expect.objectContaining({
+        opacities: expect.arrayContaining([0.25]),
+      }),
+    })
   })
 
   it('allows restoring the stored limit cycle render target for orbit-sourced cycles', async () => {
@@ -6656,6 +6693,14 @@ describe('InspectorDetailsPanel', () => {
     expect(onUpdateRender).toHaveBeenLastCalledWith(nodeId, {
       equilibriumEigenvectors: expect.objectContaining({
         colors: expect.arrayContaining(['#ff0000']),
+      }),
+    })
+    fireEvent.change(screen.getByTestId('equilibrium-eigenvector-opacity-1'), {
+      target: { value: '55' },
+    })
+    expect(onUpdateRender).toHaveBeenLastCalledWith(nodeId, {
+      equilibriumEigenvectors: expect.objectContaining({
+        opacities: expect.arrayContaining([0.55]),
       }),
     })
   })

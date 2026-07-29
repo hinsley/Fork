@@ -1,4 +1,5 @@
 import type { ComplexValue, EquilibriumEigenPair, EquilibriumEigenvectorRenderStyle } from './types'
+import { DEFAULT_COLOR_OPACITY, normalizeColorOpacity } from './color'
 
 export const EIGENVECTOR_COLOR_PALETTE = [
   '#1f77b4',
@@ -18,6 +19,7 @@ export const DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER: EquilibriumEigenvectorRende
   stride: 10,
   vectorIndices: [0],
   colors: [EIGENVECTOR_COLOR_PALETTE[0]],
+  opacities: [DEFAULT_COLOR_OPACITY],
   lineLengthScale: 0.2,
   lineThickness: 2,
   discRadiusScale: 0.1,
@@ -91,6 +93,34 @@ function applyEigenvectorColorOverrides(
     if (typeof color === 'string' && color) {
       next[index] = color
     }
+  })
+  return next
+}
+
+function normalizeEigenvectorOpacityOverrides(
+  overrides: Record<number, number> | undefined
+): Record<number, number> {
+  if (!overrides || typeof overrides !== 'object') {
+    return {}
+  }
+  const result: Record<number, number> = {}
+  for (const [key, value] of Object.entries(overrides)) {
+    const index = Number.parseInt(key, 10)
+    if (!Number.isFinite(index) || index < 0) continue
+    if (typeof value !== 'number' || !Number.isFinite(value)) continue
+    result[index] = normalizeColorOpacity(value)
+  }
+  return result
+}
+
+function applyEigenvectorOpacityOverrides(
+  overrides: Record<number, number>,
+  indices: number[],
+  opacities: number[]
+): Record<number, number> {
+  const next = { ...overrides }
+  indices.forEach((index, idx) => {
+    next[index] = normalizeColorOpacity(opacities[idx])
   })
   return next
 }
@@ -175,6 +205,30 @@ export function resolveEquilibriumEigenvectorColors(
   return indices.map((index) => colorMap.get(index) ?? defaultEigenvectorColor(index))
 }
 
+export function resolveEquilibriumEigenvectorOpacities(
+  indices: number[],
+  previousIndices: number[],
+  previousOpacities: number[],
+  overrides?: Record<number, number>
+): number[] {
+  const opacityMap = new Map<number, number>()
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      const index = Number.parseInt(key, 10)
+      if (!Number.isFinite(index) || index < 0) continue
+      if (typeof value !== 'number' || !Number.isFinite(value)) continue
+      opacityMap.set(index, normalizeColorOpacity(value))
+    }
+  }
+  previousIndices.forEach((index, idx) => {
+    opacityMap.set(index, normalizeColorOpacity(previousOpacities[idx]))
+  })
+
+  return indices.map(
+    (index) => opacityMap.get(index) ?? DEFAULT_COLOR_OPACITY
+  )
+}
+
 function findConjugateEigenspaceIndex(
   eigenpairs: EquilibriumEigenPair[],
   index: number,
@@ -249,6 +303,8 @@ export function resolveEquilibriumEigenvectorRender(
     : fallbackIndices
   const previousIndices = hasIndices ? render?.vectorIndices ?? [] : fallbackIndices
   const previousColors = render?.colors ?? DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER.colors
+  const previousOpacities =
+    render?.opacities ?? DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER.opacities
   const rawIndices = hasIndices ? render?.vectorIndices ?? [] : fallbackIndices
   const indices = normalizeEquilibriumEigenvectorIndices(rawIndices, allowedIndices)
   const baseOverrides = normalizeEigenvectorColorOverrides(render?.colorOverrides)
@@ -264,6 +320,25 @@ export function resolveEquilibriumEigenvectorRender(
     mergedOverrides
   )
   const colorOverrides = applyEigenvectorColorOverrides(mergedOverrides, indices, colors)
+  const baseOpacityOverrides = normalizeEigenvectorOpacityOverrides(
+    render?.opacityOverrides
+  )
+  const mergedOpacityOverrides = applyEigenvectorOpacityOverrides(
+    baseOpacityOverrides,
+    previousIndices,
+    previousOpacities
+  )
+  const opacities = resolveEquilibriumEigenvectorOpacities(
+    indices,
+    previousIndices,
+    previousOpacities,
+    mergedOpacityOverrides
+  )
+  const opacityOverrides = applyEigenvectorOpacityOverrides(
+    mergedOpacityOverrides,
+    indices,
+    opacities
+  )
 
   return {
     enabled: Boolean(render?.enabled ?? DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER.enabled),
@@ -271,6 +346,8 @@ export function resolveEquilibriumEigenvectorRender(
     vectorIndices: indices,
     colors,
     colorOverrides,
+    opacities,
+    opacityOverrides,
     lineLengthScale: normalizeLineLengthScale(render?.lineLengthScale),
     lineThickness: normalizeLineThickness(render?.lineThickness),
     discRadiusScale: normalizeDiscRadiusScale(render?.discRadiusScale),

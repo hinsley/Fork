@@ -11,6 +11,7 @@ import { DiagramInspectorSections } from './sections/DiagramInspectorSections'
 import { BranchInspectorSections } from './sections/BranchInspectorSections'
 import type { LineStyle } from '../../system/types'
 import { InspectorSubDisclosure } from './selectionSession'
+import { OpacityPercentInput } from '../OpacityPercentInput'
 
 export function SelectionInspectorView({
   scope,
@@ -43,6 +44,7 @@ export function SelectionInspectorView({
     handleFrozenVariableValueChange,
     handleFrozenEquationContextValueChange,
     handleLimitCycleFloquetColorChange,
+    handleLimitCycleFloquetOpacityChange,
     handleLimitCycleFloquetVisibilityChange,
     handleLimitCyclePreviewJump,
     handleParamOverrideChange,
@@ -58,6 +60,7 @@ export function SelectionInspectorView({
     limitCycleFloquetColors,
     limitCycleFloquetBackend,
     limitCycleFloquetIndices,
+    limitCycleFloquetOpacities,
     limitCycleFloquetModePointCount,
     limitCycleFloquetModes,
     limitCycleFloquetModesAvailable,
@@ -206,6 +209,17 @@ export function SelectionInspectorView({
                           onUpdateRender(selectionNode.id, { color: event.target.value })
                         }
                         data-testid="inspector-color"
+                      />
+                    </label>
+                    <label>
+                      Opacity (%)
+                      <OpacityPercentInput
+                        value={nodeRender.opacity}
+                        onChange={(opacity) =>
+                          onUpdateRender(selectionNode.id, { opacity })
+                        }
+                        ariaLabel="Color opacity percentage"
+                        testId="inspector-color-opacity"
                       />
                     </label>
                     <label>
@@ -902,6 +916,18 @@ export function SelectionInspectorView({
                                       disabled={!visible}
                                       aria-label={`${label} color`}
                                       data-testid={`limit-cycle-floquet-color-${index}`}
+                                    />
+                                    <OpacityPercentInput
+                                      value={limitCycleFloquetOpacities[idx]}
+                                      onChange={(opacity) =>
+                                        handleLimitCycleFloquetOpacityChange(
+                                          index,
+                                          opacity
+                                        )
+                                      }
+                                      disabled={!visible}
+                                      ariaLabel={`${label} opacity percentage`}
+                                      testId={`limit-cycle-floquet-opacity-${index}`}
                                     />
                                   </div>
                                 )

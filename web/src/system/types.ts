@@ -1049,6 +1049,8 @@ export interface ClvRenderStyle {
   vectorIndices: number[]
   colors: string[]
   colorOverrides?: Record<number, string>
+  opacities: number[]
+  opacityOverrides?: Record<number, number>
 }
 
 export interface EquilibriumEigenvectorRenderStyle {
@@ -1057,6 +1059,8 @@ export interface EquilibriumEigenvectorRenderStyle {
   vectorIndices: number[]
   colors: string[]
   colorOverrides?: Record<number, string>
+  opacities: number[]
+  opacityOverrides?: Record<number, number>
   lineLengthScale: number
   lineThickness: number
   discRadiusScale: number
@@ -1067,6 +1071,7 @@ export type LineStyle = 'solid' | 'dashed' | 'dotted'
 
 export interface RenderStyle {
   color: string
+  opacity: number
   lineWidth: number
   lineStyle: LineStyle
   pointSize: number
@@ -1160,6 +1165,7 @@ export interface AnalysisViewportAdvanced {
   connectPoints: boolean
   showIdentityLine: boolean
   identityLineColor: string
+  identityLineOpacity: number
   identityLineStyle: LineStyle
 }
 

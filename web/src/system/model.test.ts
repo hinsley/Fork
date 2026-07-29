@@ -339,6 +339,25 @@ describe('system model', () => {
     expect(normalized.analysisViewports[0].viewRevision).toBe(0)
   })
 
+  it('defaults legacy color opacity fields to fully opaque', () => {
+    const added = addAnalysisViewport(
+      createSystem({ name: 'Legacy_Color_Opacity' }),
+      'Legacy Analysis'
+    )
+    const legacy = structuredClone(added.system)
+    delete (legacy.nodes[added.nodeId].render as { opacity?: number }).opacity
+    delete (
+      legacy.analysisViewports[0].advanced as {
+        identityLineOpacity?: number
+      }
+    ).identityLineOpacity
+
+    const normalized = normalizeSystem(legacy)
+
+    expect(normalized.nodes[added.nodeId].render.opacity).toBe(1)
+    expect(normalized.analysisViewports[0].advanced.identityLineOpacity).toBe(1)
+  })
+
   it('normalizes missing analysis positivity constraints to an empty list', () => {
     const system = createSystem({ name: 'Legacy_Analysis_Constraints' })
     const { system: withAnalysis } = addAnalysisViewport(system, 'Event_Map')
@@ -1044,6 +1063,7 @@ describe('system model', () => {
         connectPoints: true,
         showIdentityLine: true,
         identityLineColor: '#787878',
+        identityLineOpacity: 1,
         identityLineStyle: 'dotted',
       },
     })

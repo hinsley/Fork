@@ -29,15 +29,22 @@ import type {
   TreeNode,
 } from '../../system/types'
 import { DEFAULT_RENDER, DEFAULT_SCENE_CAMERA } from '../../system/model'
-import { defaultClvIndices, resolveClvColors, resolveClvRender } from '../../system/clv'
+import {
+  defaultClvIndices,
+  resolveClvColors,
+  resolveClvOpacities,
+  resolveClvRender,
+} from '../../system/clv'
 import {
   defaultEquilibriumEigenvectorIndices,
   isRealEigenvalue,
   resolveEquilibriumEigenvalueMarkerColors,
   resolveEquilibriumEigenvectorColors,
+  resolveEquilibriumEigenvectorOpacities,
   resolveEquilibriumEigenspaceIndices,
   resolveEquilibriumEigenvectorRender,
 } from '../../system/equilibriumEigenvectors'
+import { colorWithOpacity } from '../../system/color'
 import { maxSceneAxisCount, resolveSceneAxisSelection } from '../../system/sceneAxes'
 import { formatEquilibriumLabel } from '../../system/labels'
 import {
@@ -2404,6 +2411,12 @@ function useInspectorSelectionController({
     clvRender.colors,
     clvRender.colorOverrides
   )
+  const clvOpacities = resolveClvOpacities(
+    clvIndices,
+    clvRender.vectorIndices,
+    clvRender.opacities,
+    clvRender.opacityOverrides
+  )
   const clvVisibleSet = new Set(clvRender.vectorIndices)
   const equilibriumEigenvectorIndices = defaultEquilibriumEigenvectorIndices(
     equilibriumEigenspaceIndices
@@ -2414,10 +2427,19 @@ function useInspectorSelectionController({
     equilibriumEigenvectorRender.colors,
     equilibriumEigenvectorRender.colorOverrides
   )
+  const equilibriumEigenvectorOpacities =
+    resolveEquilibriumEigenvectorOpacities(
+      equilibriumEigenvectorIndices,
+      equilibriumEigenvectorRender.vectorIndices,
+      equilibriumEigenvectorRender.opacities,
+      equilibriumEigenvectorRender.opacityOverrides
+    )
   const equilibriumEigenvalueMarkerColors = resolveEquilibriumEigenvalueMarkerColors(
     equilibriumEigenpairs,
     equilibriumEigenvectorIndices,
-    equilibriumEigenvectorColors
+    equilibriumEigenvectorColors.map((color, index) =>
+      colorWithOpacity(color, equilibriumEigenvectorOpacities[index])
+    )
   )
   const equilibriumEigenvectorVisibleSet = new Set(equilibriumEigenvectorRender.vectorIndices)
   const equilibriumPlotDim = equilibrium?.solution?.state?.length ?? system.config.varNames.length
@@ -4983,11 +5005,20 @@ function useInspectorSelectionController({
     limitCycleFloquetRender.colors,
     limitCycleFloquetRender.colorOverrides
   )
+  const limitCycleFloquetOpacities =
+    resolveEquilibriumEigenvectorOpacities(
+      limitCycleFloquetIndices,
+      limitCycleFloquetRender.vectorIndices,
+      limitCycleFloquetRender.opacities,
+      limitCycleFloquetRender.opacityOverrides
+    )
   const limitCycleFloquetVisibleSet = new Set(limitCycleFloquetRender.vectorIndices)
   const limitCycleFloquetMarkerColors = resolveEquilibriumEigenvalueMarkerColors(
     limitCycleFloquetPairTemplate,
     limitCycleFloquetIndices,
-    limitCycleFloquetColors
+    limitCycleFloquetColors.map((color, index) =>
+      colorWithOpacity(color, limitCycleFloquetOpacities[index])
+    )
   )
   const limitCycleManifoldEligibleFloquetIndexOptions = useMemo(
     () =>
@@ -8471,7 +8502,17 @@ function useInspectorSelectionController({
       equilibriumEigenvectorRender.colors,
       equilibriumEigenvectorRender.colorOverrides
     )
-    updateEquilibriumEigenvectorRender({ vectorIndices: nextIndices, colors })
+    const opacities = resolveEquilibriumEigenvectorOpacities(
+      nextIndices,
+      equilibriumEigenvectorRender.vectorIndices,
+      equilibriumEigenvectorRender.opacities,
+      equilibriumEigenvectorRender.opacityOverrides
+    )
+    updateEquilibriumEigenvectorRender({
+      vectorIndices: nextIndices,
+      colors,
+      opacities,
+    })
   }
 
   const handleEquilibriumEigenvectorColorChange = (index: number, color: string) => {
@@ -8481,6 +8522,18 @@ function useInspectorSelectionController({
       idx === colorIndex ? color : value
     )
     updateEquilibriumEigenvectorRender({ colors })
+  }
+
+  const handleEquilibriumEigenvectorOpacityChange = (
+    index: number,
+    opacity: number
+  ) => {
+    const opacityIndex = equilibriumEigenvectorRender.vectorIndices.indexOf(index)
+    if (opacityIndex === -1) return
+    const opacities = equilibriumEigenvectorRender.opacities.map((value, idx) =>
+      idx === opacityIndex ? opacity : value
+    )
+    updateEquilibriumEigenvectorRender({ opacities })
   }
 
   const updateLimitCycleFloquetRender = useCallback(
@@ -8514,7 +8567,17 @@ function useInspectorSelectionController({
       limitCycleFloquetRender.colors,
       limitCycleFloquetRender.colorOverrides
     )
-    updateLimitCycleFloquetRender({ vectorIndices: nextIndices, colors })
+    const opacities = resolveEquilibriumEigenvectorOpacities(
+      nextIndices,
+      limitCycleFloquetRender.vectorIndices,
+      limitCycleFloquetRender.opacities,
+      limitCycleFloquetRender.opacityOverrides
+    )
+    updateLimitCycleFloquetRender({
+      vectorIndices: nextIndices,
+      colors,
+      opacities,
+    })
   }
 
   const handleLimitCycleFloquetColorChange = (index: number, color: string) => {
@@ -8524,6 +8587,18 @@ function useInspectorSelectionController({
       idx === colorIndex ? color : value
     )
     updateLimitCycleFloquetRender({ colors })
+  }
+
+  const handleLimitCycleFloquetOpacityChange = (
+    index: number,
+    opacity: number
+  ) => {
+    const opacityIndex = limitCycleFloquetRender.vectorIndices.indexOf(index)
+    if (opacityIndex === -1) return
+    const opacities = limitCycleFloquetRender.opacities.map((value, idx) =>
+      idx === opacityIndex ? opacity : value
+    )
+    updateLimitCycleFloquetRender({ opacities })
   }
 
   const handleComputeLimitCycleFloquetModes = async () => {
@@ -8554,7 +8629,13 @@ function useInspectorSelectionController({
       clvRender.colors,
       clvRender.colorOverrides
     )
-    updateClvRender({ vectorIndices: nextIndices, colors })
+    const opacities = resolveClvOpacities(
+      nextIndices,
+      clvRender.vectorIndices,
+      clvRender.opacities,
+      clvRender.opacityOverrides
+    )
+    updateClvRender({ vectorIndices: nextIndices, colors, opacities })
   }
 
   const handleClvColorChange = (index: number, color: string) => {
@@ -8564,6 +8645,15 @@ function useInspectorSelectionController({
       idx === colorIndex ? color : value
     )
     updateClvRender({ colors })
+  }
+
+  const handleClvOpacityChange = (index: number, opacity: number) => {
+    const opacityIndex = clvRender.vectorIndices.indexOf(index)
+    if (opacityIndex === -1) return
+    const opacities = clvRender.opacities.map((value, idx) =>
+      idx === opacityIndex ? opacity : value
+    )
+    updateClvRender({ opacities })
   }
 
   const lyapunovDimension =
@@ -8628,6 +8718,7 @@ function useInspectorSelectionController({
     clvHasData,
     clvIndices,
     clvNeeds2d,
+    clvOpacities,
     clvPlotDim,
     clvRender,
     clvVisibleSet,
@@ -8658,6 +8749,7 @@ function useInspectorSelectionController({
     equilibriumEigenpairs,
     equilibriumEigenvectorColors,
     equilibriumEigenvectorIndices,
+    equilibriumEigenvectorOpacities,
     equilibriumEigenvectorRender,
     equilibriumEigenvectorVisibleSet,
     equilibriumError,
@@ -8697,6 +8789,7 @@ function useInspectorSelectionController({
     frozenVariableHeaderNames,
     handleClearParamOverride,
     handleClvColorChange,
+    handleClvOpacityChange,
     handleClvVisibilityChange,
     handleComputeCovariant,
     handleComputeIsocline,
@@ -8726,6 +8819,7 @@ function useInspectorSelectionController({
     handleCreateLimitCycleManifold,
     handleCreateNSCurve,
     handleEquilibriumEigenvectorColorChange,
+    handleEquilibriumEigenvectorOpacityChange,
     handleEquilibriumEigenvectorVisibilityChange,
     handleExtendBranch,
     handleExtendEquilibriumManifold1D,
@@ -8734,6 +8828,7 @@ function useInspectorSelectionController({
     handleFrozenEquationContextValueChange,
     handleJumpToBranchPoint,
     handleLimitCycleFloquetColorChange,
+    handleLimitCycleFloquetOpacityChange,
     handleLimitCycleFloquetVisibilityChange,
     handleLimitCyclePreviewJump,
     handleOrbitPreviewJump,
@@ -8812,6 +8907,7 @@ function useInspectorSelectionController({
     limitCycleFloquetColors,
     limitCycleFloquetBackend,
     limitCycleFloquetIndices,
+    limitCycleFloquetOpacities,
     limitCycleFloquetModePointCount,
     limitCycleFloquetModes,
     limitCycleFloquetModesAvailable,

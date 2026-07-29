@@ -82,6 +82,7 @@ function buildViewport(
       connectPoints: false,
       showIdentityLine: true,
       identityLineColor: '#787878',
+      identityLineOpacity: 1,
       identityLineStyle: 'dotted',
       ...overrides.advanced
     }
@@ -183,6 +184,7 @@ describe('analysisTraceBuilders', () => {
       advanced: {
         connectPoints: true,
         identityLineColor: '#112233',
+        identityLineOpacity: 0.4,
         identityLineStyle: 'dashed'
       }
     })
@@ -225,7 +227,7 @@ describe('analysisTraceBuilders', () => {
     }
     expect(identityTrace.x).toEqual([2, 5])
     expect(identityTrace.y).toEqual([2, 5])
-    expect(identityTrace.line?.color).toBe('#112233')
+    expect(identityTrace.line?.color).toBe('rgba(17, 34, 51, 0.4)')
     expect(identityTrace.line?.dash).toBe('dash')
     expect(mergeIdentityRanges([[2, 5], [1, 4], null])).toEqual([1, 5])
   })

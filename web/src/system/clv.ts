@@ -1,4 +1,5 @@
 import type { ClvRenderStyle } from './types'
+import { DEFAULT_COLOR_OPACITY, normalizeColorOpacity } from './color'
 
 export const CLV_COLOR_PALETTE = [
   '#1f77b4',
@@ -21,6 +22,7 @@ export const DEFAULT_CLV_RENDER: ClvRenderStyle = {
   thickness: 2,
   vectorIndices: [0],
   colors: [CLV_COLOR_PALETTE[0]],
+  opacities: [DEFAULT_COLOR_OPACITY],
 }
 
 export function defaultClvIndices(dim?: number): number[] {
@@ -62,6 +64,34 @@ function applyClvColorOverrides(
     if (typeof color === 'string' && color) {
       next[index] = color
     }
+  })
+  return next
+}
+
+function normalizeClvOpacityOverrides(
+  overrides: Record<number, number> | undefined
+): Record<number, number> {
+  if (!overrides || typeof overrides !== 'object') {
+    return {}
+  }
+  const result: Record<number, number> = {}
+  for (const [key, value] of Object.entries(overrides)) {
+    const index = Number.parseInt(key, 10)
+    if (!Number.isFinite(index) || index < 0) continue
+    if (typeof value !== 'number' || !Number.isFinite(value)) continue
+    result[index] = normalizeColorOpacity(value)
+  }
+  return result
+}
+
+function applyClvOpacityOverrides(
+  overrides: Record<number, number>,
+  indices: number[],
+  opacities: number[]
+): Record<number, number> {
+  const next = { ...overrides }
+  indices.forEach((index, idx) => {
+    next[index] = normalizeColorOpacity(opacities[idx])
   })
   return next
 }
@@ -137,6 +167,30 @@ export function resolveClvColors(
   return indices.map((index) => colorMap.get(index) ?? defaultClvColor(index))
 }
 
+export function resolveClvOpacities(
+  indices: number[],
+  previousIndices: number[],
+  previousOpacities: number[],
+  overrides?: Record<number, number>
+): number[] {
+  const opacityMap = new Map<number, number>()
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      const index = Number.parseInt(key, 10)
+      if (!Number.isFinite(index) || index < 0) continue
+      if (typeof value !== 'number' || !Number.isFinite(value)) continue
+      opacityMap.set(index, normalizeColorOpacity(value))
+    }
+  }
+  previousIndices.forEach((index, idx) => {
+    opacityMap.set(index, normalizeColorOpacity(previousOpacities[idx]))
+  })
+
+  return indices.map(
+    (index) => opacityMap.get(index) ?? DEFAULT_COLOR_OPACITY
+  )
+}
+
 export function resolveClvRender(
   render: Partial<ClvRenderStyle> | undefined,
   dim?: number
@@ -145,6 +199,7 @@ export function resolveClvRender(
   const fallbackIndices = defaultClvIndices(dim)
   const previousIndices = hasIndices ? render?.vectorIndices ?? [] : fallbackIndices
   const previousColors = render?.colors ?? DEFAULT_CLV_RENDER.colors
+  const previousOpacities = render?.opacities ?? DEFAULT_CLV_RENDER.opacities
   const rawIndices = hasIndices ? render?.vectorIndices ?? [] : fallbackIndices
   const indices = normalizeClvIndices(rawIndices, dim)
   const baseOverrides = normalizeClvColorOverrides(render?.colorOverrides)
@@ -160,6 +215,25 @@ export function resolveClvRender(
     mergedOverrides
   )
   const colorOverrides = applyClvColorOverrides(mergedOverrides, indices, colors)
+  const baseOpacityOverrides = normalizeClvOpacityOverrides(
+    render?.opacityOverrides
+  )
+  const mergedOpacityOverrides = applyClvOpacityOverrides(
+    baseOpacityOverrides,
+    previousIndices,
+    previousOpacities
+  )
+  const opacities = resolveClvOpacities(
+    indices,
+    previousIndices,
+    previousOpacities,
+    mergedOpacityOverrides
+  )
+  const opacityOverrides = applyClvOpacityOverrides(
+    mergedOpacityOverrides,
+    indices,
+    opacities
+  )
 
   return {
     enabled: Boolean(render?.enabled ?? DEFAULT_CLV_RENDER.enabled),
@@ -170,6 +244,8 @@ export function resolveClvRender(
     vectorIndices: indices,
     colors,
     colorOverrides,
+    opacities,
+    opacityOverrides,
   }
 }
 

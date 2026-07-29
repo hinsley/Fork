@@ -1,6 +1,7 @@
 import type { Data } from 'plotly.js'
 import type { EventSeriesHit } from '../compute/ForkCoreClient'
 import { DEFAULT_RENDER } from '../system/model'
+import { colorWithOpacity } from '../system/color'
 import type { AnalysisAxisSpec, AnalysisViewport, System } from '../system/types'
 import {
   resolveAnalysisAxisLabelForSystem,
@@ -156,7 +157,10 @@ export function buildIdentityLineTrace(
     x: [min, max],
     y: [min, max],
     line: {
-      color: viewport.advanced.identityLineColor,
+      color: colorWithOpacity(
+        viewport.advanced.identityLineColor,
+        viewport.advanced.identityLineOpacity
+      ),
       width: 1.5,
       dash: resolveLineDash(viewport.advanced.identityLineStyle)
     },

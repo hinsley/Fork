@@ -50,6 +50,7 @@ import {
 } from '../system/continuation'
 import { resolveClvRender } from '../system/clv'
 import { DEFAULT_RENDER, isNodeEffectivelyVisible } from '../system/model'
+import { colorWithOpacity, normalizeColorOpacity } from '../system/color'
 import {
   EIGENVECTOR_COLOR_PALETTE,
   isRealEigenvalue,
@@ -138,6 +139,38 @@ type ViewportEntry = {
   scene?: Scene
   analysis?: AnalysisViewport
   diagram?: BifurcationDiagram
+}
+
+const INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP =
+  'fork-independent-color-opacity'
+
+function applyNodeRenderOpacities(
+  traces: Data[],
+  nodes: System['nodes']
+): Data[] {
+  return traces.map((trace) => {
+    if (
+      'legendgroup' in trace &&
+      trace.legendgroup === INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP
+    ) {
+      return trace
+    }
+    const nodeId = 'uid' in trace && typeof trace.uid === 'string' ? trace.uid : null
+    const nodeOpacity = nodeId
+      ? normalizeColorOpacity(nodes[nodeId]?.render?.opacity)
+      : 1
+    if (nodeOpacity >= 1) return trace
+    const traceOpacity =
+      'opacity' in trace &&
+      typeof trace.opacity === 'number' &&
+      Number.isFinite(trace.opacity)
+        ? trace.opacity
+        : 1
+    return {
+      ...trace,
+      opacity: normalizeColorOpacity(traceOpacity * nodeOpacity),
+    } as Data
+  })
 }
 
 type ViewportTileProps = {
@@ -577,7 +610,10 @@ function buildClvTraces(
     const headU: number[] = []
     const headV: number[] = []
     const headW: number[] = []
-    const color = clv.colors[colorIndex] ?? '#1f77b4'
+    const color = colorWithOpacity(
+      clv.colors[colorIndex] ?? '#1f77b4',
+      clv.opacities[colorIndex]
+    )
 
     for (let idx = 0; idx < stepCount; idx += stride) {
       const vectorsAtStep = covariant.vectors[idx]
@@ -648,6 +684,7 @@ function buildClvTraces(
           y: lineY,
           z: lineZ,
           uid: nodeId,
+          legendgroup: INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP,
           line: {
             color,
             width: clv.thickness,
@@ -662,6 +699,7 @@ function buildClvTraces(
           x: lineX,
           y: lineY,
           uid: nodeId,
+          legendgroup: INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP,
           line: {
             color,
             width: clv.thickness,
@@ -683,6 +721,7 @@ function buildClvTraces(
           v: headV,
           w: headW,
           uid: nodeId,
+          legendgroup: INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP,
           anchor: 'tail',
           // Use raw sizing to avoid per-trace scaling differences between CLVs.
           sizemode: 'raw',
@@ -702,6 +741,7 @@ function buildClvTraces(
           x: headLineX,
           y: headLineY,
           uid: nodeId,
+          legendgroup: INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP,
           line: {
             color,
             width: clv.thickness,
@@ -722,6 +762,7 @@ type PendingEigenvector = {
   eigenpairs: EquilibriumEigenPair[]
   vectorIndices: number[]
   colors: string[]
+  opacities: number[]
   lineLengthScale: number
   lineThickness: number
   discRadiusScale: number
@@ -817,21 +858,6 @@ function buildEquilibriumEigenvectorTraces(
   const discLineWidth = entry.highlight ? baseDiscWidth + 1 : baseDiscWidth
   const traces: Data[] = []
 
-  const colorWithAlpha = (value: string, alpha: number) => {
-    if (!value.startsWith('#')) return value
-    const raw = value.slice(1)
-    if (raw.length !== 6 && raw.length !== 3) return value
-    const digits =
-      raw.length === 3
-        ? raw.split('').map((char) => char.repeat(2)).join('')
-        : raw
-    const r = Number.parseInt(digits.slice(0, 2), 16)
-    const g = Number.parseInt(digits.slice(2, 4), 16)
-    const b = Number.parseInt(digits.slice(4, 6), 16)
-    if (![r, g, b].every(Number.isFinite)) return value
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`
-  }
-
   const metricScales = use3d ? [scaleX, scaleY, scaleZ] : [scaleX, scaleY]
   const dot = (a: number[], b: number[]) =>
     a.reduce((sum, value, index) => {
@@ -873,6 +899,7 @@ function buildEquilibriumEigenvectorTraces(
         type: 'scatter3d',
         mode: 'lines',
         uid: entry.nodeId,
+        legendgroup: INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP,
         x: [x0, x1],
         y: [y0, y1],
         z: [z0, z1],
@@ -885,6 +912,7 @@ function buildEquilibriumEigenvectorTraces(
         type: 'scatter',
         mode: 'lines',
         uid: entry.nodeId,
+        legendgroup: INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP,
         x: [x0, x1],
         y: [y0, y1],
         line: { color, width: lineWidth },
@@ -894,7 +922,12 @@ function buildEquilibriumEigenvectorTraces(
     }
   }
 
-  const pushDisc = (u: number[], v: number[], color: string) => {
+  const pushDisc = (
+    u: number[],
+    v: number[],
+    rawColor: string,
+    opacity: number
+  ) => {
     const ringX: number[] = []
     const ringY: number[] = []
     const ringZ: number[] = []
@@ -926,14 +959,15 @@ function buildEquilibriumEigenvectorTraces(
       traces.push({
         type: 'mesh3d',
         uid: entry.nodeId,
+        legendgroup: INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP,
         x: meshX,
         y: meshY,
         z: meshZ,
         i: iTyped,
         j: jTyped,
         k: kTyped,
-        color,
-        opacity: EIGENVECTOR_DISC_OPACITY,
+        color: rawColor,
+        opacity: opacity * EIGENVECTOR_DISC_OPACITY,
         flatshading: true,
         showscale: false,
         hoverinfo: 'none',
@@ -942,10 +976,14 @@ function buildEquilibriumEigenvectorTraces(
         type: 'scatter3d',
         mode: 'lines',
         uid: entry.nodeId,
+        legendgroup: INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP,
         x: ringX,
         y: ringY,
         z: ringZ,
-        line: { color, width: discLineWidth },
+        line: {
+          color: colorWithOpacity(rawColor, opacity),
+          width: discLineWidth,
+        },
         showlegend: false,
         hoverinfo: 'none',
       })
@@ -954,11 +992,18 @@ function buildEquilibriumEigenvectorTraces(
         type: 'scatter',
         mode: 'lines',
         uid: entry.nodeId,
+        legendgroup: INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP,
         x: ringX,
         y: ringY,
         fill: 'toself',
-        fillcolor: colorWithAlpha(color, EIGENVECTOR_DISC_OPACITY),
-        line: { color, width: discLineWidth },
+        fillcolor: colorWithOpacity(
+          rawColor,
+          opacity * EIGENVECTOR_DISC_OPACITY
+        ),
+        line: {
+          color: colorWithOpacity(rawColor, opacity),
+          width: discLineWidth,
+        },
         showlegend: false,
         hoverinfo: 'none',
       })
@@ -989,13 +1034,16 @@ function buildEquilibriumEigenvectorTraces(
     const imag = axisOrder.map((index) => pair.vector[index]?.im ?? Number.NaN)
     if (!real.every(Number.isFinite) || !imag.every(Number.isFinite)) return
     const paletteIndex = vectorIndex % EIGENVECTOR_COLOR_PALETTE.length
-    const color = entry.colors[colorIndex] ?? EIGENVECTOR_COLOR_PALETTE[paletteIndex]
+    const rawColor =
+      entry.colors[colorIndex] ?? EIGENVECTOR_COLOR_PALETTE[paletteIndex]
+    const opacity = normalizeColorOpacity(entry.opacities[colorIndex])
+    const color = colorWithOpacity(rawColor, opacity)
 
     if (!isRealEigenvalue(pair.value)) {
       if (discRadius > 0) {
         const basis = orthonormalize(real, imag)
         if (basis) {
-          pushDisc(basis.u, basis.v, color)
+          pushDisc(basis.u, basis.v, rawColor, opacity)
         } else {
           const direction = resolveEigenlineDirection(real, imag)
           if (direction) {
@@ -3226,6 +3274,7 @@ function buildSceneTraces(
             eigenpairs,
             vectorIndices: eigenvectorRender.vectorIndices,
             colors: eigenvectorRender.colors,
+            opacities: eigenvectorRender.opacities,
             lineLengthScale: eigenvectorRender.lineLengthScale,
             lineThickness: eigenvectorRender.lineThickness,
             discRadiusScale: eigenvectorRender.discRadiusScale,
@@ -3680,6 +3729,7 @@ function buildSceneTraces(
               eigenpairs,
               vectorIndices: floquetRender.vectorIndices,
               colors: floquetRender.colors,
+              opacities: floquetRender.opacities,
               lineLengthScale: floquetRender.lineLengthScale,
               lineThickness: floquetRender.lineThickness,
               discRadiusScale: floquetRender.discRadiusScale,
@@ -5411,7 +5461,7 @@ function buildSceneTraces(
       })
     }
   }
-  return traces
+  return applyNodeRenderOpacities(traces, system.nodes)
 }
 
 function buildDiagramTraces(
@@ -6608,7 +6658,14 @@ function buildDiagramTraces(
     )
   }
 
-  return { traces, hasAxes, hasBranches, hasData, xTitle, yTitle }
+  return {
+    traces: applyNodeRenderOpacities(traces, system.nodes),
+    hasAxes,
+    hasBranches,
+    hasData,
+    xTitle,
+    yTitle,
+  }
 }
 
 function buildSceneBaseLayout(

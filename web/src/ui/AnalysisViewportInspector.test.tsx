@@ -187,6 +187,7 @@ describe('AnalysisViewportInspector', () => {
       (screen.getByTestId('analysis-identity-line-color') as HTMLInputElement)
         .value
     ).toBe('#787878')
+    expect(screen.getByTestId('analysis-identity-line-opacity')).toHaveValue(100)
     expect(
       (screen.getByTestId('analysis-identity-line-style') as HTMLSelectElement)
         .value
@@ -195,6 +196,9 @@ describe('AnalysisViewportInspector', () => {
     fireEvent.click(identityToggle)
     fireEvent.change(screen.getByTestId('analysis-identity-line-color'), {
       target: { value: '#112233' }
+    })
+    fireEvent.change(screen.getByTestId('analysis-identity-line-opacity'), {
+      target: { value: '45' }
     })
     fireEvent.change(screen.getByTestId('analysis-identity-line-style'), {
       target: { value: 'dashed' }
@@ -205,6 +209,7 @@ describe('AnalysisViewportInspector', () => {
       (screen.getByTestId('analysis-identity-line-color') as HTMLInputElement)
         .value
     ).toBe('#112233')
+    expect(screen.getByTestId('analysis-identity-line-opacity')).toHaveValue(45)
     expect(
       (screen.getByTestId('analysis-identity-line-style') as HTMLSelectElement)
         .value

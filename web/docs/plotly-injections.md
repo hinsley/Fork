@@ -130,8 +130,8 @@ maps use the existing cobweb builder. Selecting a forced-response branch point o
   `axisRanges`; `web/src/analysis/analysisTraceBuilders.ts` builds the
   declarative source, cobweb, and identity-line traces for 2D event maps that
   plot the same quantity at different hit offsets (same observable or `Delta t`
-  / `Delta n`), with viewport-owned identity-line color/style state; no direct
-  Plotly mutation is added beyond the shared viewport wrapper.
+  / `Delta n`), with viewport-owned identity-line color, opacity, and style
+  state; no direct Plotly mutation is added beyond the shared viewport wrapper.
 - `web/src/ui/ViewportPanel.tsx`: map function sampling requests are limited to
   true 1D map systems (`varNames.length === 1`) and only when at least one
   visible scene is currently in `map_cobweb_1d` mode.
@@ -143,6 +143,9 @@ maps use the existing cobweb builder. Selecting a forced-response branch point o
   so bifurcation visibility is managed only via the object tree.
 - `web/src/ui/ViewportPanel.tsx`: Scene branch rendering policy for continuation
   objects:
+  - object and branch color opacity is persisted as a normalized alpha value
+    and applied to every Plotly trace owned by that node, including traces that
+    already have a lower surface opacity;
   - equilibrium and codim-1 bifurcation curves render as `lines` (no per-point
     markers) in state-space projections; equilibrium branches are omitted from
     1-axis flow time-series scenes because continuation indices are not time;
@@ -167,7 +170,9 @@ maps use the existing cobweb builder. Selecting a forced-response branch point o
     not draw a false chord across the period seam;
   - persisted limit-cycle Floquet mode vectors (when manually computed from the
     inspector) reuse the equilibrium eigenline/eigendisc trace pipeline and are
-    sampled along the cycle with a configurable integer stride;
+    sampled along the cycle with a configurable integer stride; CLV,
+    equilibrium eigenspace, and Floquet mode color pickers each persist a
+    separate alpha value and apply it independently of the node color opacity;
   - cycle-like continuation branches (limit cycle, isoperiodic, homoclinic
     related) use envelope rendering (min/max traces) for one-free-variable
     projections, rather than plotting every cycle profile point.
@@ -186,7 +191,8 @@ maps use the existing cobweb builder. Selecting a forced-response branch point o
   `xaxis.range`/`yaxis.range` values for the complex plane, and add unit
   circle/disc overlays for multiplier/eigenvalue views. Equilibrium eigenvalue
   markers are color-mapped from the corresponding eigenvector/eigendisc render
-  colors (no relayout persistence is wired for these mini plots).
+  colors and opacity values (no relayout persistence is wired for these mini
+  plots).
 
 ### Plot styling driven by app theme
 
