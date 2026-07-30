@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildSortedArrayOrder,
+  continuationPieceRanges,
   canonicalizeLimitCycleStateForAnalysis,
   computeLimitCycleMetrics,
   ensureBranchIndices,
@@ -67,6 +68,20 @@ const baseBranch: ContinuationObject = {
 }
 
 describe('continuation helpers', () => {
+  it('builds adjacent branch pieces that share interior bifurcation points', () => {
+    expect(continuationPieceRanges(6, [4, 2, 2, 0, 5, 99])).toEqual([
+      { pieceIndex: 0, startPointIndex: 0, endPointIndex: 2 },
+      { pieceIndex: 1, startPointIndex: 2, endPointIndex: 4 },
+      { pieceIndex: 2, startPointIndex: 4, endPointIndex: 5 },
+    ])
+  })
+
+  it('keeps branches without interior bifurcations as one piece', () => {
+    expect(continuationPieceRanges(3, [0, 2])).toEqual([
+      { pieceIndex: 0, startPointIndex: 0, endPointIndex: 2 },
+    ])
+  })
+
   it('labels every tracked homoclinic spectral marker with its HBK code', () => {
     expect(formatBifurcationType('HomoclinicThreeLeadingStable')).toBe(
       'TLS - Three Leading Stable'

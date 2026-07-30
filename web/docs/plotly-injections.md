@@ -112,6 +112,11 @@ maps use the existing cobweb builder. Selecting a forced-response branch point o
 - `web/src/ui/ViewportPanel.tsx`: scene projection mode is now selected by
   scene axis count (`Scene.axisVariables`), not by system dimension:
   `flow_timeseries_1d`, `map_cobweb_1d`, `phase_2d`, `phase_3d`.
+- `web/src/viewports/plotly/branchPieceAppearance.ts`: continuation line
+  traces with per-piece appearance overrides are split at stored bifurcation
+  point indices before rendering. The adjacent traces share the bifurcation
+  point and retain the original branch `uid`, so Plotly clicks still select
+  the same logical continuation branch and point.
 - `web/src/ui/ViewportPanel.tsx`: 1-axis map scenes for systems with more than
   one variable render cobweb projection (`x_n` vs `x_{n+1}`) for the selected
   variable and intentionally do **not** render a governing map function graph.

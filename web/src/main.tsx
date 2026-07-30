@@ -8,6 +8,7 @@ import {
   HOMOCLINIC_PRODUCT_E2E_FIXTURE,
   HOMOCLINIC_PRODUCT_E2E_SYSTEM_NAME,
   HomoclinicProductE2EClient,
+  createBranchPieceAppearanceSystem,
   createAxisPickerMapSystem,
   createAxisPickerSystem,
   createDemoSystem,
@@ -68,6 +69,11 @@ async function bootstrap() {
   if (fixture === 'demo') {
     const memory = new MemorySystemStore()
     const { system } = createDemoSystem()
+    await memory.save(system)
+    store = memory
+  } else if (fixture === 'branch-pieces') {
+    const memory = new MemorySystemStore()
+    const { system } = createBranchPieceAppearanceSystem()
     await memory.save(system)
     store = memory
   } else if (fixture === 'pd') {

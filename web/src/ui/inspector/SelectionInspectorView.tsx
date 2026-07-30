@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react'
 import type { InspectorSelectionController } from '../InspectorDetailsPanel'
 import { OrbitInspectorSections } from './sections/OrbitInspectorSections'
 import { EquilibriumInspectorSections } from './sections/EquilibriumInspectorSections'
@@ -10,6 +11,10 @@ import { AnalysisInspectorSections } from './sections/AnalysisInspectorSections'
 import { DiagramInspectorSections } from './sections/DiagramInspectorSections'
 import { BranchInspectorSections } from './sections/BranchInspectorSections'
 import type { LineStyle } from '../../system/types'
+import {
+  continuationPieceRanges,
+  formatBifurcationLabel,
+} from '../../system/continuation'
 import { InspectorSubDisclosure } from './selectionSession'
 import { OpacityPercentInput } from '../OpacityPercentInput'
 
@@ -27,6 +32,7 @@ export function SelectionInspectorView({
     WorkflowFocusToolbar,
     activeFrozenVariableRef,
     autonomousAnalysisError,
+    branch,
     commitSelectionName,
     currentObjectFrozenValues,
     currentFrozenEquationContext,
@@ -116,6 +122,79 @@ export function SelectionInspectorView({
     workflowFocus,
     writeClipboardText,
   } = scope
+
+    const branchPieceRanges = useMemo(
+      () =>
+        branch
+          ? continuationPieceRanges(
+              branch.data.points.length,
+              branch.data.bifurcations
+            )
+          : [],
+      [branch]
+    )
+    const [pieceSelection, setPieceSelection] = useState({
+      selectionKey,
+      pieceIndex: 0,
+    })
+    const selectedPieceIndex =
+      pieceSelection.selectionKey === selectionKey &&
+      pieceSelection.pieceIndex < branchPieceRanges.length
+        ? pieceSelection.pieceIndex
+        : 0
+    const selectedPieceOverride =
+      nodeRender.continuationPieceOverrides?.[selectedPieceIndex]
+    const formatPieceBoundary = (pointIndex: number, edge: 'start' | 'end') => {
+      if (!branch) return ''
+      if (pointIndex === 0 && edge === 'start') return 'start'
+      if (
+        pointIndex === branch.data.points.length - 1 &&
+        edge === 'end'
+      ) {
+        return 'end'
+      }
+      const point = branch.data.points[pointIndex]
+      const logicalIndex = branch.data.indices[pointIndex]
+      const displayIndex = Number.isFinite(logicalIndex)
+        ? logicalIndex
+        : pointIndex
+      return formatBifurcationLabel(displayIndex, point?.stability)
+    }
+    const updateSelectedPieceOverride = (
+      update: NonNullable<
+        typeof nodeRender.continuationPieceOverrides
+      >[number]
+    ) => {
+      if (!selectionNode) return
+      onUpdateRender(selectionNode.id, {
+        continuationPieceOverrides: {
+          ...(nodeRender.continuationPieceOverrides ?? {}),
+          [selectedPieceIndex]: {
+            ...(nodeRender.continuationPieceOverrides?.[selectedPieceIndex] ?? {}),
+            ...update,
+          },
+        },
+      })
+    }
+    const enableSelectedPieceOverride = () => {
+      updateSelectedPieceOverride({
+        color: nodeRender.color,
+        opacity: nodeRender.opacity,
+        lineWidth: nodeRender.lineWidth,
+        lineStyle: nodeRender.lineStyle,
+        pointSize: nodeRender.pointSize,
+      })
+    }
+    const clearSelectedPieceOverride = () => {
+      if (!selectionNode) return
+      const nextOverrides = {
+        ...(nodeRender.continuationPieceOverrides ?? {}),
+      }
+      delete nextOverrides[selectedPieceIndex]
+      onUpdateRender(selectionNode.id, {
+        continuationPieceOverrides: nextOverrides,
+      })
+    }
 
     const navigationClass =
       workflowFocus?.navigationPhase !== 'idle' && workflowFocus?.navigationDirection
@@ -256,6 +335,153 @@ export function SelectionInspectorView({
                       <option value="dotted">Dotted</option>
                     </select>
                   </label>
+                ) : null}
+                {selectionNode.kind === 'branch' &&
+                branch &&
+                branchPieceRanges.length > 1 ? (
+                  <div
+                    className="inspector-subsection"
+                    data-testid="branch-piece-appearance"
+                  >
+                    <h4 className="inspector-subheading">Branch pieces</h4>
+                    <p className="empty-state">
+                      Bifurcation points divide this branch into pieces. Each
+                      piece can override the branch appearance.
+                    </p>
+                    <label>
+                      Piece
+                      <select
+                        value={selectedPieceIndex}
+                        onChange={(event) =>
+                          setPieceSelection({
+                            selectionKey,
+                            pieceIndex: Number(event.target.value),
+                          })
+                        }
+                        data-testid="branch-piece-select"
+                      >
+                        {branchPieceRanges.map((range) => (
+                          <option
+                            key={range.pieceIndex}
+                            value={range.pieceIndex}
+                          >
+                            {`Piece ${range.pieceIndex + 1} · ${formatPieceBoundary(
+                              range.startPointIndex,
+                              'start'
+                            )} → ${formatPieceBoundary(
+                              range.endPointIndex,
+                              'end'
+                            )}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {selectedPieceOverride ? (
+                      <>
+                        <label>
+                          Piece color
+                          <input
+                            type="color"
+                            value={
+                              selectedPieceOverride.color ?? nodeRender.color
+                            }
+                            onChange={(event) =>
+                              updateSelectedPieceOverride({
+                                color: event.target.value,
+                              })
+                            }
+                            data-testid="branch-piece-color"
+                          />
+                        </label>
+                        <label>
+                          Piece opacity (%)
+                          <OpacityPercentInput
+                            value={
+                              selectedPieceOverride.opacity ??
+                              nodeRender.opacity
+                            }
+                            onChange={(opacity) =>
+                              updateSelectedPieceOverride({ opacity })
+                            }
+                            ariaLabel="Piece color opacity percentage"
+                            testId="branch-piece-opacity"
+                          />
+                        </label>
+                        <label>
+                          Piece line width
+                          <input
+                            type="number"
+                            min={1}
+                            max={8}
+                            value={
+                              selectedPieceOverride.lineWidth ??
+                              nodeRender.lineWidth
+                            }
+                            onChange={(event) =>
+                              updateSelectedPieceOverride({
+                                lineWidth: Number(event.target.value),
+                              })
+                            }
+                            data-testid="branch-piece-line-width"
+                          />
+                        </label>
+                        <label>
+                          Piece line style
+                          <select
+                            value={
+                              selectedPieceOverride.lineStyle ??
+                              nodeRender.lineStyle
+                            }
+                            onChange={(event) =>
+                              updateSelectedPieceOverride({
+                                lineStyle: event.target.value as LineStyle,
+                              })
+                            }
+                            data-testid="branch-piece-line-style"
+                          >
+                            <option value="solid">Solid</option>
+                            <option value="dashed">Dashed</option>
+                            <option value="dotted">Dotted</option>
+                          </select>
+                        </label>
+                        <label>
+                          Piece point size
+                          <input
+                            type="number"
+                            min={2}
+                            max={12}
+                            value={
+                              selectedPieceOverride.pointSize ??
+                              nodeRender.pointSize
+                            }
+                            onChange={(event) =>
+                              updateSelectedPieceOverride({
+                                pointSize: Number(event.target.value),
+                              })
+                            }
+                            data-testid="branch-piece-point-size"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="inspector-inline-button"
+                          onClick={clearSelectedPieceOverride}
+                          data-testid="branch-piece-clear"
+                        >
+                          Use branch appearance
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="inspector-inline-button"
+                        onClick={enableSelectedPieceOverride}
+                        data-testid="branch-piece-customize"
+                      >
+                        Customize this piece
+                      </button>
+                    )}
+                  </div>
                 ) : null}
                 {selectionNode.kind === 'object' || selectionNode.kind === 'branch' ? (
                   <label>

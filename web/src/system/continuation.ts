@@ -80,6 +80,39 @@ export type ContinuationBranchDataWire = Omit<ContinuationBranchData, 'points'> 
   points: ContinuationPointWire[]
 }
 
+export type ContinuationPieceRange = {
+  pieceIndex: number
+  startPointIndex: number
+  endPointIndex: number
+}
+
+export function continuationPieceRanges(
+  pointCount: number,
+  bifurcationPointIndices: readonly number[]
+): ContinuationPieceRange[] {
+  if (pointCount <= 0) return []
+  const lastPointIndex = pointCount - 1
+  const separators = Array.from(
+    new Set(
+      bifurcationPointIndices
+        .filter(
+          (pointIndex) =>
+            Number.isInteger(pointIndex) &&
+            pointIndex > 0 &&
+            pointIndex < lastPointIndex
+        )
+        .map((pointIndex) => Math.trunc(pointIndex))
+    )
+  ).sort((left, right) => left - right)
+
+  const boundaries = [0, ...separators, lastPointIndex]
+  return boundaries.slice(0, -1).map((startPointIndex, pieceIndex) => ({
+    pieceIndex,
+    startPointIndex,
+    endPointIndex: boundaries[pieceIndex + 1],
+  }))
+}
+
 export function normalizeEigenvalueArray(raw: unknown): ContinuationEigenvalue[] {
   if (!raw || !Array.isArray(raw)) return []
   return raw.map((value) => {

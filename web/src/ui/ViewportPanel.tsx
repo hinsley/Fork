@@ -70,6 +70,7 @@ import { usesEquationContext } from '../system/expressionContext'
 import { normalizeFloquetMultipliersForRendering } from '../system/floquetModes'
 import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
 import type { PlotlyFigureCaptureState } from '../viewports/plotly/figureCapture'
+import { applyBranchPieceAppearances } from '../viewports/plotly/branchPieceAppearance'
 import { AnalysisViewportPlot } from '../analysis/AnalysisViewportPlot'
 import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
 import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
@@ -5461,7 +5462,11 @@ function buildSceneTraces(
       })
     }
   }
-  return applyNodeRenderOpacities(traces, system.nodes)
+  return applyBranchPieceAppearances(
+    applyNodeRenderOpacities(traces, system.nodes),
+    system.nodes,
+    system.branches
+  )
 }
 
 function buildDiagramTraces(
@@ -6659,7 +6664,11 @@ function buildDiagramTraces(
   }
 
   return {
-    traces: applyNodeRenderOpacities(traces, system.nodes),
+    traces: applyBranchPieceAppearances(
+      applyNodeRenderOpacities(traces, system.nodes),
+      system.nodes,
+      system.branches
+    ),
     hasAxes,
     hasBranches,
     hasData,

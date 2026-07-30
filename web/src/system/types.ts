@@ -1069,6 +1069,14 @@ export interface EquilibriumEigenvectorRenderStyle {
 
 export type LineStyle = 'solid' | 'dashed' | 'dotted'
 
+export interface BranchPieceRenderStyle {
+  color: string
+  opacity: number
+  lineWidth: number
+  lineStyle: LineStyle
+  pointSize: number
+}
+
 export interface RenderStyle {
   color: string
   opacity: number
@@ -1077,6 +1085,7 @@ export interface RenderStyle {
   pointSize: number
   stateSpaceStride?: number
   manifoldSurfaceVisible?: boolean
+  continuationPieceOverrides?: Record<number, Partial<BranchPieceRenderStyle>>
   clv?: ClvRenderStyle
   equilibriumEigenvectors?: EquilibriumEigenvectorRenderStyle
 }

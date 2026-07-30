@@ -1,4 +1,10 @@
-import { addBranch, addObject, addScene, createSystem } from './model'
+import {
+  addBranch,
+  addObject,
+  addScene,
+  createSystem,
+  updateBranch,
+} from './model'
 import { nowIso } from '../utils/determinism'
 import { normalizeBranchEigenvalues } from './continuation'
 import { MockForkCoreClient } from '../compute/mockClient'
@@ -226,6 +232,32 @@ export function createDemoSystem(): {
     system,
     objectNodeId: result.nodeId,
     branchNodeId: branchResult.nodeId,
+  }
+}
+
+export function createBranchPieceAppearanceSystem(): {
+  system: System
+  branchNodeId: string
+} {
+  const { system, branchNodeId } = createDemoSystem()
+  const branch = system.branches[branchNodeId]
+  const points: ContinuationPoint[] = Array.from({ length: 5 }, (_, index) => ({
+    state: [index * 0.25, Math.sin(index * 0.8)],
+    param_value: index * 0.1,
+    stability: index === 2 ? 'Hopf' : 'None',
+    eigenvalues: [],
+  }))
+  return {
+    system: updateBranch(system, branchNodeId, {
+      ...branch,
+      data: {
+        ...branch.data,
+        points,
+        bifurcations: [2],
+        indices: [0, 1, 2, 3, 4],
+      },
+    }),
+    branchNodeId,
   }
 }
 

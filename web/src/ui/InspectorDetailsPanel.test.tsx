@@ -1680,6 +1680,80 @@ describe('InspectorDetailsPanel', () => {
     expect(onUpdateRender).toHaveBeenLastCalledWith(branchNodeId, { lineStyle: 'dashed' })
   })
 
+  it('offers per-piece appearance overrides for branches with interior bifurcations', async () => {
+    const user = userEvent.setup()
+    const { system, branchNodeId } = createDemoSystem()
+    const sourceBranch = system.branches[branchNodeId]
+    const points = Array.from({ length: 5 }, (_, index) => ({
+      state: [index, index],
+      param_value: index,
+      stability: index === 2 ? ('Hopf' as const) : ('None' as const),
+      eigenvalues: [],
+    }))
+    const systemWithPieces = updateBranch(system, branchNodeId, {
+      ...sourceBranch,
+      data: {
+        ...sourceBranch.data,
+        points,
+        indices: [0, 1, 2, 3, 4],
+        bifurcations: [2],
+      },
+    })
+    const onUpdateRender = vi.fn()
+
+    render(
+      <InspectorDetailsPanel
+        system={systemWithPieces}
+        selectedNodeId={branchNodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={onUpdateRender}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('action-appearance-toggle'))
+    expect(screen.getByTestId('branch-piece-select')).toHaveTextContent(
+      'Piece 1 · start → Index 2 - Hopf'
+    )
+    expect(screen.getByTestId('branch-piece-select')).toHaveTextContent(
+      'Piece 2 · Index 2 - Hopf → end'
+    )
+
+    await user.selectOptions(screen.getByTestId('branch-piece-select'), '1')
+    await user.click(screen.getByTestId('branch-piece-customize'))
+    expect(onUpdateRender).toHaveBeenLastCalledWith(branchNodeId, {
+      continuationPieceOverrides: {
+        1: {
+          color: systemWithPieces.nodes[branchNodeId].render.color,
+          opacity: systemWithPieces.nodes[branchNodeId].render.opacity,
+          lineWidth: systemWithPieces.nodes[branchNodeId].render.lineWidth,
+          lineStyle: systemWithPieces.nodes[branchNodeId].render.lineStyle,
+          pointSize: systemWithPieces.nodes[branchNodeId].render.pointSize,
+        },
+      },
+    })
+  })
+
   it('toggles 2D manifold surface rendering from the branch inspector', async () => {
     const user = userEvent.setup()
     const config: SystemConfig = {
