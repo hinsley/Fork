@@ -14,11 +14,10 @@ function downloadBlob(blob: Blob, filename: string) {
 
 export function downloadSystem(system: System) {
   const blob = buildSystemArchiveBlob(system)
-  const filename = `${system.name.replace(/\s+/g, '_') || 'fork_system'}.zip`
+  const filename = `${system.name.trim() || 'fork_system'}.zip`
   downloadBlob(blob, filename)
 }
 
 export async function readSystemFile(file: File): Promise<System> {
   return await parseSystemArchiveFile(file)
 }
-

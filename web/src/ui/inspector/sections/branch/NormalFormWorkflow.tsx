@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { Codim2BranchCreationRequest } from '../../../../state/appState'
 import type { ContinuationSettings } from '../../../../system/types'
-import { isCliSafeName } from '../../../../utils/naming'
+import { isValidDisplayName } from '../../../../utils/naming'
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { normalFormSummaryRows, supportsNormalFormWorkflow } from './normalFormPresentation'
 
@@ -174,8 +174,8 @@ function NormalFormWorkflowContent({
   const validateName = (): string | null => {
     const candidate = name.trim() || suggestedName
     if (!candidate) return null
-    if (!isCliSafeName(candidate)) {
-      setError('Branch names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(candidate)) {
+      setError('Branch names cannot contain control characters or path separators, and cannot be "." or "..".')
       return null
     }
     return candidate

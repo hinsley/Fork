@@ -1,4 +1,11 @@
-const CLI_SAFE_NAME = /^[a-zA-Z0-9_]+$/
+const PATH_SEPARATOR = /[\\/]/
+
+function containsControlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0
+    return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
+  })
+}
 
 export const DEFAULT_NAME_MAX_LENGTH = 48
 
@@ -160,8 +167,27 @@ function reserveName(
   }
 }
 
-export function isCliSafeName(name: string): boolean {
-  return CLI_SAFE_NAME.test(name)
+export function normalizeDisplayName(name: string): string {
+  return name.trim()
+}
+
+export function displayNameError(name: string, label = 'Name'): string | null {
+  const normalized = normalizeDisplayName(name)
+  if (!normalized) return `${label} is required.`
+  if (containsControlCharacter(normalized)) {
+    return `${label} cannot contain control characters.`
+  }
+  if (PATH_SEPARATOR.test(normalized)) {
+    return `${label} cannot contain path separators.`
+  }
+  if (normalized === '.' || normalized === '..') {
+    return `${label} cannot be "." or "..".`
+  }
+  return null
+}
+
+export function isValidDisplayName(name: string): boolean {
+  return displayNameError(name) === null
 }
 
 export function toCliSafeName(name: string): string {

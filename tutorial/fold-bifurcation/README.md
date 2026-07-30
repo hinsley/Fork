@@ -278,7 +278,7 @@ Use a different color for items that appear together in one plot.
 
 6. Rename the equilibrium `Stable_Equilibrium`.
 
-   Fork names can contain letters, numbers, and underscores. Do not use spaces.
+   Fork names can contain ordinary internal spaces. Leading and trailing whitespace is trimmed.
 
    ![Black orbit and orange equilibrium](images/33-distinct-stable-orbit-clean.png)
 

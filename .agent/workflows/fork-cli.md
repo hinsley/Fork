@@ -60,7 +60,7 @@ Main Menu
 
 1. Start CLI: `npm start`
 2. Select `1` (Create New System)
-3. Enter system name (alphanumeric + underscores only)
+3. Enter a system name. Ordinary internal spaces are allowed.
 4. Configure system type (Flow for ODEs, Map for iterated functions)
 5. Enter variables (comma-separated, e.g., `x,y,z`)
 6. Enter parameters (comma-separated, e.g., `r,s,b`)

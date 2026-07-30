@@ -30,7 +30,7 @@ import {
   runConfigMenu
 } from '../menu';
 import { normalizeBranchEigenvalues } from './serialization';
-import { isValidName } from './utils';
+import { isValidName, normalizeName } from './utils';
 import { inspectBranch } from './inspect';
 import { initiateLCFromOrbit } from './initiate-lc-from-orbit';
 import { runEquilibriumContinuationWithProgress, runLimitCycleContinuationWithProgress } from './progress';
@@ -162,6 +162,7 @@ export async function createEquilibriumBranchForObject(
           name: 'value',
           message: 'Name for this Continuation Branch:',
           default: branchName || `${eqObj.name}_${selectedParamName}`,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
@@ -469,6 +470,7 @@ export async function createLimitCycleBranchForObject(
           name: 'value',
           message: 'Name for this Limit Cycle Branch:',
           default: branchName || `${lcObj.name}_${selectedParamName}`,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
@@ -863,6 +865,7 @@ async function createEquilibriumBranch(sysName: string) {
           name: 'value',
           message: 'Name for this Continuation Branch:',
           default: branchName || `${selectedEqName || 'branch'}_${selectedParamName || 'param'}`,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;

@@ -1,9 +1,7 @@
 import type { SystemConfig } from '../system/types'
-import { isCliSafeName } from '../utils/naming'
+import { displayNameError, normalizeDisplayName } from '../utils/naming'
 import { usesEquationContext } from '../system/expressionContext'
 import { forcingDeclarationError } from '../system/forcing'
-
-const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 
 export type SystemValidation = {
   valid: boolean
@@ -21,11 +19,7 @@ export type SystemValidation = {
 }
 
 export const validateSystemName = (name: string): string | null => {
-  if (!name.trim()) return 'System name is required.'
-  if (!isCliSafeName(name)) {
-    return 'System name must contain only letters, numbers, and underscores.'
-  }
-  return null
+  return displayNameError(name, 'System name')
 }
 
 export const validateSystemConfig = (system: SystemConfig): SystemValidation => {
@@ -40,13 +34,17 @@ export const validateSystemConfig = (system: SystemConfig): SystemValidation => 
   if (system.varNames.some((name) => name.trim().length === 0)) {
     errors.varNames = 'Variable names cannot be empty.'
   }
-  const varNames = system.varNames.map((name) => name.trim()).filter((name) => name.length > 0)
+  const varNames = system.varNames
+    .map(normalizeDisplayName)
+    .filter((name) => name.length > 0)
   if (varNames.length === 0) {
     errors.varNames = 'At least one variable is required.'
   } else if (!errors.varNames) {
-    const invalidVars = varNames.filter((name) => !IDENTIFIER_REGEX.test(name))
+    const invalidVars = varNames.filter(
+      (name) => displayNameError(name) !== null || name.includes('`')
+    )
     if (invalidVars.length > 0) {
-      errors.varNames = `Invalid variable names: ${invalidVars.join(', ')}.`
+      errors.varNames = `Variable names cannot contain backticks, control characters, or path separators: ${invalidVars.join(', ')}.`
     } else {
       const duplicateVars = varNames.filter((name, index) => varNames.indexOf(name) !== index)
       if (duplicateVars.length > 0) {
@@ -60,13 +58,16 @@ export const validateSystemConfig = (system: SystemConfig): SystemValidation => 
   if (system.paramNames.some((name) => name.trim().length === 0)) {
     errors.paramNames = 'Parameter names cannot be empty.'
   }
-  if (system.paramNames.length > 0 && !errors.paramNames) {
-    const invalidParams = system.paramNames.filter((name) => !IDENTIFIER_REGEX.test(name))
+  const paramNames = system.paramNames.map(normalizeDisplayName)
+  if (paramNames.length > 0 && !errors.paramNames) {
+    const invalidParams = paramNames.filter(
+      (name) => displayNameError(name) !== null || name.includes('`')
+    )
     if (invalidParams.length > 0) {
-      errors.paramNames = `Invalid parameter names: ${invalidParams.join(', ')}.`
+      errors.paramNames = `Parameter names cannot contain backticks, control characters, or path separators: ${invalidParams.join(', ')}.`
     } else {
-      const duplicateParams = system.paramNames.filter(
-        (name, index) => system.paramNames.indexOf(name) !== index
+      const duplicateParams = paramNames.filter(
+        (name, index) => paramNames.indexOf(name) !== index
       )
       if (duplicateParams.length > 0) {
         errors.paramNames = `Duplicate parameter names: ${[
@@ -78,7 +79,7 @@ export const validateSystemConfig = (system: SystemConfig): SystemValidation => 
 
   if (!errors.varNames && !errors.paramNames) {
     const varSet = new Set(varNames)
-    const collisions = system.paramNames.filter((name) => varSet.has(name))
+    const collisions = paramNames.filter((name) => varSet.has(name))
     if (collisions.length > 0) {
       errors.paramNames = `Variable/parameter name collisions: ${[
         ...new Set(collisions),

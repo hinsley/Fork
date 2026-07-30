@@ -9,17 +9,21 @@ import {
   SystemConfig
 } from '../types';
 
-import { isValidName as isValidNameShared } from '../naming';
+import {
+  isValidName as isValidNameShared,
+  normalizeName as normalizeNameShared,
+} from '../naming';
 
 /**
  * Validates a branch or object name.
  * 
- * Names must be alphanumeric with underscores only (no spaces or special characters).
+ * Names are trimmed and may contain ordinary internal spaces.
  * 
  * @param name - The name to validate
  * @returns true if valid, or an error message string if invalid
  */
 export const isValidName = isValidNameShared;
+export const normalizeName = normalizeNameShared;
 
 /**
  * Get the best available parameter values for a branch.

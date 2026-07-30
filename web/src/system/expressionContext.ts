@@ -23,7 +23,9 @@ export function usesEquationContext(
     return false
   }
   return system.equations.some((equation) =>
-    (equation.match(IDENTIFIER_PATTERN) ?? []).some((token) => token === symbol)
+    (equation.replace(/`[^`]*`/g, '').match(IDENTIFIER_PATTERN) ?? []).some(
+      (token) => token === symbol
+    )
   )
 }
 

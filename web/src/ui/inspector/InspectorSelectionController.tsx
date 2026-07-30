@@ -126,7 +126,7 @@ import {
   resolveContinuationPointEquilibriumState,
   resolveContinuationPointParam2Value,
 } from '../../system/continuation'
-import { isCliSafeName, suggestDefaultName } from '../../utils/naming'
+import { isValidDisplayName, suggestDefaultName } from '../../utils/naming'
 import {
   buildSubsystemSnapshot,
   continuationParameterOptions,
@@ -6190,8 +6190,8 @@ function useInspectorSelectionController({
         continuationDraft.parameterName,
         existingBranchNames
       )
-    if (!isCliSafeName(name)) {
-      setContinuationError('Branch names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(name)) {
+      setContinuationError('Branch names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
     const { settings, error } = buildContinuationSettings(continuationDraft)
@@ -6245,8 +6245,8 @@ function useInspectorSelectionController({
       setContinuationError('Branch name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
-      setContinuationError('Branch names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(name)) {
+      setContinuationError('Branch names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -6289,8 +6289,8 @@ function useInspectorSelectionController({
       setEquilibriumManifoldError('Branch name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
-      setEquilibriumManifoldError('Branch names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(name)) {
+      setEquilibriumManifoldError('Branch names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -6513,8 +6513,8 @@ function useInspectorSelectionController({
       setLimitCycleManifoldError('Branch name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
-      setLimitCycleManifoldError('Branch names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(name)) {
+      setLimitCycleManifoldError('Branch names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -6733,8 +6733,8 @@ function useInspectorSelectionController({
       setBranchContinuationError('Branch name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
-      setBranchContinuationError('Branch names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(name)) {
+      setBranchContinuationError('Branch names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -6956,8 +6956,8 @@ function useInspectorSelectionController({
       setFoldCurveError('Curve name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
-      setFoldCurveError('Curve names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(name)) {
+      setFoldCurveError('Curve names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -7031,8 +7031,8 @@ function useInspectorSelectionController({
       setHopfCurveError('Curve name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
-      setHopfCurveError('Curve names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(name)) {
+      setHopfCurveError('Curve names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -7187,8 +7187,8 @@ function useInspectorSelectionController({
       setIsoperiodicCurveError('Curve name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
-      setIsoperiodicCurveError('Curve names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(name)) {
+      setIsoperiodicCurveError('Curve names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -7268,9 +7268,9 @@ function useInspectorSelectionController({
       setLimitCycleCodim1CurveError('Curve name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
+    if (!isValidDisplayName(name)) {
       setLimitCycleCodim1CurveError(
-        'Curve names must be alphanumeric with underscores only.'
+        'Curve names cannot contain control characters or path separators, and cannot be "." or "..".'
       )
       return
     }
@@ -7351,8 +7351,8 @@ function useInspectorSelectionController({
       setNSCurveError('Curve name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
-      setNSCurveError('Curve names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(name)) {
+      setNSCurveError('Curve names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -7415,8 +7415,8 @@ function useInspectorSelectionController({
       setLimitCycleFromHopfError('Limit cycle name is required.')
       return
     }
-    if (!isCliSafeName(limitCycleName)) {
-      setLimitCycleFromHopfError('Limit cycle names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(limitCycleName)) {
+      setLimitCycleFromHopfError('Limit cycle names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -7426,8 +7426,8 @@ function useInspectorSelectionController({
       setLimitCycleFromHopfError('Branch name is required.')
       return
     }
-    if (!isCliSafeName(branchName)) {
-      setLimitCycleFromHopfError('Branch names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(branchName)) {
+      setLimitCycleFromHopfError('Branch names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -7519,8 +7519,8 @@ function useInspectorSelectionController({
       setLimitCycleFromPDError('Cycle name is required.')
       return
     }
-    if (!isCliSafeName(cycleName)) {
-      setLimitCycleFromPDError('Cycle names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(cycleName)) {
+      setLimitCycleFromPDError('Cycle names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -7530,8 +7530,8 @@ function useInspectorSelectionController({
       setLimitCycleFromPDError('Branch name is required.')
       return
     }
-    if (!isCliSafeName(branchName)) {
-      setLimitCycleFromPDError('Branch names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(branchName)) {
+      setLimitCycleFromPDError('Branch names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -7624,8 +7624,8 @@ function useInspectorSelectionController({
       setLimitCycleFromPDError('Limit cycle name is required.')
       return
     }
-    if (!isCliSafeName(limitCycleName)) {
-      setLimitCycleFromPDError('Limit cycle names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(limitCycleName)) {
+      setLimitCycleFromPDError('Limit cycle names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -7635,8 +7635,8 @@ function useInspectorSelectionController({
       setLimitCycleFromPDError('Branch name is required.')
       return
     }
-    if (!isCliSafeName(branchName)) {
-      setLimitCycleFromPDError('Branch names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(branchName)) {
+      setLimitCycleFromPDError('Branch names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -7732,9 +7732,9 @@ function useInspectorSelectionController({
       setHomoclinicFromLargeCycleError('Branch name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
+    if (!isValidDisplayName(name)) {
       setHomoclinicFromLargeCycleError(
-        'Branch names must be alphanumeric with underscores only.'
+        'Branch names cannot contain control characters or path separators, and cannot be "." or "..".'
       )
       return
     }
@@ -7892,9 +7892,9 @@ function useInspectorSelectionController({
       setHomoclinicFromHomoclinicError('Branch name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
+    if (!isValidDisplayName(name)) {
       setHomoclinicFromHomoclinicError(
-        'Branch names must be alphanumeric with underscores only.'
+        'Branch names cannot contain control characters or path separators, and cannot be "." or "..".'
       )
       return
     }
@@ -8051,9 +8051,9 @@ function useInspectorSelectionController({
       setHomotopySaddleFromEquilibriumError('Branch name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
+    if (!isValidDisplayName(name)) {
       setHomotopySaddleFromEquilibriumError(
-        'Branch names must be alphanumeric with underscores only.'
+        'Branch names cannot contain control characters or path separators, and cannot be "." or "..".'
       )
       return
     }
@@ -8177,9 +8177,9 @@ function useInspectorSelectionController({
       setHomoclinicFromHomotopySaddleError('Branch name is required.')
       return
     }
-    if (!isCliSafeName(name)) {
+    if (!isValidDisplayName(name)) {
       setHomoclinicFromHomotopySaddleError(
-        'Branch names must be alphanumeric with underscores only.'
+        'Branch names cannot contain control characters or path separators, and cannot be "." or "..".'
       )
       return
     }
@@ -8282,8 +8282,8 @@ function useInspectorSelectionController({
       setLimitCycleFromOrbitError('Limit cycle name is required.')
       return
     }
-    if (!isCliSafeName(limitCycleName)) {
-      setLimitCycleFromOrbitError('Limit cycle names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(limitCycleName)) {
+      setLimitCycleFromOrbitError('Limit cycle names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -8293,8 +8293,8 @@ function useInspectorSelectionController({
       setLimitCycleFromOrbitError('Branch name is required.')
       return
     }
-    if (!isCliSafeName(branchName)) {
-      setLimitCycleFromOrbitError('Branch names must be alphanumeric with underscores only.')
+    if (!isValidDisplayName(branchName)) {
+      setLimitCycleFromOrbitError('Branch names cannot contain control characters or path separators, and cannot be "." or "..".')
       return
     }
 
@@ -8392,9 +8392,9 @@ function useInspectorSelectionController({
     }
     const name =
       heteroclinicFromOrbitDraft.name.trim() || heteroclinicFromOrbitNameSuggestion
-    if (!name || !isCliSafeName(name)) {
+    if (!name || !isValidDisplayName(name)) {
       setHeteroclinicFromOrbitError(
-        'Branch names must be alphanumeric with underscores only.'
+        'Branch names cannot contain control characters or path separators, and cannot be "." or "..".'
       )
       return
     }

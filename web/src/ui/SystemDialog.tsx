@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { SystemSummary } from '../system/types'
 import { validateSystemName } from '../state/systemValidation'
+import { normalizeDisplayName } from '../utils/naming'
 import { confirmDelete } from './confirmDelete'
 
 type SystemDialogProps = {
@@ -35,7 +36,7 @@ export function SystemDialog({
     const error = validateSystemName(name)
     setNameError(error)
     if (error) return
-    onCreateSystem(name)
+    onCreateSystem(normalizeDisplayName(name))
   }
 
   if (!open) return null

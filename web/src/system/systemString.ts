@@ -8,8 +8,9 @@ export type SystemStringDefinition = {
 }
 
 const IDENTIFIER = '[a-zA-Z_][a-zA-Z0-9_]*'
-const EQUATION_LINE = new RegExp(`^(${IDENTIFIER})\\s*'\\s*=\\s*(.*)$`)
-const PARAMETER_LINE = new RegExp(`^(${IDENTIFIER})\\s*=\\s*(.*)$`)
+const IDENTIFIER_PATTERN = new RegExp(`^${IDENTIFIER}$`)
+const EQUATION_LINE = /^(.+?)\s*'\s*=\s*(.*)$/
+const PARAMETER_LINE = /^(.+?)\s*=\s*(.*)$/
 
 type DefinedName = {
   kind: 'variable' | 'parameter'
@@ -18,6 +19,21 @@ type DefinedName = {
 
 function lineError(line: number, message: string): never {
   throw new Error(`Line ${line}: ${message}`)
+}
+
+function parseDefinedName(rawName: string): string | null {
+  const name = rawName.trim()
+  if (IDENTIFIER_PATTERN.test(name)) return name
+  if (name.startsWith('`') && name.endsWith('`')) {
+    const unquoted = name.slice(1, -1)
+    const normalized = unquoted.trim()
+    return normalized && !normalized.includes('`') ? normalized : null
+  }
+  return null
+}
+
+function formatDefinedName(name: string): string {
+  return IDENTIFIER_PATTERN.test(name) ? name : `\`${name}\``
 }
 
 function recordName(
@@ -64,27 +80,31 @@ export function parseSystemString(input: string): SystemStringDefinition {
 
     const equationMatch = EQUATION_LINE.exec(line)
     if (equationMatch) {
-      const name = equationMatch[1]
-      const equation = equationMatch[2].trim()
-      if (!equation) lineError(lineNumber, `equation for "${name}" cannot be empty.`)
-      recordName(definitions, name, 'variable', lineNumber)
-      result.varNames.push(name)
-      result.equations.push(equation)
-      return
+      const name = parseDefinedName(equationMatch[1])
+      if (name) {
+        const equation = equationMatch[2].trim()
+        if (!equation) lineError(lineNumber, `equation for "${name}" cannot be empty.`)
+        recordName(definitions, name, 'variable', lineNumber)
+        result.varNames.push(name)
+        result.equations.push(equation)
+        return
+      }
     }
 
     const parameterMatch = PARAMETER_LINE.exec(line)
     if (parameterMatch) {
-      const name = parameterMatch[1]
-      const rawValue = parameterMatch[2].trim()
-      const value = parseConstantExpression(rawValue)
-      if (value === null) {
-        lineError(lineNumber, `parameter "${name}" must have a finite constant expression.`)
+      const name = parseDefinedName(parameterMatch[1])
+      if (name) {
+        const rawValue = parameterMatch[2].trim()
+        const value = parseConstantExpression(rawValue)
+        if (value === null) {
+          lineError(lineNumber, `parameter "${name}" must have a finite constant expression.`)
+        }
+        recordName(definitions, name, 'parameter', lineNumber)
+        result.paramNames.push(name)
+        result.params.push(value)
+        return
       }
-      recordName(definitions, name, 'parameter', lineNumber)
-      result.paramNames.push(name)
-      result.params.push(value)
-      return
     }
 
     lineError(
@@ -118,10 +138,10 @@ export function formatSystemString(definition: SystemStringDefinition): string {
   }
 
   const lines = definition.varNames.map(
-    (name, index) => `${name}' = ${definition.equations[index]}`
+    (name, index) => `${formatDefinedName(name)}' = ${definition.equations[index]}`
   )
   definition.paramNames.forEach((name, index) => {
-    lines.push(`${name} = ${formatNumber(definition.params[index])}`)
+    lines.push(`${formatDefinedName(name)} = ${formatNumber(definition.params[index])}`)
   })
 
   const formatted = lines.join('\n')

@@ -127,7 +127,7 @@ import {
   validateObjectName,
 } from './systemTreeCommands'
 import { validateSystemConfig } from './systemValidation'
-import { isCliSafeName } from '../utils/naming'
+import { isValidDisplayName } from '../utils/naming'
 import { makeStableId } from '../utils/determinism'
 import {
   DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT,
@@ -421,8 +421,8 @@ function collectSubtreeEntityIds(
 
 function validateBranchName(name: string): string | null {
   if (!name.trim()) return 'Branch name is required.'
-  if (!isCliSafeName(name)) {
-    return 'Branch names must be alphanumeric with underscores only.'
+  if (!isValidDisplayName(name)) {
+    return 'Branch names cannot contain control characters or path separators, and cannot be "." or "..".'
   }
   return null
 }

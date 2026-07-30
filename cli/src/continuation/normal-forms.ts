@@ -6,7 +6,7 @@ import { Storage } from '../storage';
 import type { ContinuationObject, ContinuationPoint } from '../types';
 import { WasmBridge } from '../wasm';
 import { runLimitCycleContinuationWithProgress } from './progress';
-import { formatNumberFullPrecision, getBranchParams, isValidName } from './utils';
+import { formatNumberFullPrecision, getBranchParams, isValidName, normalizeName } from './utils';
 
 const branchSettings = {
   step_size: 0.01,
@@ -226,7 +226,14 @@ export async function initiatePeriodicBranchPointSwitch(
     return null;
   }
   const answers = await inquirer.prompt([
-    { type: 'input', name: 'name', message: 'Secondary branch name:', default: `${branch.name}_bp_${pointIndex}` },
+    {
+      type: 'input',
+      name: 'name',
+      message: 'Secondary branch name:',
+      default: `${branch.name}_bp_${pointIndex}`,
+      filter: normalizeName,
+      validate: isValidName,
+    },
     { type: 'number', name: 'amplitude', message: 'Predictor amplitude:', default: 0.05 },
     { type: 'confirm', name: 'forward', message: 'Continue forward?', default: true },
   ]);

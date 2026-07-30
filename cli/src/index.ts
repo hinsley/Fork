@@ -1,7 +1,7 @@
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { Storage } from './storage';
-import { isValidName } from './naming';
+import { isValidEquationName, isValidName, normalizeName } from './naming';
 import { NavigationRequest } from './navigation';
 import {
     AnalysisObject,
@@ -276,6 +276,7 @@ async function promptRename(
         name: 'newName',
         message: `New ${entityLabel} Name:`,
         default: currentName,
+        filter: normalizeName,
         validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
@@ -390,6 +391,7 @@ async function systemContext(initialSysName: string) {
                 name: 'newName',
                 message: 'New System Name:',
                 default: `${sys.name}_copy`,
+                filter: normalizeName,
                 validate: isValidName
             });
 
@@ -425,7 +427,7 @@ async function systemContext(initialSysName: string) {
 
 async function createSystem() {
     const { name } = await inquirer.prompt([
-        { name: 'name', message: 'System Name:', validate: isValidName }
+        { name: 'name', message: 'System Name:', filter: normalizeName, validate: isValidName }
     ]);
 
     if (systemExists(name)) {
@@ -436,6 +438,31 @@ async function createSystem() {
     let typeChoice = 'Flow';
     let varsInput = 'x';
     let paramsInput = '';
+
+    const validateEquationNameList = (
+        input: string,
+        label: 'Variable' | 'Parameter',
+        otherInput: string
+    ): boolean | string => {
+        const names = parseListInput(input);
+        if (label === 'Variable' && names.length === 0) {
+            return 'At least one variable is required.';
+        }
+        for (const entry of names) {
+            const validity = isValidEquationName(entry);
+            if (validity !== true) return `${label} "${entry}": ${validity}`;
+        }
+        const duplicates = names.filter((entry, index) => names.indexOf(entry) !== index);
+        if (duplicates.length > 0) {
+            return `Duplicate ${label.toLowerCase()} names: ${[...new Set(duplicates)].join(', ')}.`;
+        }
+        const otherNames = new Set(parseListInput(otherInput));
+        const collisions = names.filter((entry) => otherNames.has(entry));
+        if (collisions.length > 0) {
+            return `Variable and parameter names must be distinct: ${collisions.join(', ')}.`;
+        }
+        return true;
+    };
 
     const metaEntries: ConfigEntry[] = [
         {
@@ -461,7 +488,9 @@ async function createSystem() {
                 const { value } = await inquirer.prompt({
                     name: 'value',
                     message: 'Variables (comma separated, e.g. x,y,z):',
-                    default: varsInput
+                    default: varsInput,
+                    validate: (value: string) =>
+                        validateEquationNameList(value, 'Variable', paramsInput)
                 });
                 varsInput = value;
             }
@@ -474,7 +503,9 @@ async function createSystem() {
                 const { value } = await inquirer.prompt({
                     name: 'value',
                     message: 'Parameters (comma separated, e.g. r,s,b):',
-                    default: paramsInput
+                    default: paramsInput,
+                    validate: (value: string) =>
+                        validateEquationNameList(value, 'Parameter', varsInput)
                 });
                 paramsInput = value;
             }
@@ -509,6 +540,13 @@ async function createSystem() {
     let periodicVariables = normalizePeriodicVariables({ varNames });
 
     if (varNames.length > 0) {
+        if ([...varNames, ...paramNames].some((entry) => /\s/.test(entry))) {
+            console.log(
+                chalk.dim(
+                    'Use backticks around names that are not plain identifiers, including names with spaces.'
+                )
+            );
+        }
         const equationEntries: ConfigEntry[] = varNames.map((varName, idx) => {
             const prefix = type === 'map' ? `${varName}_{n+1}` : `d${varName}/dt`;
             return {
@@ -655,6 +693,7 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
                 name: 'name',
                 message: 'New System Name:',
                 default: sys.name,
+                filter: normalizeName,
                 validate: isValidName
             });
             if (name !== sys.name && systemExists(name)) {
@@ -830,6 +869,7 @@ async function createOrbit(sysName: string): Promise<NavigationRequest | void> {
     const { objName } = await inquirer.prompt({
         name: 'objName',
         message: 'Name for this Orbit Object:',
+        filter: normalizeName,
         validate: isValidName
     });
 
@@ -1108,6 +1148,7 @@ async function createEquilibrium(sysName: string): Promise<NavigationRequest | v
     const { name } = await inquirer.prompt({
         name: 'name',
         message: `Name for this ${equilibriumLabel} Object:`,
+        filter: normalizeName,
         validate: isValidName
     });
 
@@ -1149,6 +1190,7 @@ async function createForcedPeriodicResponse(sysName: string): Promise<void> {
     const { name } = await inquirer.prompt({
         name: 'name',
         message: 'Name for this Forced Periodic Response:',
+        filter: normalizeName,
         validate: isValidName
     });
     if (objectExists(sysName, name)) {
@@ -1319,7 +1361,7 @@ async function createForcedPeriodicResponseBranch(
         return;
     }
     const answers = await inquirer.prompt([
-        { name: 'name', message: 'Branch name:', validate: isValidName },
+        { name: 'name', message: 'Branch name:', filter: normalizeName, validate: isValidName },
         { type: 'rawlist', name: 'parameterName', message: 'Continuation parameter:', choices: system.paramNames },
         { type: 'rawlist', name: 'direction', message: 'Direction:', choices: ['forward', 'backward'] },
         { type: 'number', name: 'stepSize', message: 'Initial step size:', default: 0.01 },

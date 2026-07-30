@@ -40,6 +40,9 @@ function escapeRegex(value: string): string {
 
 function replaceIdentifier(expr: string, identifier: string, replacement: string): string {
   if (!identifier) return expr
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(identifier)) {
+    return expr.replace(new RegExp(`\`${escapeRegex(identifier)}\``, 'g'), replacement)
+  }
   const pattern = new RegExp(`\\b${escapeRegex(identifier)}\\b`, 'g')
   return expr.replace(pattern, replacement)
 }
@@ -92,7 +95,12 @@ function makeFrozenParamName(
   varName: string,
   occupied: Set<string>
 ): string {
-  const base = `${FROZEN_PARAMETER_PREFIX}${varName}`
+  const safeVarName =
+    varName
+      .trim()
+      .replace(/\s+/g, '_')
+      .replace(/[^a-zA-Z0-9_]/g, '_') || 'variable'
+  const base = `${FROZEN_PARAMETER_PREFIX}${safeVarName}`
   if (!occupied.has(base)) {
     occupied.add(base)
     return base

@@ -388,6 +388,10 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
           </header>
           {sections.model ? (
             <div className="system-editor__card-body">
+              <p className="system-editor__helper">
+                Names may contain spaces. Use backticks around names that are not plain
+                identifiers, including names with spaces, when you use them in an equation.
+              </p>
               <div className={`system-editor__model-grid system-editor__model-grid--${draft.type}`}>
                 <label className="system-editor__field system-editor__field--name">
                   <span>System name</span>

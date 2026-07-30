@@ -1053,6 +1053,24 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
     while let Some(&c) = chars.peek() {
         if c.is_whitespace() {
             chars.next();
+        } else if c == '`' {
+            chars.next();
+            let mut ident = String::new();
+            let mut terminated = false;
+            for d in chars.by_ref() {
+                if d == '`' {
+                    terminated = true;
+                    break;
+                }
+                ident.push(d);
+            }
+            if !terminated {
+                return Err("Unterminated quoted identifier".to_string());
+            }
+            if ident.trim().is_empty() {
+                return Err("Quoted identifier cannot be empty".to_string());
+            }
+            tokens.push(Token::Identifier(ident));
         } else if c.is_ascii_digit() || c == '.' {
             let mut num_str = String::new();
             let mut has_digit = false;
@@ -1421,6 +1439,22 @@ mod tests {
                 .unwrap_err(),
             "Context symbol t is not available here; this expression context provides n"
         );
+    }
+
+    #[test]
+    fn quoted_identifiers_allow_spaces_in_variable_and_parameter_names() {
+        let variables = vec!["Membrane Voltage".to_string()];
+        let parameters = vec!["Applied Current".to_string()];
+        let compiler = Compiler::new(&variables, &parameters);
+        let expression = parse("`Membrane Voltage` + 2 * `Applied Current`")
+            .expect("quoted display names should parse");
+        let bytecode = compiler
+            .try_compile(&expression)
+            .expect("quoted display names should compile");
+        let system = EquationSystem::new(vec![bytecode], vec![3.0]);
+        let mut output = vec![0.0];
+        system.apply(0.0, &[4.0], &mut output);
+        assert_eq!(output, vec![10.0]);
     }
 
     #[test]

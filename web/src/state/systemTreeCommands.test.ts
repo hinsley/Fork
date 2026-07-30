@@ -79,11 +79,11 @@ describe('system tree commands', () => {
     const added = addObject(base, makeOrbit('Orbit_A', base.config))
     const harness = setupTreeCommands(added.system)
 
-    harness.commands.renameNode(added.nodeId, '  Orbit_B  ')
+    harness.commands.renameNode(added.nodeId, '  Voltage   Orbit  ')
 
     const system = harness.getState().currentSystem
-    expect(system?.nodes[added.nodeId]?.name).toBe('Orbit_B')
-    expect(system?.objects[added.nodeId]?.name).toBe('Orbit_B')
+    expect(system?.nodes[added.nodeId]?.name).toBe('Voltage   Orbit')
+    expect(system?.objects[added.nodeId]?.name).toBe('Voltage   Orbit')
     expect(harness.scheduleSystemSave).toHaveBeenCalledWith(system)
     expect(harness.scheduleUiSave).not.toHaveBeenCalled()
   })
@@ -93,11 +93,9 @@ describe('system tree commands', () => {
     const added = addObject(base, makeOrbit('Orbit_A', base.config))
     const harness = setupTreeCommands(added.system)
 
-    harness.commands.renameNode(added.nodeId, 'Invalid name')
+    harness.commands.renameNode(added.nodeId, 'Invalid/name')
 
-    expect(harness.getState().error).toBe(
-      'Orbit names must be alphanumeric with underscores only.'
-    )
+    expect(harness.getState().error).toBe('Orbit name cannot contain path separators.')
     expect(harness.getState().currentSystem?.nodes[added.nodeId]?.name).toBe('Orbit_A')
     expect(harness.scheduleSystemSave).not.toHaveBeenCalled()
     expect(harness.scheduleUiSave).not.toHaveBeenCalled()
@@ -108,11 +106,13 @@ describe('system tree commands', () => {
     const added = addScene(base, 'Scene_A')
     const harness = setupTreeCommands(added.system)
 
-    harness.commands.renameNode(added.nodeId, 'Scene_B')
+    harness.commands.renameNode(added.nodeId, 'Parameter Sweep')
 
     const system = harness.getState().currentSystem
-    expect(system?.nodes[added.nodeId]?.name).toBe('Scene_B')
-    expect(system?.scenes.find((scene) => scene.id === added.nodeId)?.name).toBe('Scene_B')
+    expect(system?.nodes[added.nodeId]?.name).toBe('Parameter Sweep')
+    expect(system?.scenes.find((scene) => scene.id === added.nodeId)?.name).toBe(
+      'Parameter Sweep'
+    )
     expect(harness.scheduleUiSave).toHaveBeenCalledWith(system)
     expect(harness.scheduleSystemSave).not.toHaveBeenCalled()
   })

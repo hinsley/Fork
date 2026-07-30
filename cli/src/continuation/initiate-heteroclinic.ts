@@ -15,7 +15,7 @@ import { buildCollocationAdaptivitySettings } from './collocation-adaptivity';
 import { inspectBranch } from './inspect';
 import { runHeteroclinicContinuationWithProgress } from './progress';
 import { normalizeBranchEigenvalues } from './serialization';
-import { isValidName } from './utils';
+import { isValidName, normalizeName } from './utils';
 
 type InitiateHeteroclinicOptions = { autoInspect?: boolean };
 
@@ -127,6 +127,7 @@ export async function initiateHeteroclinicFromOrbit(
       message: 'Heteroclinic branch name:',
       default: (current: { sourceName?: string; targetName?: string }) =>
         `heteroc_${current.sourceName ?? 'source'}_to_${current.targetName ?? 'target'}`,
+      filter: normalizeName,
       validate: (value: string) => {
         const validity = isValidName(value);
         if (validity !== true) return validity;

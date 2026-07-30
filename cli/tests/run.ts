@@ -661,10 +661,12 @@ async function run() {
 
   test('naming validates names', () => {
     assert.equal(naming.isValidName(''), 'Name cannot be empty.');
-    assert.equal(
-      naming.isValidName('bad name'),
-      'Name must contain only alphanumeric characters and underscores (no spaces).'
-    );
+    assert.equal(naming.isValidName('Voltage Branch'), true);
+    assert.equal(naming.isValidName('bad/name'), 'Name cannot contain path separators.');
+    assert.equal(naming.isValidName('line\nbreak'), 'Name cannot contain control characters.');
+    assert.equal(naming.normalizeName('  Parameter   Sweep  '), 'Parameter   Sweep');
+    assert.equal(naming.isValidEquationName('Applied Current'), true);
+    assert.equal(naming.isValidEquationName('bad`name'), 'Name cannot contain backticks.');
     assert.equal(naming.isValidName('ok_name_123'), true);
   });
 
@@ -1049,6 +1051,35 @@ async function run() {
     const systems = Storage.listSystems();
     assert.ok(systems.includes(sysName));
     assert.deepEqual(Storage.loadSystem(sysName), config);
+  });
+
+  test('storage round-trips display names with spaces', () => {
+    const sysName = `My System ${nextSystemName()}`;
+    const config = {
+      ...makeSystemConfig(sysName),
+      varNames: ['Membrane Voltage'],
+      paramNames: ['Applied Current'],
+      equations: ['`Membrane Voltage` + `Applied Current`']
+    };
+    Storage.saveSystem(config);
+    Storage.saveObject(sysName, {
+      type: 'equilibrium',
+      name: 'Stable State',
+      systemName: sysName
+    } as any);
+    const branch = makeContinuationBranch({
+      name: 'Voltage Branch',
+      systemName: sysName,
+      parentObject: 'Stable State'
+    });
+    Storage.saveBranch(sysName, 'Stable State', branch as any);
+
+    assert.deepEqual(Storage.loadSystem(sysName), config);
+    assert.equal(Storage.loadObject(sysName, 'Stable State').name, 'Stable State');
+    assert.equal(
+      (Storage.loadBranch(sysName, 'Stable State', 'Voltage Branch') as any).name,
+      'Voltage Branch'
+    );
   });
 
   test('storage loads legacy system file', () => {

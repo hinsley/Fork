@@ -19,7 +19,7 @@ import {
   runConfigMenu
 } from '../menu';
 import { printSuccess, printError, printInfo } from '../format';
-import { isValidName, getBranchParams } from './utils';
+import { isValidName, normalizeName, getBranchParams } from './utils';
 import {
   runFoldCurveWithProgress,
   runHopfCurveWithProgress,
@@ -326,6 +326,7 @@ export async function initiateFoldCurve(
           name: 'value',
           message: 'Name for the fold curve:',
           default: curveName,
+          filter: normalizeName,
           validate: (val: string) => isValidName(val)
         });
         curveName = value;
@@ -631,6 +632,7 @@ export async function initiateHopfCurve(
           name: 'value',
           message: 'Name for the Hopf curve:',
           default: curveName,
+          filter: normalizeName,
           validate: (val: string) => isValidName(val)
         });
         curveName = value;
@@ -937,6 +939,7 @@ export async function initiateLPCCurve(
           name: 'value',
           message: 'Name for the LPC curve:',
           default: curveName,
+          filter: normalizeName,
           validate: (val: string) => isValidName(val)
         });
         curveName = value;
@@ -1297,6 +1300,7 @@ export async function initiateIsoperiodicCurve(
           name: 'value',
           message: 'Name for the isoperiodic curve:',
           default: curveName,
+          filter: normalizeName,
           validate: (val: string) => isValidName(val)
         });
         curveName = value;
@@ -1605,8 +1609,10 @@ export async function initiatePDCurve(
           name: 'value',
           message: 'Name for the PD curve:',
           default: curveName,
+          filter: normalizeName,
           validate: (val: string) => {
-            if (!isValidName(val)) return 'Invalid name format';
+            const validity = isValidName(val);
+            if (validity !== true) return validity;
             if (existingBranches.includes(val) && val !== curveName) {
               return `A branch named "${val}" already exists for this limit cycle`;
             }
@@ -1937,6 +1943,7 @@ export async function initiateNSCurve(
           name: 'value',
           message: 'Name for the NS curve:',
           default: curveName,
+          filter: normalizeName,
           validate: (val: string) => isValidName(val)
         });
         curveName = value;

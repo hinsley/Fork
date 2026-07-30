@@ -65,10 +65,10 @@ describe('system storage commands', () => {
   it('creates systems through the store and refreshes summaries', async () => {
     const harness = setupStorageCommands()
 
-    await harness.commands.createSystem('Command_System')
+    await harness.commands.createSystem('  My System  ')
 
     const state = harness.getState()
-    expect(state.currentSystem?.name).toBe('Command_System')
+    expect(state.currentSystem?.name).toBe('My System')
     expect(state.systems).toEqual(await harness.store.list())
     expect(state.error).toBeNull()
     expect(state.busy).toBe(false)
@@ -83,11 +83,11 @@ describe('system storage commands', () => {
   it('keeps invalid create requests inside the command layer', async () => {
     const harness = setupStorageCommands()
 
-    await harness.commands.createSystem('Invalid Name')
+    await harness.commands.createSystem('Invalid/Name')
 
     expect(harness.getState().currentSystem).toBeNull()
     expect(harness.getState().error).toBe(
-      'System name must contain only letters, numbers, and underscores.'
+      'System name cannot contain path separators.'
     )
     expect(await harness.store.list()).toEqual([])
   })

@@ -29,7 +29,7 @@ import {
 } from '../menu';
 import { printSuccess, printError, printInfo } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
-import { isValidName, getBranchParams } from './utils';
+import { isValidName, normalizeName, getBranchParams } from './utils';
 import {
   runEquilibriumContinuationWithProgress,
   runEquilibriumManifold1DWithProgress,
@@ -173,6 +173,7 @@ export async function initiateEquilibriumBranchFromPoint(
           name: 'value',
           message: 'Name for this Continuation Branch:',
           default: branchName || `${sourceBranch.name}_${selectedParamName}`,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
@@ -1527,6 +1528,7 @@ export async function initiateMapCycleFromPD(
           name: 'value',
           message: `Name for the new ${targetLabel} Object:`,
           default: cycleObjectName,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
@@ -1550,6 +1552,7 @@ export async function initiateMapCycleFromPD(
           name: 'value',
           message: `Name for the ${targetLabel} Branch:`,
           default: branchName || `${cycleObjectName}_${sourceBranch.parameterName}`,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;

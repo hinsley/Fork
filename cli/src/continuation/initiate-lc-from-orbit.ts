@@ -25,7 +25,7 @@ import {
 } from '../menu';
 import { printSuccess, printError, printInfo } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
-import { isValidName } from './utils';
+import { isValidName, normalizeName } from './utils';
 import { inspectBranch } from './inspect';
 import { runLimitCycleContinuationWithProgress } from './progress';
 import {
@@ -122,6 +122,7 @@ export async function initiateLCFromOrbit(
           name: 'value',
           message: 'Name for the new Limit Cycle Object:',
           default: limitCycleObjectName,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
@@ -145,6 +146,7 @@ export async function initiateLCFromOrbit(
           name: 'value',
           message: 'Name for the initial Limit Cycle Branch:',
           default: branchName || `${limitCycleObjectName}_${selectedParamName}`,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;

@@ -28,7 +28,7 @@ import {
 } from '../menu';
 import { printSuccess, printError, printInfo } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
-import { isValidName, getBranchParams } from './utils';
+import { isValidName, normalizeName, getBranchParams } from './utils';
 import {
   runLimitCycleContinuationWithProgress,
   runLimitCycleManifold2DWithProgress
@@ -117,6 +117,7 @@ export async function initiateLCFromHopf(
           name: 'value',
           message: 'Name for the new Limit Cycle Object:',
           default: limitCycleObjectName,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
@@ -140,6 +141,7 @@ export async function initiateLCFromHopf(
           name: 'value',
           message: 'Name for the initial Limit Cycle Branch:',
           default: branchName || `${limitCycleObjectName}_${branch.parameterName}`,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
@@ -521,6 +523,7 @@ export async function initiateLCBranchFromPoint(
           name: 'value',
           message: 'Name for this Limit Cycle Branch:',
           default: branchName || `${sourceBranch.name}_${selectedParamName}`,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
@@ -812,6 +815,7 @@ export async function initiateLCFromPD(
           name: 'value',
           message: 'Name for the new Period-Doubled Limit Cycle Object:',
           default: limitCycleObjectName,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
@@ -835,6 +839,7 @@ export async function initiateLCFromPD(
           name: 'value',
           message: 'Name for the initial Period-Doubled Branch:',
           default: branchName || `${limitCycleObjectName}_${sourceBranch.parameterName}`,
+          filter: normalizeName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;

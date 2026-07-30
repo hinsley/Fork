@@ -144,19 +144,19 @@ describe('SystemDialog', () => {
 
     const nameInput = screen.getByTestId('system-name-input')
     await user.clear(nameInput)
-    await user.type(nameInput, 'Bad Name')
+    await user.type(nameInput, 'Bad/Name')
     await user.click(screen.getByTestId('create-system'))
 
     expect(onCreateSystem).not.toHaveBeenCalled()
     expect(
-      screen.getByText('System name must contain only letters, numbers, and underscores.')
+      screen.getByText('System name cannot contain path separators.')
     ).toBeInTheDocument()
 
     await user.clear(nameInput)
-    await user.type(nameInput, 'Good_Name')
+    await user.type(nameInput, '  My System  ')
     await user.click(screen.getByTestId('create-system'))
 
-    expect(onCreateSystem).toHaveBeenCalledWith('Good_Name')
+    expect(onCreateSystem).toHaveBeenCalledWith('My System')
   })
 
   it('does not delete when confirmation is canceled', async () => {

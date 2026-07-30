@@ -22,6 +22,22 @@ describe('system strings', () => {
     })
   })
 
+  it('round-trips variable and parameter names with spaces', () => {
+    const definition = {
+      varNames: ['Membrane Voltage'],
+      equations: ['-`Membrane Voltage` + `Applied Current`'],
+      paramNames: ['Applied Current'],
+      params: [2],
+    }
+
+    const formatted = formatSystemString(definition)
+
+    expect(formatted).toBe(
+      "`Membrane Voltage`' = -`Membrane Voltage` + `Applied Current`\n`Applied Current` = 2"
+    )
+    expect(parseSystemString(formatted)).toEqual(definition)
+  })
+
   it('evaluates mathematical constants in parameter expressions', () => {
     expect(parseSystemString("x' = omega*x\nomega = tau / 4\noffset = e - pi")).toEqual({
       varNames: ['x'],

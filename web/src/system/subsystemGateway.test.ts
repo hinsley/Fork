@@ -71,6 +71,28 @@ describe('subsystemGateway', () => {
     expect(reduced.params).toEqual([3, 1.5, -1.2])
   })
 
+  it('rewrites quoted variable names with spaces to safe generated parameters', () => {
+    const system = {
+      ...BASE_SYSTEM,
+      varNames: ['Membrane Voltage', 'Recovery Variable'],
+      equations: [
+        '`Recovery Variable` - `Membrane Voltage`',
+        '`Membrane Voltage`',
+      ],
+    }
+    const snapshot = buildSubsystemSnapshot(system, {
+      frozenValuesByVarName: { 'Recovery Variable': -1.2 },
+    })
+    const reduced = buildReducedRunConfig(system, snapshot)
+
+    expect(snapshot.frozenParameterNamesByVarName['Recovery Variable']).toMatch(
+      /^fv__Recovery_Variable/
+    )
+    expect(reduced.equations[0]).toBe(
+      `${snapshot.frozenParameterNamesByVarName['Recovery Variable']} - \`Membrane Voltage\``
+    )
+  })
+
   it('resolves continuation parameter labels and runtime names for native and frozen refs', () => {
     const snapshot = buildSubsystemSnapshot(BASE_SYSTEM, {
       frozenValuesByVarName: { y: 0.75 },

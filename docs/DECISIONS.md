@@ -953,17 +953,18 @@ References:
 `.gitignore`, `crates/fork_wasm/pkg-web`, `web/vite.config.ts`,
 `web/src/compute/worker/forkCoreWorker.ts`
 
-### 2026-01-09: Enforce CLI-safe names across the UI
+### 2026-01-09: Keep display names consistent across the web and CLI
 Context:
-Web object/branch defaults historically used spaces, while the CLI requires names to be
-alphanumeric with underscores only for storage and command parity.
+Web and CLI names share validation and persistence behavior.
 Decision:
-Treat object/branch/system names as CLI-safe identifiers (`[a-zA-Z0-9_]`) everywhere.
-Web defaults now sanitize spaces to underscores and UI validation blocks invalid names.
+Preserve ordinary internal spaces in user-entered display names. Trim leading and trailing
+whitespace, and reject whitespace-only names, control characters, and path separators. Keep
+app-owned default suggestions compact without rewriting user-entered names. Variable and parameter
+names with spaces use backticks in equations.
 Why:
-Prevents CLI/web mismatch and avoids invalid filenames when persisting objects and branches.
+Keeps names natural while protecting CLI file-backed storage and expression parsing.
 Impact:
-Creation/rename flows in the web UI now reject non-CLI-safe names and suggest underscore defaults.
+Creation, rename, serialization, archive, and CLI flows preserve internal spaces.
 References:
 `cli/src/naming.ts`, `web/src/utils/naming.ts`, `web/src/state/appState.tsx`,
 `web/src/ui/InspectorDetailsPanel.tsx`, `web/src/App.tsx`

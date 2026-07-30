@@ -26,13 +26,17 @@ describe('validateSystemConfig', () => {
     expect(result.warnings).toHaveLength(0)
   })
 
-  it('rejects names that are not CLI-safe', () => {
-    const result = validateSystemConfig(buildConfig({ name: 'Not Safe' }))
-
-    expect(result.valid).toBe(false)
-    expect(result.errors.name).toBe(
-      'System name must contain only letters, numbers, and underscores.'
+  it('accepts spaces in system, variable, and parameter names', () => {
+    const result = validateSystemConfig(
+      buildConfig({
+        name: 'My System',
+        varNames: ['Membrane Voltage'],
+        equations: ['`Membrane Voltage` + `Applied Current`'],
+        paramNames: ['Applied Current'],
+      })
     )
+
+    expect(result.valid).toBe(true)
   })
 
   it('requires a non-empty system name', () => {
@@ -42,11 +46,13 @@ describe('validateSystemConfig', () => {
     expect(result.errors.name).toBe('System name is required.')
   })
 
-  it('flags invalid variable names', () => {
-    const result = validateSystemConfig(buildConfig({ varNames: ['1bad', 'good'] }))
+  it('flags unsafe variable names', () => {
+    const result = validateSystemConfig(buildConfig({ varNames: ['bad/name', 'good'] }))
 
     expect(result.valid).toBe(false)
-    expect(result.errors.varNames).toBe('Invalid variable names: 1bad.')
+    expect(result.errors.varNames).toBe(
+      'Variable names cannot contain backticks, control characters, or path separators: bad/name.'
+    )
   })
 
   it('requires at least one variable', () => {
@@ -103,9 +109,11 @@ describe('validateSystemConfig', () => {
     expect(emptyNames.errors.paramNames).toBe('Parameter names cannot be empty.')
 
     const invalidNames = validateSystemConfig(
-      buildConfig({ paramNames: ['a', '1b'], params: [1, 2] })
+      buildConfig({ paramNames: ['a', 'bad`name'], params: [1, 2] })
     )
-    expect(invalidNames.errors.paramNames).toBe('Invalid parameter names: 1b.')
+    expect(invalidNames.errors.paramNames).toBe(
+      'Parameter names cannot contain backticks, control characters, or path separators: bad`name.'
+    )
 
     const duplicates = validateSystemConfig(
       buildConfig({ paramNames: ['a', 'a'], params: [1, 2] })

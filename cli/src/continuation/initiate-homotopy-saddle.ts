@@ -12,7 +12,7 @@ import {
 } from '../menu';
 import { printError, printInfo, printSuccess } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
-import { getBranchParams, isValidName } from './utils';
+import { getBranchParams, isValidName, normalizeName } from './utils';
 import { runHomotopySaddleContinuationWithProgress } from './progress';
 
 export const HOMOTOPY_SADDLE_MENU_TITLE =
@@ -121,6 +121,7 @@ export async function initiateHomotopySaddleFromEquilibrium(
           name: 'value',
           message: 'Homotopy-saddle branch name:',
           default: curveName,
+          filter: normalizeName,
           validate: (val: string) => isValidName(val)
         });
         curveName = value;

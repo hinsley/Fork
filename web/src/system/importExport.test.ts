@@ -139,9 +139,9 @@ function createRichSystem(): {
   forcedResponseBranchId: string
 } {
   let system = createSystem({
-    name: 'Zip_Roundtrip_System',
+    name: 'Zip Roundtrip System',
     config: {
-      name: 'Zip_Roundtrip_System',
+      name: 'Zip Roundtrip System',
       equations: ['y + 0.1*cos(t)', '-x + mu'],
       params: [0.2],
       paramNames: ['mu'],
@@ -374,7 +374,7 @@ describe('system import/export (zip)', () => {
     const { system } = createRichSystem()
     const { anchor, blob, spies } = await exportSystem(system)
 
-    expect(anchor.download).toBe('Zip_Roundtrip_System.zip')
+    expect(anchor.download).toBe('Zip Roundtrip System.zip')
     expect(blob.type).toBe('application/zip')
     expect(spies.createObjectUrlSpy).toHaveBeenCalledTimes(1)
     expect(spies.revokeSpy).toHaveBeenCalledTimes(1)
@@ -440,6 +440,35 @@ describe('system import/export (zip)', () => {
         expect(restoredCycle.origin.equilibriumBranchId).toBe(ids.equilibriumBranchId)
       }
     }
+  })
+
+  it('round-trips display names with internal spaces without changing stable ids', async () => {
+    const ids = createRichSystem()
+    const system = structuredClone(ids.system)
+    system.name = 'My System'
+    system.config.name = 'My System'
+    system.nodes[ids.orbitId].name = 'Voltage Orbit'
+    system.objects[ids.orbitId].name = 'Voltage Orbit'
+    system.nodes[ids.equilibriumBranchId].name = 'Voltage Branch'
+    system.branches[ids.equilibriumBranchId].name = 'Voltage Branch'
+    system.config.varNames = ['Membrane Voltage', 'Recovery Variable']
+    system.config.paramNames = ['Applied Current']
+    system.config.equations = [
+      '`Recovery Variable` + 0.1*cos(t)',
+      '-`Membrane Voltage` + `Applied Current`',
+    ]
+
+    const restored = await roundTripSystem(system)
+
+    expect(restored.id).toBe(system.id)
+    expect(restored.name).toBe('My System')
+    expect(restored.nodes[ids.orbitId].name).toBe('Voltage Orbit')
+    expect(restored.objects[ids.orbitId].name).toBe('Voltage Orbit')
+    expect(restored.nodes[ids.equilibriumBranchId].name).toBe('Voltage Branch')
+    expect(restored.branches[ids.equilibriumBranchId].name).toBe('Voltage Branch')
+    expect(restored.config.varNames).toEqual(['Membrane Voltage', 'Recovery Variable'])
+    expect(restored.config.paramNames).toEqual(['Applied Current'])
+    expect(restored.config.equations).toEqual(system.config.equations)
   })
 
   it('transfers archives between IndexedDB and OPFS stores', async () => {

@@ -1,17 +1,26 @@
 import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_NAME_MAX_LENGTH,
-  isCliSafeName,
+  displayNameError,
+  isValidDisplayName,
+  normalizeDisplayName,
   suggestDefaultName,
   toCliSafeName,
 } from './naming'
 
 describe('naming utils', () => {
-  it('validates CLI-safe names', () => {
-    expect(isCliSafeName('Alpha_123')).toBe(true)
-    expect(isCliSafeName('')).toBe(false)
-    expect(isCliSafeName('bad-name')).toBe(false)
-    expect(isCliSafeName('has space')).toBe(false)
+  it('accepts ordinary display names with internal spaces and punctuation', () => {
+    expect(isValidDisplayName('Alpha_123')).toBe(true)
+    expect(isValidDisplayName('Voltage Branch')).toBe(true)
+    expect(isValidDisplayName('parameter-sweep (fast)')).toBe(true)
+    expect(isValidDisplayName('')).toBe(false)
+    expect(isValidDisplayName('bad/name')).toBe(false)
+    expect(isValidDisplayName('line\nbreak')).toBe(false)
+  })
+
+  it('trims only leading and trailing whitespace', () => {
+    expect(normalizeDisplayName('  Parameter   Sweep  ')).toBe('Parameter   Sweep')
+    expect(displayNameError('   ', 'Branch name')).toBe('Branch name is required.')
   })
 
   it('normalizes names into CLI-safe slugs', () => {
@@ -22,7 +31,7 @@ describe('naming utils', () => {
 
   it('handles whitespace-only input', () => {
     expect(toCliSafeName('   ')).toBe('')
-    expect(isCliSafeName(toCliSafeName('   '))).toBe(false)
+    expect(isValidDisplayName(toCliSafeName('   '))).toBe(false)
   })
 
   it('chooses sensible indexed names for root entities', () => {
@@ -85,7 +94,7 @@ describe('naming utils', () => {
     ).toBe('homoc_Equilibrium_1_mu_stageD')
   })
 
-  it('keeps generated names bounded, CLI-safe, and deterministically unique', () => {
+  it('keeps generated names bounded and deterministically unique', () => {
     const first = suggestDefaultName('isoperiodicCurve', {
       sourceName:
         'hopf_curve_an_extremely_long_but_still_descriptive_equilibrium_name_with_context_mu',
@@ -99,10 +108,10 @@ describe('naming utils', () => {
     expect(first.length).toBeLessThanOrEqual(DEFAULT_NAME_MAX_LENGTH)
     expect(first).toMatch(/^isoperiodic_/)
     expect(first).toMatch(/context_mu$/)
-    expect(isCliSafeName(first)).toBe(true)
+    expect(isValidDisplayName(first)).toBe(true)
     expect(second).not.toBe(first)
     expect(second).toMatch(/^isoperiodic_.*_2$/)
-    expect(isCliSafeName(second)).toBe(true)
+    expect(isValidDisplayName(second)).toBe(true)
     expect(second.length).toBeLessThanOrEqual(DEFAULT_NAME_MAX_LENGTH)
   })
 

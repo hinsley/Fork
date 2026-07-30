@@ -14,7 +14,7 @@ import {
 import { formatEquilibriumLabel } from '../system/labels'
 import type { System, SystemConfig, TreeNode } from '../system/types'
 import type { ReorderPlacement } from '../system/model'
-import { isCliSafeName, suggestDefaultName } from '../utils/naming'
+import { displayNameError, normalizeDisplayName, suggestDefaultName } from '../utils/naming'
 
 type SystemTreeAction =
   | { type: 'SET_SYSTEM'; system: System | null }
@@ -47,11 +47,7 @@ export type SystemTreeCommandDeps = {
 }
 
 export function validateObjectName(name: string, label: string): string | null {
-  if (!name.trim()) return `${label} name is required.`
-  if (!isCliSafeName(name)) {
-    return `${label} names must be alphanumeric with underscores only.`
-  }
-  return null
+  return displayNameError(name, `${label} name`)
 }
 
 function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type']): string {
@@ -102,7 +98,7 @@ export function createSystemTreeCommands({
     const current = getCurrentSystem()
     if (!current) return
 
-    const trimmedName = name.trim()
+    const trimmedName = normalizeDisplayName(name)
     const node = current.nodes[nodeId]
     const nameError = validateObjectName(trimmedName, getNodeLabel(node, current.config.type))
     if (nameError) {

@@ -13,7 +13,7 @@ import {
 } from '../menu';
 import { printError, printInfo, printSuccess } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
-import { getBranchParams, isValidName } from './utils';
+import { getBranchParams, isValidName, normalizeName } from './utils';
 import {
   runHomoclinicContinuationWithProgress,
   runHomoclinicShootingContinuationWithProgress
@@ -383,6 +383,7 @@ export async function initiateHomoclinicFromLargeCycle(
           name: 'value',
           message: 'Homoclinic branch name:',
           default: curveName,
+          filter: normalizeName,
           validate: (val: string) => isValidName(val)
         });
         curveName = value;
@@ -935,6 +936,7 @@ export async function initiateHomoclinicFromHomoclinic(
           name: 'value',
           message: 'Homoclinic branch name:',
           default: curveName,
+          filter: normalizeName,
           validate: (val: string) => isValidName(val)
         });
         curveName = value;
@@ -1595,6 +1597,7 @@ export async function initiateHomoclinicFromHomotopySaddle(
           name: 'value',
           message: 'Homoclinic branch name:',
           default: curveName,
+          filter: normalizeName,
           validate: (val: string) => isValidName(val)
         });
         curveName = value;

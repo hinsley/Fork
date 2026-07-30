@@ -2,6 +2,7 @@ import { createSystem } from '../system/model'
 import type { SystemStore } from '../system/store'
 import type { System, SystemSummary } from '../system/types'
 import { validateSystemName } from './systemValidation'
+import { normalizeDisplayName } from '../utils/naming'
 
 type SystemStorageAction =
   | { type: 'SET_SYSTEM'; system: System | null }
@@ -97,7 +98,7 @@ export function createSystemStorageCommands({
     }
     dispatch({ type: 'SET_BUSY', busy: true })
     try {
-      const system = createSystem({ name })
+      const system = createSystem({ name: normalizeDisplayName(name) })
       dispatch({ type: 'SET_SYSTEM', system })
       await store.save(system)
       await refreshSystems()
