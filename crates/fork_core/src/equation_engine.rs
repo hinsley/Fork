@@ -1821,6 +1821,46 @@ impl EquationSystem {
         }
     }
 
+    /// Evaluates the system values and state Jacobian into caller-owned buffers.
+    ///
+    /// The first seeded Dual evaluation supplies both the ordinary values and
+    /// the first Jacobian column, so this does not evaluate the system
+    /// separately with `f64`.
+    pub(crate) fn apply_value_and_jacobian_in_place(
+        &self,
+        context: f64,
+        state: &[f64],
+        values: &mut [f64],
+        jacobian: &mut [f64],
+        dual_state: &mut [Dual],
+        dual_out: &mut [Dual],
+    ) {
+        let dim = self.equations.len();
+        assert_eq!(state.len(), dim);
+        assert_eq!(values.len(), dim);
+        assert_eq!(jacobian.len(), dim * dim);
+        assert_eq!(dual_state.len(), dim);
+        assert_eq!(dual_out.len(), dim);
+
+        self.ensure_dual_params();
+        let params = self.params_dual.borrow();
+        let mut stack = self.stack_dual.borrow_mut();
+        let dual_context = Dual::new(context, 0.0);
+        for column in 0..dim {
+            for row in 0..dim {
+                dual_state[row] = Dual::new(state[row], if row == column { 1.0 } else { 0.0 });
+            }
+            for (row, equation) in self.equations.iter().enumerate() {
+                dual_out[row] =
+                    VM::execute_at(equation, dual_state, &params, dual_context, &mut stack);
+                if column == 0 {
+                    values[row] = dual_out[row].val;
+                }
+                jacobian[row * dim + column] = dual_out[row].eps;
+            }
+        }
+    }
+
     /// Evaluates the equations using Dual numbers, differentiating with respect to a specific parameter.
     /// The state variables `x` are treated as constants.
     pub fn evaluate_dual_wrt_param(&self, x: &[f64], param_idx: usize, out: &mut [Dual]) {
@@ -1918,5 +1958,57 @@ impl DynamicalSystem<Dual> for &EquationSystem {
 
     fn apply(&self, t: Dual, x: &[Dual], out: &mut [Dual]) {
         (*self).apply(t, x, out)
+    }
+}
+
+#[cfg(test)]
+mod equation_system_value_jacobian_tests {
+    use super::{parse, Compiler, Dual, EquationSystem};
+
+    #[test]
+    fn value_and_jacobian_in_place_reuses_caller_buffers() {
+        let variables = vec!["x".to_string(), "y".to_string()];
+        let parameters = vec!["mu".to_string()];
+        let compiler = Compiler::new(&variables, &parameters);
+        let equations = ["mu*x + y*y", "sin(x) - mu*y"]
+            .iter()
+            .map(|source| compiler.compile(&parse(source).expect("parse equation")))
+            .collect();
+        let system = EquationSystem::new(equations, vec![0.25]);
+        let mut values = vec![f64::NAN; 2];
+        let mut jacobian = vec![f64::NAN; 4];
+        let mut dual_state = vec![Dual::new(f64::NAN, f64::NAN); 2];
+        let mut dual_out = vec![Dual::new(f64::NAN, f64::NAN); 2];
+
+        system.apply_value_and_jacobian_in_place(
+            0.0,
+            &[0.4, -0.3],
+            &mut values,
+            &mut jacobian,
+            &mut dual_state,
+            &mut dual_out,
+        );
+
+        assert!((values[0] - 0.19).abs() <= 1e-15);
+        assert!((values[1] - (0.4_f64.sin() + 0.075)).abs() <= 1e-15);
+        let expected = [0.25, -0.6, 0.4_f64.cos(), -0.25];
+        for (actual, expected) in jacobian.iter().zip(expected) {
+            assert!((actual - expected).abs() <= 1e-15);
+        }
+
+        system.apply_value_and_jacobian_in_place(
+            0.0,
+            &[-0.2, 0.5],
+            &mut values,
+            &mut jacobian,
+            &mut dual_state,
+            &mut dual_out,
+        );
+        assert!((values[0] - 0.2).abs() <= 1e-15);
+        assert!((values[1] - (-0.2_f64.sin() - 0.125)).abs() <= 1e-15);
+        let expected = [0.25, 1.0, (-0.2_f64).cos(), -0.25];
+        for (actual, expected) in jacobian.iter().zip(expected) {
+            assert!((actual - expected).abs() <= 1e-15);
+        }
     }
 }

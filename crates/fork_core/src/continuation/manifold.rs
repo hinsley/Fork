@@ -3,6 +3,7 @@ use nalgebra::linalg::SVD;
 use nalgebra::DMatrix;
 use num_complex::Complex;
 
+use crate::autodiff::Dual;
 use crate::continuation::periodic::{
     compute_cycle_monodromy_data, floquet_real_eigenvector_from_transfers, CollocationCoefficients,
 };
@@ -6934,10 +6935,11 @@ fn integrate_state_and_variational(
     let h_min = (clamped_tau / (max_steps as f64)).max(1e-12);
     let h_max = (clamped_tau / 2.0).max(h_min);
     let nominal_h = dt.max(1e-9).clamp(h_min, h_max);
+    let mut workspace = StateVariationalRk4Workspace::new(n);
     let mut t = 0.0;
     while t + 1e-15 < clamped_tau {
         let h = (clamped_tau - t).min(nominal_h);
-        rk4_state_variational_step(system, &mut state, &mut phi, h, sigma)?;
+        rk4_state_variational_step(system, &mut state, &mut phi, h, sigma, &mut workspace)?;
         if state.iter().any(|value| !value.is_finite())
             || phi.iter().any(|value| !value.is_finite())
         {
@@ -6946,6 +6948,30 @@ fn integrate_state_and_variational(
         t += h;
     }
     Some((state, phi))
+}
+
+struct StateVariationalRk4Workspace {
+    stage_state: Vec<f64>,
+    stage_phi: Vec<f64>,
+    state_stages: [Vec<f64>; 4],
+    phi_stages: [Vec<f64>; 4],
+    jacobian: Vec<f64>,
+    dual_state: Vec<Dual>,
+    dual_out: Vec<Dual>,
+}
+
+impl StateVariationalRk4Workspace {
+    fn new(dim: usize) -> Self {
+        Self {
+            stage_state: vec![0.0; dim],
+            stage_phi: vec![0.0; dim * dim],
+            state_stages: std::array::from_fn(|_| vec![0.0; dim]),
+            phi_stages: std::array::from_fn(|_| vec![0.0; dim * dim]),
+            jacobian: vec![0.0; dim * dim],
+            dual_state: vec![Dual::new(0.0, 0.0); dim],
+            dual_out: vec![Dual::new(0.0, 0.0); dim],
+        }
+    }
 }
 
 fn integrate_state_only(
@@ -6988,83 +7014,140 @@ fn rk4_state_variational_step(
     phi: &mut [f64],
     dt: f64,
     sigma: f64,
+    workspace: &mut StateVariationalRk4Workspace,
 ) -> Option<()> {
     let n = state.len();
     if phi.len() != n * n {
         return None;
     }
+    if workspace.stage_state.len() != n || workspace.stage_phi.len() != n * n {
+        return None;
+    }
 
-    let (k1_x, k1_phi) = state_variational_rhs(system, state, phi, sigma)?;
-
-    let mut x2 = state.to_vec();
-    let mut phi2 = phi.to_vec();
-    for i in 0..n {
-        x2[i] += 0.5 * dt * k1_x[i];
-    }
-    for i in 0..(n * n) {
-        phi2[i] += 0.5 * dt * k1_phi[i];
-    }
-    let (k2_x, k2_phi) = state_variational_rhs(system, &x2, &phi2, sigma)?;
-
-    let mut x3 = state.to_vec();
-    let mut phi3 = phi.to_vec();
-    for i in 0..n {
-        x3[i] += 0.5 * dt * k2_x[i];
-    }
-    for i in 0..(n * n) {
-        phi3[i] += 0.5 * dt * k2_phi[i];
-    }
-    let (k3_x, k3_phi) = state_variational_rhs(system, &x3, &phi3, sigma)?;
-
-    let mut x4 = state.to_vec();
-    let mut phi4 = phi.to_vec();
-    for i in 0..n {
-        x4[i] += dt * k3_x[i];
-    }
-    for i in 0..(n * n) {
-        phi4[i] += dt * k3_phi[i];
-    }
-    let (k4_x, k4_phi) = state_variational_rhs(system, &x4, &phi4, sigma)?;
+    state_variational_rhs_in_place(
+        system,
+        state,
+        phi,
+        sigma,
+        &mut workspace.state_stages[0],
+        &mut workspace.phi_stages[0],
+        &mut workspace.jacobian,
+        &mut workspace.dual_state,
+        &mut workspace.dual_out,
+    )?;
 
     for i in 0..n {
-        state[i] += dt * (k1_x[i] + 2.0 * k2_x[i] + 2.0 * k3_x[i] + k4_x[i]) / 6.0;
+        workspace.stage_state[i] = state[i] + 0.5 * dt * workspace.state_stages[0][i];
     }
     for i in 0..(n * n) {
-        phi[i] += dt * (k1_phi[i] + 2.0 * k2_phi[i] + 2.0 * k3_phi[i] + k4_phi[i]) / 6.0;
+        workspace.stage_phi[i] = phi[i] + 0.5 * dt * workspace.phi_stages[0][i];
+    }
+    state_variational_rhs_in_place(
+        system,
+        &workspace.stage_state,
+        &workspace.stage_phi,
+        sigma,
+        &mut workspace.state_stages[1],
+        &mut workspace.phi_stages[1],
+        &mut workspace.jacobian,
+        &mut workspace.dual_state,
+        &mut workspace.dual_out,
+    )?;
+
+    for i in 0..n {
+        workspace.stage_state[i] = state[i] + 0.5 * dt * workspace.state_stages[1][i];
+    }
+    for i in 0..(n * n) {
+        workspace.stage_phi[i] = phi[i] + 0.5 * dt * workspace.phi_stages[1][i];
+    }
+    state_variational_rhs_in_place(
+        system,
+        &workspace.stage_state,
+        &workspace.stage_phi,
+        sigma,
+        &mut workspace.state_stages[2],
+        &mut workspace.phi_stages[2],
+        &mut workspace.jacobian,
+        &mut workspace.dual_state,
+        &mut workspace.dual_out,
+    )?;
+
+    for i in 0..n {
+        workspace.stage_state[i] = state[i] + dt * workspace.state_stages[2][i];
+    }
+    for i in 0..(n * n) {
+        workspace.stage_phi[i] = phi[i] + dt * workspace.phi_stages[2][i];
+    }
+    state_variational_rhs_in_place(
+        system,
+        &workspace.stage_state,
+        &workspace.stage_phi,
+        sigma,
+        &mut workspace.state_stages[3],
+        &mut workspace.phi_stages[3],
+        &mut workspace.jacobian,
+        &mut workspace.dual_state,
+        &mut workspace.dual_out,
+    )?;
+
+    for i in 0..n {
+        state[i] += dt
+            * (workspace.state_stages[0][i]
+                + 2.0 * workspace.state_stages[1][i]
+                + 2.0 * workspace.state_stages[2][i]
+                + workspace.state_stages[3][i])
+            / 6.0;
+    }
+    for i in 0..(n * n) {
+        phi[i] += dt
+            * (workspace.phi_stages[0][i]
+                + 2.0 * workspace.phi_stages[1][i]
+                + 2.0 * workspace.phi_stages[2][i]
+                + workspace.phi_stages[3][i])
+            / 6.0;
     }
     Some(())
 }
 
-fn state_variational_rhs(
+#[allow(clippy::too_many_arguments)]
+fn state_variational_rhs_in_place(
     system: &EquationSystem,
     state: &[f64],
     phi: &[f64],
     sigma: f64,
-) -> Option<(Vec<f64>, Vec<f64>)> {
+    state_dot: &mut [f64],
+    phi_dot: &mut [f64],
+    jacobian: &mut [f64],
+    dual_state: &mut [Dual],
+    dual_out: &mut [Dual],
+) -> Option<()> {
     let n = state.len();
-    if phi.len() != n * n {
+    if phi.len() != n * n
+        || state_dot.len() != n
+        || phi_dot.len() != n * n
+        || jacobian.len() != n * n
+        || dual_state.len() != n
+        || dual_out.len() != n
+    {
         return None;
     }
-    let mut f = vec![0.0; n];
-    system.apply(0.0, state, &mut f);
-    for value in &mut f {
+    system.apply_value_and_jacobian_in_place(0.0, state, state_dot, jacobian, dual_state, dual_out);
+    for value in state_dot {
         *value *= sigma;
     }
-    let mut jac = compute_jacobian(system, SystemKind::Flow, state).ok()?;
-    for value in &mut jac {
+    for value in jacobian.iter_mut() {
         *value *= sigma;
     }
-    let mut phi_dot = vec![0.0; n * n];
     for i in 0..n {
         for j in 0..n {
             let mut sum = 0.0;
             for k in 0..n {
-                sum += jac[i * n + k] * phi[k * n + j];
+                sum += jacobian[i * n + k] * phi[k * n + j];
             }
             phi_dot[i * n + j] = sum;
         }
     }
-    Some((f, phi_dot))
+    Some(())
 }
 
 fn mat_vec_mul_row_major(matrix: &[f64], vector: &[f64]) -> Option<Vec<f64>> {
@@ -10270,6 +10353,77 @@ mod tests {
         let mut system = EquationSystem::new(bytecodes, param_values);
         system.set_maps(compiler.param_map, compiler.var_map);
         system
+    }
+
+    #[test]
+    fn state_variational_workspace_preserves_legacy_rk4_outputs() {
+        let system = build_system(
+            &[
+                "mu*x - y - x*(x*x + y*y)",
+                "x + mu*y - y*(x*x + y*y)",
+                "lambda*z + x*z",
+            ],
+            &["x", "y", "z"],
+            &[("mu", 0.1), ("lambda", 0.2)],
+        );
+        let cases = [
+            (
+                1.0,
+                [
+                    4599974288655226182,
+                    4587369033670049042,
+                    4590009212687822137,
+                ],
+                [
+                    4603520466207044163,
+                    13826612465140033766,
+                    0,
+                    4603886665109662306,
+                    4604872037064552927,
+                    0,
+                    4586667419819292421,
+                    13803667741525753664,
+                    4609359809203468425,
+                ],
+            ),
+            (
+                -1.0,
+                [
+                    4591321320201560199,
+                    13823486151953956010,
+                    4585517497852889377,
+                ],
+                [
+                    4605463080993526597,
+                    4604054137215233433,
+                    0,
+                    13829295020023078004,
+                    4606114103434958301,
+                    0,
+                    13806569078683814760,
+                    13799650941120760581,
+                    4604871065566645099,
+                ],
+            ),
+        ];
+        for (sigma, expected_state, expected_phi) in cases {
+            let (state, phi) = integrate_state_and_variational(
+                &system,
+                &[0.3, -0.2, 0.05],
+                0.73,
+                sigma,
+                0.02,
+                300,
+                30.0,
+            )
+            .expect("state and variational integration");
+            for (actual, expected) in state.iter().zip(expected_state) {
+                assert_eq!(actual.to_bits(), expected);
+            }
+            for (actual, expected) in phi.iter().zip(expected_phi) {
+                assert_eq!(actual.to_bits(), expected);
+            }
+        }
     }
 
     #[test]
