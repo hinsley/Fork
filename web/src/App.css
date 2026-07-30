@@ -723,6 +723,19 @@
   color: var(--text-muted);
 }
 
+.inspector-section label:has(> input[type='checkbox']:only-child) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.inspector-section label:has(> input[type='checkbox']:only-child) > input[type='checkbox'] {
+  order: -1;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
 .inspector-section input[type='text'],
 .inspector-section input[type='number'],
 .inspector-section input[type='color'],
@@ -818,13 +831,6 @@
   align-items: center;
   font-size: 0.75rem;
   color: var(--text);
-}
-
-.opacity-percent-field {
-  display: inline-grid;
-  grid-template-columns: auto auto;
-  gap: 4px;
-  align-items: center;
 }
 
 .opacity-percent-input {
