@@ -35,6 +35,7 @@ type ObjectsTreeProps = {
   onCreateEquilibrium: () => void
   onCreateForcedPeriodicResponse?: (orbitId?: string) => void
   onCreateIsocline?: () => void
+  onCreateStateGrid?: () => void
   onDuplicateNode?: (id: string) => void | Promise<void>
   onDeleteNode: (id: string) => void
 }
@@ -128,6 +129,7 @@ function getNodeLabel(node: TreeNode, system: System) {
     return `${node.name} (forced periodic response)`
   }
   if (node.objectType === 'isocline') return `${node.name} (isocline)`
+  if (node.objectType === 'state_grid') return `${node.name} (state grid)`
   if (node.objectType === 'orbit') return `${node.name} (orbit)`
   if (node.kind === 'scene') return `${node.name} (scene)`
   if (node.kind === 'diagram') return `${node.name} (bifurcation)`
@@ -160,6 +162,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       onCreateEquilibrium,
       onCreateForcedPeriodicResponse = () => {},
       onCreateIsocline = () => {},
+      onCreateStateGrid = () => {},
       onDuplicateNode = () => {},
       onDeleteNode,
     },
@@ -1054,6 +1057,16 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               data-testid="create-isocline"
             >
               Isocline
+            </button>
+            <button
+              className="context-menu__item"
+              onClick={() => {
+                onCreateStateGrid()
+                setCreateMenu(null)
+              }}
+              data-testid="create-state-grid"
+            >
+              State Grid
             </button>
           </div>
         ) : null}

@@ -22,6 +22,8 @@ import type {
   EquilibriumManifold1DGroupExtensionResult,
   EquilibriumManifold2DRequest,
   EquilibriumManifold2DResult,
+  ExpansionEntropyRequest,
+  ExpansionEntropyResponse,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   FoldCurveContinuationRequest,
@@ -486,6 +488,57 @@ export class MockForkCoreClient implements ForkCoreClient {
           }
         }
         return { dimension, checkpoints, times, vectors }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeExpansionEntropy(
+    request: ExpansionEntropyRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<ExpansionEntropyResponse> {
+    const job = this.queue.enqueue(
+      'computeExpansionEntropy',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        const totalSamples = request.axes.reduce(
+          (total, axis) => total * axis.resolution,
+          1
+        )
+        const checkpointCount = Math.ceil(request.steps / request.checkpointStride)
+        const checkpoints = Array.from(
+          { length: checkpointCount },
+          (_, index) =>
+            Math.min((index + 1) * request.checkpointStride, request.steps) *
+            (request.system.type === 'map' ? 1 : request.dt)
+        )
+        const horizonKind: ExpansionEntropyResponse['horizonKind'] =
+          request.system.type === 'map' ? 'iteration' : 'time'
+        opts?.onProgress?.({
+          done: true,
+          current_step: totalSamples,
+          max_steps: totalSamples,
+          points_computed: totalSamples,
+          bifurcations_found: 0,
+          current_param: totalSamples,
+        })
+        return {
+          checkpoints,
+          horizonKind,
+          logMeanExpansion: checkpoints.map((horizon) => 0.2 * horizon),
+          entropyEstimates: checkpoints.map(() => 0.2),
+          survivorCounts: checkpoints.map(() => totalSamples),
+          survivorFractions: checkpoints.map(() => 1),
+          totalSamples,
+          maxLogConditionNumber: 0,
+          conditioningWarning: false,
+        }
       },
       opts
     )

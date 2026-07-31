@@ -18,6 +18,7 @@ import type {
   LyapunovExponentsRequest as CoreLyapunovExponentsRequest,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
+  ExpansionEntropyResponse,
   ValidateSystemResult,
 } from '../compute/ForkCoreClient'
 import type { JobTiming } from '../compute/jobQueue'
@@ -54,6 +55,7 @@ import type {
   System,
   SystemSummary,
   Scene,
+  StateGridObject,
   SubsystemSnapshot,
   SystemConfig,
   TreeNode,
@@ -661,6 +663,37 @@ function defaultIsoclineSource(system: SystemConfig): IsoclineSource {
     return { kind: 'map_increment', variableName: firstVariable }
   }
   return { kind: 'flow_derivative', variableName: firstVariable }
+}
+
+function defaultStateGridAxes(system: SystemConfig): StateGridObject['axes'] {
+  const resolution = system.varNames.length <= 3 ? 5 : 3
+  return system.varNames.map((variableName) => ({
+    variableName,
+    min: -2,
+    max: 2,
+    resolution,
+  }))
+}
+
+function normalizeStateGridAxes(
+  system: SystemConfig,
+  axes: StateGridObject['axes']
+): StateGridObject['axes'] {
+  const byName = new Map(axes.map((axis) => [axis.variableName, axis]))
+  return system.varNames.map((variableName) => {
+    const axis = byName.get(variableName)
+    return {
+      variableName,
+      min: Number.isFinite(axis?.min) ? axis!.min : -2,
+      max: Number.isFinite(axis?.max) ? axis!.max : 2,
+      resolution:
+        Number.isFinite(axis?.resolution) && (axis?.resolution ?? 0) >= 1
+          ? Math.trunc(axis!.resolution)
+          : system.varNames.length <= 3
+            ? 5
+            : 3,
+    }
+  })
 }
 
 function defaultIsoclineSamples(activeCount: number): number {
@@ -1727,6 +1760,10 @@ export type IsoclineComputeRequest = {
   useLastComputedSettings?: boolean
 }
 
+export type StateGridComputeRequest = {
+  stateGridId: string
+}
+
 export type LimitCycleHopfContinuationRequest = {
   branchId: string
   pointIndex: number
@@ -2009,6 +2046,10 @@ export type AppActions = {
     nodeId: string,
     update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
   ) => void
+  updateStateGridObject: (
+    nodeId: string,
+    update: Partial<Omit<StateGridObject, 'type' | 'name' | 'systemName'>>
+  ) => void
   updateScene: (sceneId: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   updateAnalysisViewport: (
     viewportId: string,
@@ -2031,6 +2072,7 @@ export type AppActions = {
     orbitId?: string
   ) => Promise<string | null>
   createIsoclineObject: (name: string) => Promise<string | null>
+  createStateGridObject: (name: string) => Promise<string | null>
   runOrbit: (request: OrbitRunRequest) => Promise<void>
   computeIsocline: (
     request: IsoclineComputeRequest,
@@ -2058,6 +2100,10 @@ export type AppActions = {
   ) => Promise<void>
   computeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
   computeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
+  computeExpansionEntropy: (
+    request: StateGridComputeRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<ExpansionEntropyResponse | null>
   computeLimitCycleFloquetModes: (request: LimitCycleFloquetModesRequest) => Promise<void>
   computeNormalFormAtPoint: (request: NormalFormAtPointRequest) => Promise<void>
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
@@ -2548,6 +2594,53 @@ export function AppProvider({
     [scheduleSystemSave, state.system]
   )
 
+  const updateStateGridObjectAction = useCallback(
+    (
+      nodeId: string,
+      update: Partial<Omit<StateGridObject, 'type' | 'name' | 'systemName'>>
+    ) => {
+      if (!state.system) return
+      const object = state.system.objects[nodeId]
+      if (!object || object.type !== 'state_grid') return
+      const axes = update.axes
+        ? normalizeStateGridAxes(state.system.config, update.axes)
+        : object.axes
+      const analysis = update.analysis
+        ? {
+            type: 'expansion_entropy' as const,
+            steps:
+              Number.isFinite(update.analysis.steps) && update.analysis.steps >= 1
+                ? Math.trunc(update.analysis.steps)
+                : object.analysis.steps,
+            dt:
+              Number.isFinite(update.analysis.dt) && update.analysis.dt > 0
+                ? update.analysis.dt
+                : object.analysis.dt,
+            checkpointStride: Math.max(
+              1,
+              Number.isFinite(update.analysis.checkpointStride)
+                ? Math.trunc(update.analysis.checkpointStride)
+                : object.analysis.checkpointStride
+            ),
+            stabilizationStride: Math.max(
+              1,
+              Number.isFinite(update.analysis.stabilizationStride)
+                ? Math.trunc(update.analysis.stabilizationStride)
+                : object.analysis.stabilizationStride
+            ),
+          }
+        : object.analysis
+      const system = updateObject(state.system, nodeId, {
+        ...update,
+        axes,
+        analysis,
+      })
+      dispatch({ type: 'SET_SYSTEM', system })
+      scheduleSystemSave(system)
+    },
+    [scheduleSystemSave, state.system]
+  )
+
   const setLimitCycleRenderTargetAction = useCallback(
     (objectId: string, target: LimitCycleRenderTarget | null) => {
       if (!state.system) return
@@ -3026,6 +3119,103 @@ export function AppProvider({
         if (!silent) {
           dispatch({ type: 'SET_BUSY', busy: false })
         }
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const computeExpansionEntropy = useCallback(
+    async (
+      request: StateGridComputeRequest,
+      opts?: { signal?: AbortSignal }
+    ): Promise<ExpansionEntropyResponse | null> => {
+      if (!state.system) return null
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const config = state.system.config
+        if (
+          (config.type === 'flow' && config.solver === 'discrete') ||
+          (config.type === 'map' && config.solver !== 'discrete')
+        ) {
+          throw new Error(
+            'Expansion entropy requires a flow solver for flows and discrete iteration for maps.'
+          )
+        }
+        const validation = validateSystemConfig(config)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        const object = state.system.objects[request.stateGridId]
+        if (!object || object.type !== 'state_grid') {
+          throw new Error('Select a valid State Grid object.')
+        }
+        const axes = normalizeStateGridAxes(config, object.axes)
+        for (const axis of axes) {
+          if (!Number.isFinite(axis.min) || !Number.isFinite(axis.max) || axis.min >= axis.max) {
+            throw new Error(`State Grid bounds for "${axis.variableName}" require min < max.`)
+          }
+          if (!Number.isInteger(axis.resolution) || axis.resolution < 1) {
+            throw new Error(
+              `State Grid resolution for "${axis.variableName}" must be a positive integer.`
+            )
+          }
+        }
+        const settings = object.analysis
+        const result = await client.computeExpansionEntropy(
+          {
+            system: config,
+            axes,
+            initialTime: 0,
+            steps: settings.steps,
+            dt: settings.dt,
+            checkpointStride: settings.checkpointStride,
+            stabilizationStride: settings.stabilizationStride,
+          },
+          {
+            signal: opts?.signal,
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Expansion entropy', progress },
+              }),
+          }
+        )
+        const updated = updateObject(state.system, request.stateGridId, {
+          axes,
+          parameters: [...config.params],
+          lastResult: {
+            analysisType: 'expansion_entropy',
+            method: 'hunt_ott',
+            scope: 'finite_horizon_finite_ensemble_region_restricted',
+            dynamicsType: config.type,
+            escapePolicy:
+              config.type === 'map'
+                ? 'closed_box_checked_after_each_map_iterate'
+                : 'closed_box_checked_after_each_integration_step',
+            axes: structuredClone(axes),
+            settings: structuredClone(settings),
+            parameters: [...config.params],
+            ...result,
+            logMeanExpansion: result.logMeanExpansion.map((value) =>
+              Number.isFinite(value) ? value : null
+            ),
+            entropyEstimates: result.entropyEstimates.map((value) =>
+              Number.isFinite(value) ? value : null
+            ),
+            computedAt: new Date().toISOString(),
+          },
+        } as Partial<StateGridObject>)
+        dispatch({ type: 'SET_SYSTEM', system: updated })
+        await store.save(updated)
+        return result
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') return null
+        const message = error instanceof Error ? error.message : String(error)
+        dispatch({ type: 'SET_ERROR', error: message })
+        throw error instanceof Error ? error : new Error(message)
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
       }
     },
     [client, state.system, store]
@@ -3751,6 +3941,60 @@ export function AppProvider({
       }
     },
     [client, ensureEntitiesLoaded, state.system, store]
+  )
+
+  const createStateGridObject = useCallback(
+    async (name: string) => {
+      if (!state.system) return null
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const config = state.system.config
+        const validation = validateSystemConfig(config)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (config.varNames.length < 1) {
+          throw new Error('Define at least one state variable before creating a State Grid.')
+        }
+        const trimmedName = name.trim()
+        const nameError = validateObjectName(trimmedName, 'State Grid')
+        if (nameError) throw new Error(nameError)
+        const existingNames = Object.values(state.system.objects).map((object) => object.name)
+        if (existingNames.includes(trimmedName)) {
+          throw new Error(`Object "${trimmedName}" already exists.`)
+        }
+        const object: StateGridObject = {
+          type: 'state_grid',
+          name: trimmedName,
+          systemName: config.name,
+          axes: defaultStateGridAxes(config),
+          sampling: { type: 'cartesian_cell_centers' },
+          analysis: {
+            type: 'expansion_entropy',
+            steps: 500,
+            dt: config.type === 'map' ? 1 : 0.01,
+            checkpointStride: 25,
+            stabilizationStride: 10,
+          },
+          parameters: [...config.params],
+          createdAt: new Date().toISOString(),
+        }
+        const result = addObject(state.system, object)
+        const selected = selectNode(result.system, result.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+        return result.nodeId
+      } catch (error) {
+        dispatch({
+          type: 'SET_ERROR',
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return null
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [state.system, store]
   )
 
   const createIsoclineObject = useCallback(
@@ -9441,6 +9685,7 @@ export function AppProvider({
       updateObjectFrozenVariables: updateObjectFrozenVariablesAction,
       updateObjectFrozenEquationContext: updateObjectFrozenEquationContextAction,
       updateIsoclineObject: updateIsoclineObjectAction,
+      updateStateGridObject: updateStateGridObjectAction,
       updateScene: updateSceneAction,
       updateAnalysisViewport: updateAnalysisViewportAction,
       updateBifurcationDiagram: updateBifurcationDiagramAction,
@@ -9451,6 +9696,7 @@ export function AppProvider({
       createEquilibriumObject,
       createForcedPeriodicResponseObject,
       createIsoclineObject,
+      createStateGridObject,
       runOrbit,
       computeIsocline,
       sampleMap1DFunction,
@@ -9459,6 +9705,7 @@ export function AppProvider({
       validateAnalysisExpression,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
+      computeExpansionEntropy,
       computeLimitCycleFloquetModes,
       solveEquilibrium,
       solveForcedPeriodicResponse,
@@ -9510,6 +9757,7 @@ export function AppProvider({
       validateAnalysisExpression,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
+      computeExpansionEntropy,
       computeLimitCycleFloquetModes,
       solveEquilibrium,
       solveForcedPeriodicResponse,
@@ -9565,6 +9813,7 @@ export function AppProvider({
       updateObjectFrozenVariablesAction,
       updateObjectFrozenEquationContextAction,
       updateIsoclineObjectAction,
+      updateStateGridObjectAction,
       updateSceneAction,
       updateAnalysisViewportAction,
       updateBifurcationDiagramAction,
@@ -9572,6 +9821,7 @@ export function AppProvider({
       duplicateNodeAction,
       deleteNodeAction,
       createIsoclineObject,
+      createStateGridObject,
       computeIsocline,
       addSceneAction,
       addAnalysisViewportAction,

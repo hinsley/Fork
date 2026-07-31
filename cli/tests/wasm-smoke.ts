@@ -36,6 +36,7 @@ const requiredExports = [
   'WasmIsoperiodicCurveRunner',
   'WasmLyapunovRunner',
   'WasmCovariantLyapunovRunner',
+  'WasmExpansionEntropyRunner',
   'WasmEquilibriumSolverRunner',
 ];
 
@@ -60,6 +61,80 @@ const state = Array.from(system.get_state() as Float64Array);
 assert.equal(state.length, 1);
 assert.ok(Math.abs(state[0] - 0.25) < 1e-10, `Expected x ~= 0.25 after one step, got ${state[0]}`);
 assert.ok(Math.abs(system.get_t() - 0.25) < 1e-12, `Expected t ~= 0.25, got ${system.get_t()}`);
+
+const expansionEntropyRunner = new wasm.WasmExpansionEntropyRunner(
+  ['0.4*x', '-0.2*y'],
+  new Float64Array(),
+  [],
+  ['x', 'y'],
+  'rk4',
+  new Float64Array([-1, -1]),
+  new Float64Array([1, 1]),
+  new Uint32Array([1, 1]),
+  0,
+  200,
+  0.01,
+  20,
+  10
+);
+while (!expansionEntropyRunner.get_progress().done) {
+  expansionEntropyRunner.run_steps(1);
+}
+const expansionEntropy = expansionEntropyRunner.get_result();
+assert.equal(expansionEntropy.totalSamples, 1);
+assert.equal(expansionEntropy.survivorCounts.at(-1), 1);
+assert.ok(
+  Math.abs(expansionEntropy.entropyEstimates.at(-1) - 0.4) < 1e-8,
+  `Expected finite-time expansion estimate ~= 0.4, got ${expansionEntropy.entropyEstimates.at(-1)}`
+);
+
+const expandingMapEntropyRunner = new wasm.WasmExpansionEntropyRunner(
+  ['2*x', '0.5*y'],
+  new Float64Array(),
+  [],
+  ['x', 'y'],
+  'discrete',
+  new Float64Array([-1, -1]),
+  new Float64Array([1, 1]),
+  new Uint32Array([1, 1]),
+  0,
+  12,
+  1,
+  3,
+  2
+);
+while (!expandingMapEntropyRunner.get_progress().done) {
+  expandingMapEntropyRunner.run_steps(1);
+}
+const expandingMapEntropy = expandingMapEntropyRunner.get_result();
+assert.equal(expandingMapEntropy.horizonKind, 'iteration');
+assert.deepEqual(Array.from(expandingMapEntropy.checkpoints), [3, 6, 9, 12]);
+assert.ok(
+  Math.abs(expandingMapEntropy.entropyEstimates.at(-1) - Math.log(2)) < 1e-12,
+  `Expected map expansion estimate ~= log(2), got ${expandingMapEntropy.entropyEstimates.at(-1)}`
+);
+
+const contractingMapEntropyRunner = new wasm.WasmExpansionEntropyRunner(
+  ['0.5*x', '0.25*y'],
+  new Float64Array(),
+  [],
+  ['x', 'y'],
+  'discrete',
+  new Float64Array([-1, -1]),
+  new Float64Array([1, 1]),
+  new Uint32Array([1, 1]),
+  0,
+  10,
+  1,
+  2,
+  2
+);
+while (!contractingMapEntropyRunner.get_progress().done) {
+  contractingMapEntropyRunner.run_steps(1);
+}
+const contractingMapEntropy = contractingMapEntropyRunner.get_result();
+assert.equal(contractingMapEntropy.horizonKind, 'iteration');
+assert.equal(contractingMapEntropy.entropyEstimates.at(-1), 0);
 
 const forcedFlow = new wasm.WasmSystem(
   ['t'],

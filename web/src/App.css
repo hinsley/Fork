@@ -863,6 +863,30 @@
   text-align: right;
 }
 
+.state-grid-axis-table {
+  display: grid;
+  gap: 6px;
+}
+
+.state-grid-axis-table__header,
+.state-grid-axis-table__row {
+  display: grid;
+  grid-template-columns: minmax(58px, 0.8fr) repeat(3, minmax(64px, 1fr));
+  gap: 6px;
+  align-items: center;
+}
+
+.state-grid-axis-table__header {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.state-grid-axis-table__row input {
+  min-width: 0;
+  width: 100%;
+}
+
 .inspector-data {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     "Courier New", monospace;

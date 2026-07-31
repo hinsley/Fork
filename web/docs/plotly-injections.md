@@ -10,6 +10,12 @@ traces use stored live contexts, state-space traces use stored response states, 
 maps use the existing cobweb builder. Selecting a forced-response branch point overlays its stored
 `cycle_points`. This adds trace construction but no new Plotly event or layout injection.
 
+State Grid expansion-entropy results use `PlotlyViewport` in
+`web/src/ui/inspector/StateGridInspector.tsx` for the finite-time convergence
+curve for flows and finite-iteration convergence curve for maps. It provides
+ordinary data and layout objects and adds no Plotly event, state, or rendering
+injection.
+
 ## Runtime touchpoints
 
 ### Plotly lifecycle and render config

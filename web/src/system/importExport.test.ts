@@ -22,6 +22,7 @@ import type {
   ForcedPeriodicResponseObject,
   LimitCycleObject,
   OrbitObject,
+  StateGridObject,
   System,
 } from './types'
 import { IndexedDbSystemStore } from './indexedDb'
@@ -469,6 +470,68 @@ describe('system import/export (zip)', () => {
     expect(restored.config.varNames).toEqual(['Membrane Voltage', 'Recovery Variable'])
     expect(restored.config.paramNames).toEqual(['Applied Current'])
     expect(restored.config.equations).toEqual(system.config.equations)
+  })
+
+  it('round-trips map State Grid configuration and expansion-entropy results with stable ids', async () => {
+    const base = createSystem({ name: 'State Grid archive' })
+    base.config.type = 'map'
+    base.config.solver = 'discrete'
+    base.config.equations = ['2*x', '0.5*y']
+    const object: StateGridObject = {
+      type: 'state_grid',
+      name: 'Grid with result',
+      systemName: base.name,
+      axes: [
+        { variableName: 'x', min: -1, max: 1, resolution: 3 },
+        { variableName: 'y', min: -2, max: 2, resolution: 5 },
+      ],
+      sampling: { type: 'cartesian_cell_centers' },
+      analysis: {
+        type: 'expansion_entropy',
+        steps: 100,
+        dt: 1,
+        checkpointStride: 10,
+        stabilizationStride: 5,
+      },
+      parameters: [],
+      lastResult: {
+        analysisType: 'expansion_entropy',
+        method: 'hunt_ott',
+        scope: 'finite_horizon_finite_ensemble_region_restricted',
+        dynamicsType: 'map',
+        horizonKind: 'iteration',
+        escapePolicy: 'closed_box_checked_after_each_map_iterate',
+        axes: [
+          { variableName: 'x', min: -1, max: 1, resolution: 3 },
+          { variableName: 'y', min: -2, max: 2, resolution: 5 },
+        ],
+        settings: {
+          type: 'expansion_entropy',
+          steps: 100,
+          dt: 1,
+          checkpointStride: 10,
+          stabilizationStride: 5,
+        },
+        parameters: [],
+        checkpoints: [50, 100],
+        logMeanExpansion: [50 * Math.log(2), 100 * Math.log(2)],
+        entropyEstimates: [Math.log(2), Math.log(2)],
+        survivorCounts: [15, 12],
+        survivorFractions: [1, 0.8],
+        totalSamples: 15,
+        maxLogConditionNumber: 1.5,
+        conditioningWarning: false,
+        computedAt: '2026-07-30T00:01:00.000Z',
+      },
+      createdAt: '2026-07-30T00:00:00.000Z',
+    }
+    const added = addObject(base, object)
+
+    const restored = await roundTripSystem(added.system)
+
+    expect(restored.objects[added.nodeId]).toEqual(added.system.objects[added.nodeId])
+    expect(restored.nodes[added.nodeId].id).toBe(added.nodeId)
+    expect(restored.nodes[added.nodeId].name).toBe('Grid with result')
   })
 
   it('transfers archives between IndexedDB and OPFS stores', async () => {

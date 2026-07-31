@@ -14,6 +14,7 @@ export type DefaultNameKind =
   | 'equilibrium'
   | 'forcedPeriodicResponse'
   | 'isocline'
+  | 'stateGrid'
   | 'folder'
   | 'scene'
   | 'bifurcationDiagram'
@@ -50,6 +51,7 @@ const INDEXED_LABELS: Partial<Record<DefaultNameKind, string>> = {
   equilibrium: 'Equilibrium',
   forcedPeriodicResponse: 'Forced_Response',
   isocline: 'Isocline',
+  stateGrid: 'State_Grid',
   folder: 'Folder',
   scene: 'Scene',
   bifurcationDiagram: 'Bifurcation_Diagram',

@@ -47,6 +47,25 @@ export function runSteppedRunnerToCompletion<TResult>(
   return terminalGetter ? terminalGetter(runner) : runner.get_result()
 }
 
+export async function runSteppedRunnerToCompletionAsync<TResult>(
+  runner: SteppedRunner<TResult>,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<TResult> {
+  let progress = runner.get_progress()
+  onProgress(progress)
+  const batchSize = computeBatchSize(progress.max_steps)
+
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+  abortIfNeeded(signal)
+  return runner.get_result()
+}
+
 export function runAdaptiveSteppedRunnerToCompletion<
   TBranch extends object,
   TReport,

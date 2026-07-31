@@ -3,6 +3,7 @@ import type { ContinuationProgress } from '../ForkCoreClient'
 import {
   runAdaptiveSteppedRunnerToCompletion,
   runSteppedRunnerToCompletion,
+  runSteppedRunnerToCompletionAsync,
 } from './steppedRunner'
 
 function makeProgress(
@@ -115,6 +116,28 @@ describe('runSteppedRunnerToCompletion', () => {
     expect((thrown as Error).name).toBe('AbortError')
     expect(runSteps).not.toHaveBeenCalled()
     expect(getResult).not.toHaveBeenCalled()
+  })
+
+  it('yields between async batches so a running worker can be cancelled', async () => {
+    const controller = new AbortController()
+    let currentStep = 0
+    const runSteps = vi.fn((batchSize: number) => {
+      currentStep += batchSize
+      return makeProgress(currentStep, 100, false)
+    })
+    const runner = {
+      get_progress: vi.fn(() => makeProgress(0, 100, false)),
+      run_steps: runSteps,
+      get_result: vi.fn(() => 'complete'),
+    }
+
+    await expect(
+      runSteppedRunnerToCompletionAsync(runner, controller.signal, (progress) => {
+        if (progress.current_step > 0) controller.abort()
+      })
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(runSteps).toHaveBeenCalledTimes(1)
+    expect(runner.get_result).not.toHaveBeenCalled()
   })
 
   it('captures the adaptation report before a consuming legacy get_result call', () => {

@@ -1,0 +1,365 @@
+import { useMemo, useRef, useState } from 'react'
+import type { Data, Layout } from 'plotly.js'
+import type { StateGridObject, System } from '../../system/types'
+import type { StateGridComputeRequest } from '../../state/appState'
+import { PlotlyViewport } from '../../viewports/plotly/PlotlyViewport'
+
+type StateGridInspectorProps = {
+  system: System
+  nodeId: string
+  object: StateGridObject
+  onRename: (id: string, name: string) => void
+  onUpdate: (
+    id: string,
+    update: Partial<Omit<StateGridObject, 'type' | 'name' | 'systemName'>>
+  ) => void
+  onCompute: (
+    request: StateGridComputeRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<unknown>
+}
+
+function formatCount(value: number): string {
+  return Number.isSafeInteger(value) ? value.toLocaleString() : 'Too large to represent safely'
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+export function StateGridInspector({
+  system,
+  nodeId,
+  object,
+  onRename,
+  onUpdate,
+  onCompute,
+}: StateGridInspectorProps) {
+  const [nameDraft, setNameDraft] = useState(object.name)
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const controllerRef = useRef<AbortController | null>(null)
+  const isMap = system.config.type === 'map'
+  const totalPoints = useMemo(
+    () =>
+      object.axes.reduce((total, axis) => {
+        if (!Number.isSafeInteger(total) || !Number.isInteger(axis.resolution)) {
+          return Number.POSITIVE_INFINITY
+        }
+        const next = total * axis.resolution
+        return Number.isSafeInteger(next) ? next : Number.POSITIVE_INFINITY
+      }, 1),
+    [object.axes]
+  )
+  const integrationWork = totalPoints * object.analysis.steps
+  const workloadLevel =
+    !Number.isFinite(totalPoints) || totalPoints >= 100_000
+      ? 'large'
+      : totalPoints >= 10_000
+        ? 'moderate'
+        : 'small'
+  const result = object.lastResult
+  const resultStale = Boolean(
+    result &&
+      (!sameJson(result.axes, object.axes) ||
+        !sameJson(result.settings, object.analysis) ||
+        !sameJson(result.parameters, system.config.params) ||
+        result.dynamicsType !== system.config.type)
+  )
+  const finalEstimate = result?.entropyEstimates.at(-1)
+  const plot = useMemo(() => {
+    if (!result || result.checkpoints.length === 0) return null
+    const iterationResult = result.horizonKind === 'iteration'
+    const data: Data[] = [
+      {
+        type: 'scatter',
+        mode: 'lines+markers',
+        x: result.checkpoints,
+        y: result.entropyEstimates,
+        name: iterationResult ? 'h(n)' : 'h(T)',
+        line: { color: '#e06c3f', width: 2 },
+        marker: { size: 5 },
+      },
+    ]
+    const layout: Partial<Layout> = {
+      margin: { l: 55, r: 15, t: 15, b: 45 },
+      paper_bgcolor: 'rgba(0,0,0,0)',
+      plot_bgcolor: 'rgba(0,0,0,0)',
+      xaxis: {
+        title: { text: iterationResult ? 'Iteration n' : 'Time T' },
+        automargin: true,
+      },
+      yaxis: {
+        title: {
+          text: iterationResult
+            ? 'Finite-iteration estimate h(n)'
+            : 'Finite-time estimate h(T)',
+        },
+        automargin: true,
+      },
+      showlegend: false,
+      height: 260,
+    }
+    return { data, layout }
+  }, [result])
+
+  const updateAxis = (
+    index: number,
+    field: 'min' | 'max' | 'resolution',
+    rawValue: string
+  ) => {
+    const value = Number(rawValue)
+    if (!Number.isFinite(value)) return
+    if (field === 'resolution' && (!Number.isInteger(value) || value < 1)) return
+    const axes = object.axes.map((axis, axisIndex) =>
+      axisIndex === index ? { ...axis, [field]: value } : axis
+    )
+    onUpdate(nodeId, { axes })
+  }
+
+  const updateAnalysis = (
+    field: 'steps' | 'dt' | 'checkpointStride' | 'stabilizationStride',
+    rawValue: string
+  ) => {
+    const value = Number(rawValue)
+    if (!Number.isFinite(value) || value <= 0) return
+    if (field !== 'dt' && !Number.isInteger(value)) return
+    onUpdate(nodeId, { analysis: { ...object.analysis, [field]: value } })
+  }
+
+  const run = async () => {
+    setError(null)
+    const invalidAxis = object.axes.find(
+      (axis) => !Number.isFinite(axis.min) || !Number.isFinite(axis.max) || axis.min >= axis.max
+    )
+    if (invalidAxis) {
+      setError(`Bounds for ${invalidAxis.variableName} require min < max.`)
+      return
+    }
+    const controller = new AbortController()
+    controllerRef.current = controller
+    setRunning(true)
+    try {
+      await onCompute({ stateGridId: nodeId }, { signal: controller.signal })
+    } catch (reason) {
+      if (!(reason instanceof Error && reason.name === 'AbortError')) {
+        setError(reason instanceof Error ? reason.message : String(reason))
+      }
+    } finally {
+      if (controllerRef.current === controller) controllerRef.current = null
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div className="inspector-selection" data-testid="state-grid-inspector">
+      <section className="inspector-section">
+        <label>
+          Name
+          <input
+            value={nameDraft}
+            onChange={(event) => setNameDraft(event.target.value)}
+            onBlur={() => {
+              const trimmed = nameDraft.trim()
+              if (trimmed && trimmed !== object.name) onRename(nodeId, trimmed)
+            }}
+            data-testid="state-grid-name"
+          />
+        </label>
+        <h3>State Grid</h3>
+        <p className="inspector-help">
+          A bounded regular Cartesian grid in the full state space. Resolution is the number of
+          cell-center samples on each coordinate.
+        </p>
+        <div className="inspector-metrics" data-testid="state-grid-workload">
+          <div className="inspector-metrics__row">
+            <span className="inspector-metrics__label">Total grid points</span>
+            <strong className="inspector-metrics__value" data-testid="state-grid-total-points">
+              {formatCount(totalPoints)}
+            </strong>
+          </div>
+          <div className="inspector-metrics__row">
+            <span className="inspector-metrics__label">
+              {isMap ? 'Map/tangent iterations' : 'Forward/tangent steps'}
+            </span>
+            <span className="inspector-metrics__value">{formatCount(integrationWork)}</span>
+          </div>
+        </div>
+        <p
+          className={workloadLevel === 'large' ? 'inspector-error' : 'inspector-help'}
+          data-testid="state-grid-workload-warning"
+        >
+          {workloadLevel === 'large'
+            ? 'Large Cartesian product. Runtime and memory pressure grow exponentially with state dimension.'
+            : workloadLevel === 'moderate'
+              ? 'Moderate Cartesian product. Increasing one resolution multiplies the full workload.'
+              : 'The Cartesian product is currently small.'}
+        </p>
+      </section>
+
+      <section className="inspector-section">
+        <h3>Bounds and resolution</h3>
+        <div className="state-grid-axis-table">
+          <div className="state-grid-axis-table__header">
+            <span>Variable</span>
+            <span>Min</span>
+            <span>Max</span>
+            <span>Resolution</span>
+          </div>
+          {object.axes.map((axis, index) => (
+            <div className="state-grid-axis-table__row" key={axis.variableName}>
+              <span>{axis.variableName}</span>
+              <input
+                type="number"
+                value={axis.min}
+                onChange={(event) => updateAxis(index, 'min', event.target.value)}
+                data-testid={`state-grid-${axis.variableName}-min`}
+              />
+              <input
+                type="number"
+                value={axis.max}
+                onChange={(event) => updateAxis(index, 'max', event.target.value)}
+                data-testid={`state-grid-${axis.variableName}-max`}
+              />
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={axis.resolution}
+                onChange={(event) => updateAxis(index, 'resolution', event.target.value)}
+                data-testid={`state-grid-${axis.variableName}-resolution`}
+              />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="inspector-section">
+        <h3>Expansion Entropy</h3>
+        <p className="inspector-help">
+          {isMap
+            ? 'Hunt–Ott estimate restricted to this region, iteration horizon, and finite grid. Escaped trajectories contribute zero after the first map iterate outside the closed region. This is not unrestricted or exact topological entropy.'
+            : 'Hunt–Ott estimate restricted to this region, time horizon, and finite grid. Escaped trajectories contribute zero. Escape is checked after each integration step. This is not unrestricted or exact topological entropy.'}
+        </p>
+        <label>
+          {isMap ? 'Iterations' : 'Integration steps'}
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={object.analysis.steps}
+            onChange={(event) => updateAnalysis('steps', event.target.value)}
+            data-testid="state-grid-entropy-steps"
+          />
+        </label>
+        {!isMap ? (
+          <label>
+            Step size
+            <input
+              type="number"
+              min="0"
+              value={object.analysis.dt}
+              onChange={(event) => updateAnalysis('dt', event.target.value)}
+              data-testid="state-grid-entropy-dt"
+            />
+          </label>
+        ) : null}
+        <label>
+          Convergence checkpoint stride
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={object.analysis.checkpointStride}
+            onChange={(event) => updateAnalysis('checkpointStride', event.target.value)}
+            data-testid="state-grid-entropy-checkpoint-stride"
+          />
+        </label>
+        <label>
+          Tangent stabilization stride
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={object.analysis.stabilizationStride}
+            onChange={(event) => updateAnalysis('stabilizationStride', event.target.value)}
+            data-testid="state-grid-entropy-stabilization-stride"
+          />
+        </label>
+        <div className="inspector-actions">
+          <button
+            type="button"
+            onClick={() => void run()}
+            disabled={running || !Number.isFinite(totalPoints)}
+            data-testid="state-grid-run-expansion-entropy"
+          >
+            {running ? 'Calculating…' : 'Calculate expansion entropy'}
+          </button>
+          {running ? (
+            <button
+              type="button"
+              onClick={() => controllerRef.current?.abort()}
+              data-testid="state-grid-cancel-expansion-entropy"
+            >
+              Cancel
+            </button>
+          ) : null}
+        </div>
+        {error ? <p className="inspector-error">{error}</p> : null}
+      </section>
+
+      <section className="inspector-section" data-testid="state-grid-expansion-entropy-result">
+        <h3>{isMap ? 'Finite-iteration result' : 'Finite-time result'}</h3>
+        {result ? (
+          <>
+            {resultStale ? (
+              <p className="inspector-error">Stored result is stale for the current grid or system parameters.</p>
+            ) : null}
+            <div className="inspector-metrics">
+              <div className="inspector-metrics__row">
+                <span className="inspector-metrics__label">
+                  {result.horizonKind === 'iteration' ? 'Final h(n)' : 'Final h(T)'}
+                </span>
+                <strong className="inspector-metrics__value" data-testid="state-grid-final-estimate">
+                  {typeof finalEstimate === 'number' && Number.isFinite(finalEstimate)
+                    ? finalEstimate.toPrecision(6)
+                    : '−∞'}
+                </strong>
+              </div>
+              <div className="inspector-metrics__row">
+                <span className="inspector-metrics__label">Final survivors</span>
+                <span className="inspector-metrics__value">
+                  {result.survivorCounts.at(-1)?.toLocaleString() ?? 0} /{' '}
+                  {result.totalSamples.toLocaleString()}
+                </span>
+              </div>
+            </div>
+            <p className="inspector-help">
+              Scope:{' '}
+              {result.horizonKind === 'iteration' ? 'finite iteration' : 'finite time'}, finite
+              ensemble (State Grid), and region restricted.
+            </p>
+            {result.conditioningWarning ? (
+              <p className="inspector-error">
+                Tangent conditioning exceeded the reliable floating-point range for at least one
+                sample. Shorten the horizon or stabilization stride and compare results.
+              </p>
+            ) : null}
+            {plot ? (
+              <div className="inspector-plot">
+                <PlotlyViewport
+                  plotId={`state-grid-expansion-entropy-${nodeId}`}
+                  data={plot.data}
+                  layout={plot.layout}
+                  testId="state-grid-expansion-entropy-plot"
+                />
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <p className="empty-state">No expansion-entropy result stored yet.</p>
+        )}
+      </section>
+    </div>
+  )
+}

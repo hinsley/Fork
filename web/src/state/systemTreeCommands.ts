@@ -61,6 +61,7 @@ function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type
     if (node.objectType === 'equilibrium') return formatEquilibriumLabel(systemType)
     if (node.objectType === 'limit_cycle') return 'Limit cycle'
     if (node.objectType === 'isocline') return 'Isocline'
+    if (node.objectType === 'state_grid') return 'State Grid'
     return 'Object'
   }
   return 'Item'

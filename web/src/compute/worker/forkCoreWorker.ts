@@ -24,6 +24,8 @@ import type {
   EquilibriumManifold1DGroupExtensionResult,
   EquilibriumManifold2DRequest,
   EquilibriumManifold2DResult,
+  ExpansionEntropyRequest,
+  ExpansionEntropyResponse,
   EventSeriesResult,
   FoldCurveContinuationRequest,
   ForcedPeriodicResponseContinuationRequest,
@@ -77,6 +79,7 @@ import {
 import {
   runAdaptiveSteppedRunnerToCompletion,
   runSteppedRunnerToCompletion,
+  runSteppedRunnerToCompletionAsync,
 } from './steppedRunner'
 import { createWorkerSuccessResponse, getComputeHandler } from '../computeProtocol'
 import type {
@@ -433,6 +436,44 @@ async function runCovariantLyapunovVectors(
     request.forwardTransient,
     request.backwardTransient
   )
+}
+
+async function runExpansionEntropy(
+  request: ExpansionEntropyRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<ExpansionEntropyResponse> {
+  if (
+    (request.system.type === 'flow' && request.system.solver === 'discrete') ||
+    (request.system.type === 'map' && request.system.solver !== 'discrete')
+  ) {
+    throw new Error('Expansion entropy requires a flow solver for flows and discrete iteration for maps.')
+  }
+  const wasm = await loadWasm()
+  const axesByName = new Map(request.axes.map((axis) => [axis.variableName, axis]))
+  const axes = request.system.varNames.map((variableName) => {
+    const axis = axesByName.get(variableName)
+    if (!axis) {
+      throw new Error(`State Grid is missing bounds for "${variableName}".`)
+    }
+    return axis
+  })
+  const runner = new wasm.WasmExpansionEntropyRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    new Float64Array(axes.map((axis) => axis.min)),
+    new Float64Array(axes.map((axis) => axis.max)),
+    new Uint32Array(axes.map((axis) => axis.resolution)),
+    request.initialTime,
+    request.steps,
+    request.system.type === 'map' ? 1 : request.dt,
+    request.checkpointStride,
+    request.stabilizationStride
+  )
+  return await runSteppedRunnerToCompletionAsync(runner, signal, onProgress)
 }
 
 async function runSolveEquilibrium(
@@ -2284,6 +2325,7 @@ const handlers = {
   computeIsocline: runComputeIsocline,
   computeLyapunovExponents: runLyapunovExponents,
   computeCovariantLyapunovVectors: runCovariantLyapunovVectors,
+  computeExpansionEntropy: runExpansionEntropy,
   solveEquilibrium: runSolveEquilibrium,
   solveForcedPeriodicResponse: runSolveForcedPeriodicResponse,
   runForcedPeriodicResponseContinuation,

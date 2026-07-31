@@ -1011,6 +1011,61 @@ export interface IsoclineObject {
   subsystemSnapshot?: SubsystemSnapshot
 }
 
+export interface StateGridAxis {
+  variableName: string
+  min: number
+  max: number
+  resolution: number
+}
+
+export interface ExpansionEntropySettings {
+  type: 'expansion_entropy'
+  steps: number
+  dt: number
+  checkpointStride: number
+  stabilizationStride: number
+}
+
+export interface ExpansionEntropyResult {
+  analysisType: 'expansion_entropy'
+  method: 'hunt_ott'
+  scope: 'finite_horizon_finite_ensemble_region_restricted'
+  dynamicsType: 'flow' | 'map'
+  horizonKind: 'time' | 'iteration'
+  escapePolicy:
+    | 'closed_box_checked_after_each_integration_step'
+    | 'closed_box_checked_after_each_map_iterate'
+  axes: StateGridAxis[]
+  settings: ExpansionEntropySettings
+  parameters: number[]
+  checkpoints: number[]
+  logMeanExpansion: Array<number | null>
+  entropyEstimates: Array<number | null>
+  survivorCounts: number[]
+  survivorFractions: number[]
+  totalSamples: number
+  maxLogConditionNumber: number
+  conditioningWarning: boolean
+  computedAt: string
+}
+
+export interface StateGridObject {
+  type: 'state_grid'
+  id?: string
+  name: string
+  systemName: string
+  axes: StateGridAxis[]
+  sampling: {
+    type: 'cartesian_cell_centers'
+  }
+  analysis: ExpansionEntropySettings
+  parameters?: number[]
+  customParameters?: number[]
+  frozenVariables?: FrozenVariablesConfig
+  lastResult?: ExpansionEntropyResult
+  createdAt: string
+}
+
 export type PeriodicOrbitRenderTarget =
   | { type: 'object' }
   | { type: 'branch'; branchId: string; pointIndex: number }
@@ -1023,6 +1078,7 @@ export type AnalysisObject =
   | ForcedPeriodicResponseObject
   | LimitCycleObject
   | IsoclineObject
+  | StateGridObject
   | ContinuationObject
 
 export interface CovariantLyapunovData {

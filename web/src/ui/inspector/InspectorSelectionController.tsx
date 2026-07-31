@@ -24,6 +24,7 @@ import type {
   ManifoldTerminationCaps,
   OrbitObject,
   Scene,
+  StateGridObject,
   System,
   SystemConfig,
   TreeNode,
@@ -81,6 +82,7 @@ import type {
   HomotopySaddleFromEquilibriumRequest,
   IsoperiodicCurveContinuationRequest,
   IsoclineComputeRequest,
+  StateGridComputeRequest,
   LimitCycleFloquetModesRequest,
   LimitCycleCodim1CurveCreationRequest,
   MapNSCurveContinuationRequest,
@@ -167,6 +169,7 @@ import {
 import { supportsNormalFormWorkflow } from './sections/branch/normalFormPresentation'
 
 import { SelectionInspectorView } from './SelectionInspectorView'
+import { StateGridInspector } from './StateGridInspector'
 
 type InspectorDetailsPanelProps = {
   system: System
@@ -198,6 +201,14 @@ type InspectorDetailsPanelProps = {
   onComputeIsocline?: (
     request: IsoclineComputeRequest,
     opts?: { signal?: AbortSignal; silent?: boolean }
+  ) => Promise<unknown>
+  onUpdateStateGridObject?: (
+    id: string,
+    update: Partial<Omit<StateGridObject, 'type' | 'name' | 'systemName'>>
+  ) => void
+  onComputeExpansionEntropy?: (
+    request: StateGridComputeRequest,
+    opts?: { signal?: AbortSignal }
   ) => Promise<unknown>
   onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   onUpdateAnalysisViewport?: (
@@ -2178,6 +2189,30 @@ export type InspectorSelectionController = ReturnType<
 >
 
 function InspectorSelectionSession(props: InspectorDetailsPanelProps) {
+  const selectedObject = props.selectedNodeId
+    ? props.system.objects[props.selectedNodeId]
+    : undefined
+  if (
+    props.selectedNodeId &&
+    selectedObject?.type === 'state_grid' &&
+    props.onUpdateStateGridObject &&
+    props.onComputeExpansionEntropy
+  ) {
+    return (
+      <StateGridInspector
+        system={props.system}
+        nodeId={props.selectedNodeId}
+        object={selectedObject}
+        onRename={props.onRename}
+        onUpdate={props.onUpdateStateGridObject}
+        onCompute={props.onComputeExpansionEntropy}
+      />
+    )
+  }
+  return <DefaultInspectorSelectionSession {...props} />
+}
+
+function DefaultInspectorSelectionSession(props: InspectorDetailsPanelProps) {
   const scope = useInspectorSelectionController(props)
   return <SelectionInspectorView scope={scope} />
 }

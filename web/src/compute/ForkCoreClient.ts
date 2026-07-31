@@ -169,6 +169,35 @@ export type CovariantLyapunovResponse = {
   vectors: number[]
 }
 
+export type StateGridAxisRequest = {
+  variableName: string
+  min: number
+  max: number
+  resolution: number
+}
+
+export type ExpansionEntropyRequest = {
+  system: SystemConfig
+  axes: StateGridAxisRequest[]
+  initialTime: number
+  steps: number
+  dt: number
+  checkpointStride: number
+  stabilizationStride: number
+}
+
+export type ExpansionEntropyResponse = {
+  checkpoints: number[]
+  horizonKind: 'time' | 'iteration'
+  logMeanExpansion: number[]
+  entropyEstimates: number[]
+  survivorCounts: number[]
+  survivorFractions: number[]
+  totalSamples: number
+  maxLogConditionNumber: number
+  conditioningWarning: boolean
+}
+
 export type ValidateSystemRequest = {
   system: SystemConfig
 }
@@ -799,6 +828,10 @@ export interface ForkCoreClient {
     request: CovariantLyapunovRequest,
     opts?: { signal?: AbortSignal }
   ): Promise<CovariantLyapunovResponse>
+  computeExpansionEntropy(
+    request: ExpansionEntropyRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<ExpansionEntropyResponse>
   solveEquilibrium(
     request: SolveEquilibriumRequest,
     opts?: { signal?: AbortSignal }

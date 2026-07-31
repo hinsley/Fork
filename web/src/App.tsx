@@ -140,6 +140,13 @@ function App() {
     await actions.createIsoclineObject(name)
   }
 
+  const createStateGrid = async () => {
+    if (!system) return
+    const names = Object.values(system.objects).map((object) => object.name)
+    const name = suggestDefaultName('stateGrid', { existingNames: names })
+    await actions.createStateGridObject(name)
+  }
+
   const createForcedPeriodicResponse = async (orbitId?: string) => {
     if (!system) return
     const names = Object.values(system.objects).map((object) => object.name)
@@ -382,6 +389,7 @@ function App() {
                 onCreateEquilibrium={createEquilibrium}
                 onCreateForcedPeriodicResponse={createForcedPeriodicResponse}
                 onCreateIsocline={createIsocline}
+                onCreateStateGrid={createStateGrid}
                 onDuplicateNode={actions.duplicateNode}
                 onDeleteNode={actions.deleteNode}
               />

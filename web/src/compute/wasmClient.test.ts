@@ -3,6 +3,7 @@ import type {
   ComputeIsoclineRequest,
   ContinuationProgress,
   EquilibriumContinuationRequest,
+  ExpansionEntropyRequest,
   HomoclinicFromHomoclinicRequest,
   HomoclinicFromHomotopySaddleRequest,
   HomoclinicFromLargeCycleRequest,
@@ -206,6 +207,50 @@ describe('WasmForkCoreClient', () => {
     worker.emit({ id: message.id, ok: true, result })
 
     await expect(promise).resolves.toEqual(result)
+  })
+
+  it('sends expansion-entropy requests and forwards progress', async () => {
+    const client = new WasmForkCoreClient()
+    const request: ExpansionEntropyRequest = {
+      system: baseSystem,
+      axes: [{ variableName: 'x', min: -1, max: 1, resolution: 3 }],
+      initialTime: 0,
+      steps: 10,
+      dt: 0.1,
+      checkpointStride: 2,
+      stabilizationStride: 1,
+    }
+    const onProgress = vi.fn()
+
+    const promise = client.computeExpansionEntropy(request, { onProgress })
+    await flushQueue()
+    const worker = MockWorker.instances[0]
+    const message = worker.posted[0]
+    expect(message).toMatchObject({ kind: 'computeExpansionEntropy', payload: request })
+    const progress: ContinuationProgress = {
+      done: false,
+      current_step: 1,
+      max_steps: 3,
+      points_computed: 1,
+      bifurcations_found: 0,
+      current_param: 1,
+    }
+    worker.emit({ id: message.id, kind: 'progress', progress })
+    const result = {
+      checkpoints: [1],
+      horizonKind: 'time',
+      logMeanExpansion: [0],
+      entropyEstimates: [0],
+      survivorCounts: [3],
+      survivorFractions: [1],
+      totalSamples: 3,
+      maxLogConditionNumber: 0,
+      conditioningWarning: false,
+    }
+    worker.emit({ id: message.id, ok: true, result })
+
+    await expect(promise).resolves.toEqual(result)
+    expect(onProgress).toHaveBeenCalledWith(progress)
   })
 
   it('sends homoclinic and homotopy worker request kinds', async () => {

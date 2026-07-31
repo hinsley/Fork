@@ -20,6 +20,8 @@ import type {
   EquilibriumManifold1DGroupExtensionResult,
   EquilibriumManifold2DRequest,
   EquilibriumManifold2DResult,
+  ExpansionEntropyRequest,
+  ExpansionEntropyResponse,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   FoldCurveContinuationRequest,
@@ -192,6 +194,19 @@ export class WasmForkCoreClient implements ForkCoreClient {
     const job = this.queue.enqueue(
       'computeCovariantLyapunovVectors',
       (signal) => this.runWorker('computeCovariantLyapunovVectors', request, signal),
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeExpansionEntropy(
+    request: ExpansionEntropyRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<ExpansionEntropyResponse> {
+    const job = this.queue.enqueue(
+      'computeExpansionEntropy',
+      (signal) =>
+        this.runWorker('computeExpansionEntropy', request, signal, opts?.onProgress),
       opts
     )
     return await job.promise

@@ -36,6 +36,7 @@ const expectedOperationKinds = [
   'computeIsocline',
   'computeLyapunovExponents',
   'computeCovariantLyapunovVectors',
+  'computeExpansionEntropy',
   'solveEquilibrium',
   'solveForcedPeriodicResponse',
   'runForcedPeriodicResponseContinuation',
@@ -68,6 +69,7 @@ const expectedOperationKinds = [
 ] as const satisfies readonly ComputeOperationKind[]
 
 const expectedProgressOperationKinds = [
+  'computeExpansionEntropy',
   'runForcedPeriodicResponseContinuation',
   'runEquilibriumContinuation',
   'runContinuationExtension',

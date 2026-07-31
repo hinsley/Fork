@@ -10,6 +10,7 @@ mod analysis;
 mod continuation;
 mod equilibrium;
 mod event_series;
+mod expansion_entropy;
 mod forced_response;
 mod system;
 
@@ -23,5 +24,6 @@ pub use continuation::{
     WasmLimitCycleRunner, WasmManifold2DExtensionRunner, WasmNSCurveRunner, WasmPDCurveRunner,
 };
 pub use equilibrium::WasmEquilibriumSolverRunner;
+pub use expansion_entropy::WasmExpansionEntropyRunner;
 pub use forced_response::WasmForcedResponseRunner;
 pub use system::WasmSystem;

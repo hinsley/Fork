@@ -39,6 +39,8 @@ export function InspectorPanel({
           onUpdateObjectFrozenEquationContext={actions.updateObjectFrozenEquationContext}
           onUpdateIsoclineObject={actions.updateIsoclineObject}
           onComputeIsocline={actions.computeIsocline}
+          onUpdateStateGridObject={actions.updateStateGridObject}
+          onComputeExpansionEntropy={actions.computeExpansionEntropy}
           onUpdateScene={actions.updateScene}
           onUpdateAnalysisViewport={actions.updateAnalysisViewport}
           onValidateAnalysisExpression={actions.validateAnalysisExpression}
