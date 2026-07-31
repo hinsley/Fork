@@ -1,6 +1,6 @@
 import type { ContinuationProgress, ForkCoreClient } from './ForkCoreClient'
 
-export type ComputeOperationKind = Exclude<keyof ForkCoreClient, 'close'>
+export type ComputeOperationKind = Exclude<keyof ForkCoreClient, 'close' | 'cancelAll'>
 
 type ComputeMethodContract<K extends ComputeOperationKind> = NonNullable<
   ForkCoreClient[K]

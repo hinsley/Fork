@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { addObject, createSystem } from '../../system/model'
 import type { StateGridObject } from '../../system/types'
 import { StateGridInspector } from './StateGridInspector'
+import { WorkflowFocusProvider } from './selectionSession'
 
 function fixture() {
   const base = createSystem({ name: 'Linear flow' })
@@ -35,6 +36,35 @@ function fixture() {
 }
 
 describe('StateGridInspector', () => {
+  it('uses the shared nested configure actions for parameters and frozen variables', () => {
+    const initial = fixture()
+    const onUpdateObjectParams = vi.fn()
+    const onUpdateObjectFrozenVariables = vi.fn()
+    render(
+      <WorkflowFocusProvider>
+        <StateGridInspector
+          system={initial.system}
+          nodeId={initial.nodeId}
+          object={initial.object}
+          onRename={() => {}}
+          onUpdate={() => {}}
+          onCompute={async () => null}
+          onUpdateObjectParams={onUpdateObjectParams}
+          onUpdateObjectFrozenVariables={onUpdateObjectFrozenVariables}
+        />
+      </WorkflowFocusProvider>
+    )
+
+    expect(screen.getByTestId('action-frozen-variables-toggle')).toBeInTheDocument()
+    expect(screen.getByTestId('action-parameters-toggle')).toBeInTheDocument()
+    expect(screen.getByTestId('action-state-grid-setup-toggle')).toBeInTheDocument()
+    expect(screen.getByTestId('action-state-grid-entropy-toggle')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('action-frozen-variables-toggle'))
+    fireEvent.click(screen.getByTestId('frozen-variable-toggle-x'))
+    expect(onUpdateObjectFrozenVariables).toHaveBeenCalledWith(initial.nodeId, { x: 0 })
+  })
+
   it('updates the Cartesian product count live as a resolution changes', () => {
     const initial = fixture()
 

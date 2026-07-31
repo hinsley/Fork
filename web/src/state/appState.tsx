@@ -878,6 +878,7 @@ type FreezableAnalysisObject =
   | ForcedPeriodicResponseObject
   | LimitCycleObject
   | IsoclineObject
+  | StateGridObject
 
 function isFreezableObject(object: AnalysisObject | undefined): object is FreezableAnalysisObject {
   if (!object) return false
@@ -886,7 +887,8 @@ function isFreezableObject(object: AnalysisObject | undefined): object is Freeza
     object.type === 'equilibrium' ||
     object.type === 'forced_periodic_response' ||
     object.type === 'limit_cycle' ||
-    object.type === 'isocline'
+    object.type === 'isocline' ||
+    object.type === 'state_grid'
   )
 }
 
@@ -2514,6 +2516,13 @@ export function AppProvider({
         scheduleSystemSave(updated)
         return
       }
+      if (
+        object.type === 'state_grid' &&
+        Object.keys(normalizedFrozenValuesByVarName).length >= state.system.config.varNames.length
+      ) {
+        dispatch({ type: 'SET_ERROR', error: 'At least one free variable is required.' })
+        return
+      }
 
       const updated = updateObject(state.system, nodeId, {
         frozenVariables: {
@@ -3169,10 +3178,23 @@ export function AppProvider({
           }
         }
         const settings = object.analysis
+        const baseParams = resolveObjectParams(config, object.customParameters)
+        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(
+          config,
+          object,
+          baseParams
+        )
+        const freeAxes = snapshot.freeVariableNames.map((variableName) => {
+          const axis = axes.find((candidate) => candidate.variableName === variableName)
+          if (!axis) {
+            throw new Error(`State Grid is missing bounds for "${variableName}".`)
+          }
+          return axis
+        })
         const result = await client.computeExpansionEntropy(
           {
-            system: config,
-            axes,
+            system: runConfig,
+            axes: freeAxes,
             initialTime: 0,
             steps: settings.steps,
             dt: settings.dt,
@@ -3190,7 +3212,8 @@ export function AppProvider({
         )
         const updated = updateObject(state.system, request.stateGridId, {
           axes,
-          parameters: [...config.params],
+          parameters: [...baseParams],
+          subsystemSnapshot: snapshot,
           lastResult: {
             analysisType: 'expansion_entropy',
             method: 'hunt_ott',
@@ -3202,7 +3225,8 @@ export function AppProvider({
                 : 'closed_box_checked_after_each_integration_step',
             axes: structuredClone(axes),
             settings: structuredClone(settings),
-            parameters: [...config.params],
+            parameters: [...baseParams],
+            subsystemSnapshot: snapshot,
             ...result,
             logMeanExpansion: result.logMeanExpansion.map((value) =>
               Number.isFinite(value) ? value : null

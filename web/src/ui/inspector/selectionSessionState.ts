@@ -1,6 +1,8 @@
 export const WORKFLOW_IDS = [
   'frozen-variables-toggle',
   'parameters-toggle',
+  'state-grid-setup-toggle',
+  'state-grid-entropy-toggle',
   'appearance-toggle',
   'orbit-run-toggle',
   'orbit-data-toggle',

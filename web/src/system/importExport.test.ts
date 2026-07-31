@@ -494,6 +494,8 @@ describe('system import/export (zip)', () => {
         stabilizationStride: 5,
       },
       parameters: [],
+      customParameters: [],
+      frozenVariables: { frozenValuesByVarName: { y: 0.25 } },
       lastResult: {
         analysisType: 'expansion_entropy',
         method: 'hunt_ott',

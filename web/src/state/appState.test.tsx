@@ -22,9 +22,11 @@ import type {
   IsoclineObject,
   LimitCycleObject,
   OrbitObject,
+  StateGridObject,
   System,
   SystemConfig,
 } from '../system/types'
+import type { ExpansionEntropyRequest } from '../compute/ForkCoreClient'
 
 const continuationSettings: ContinuationSettings = {
   step_size: 0.01,
@@ -118,6 +120,42 @@ function withParam(system: System, name: string, value: number): System {
       params: [value],
     },
   }
+}
+
+function createConfiguredStateGridSystem(type: 'flow' | 'map') {
+  const system = createSystem({
+    name: `State_Grid_${type}`,
+    config: {
+      name: `State_Grid_${type}`,
+      equations: type === 'flow' ? ['mu*x + y', '-y'] : ['mu*x + y', 'y'],
+      params: [1],
+      paramNames: ['mu'],
+      varNames: ['x', 'y'],
+      solver: type === 'flow' ? 'rk4' : 'discrete',
+      type,
+    },
+  })
+  const object: StateGridObject = {
+    type: 'state_grid',
+    name: 'State_Grid_1',
+    systemName: system.name,
+    axes: [
+      { variableName: 'x', min: -1, max: 1, resolution: 3 },
+      { variableName: 'y', min: -2, max: 2, resolution: 5 },
+    ],
+    sampling: { type: 'cartesian_cell_centers' },
+    analysis: {
+      type: 'expansion_entropy',
+      steps: 2,
+      dt: 0.01,
+      checkpointStride: 1,
+      stabilizationStride: 1,
+    },
+    customParameters: [3],
+    frozenVariables: { frozenValuesByVarName: { y: 7 } },
+    createdAt: new Date().toISOString(),
+  }
+  return addObject(system, object)
 }
 
 function createCodimCycleAnalysisSystem(): {
@@ -288,6 +326,38 @@ describe('appState limit-cycle state projection', () => {
       )
     ).toEqual(reducedExplicitState)
   })
+})
+
+describe('appState State Grid subsystem configuration', () => {
+  for (const dynamicsType of ['flow', 'map'] as const) {
+    it(`applies parameter overrides and frozen variables to ${dynamicsType} evaluation`, async () => {
+      const fixture = createConfiguredStateGridSystem(dynamicsType)
+      const client = new MockForkCoreClient(0)
+      let captured: ExpansionEntropyRequest | null = null
+      const original = client.computeExpansionEntropy.bind(client)
+      client.computeExpansionEntropy = async (request, opts) => {
+        captured = request
+        return await original(request, opts)
+      }
+      const { getContext } = setupApp(fixture.system, client)
+
+      await act(async () => {
+        await getContext().actions.computeExpansionEntropy({
+          stateGridId: fixture.nodeId,
+        })
+      })
+
+      expect(captured).not.toBeNull()
+      expect(captured!.system.varNames).toEqual(['x'])
+      expect(captured!.axes.map((axis) => axis.variableName)).toEqual(['x'])
+      expect(captured!.system.params[0]).toBe(3)
+      expect(captured!.system.params).toContain(7)
+      const stored = getContext().state.system!.objects[fixture.nodeId] as StateGridObject
+      expect(stored.parameters).toEqual([3])
+      expect(stored.subsystemSnapshot?.frozenValuesByVarName).toEqual({ y: 7 })
+      expect(stored.lastResult?.subsystemSnapshot?.hash).toBe(stored.subsystemSnapshot?.hash)
+    })
+  }
 })
 
 describe('appState initialization', () => {

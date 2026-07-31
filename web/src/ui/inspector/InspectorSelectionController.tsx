@@ -2131,6 +2131,7 @@ type FreezableObject =
   | ForcedPeriodicResponseObject
   | LimitCycleObject
   | IsoclineObject
+  | StateGridObject
 
 function resolveObjectFrozenValues(
   systemConfig: SystemConfig,
@@ -2216,6 +2217,8 @@ function InspectorSelectionSession(props: InspectorDetailsPanelProps) {
         onRename={props.onRename}
         onUpdate={props.onUpdateStateGridObject}
         onCompute={props.onComputeExpansionEntropy}
+        onUpdateObjectParams={props.onUpdateObjectParams}
+        onUpdateObjectFrozenVariables={props.onUpdateObjectFrozenVariables}
       />
     )
   }

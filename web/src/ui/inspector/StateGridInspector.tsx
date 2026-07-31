@@ -3,6 +3,11 @@ import type { Data, Layout } from 'plotly.js'
 import type { StateGridObject, System } from '../../system/types'
 import type { StateGridComputeRequest } from '../../state/appState'
 import { PlotlyViewport } from '../../viewports/plotly/PlotlyViewport'
+import { resolveObjectParams } from '../../system/parameters'
+import { buildSubsystemSnapshot } from '../../system/subsystemGateway'
+import { WorkflowActionList, WorkflowFocusToolbar } from './selectionSession'
+import { useWorkflowFocus } from './useWorkflowFocus'
+import type { WorkflowActionEntry } from './selectionSessionState'
 
 type StateGridInspectorProps = {
   system: System
@@ -17,6 +22,11 @@ type StateGridInspectorProps = {
     request: StateGridComputeRequest,
     opts?: { signal?: AbortSignal }
   ) => Promise<unknown>
+  onUpdateObjectParams?: (id: string, params: number[] | null) => void
+  onUpdateObjectFrozenVariables?: (
+    id: string,
+    frozenValuesByVarName: Record<string, number>
+  ) => void
 }
 
 function formatCount(value: number): string {
@@ -34,23 +44,28 @@ export function StateGridInspector({
   onRename,
   onUpdate,
   onCompute,
+  onUpdateObjectParams = () => {},
+  onUpdateObjectFrozenVariables = () => {},
 }: StateGridInspectorProps) {
+  const workflowFocus = useWorkflowFocus()
   const [nameDraft, setNameDraft] = useState(object.name)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
   const isMap = system.config.type === 'map'
-  const totalPoints = useMemo(
-    () =>
-      object.axes.reduce((total, axis) => {
-        if (!Number.isSafeInteger(total) || !Number.isInteger(axis.resolution)) {
-          return Number.POSITIVE_INFINITY
-        }
-        const next = total * axis.resolution
-        return Number.isSafeInteger(next) ? next : Number.POSITIVE_INFINITY
-      }, 1),
-    [object.axes]
-  )
+  const frozenValues = object.frozenVariables?.frozenValuesByVarName ?? {}
+  const resolvedParameters = resolveObjectParams(system.config, object.customParameters)
+  const subsystemSnapshot = buildSubsystemSnapshot(system.config, object.frozenVariables)
+  const freeVariableNames = new Set(subsystemSnapshot.freeVariableNames)
+  const totalPoints = object.axes
+    .filter((axis) => freeVariableNames.has(axis.variableName))
+    .reduce((total, axis) => {
+      if (!Number.isSafeInteger(total) || !Number.isInteger(axis.resolution)) {
+        return Number.POSITIVE_INFINITY
+      }
+      const next = total * axis.resolution
+      return Number.isSafeInteger(next) ? next : Number.POSITIVE_INFINITY
+    }, 1)
   const integrationWork = totalPoints * object.analysis.steps
   const workloadLevel =
     !Number.isFinite(totalPoints) || totalPoints >= 100_000
@@ -63,9 +78,40 @@ export function StateGridInspector({
     result &&
       (!sameJson(result.axes, object.axes) ||
         !sameJson(result.settings, object.analysis) ||
-        !sameJson(result.parameters, system.config.params) ||
+        !sameJson(result.parameters, resolvedParameters) ||
+        (result.subsystemSnapshot
+          ? result.subsystemSnapshot.hash !== subsystemSnapshot.hash
+          : Object.keys(frozenValues).length > 0) ||
         result.dynamicsType !== system.config.type)
   )
+  const workflowActions: WorkflowActionEntry[] = [
+    {
+      id: 'frozen-variables-toggle',
+      group: 'Configure',
+      label: 'Frozen Variables',
+      description: 'Choose variables to hold constant for this object.',
+    },
+    {
+      id: 'parameters-toggle',
+      group: 'Configure',
+      label: 'Parameters',
+      description: 'Override the system parameter values for this object.',
+      tag: object.customParameters ? 'custom' : undefined,
+    },
+    {
+      id: 'state-grid-setup-toggle',
+      group: 'Compute',
+      label: 'State Grid setup',
+      description: 'Set bounds and resolution for the free state variables.',
+    },
+    {
+      id: 'state-grid-entropy-toggle',
+      group: 'Compute',
+      label: 'Expansion entropy',
+      description: 'Configure and run the finite-region expansion-entropy calculation.',
+    },
+  ]
+  const activeWorkflow = workflowFocus ? workflowFocus.activeWorkflow : 'all'
   const finalEstimate = result?.entropyEstimates.at(-1)
   const plot = useMemo(() => {
     if (!result || result.checkpoints.length === 0) return null
@@ -153,6 +199,7 @@ export function StateGridInspector({
 
   return (
     <div className="inspector-selection" data-testid="state-grid-inspector">
+      <WorkflowFocusToolbar entries={workflowActions} />
       <section className="inspector-section">
         <label>
           Name
@@ -171,6 +218,9 @@ export function StateGridInspector({
           A bounded regular Cartesian grid in the full state space. Resolution is the number of
           cell-center samples on each coordinate.
         </p>
+        {activeWorkflow === null ? <WorkflowActionList entries={workflowActions} /> : null}
+        {activeWorkflow === 'state-grid-setup-toggle' || activeWorkflow === 'all' ? (
+          <>
         <div className="inspector-metrics" data-testid="state-grid-workload">
           <div className="inspector-metrics__row">
             <span className="inspector-metrics__label">Total grid points</span>
@@ -195,8 +245,104 @@ export function StateGridInspector({
               ? 'Moderate Cartesian product. Increasing one resolution multiplies the full workload.'
               : 'The Cartesian product is currently small.'}
         </p>
+          </>
+        ) : null}
       </section>
 
+      {activeWorkflow === 'frozen-variables-toggle' ? (
+        <section className="inspector-section" data-testid="frozen-variables-section">
+          <h3>Frozen Variables</h3>
+          <div className="state-table__wrap" role="region" aria-label="Frozen variables">
+            <table className="state-table__grid">
+              <thead>
+                <tr>
+                  <th>Variable</th>
+                  <th>Frozen</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {system.config.varNames.map((variableName) => {
+                  const isFrozen = Object.prototype.hasOwnProperty.call(
+                    frozenValues,
+                    variableName
+                  )
+                  return (
+                    <tr key={variableName}>
+                      <td>{variableName}</td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={isFrozen}
+                          disabled={!isFrozen && freeVariableNames.size <= 1}
+                          onChange={(event) => {
+                            const next = { ...frozenValues }
+                            if (event.target.checked) next[variableName] = 0
+                            else delete next[variableName]
+                            onUpdateObjectFrozenVariables(nodeId, next)
+                          }}
+                          data-testid={`frozen-variable-toggle-${variableName}`}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          value={frozenValues[variableName] ?? 0}
+                          disabled={!isFrozen}
+                          onChange={(event) => {
+                            const value = Number(event.target.value)
+                            if (!Number.isFinite(value)) return
+                            onUpdateObjectFrozenVariables(nodeId, {
+                              ...frozenValues,
+                              [variableName]: value,
+                            })
+                          }}
+                          data-testid={`frozen-variable-value-${variableName}`}
+                        />
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {activeWorkflow === 'parameters-toggle' ? (
+        <section className="inspector-section" data-testid="param-override-section">
+          <h3>Parameter values</h3>
+          {system.config.paramNames.map((parameterName, index) => (
+            <label key={parameterName}>
+              {parameterName}
+              <input
+                type="number"
+                value={resolvedParameters[index] ?? 0}
+                onChange={(event) => {
+                  const value = Number(event.target.value)
+                  if (!Number.isFinite(value)) return
+                  const next = [...resolvedParameters]
+                  next[index] = value
+                  onUpdateObjectParams(nodeId, next)
+                }}
+                data-testid={`param-override-${parameterName}`}
+              />
+            </label>
+          ))}
+          {object.customParameters ? (
+            <button
+              type="button"
+              className="inspector-inline-button"
+              onClick={() => onUpdateObjectParams(nodeId, null)}
+              data-testid="param-override-clear"
+            >
+              Restore default parameters
+            </button>
+          ) : null}
+        </section>
+      ) : null}
+
+      {activeWorkflow === 'state-grid-setup-toggle' || activeWorkflow === 'all' ? (
       <section className="inspector-section">
         <h3>Bounds and resolution</h3>
         <div className="state-grid-axis-table">
@@ -206,7 +352,7 @@ export function StateGridInspector({
             <span>Max</span>
             <span>Resolution</span>
           </div>
-          {object.axes.map((axis, index) => (
+          {object.axes.map((axis, index) => freeVariableNames.has(axis.variableName) ? (
             <div className="state-grid-axis-table__row" key={axis.variableName}>
               <span>{axis.variableName}</span>
               <input
@@ -230,10 +376,13 @@ export function StateGridInspector({
                 data-testid={`state-grid-${axis.variableName}-resolution`}
               />
             </div>
-          ))}
+          ) : null)}
         </div>
       </section>
+      ) : null}
 
+      {activeWorkflow === 'state-grid-entropy-toggle' || activeWorkflow === 'all' ? (
+      <>
       <section className="inspector-section">
         <h3>Expansion Entropy</h3>
         <p className="inspector-help">
@@ -360,6 +509,8 @@ export function StateGridInspector({
           <p className="empty-state">No expansion-entropy result stored yet.</p>
         )}
       </section>
+      </>
+      ) : null}
     </div>
   )
 }

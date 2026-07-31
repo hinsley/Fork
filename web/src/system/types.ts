@@ -1039,6 +1039,7 @@ export interface ExpansionEntropyResult {
   axes: StateGridAxis[]
   settings: ExpansionEntropySettings
   parameters: number[]
+  subsystemSnapshot?: SubsystemSnapshot
   checkpoints: number[]
   logMeanExpansion: Array<number | null>
   entropyEstimates: Array<number | null>
@@ -1063,6 +1064,7 @@ export interface StateGridObject {
   parameters?: number[]
   customParameters?: number[]
   frozenVariables?: FrozenVariablesConfig
+  subsystemSnapshot?: SubsystemSnapshot
   lastResult?: ExpansionEntropyResult
   createdAt: string
 }
