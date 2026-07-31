@@ -93,7 +93,6 @@ export function StateGridInspector({
       label: 'Frozen Variables',
       description: 'Choose variables to hold constant for this object.',
     },
-    { id: 'state-grid-transfer-toggle', group: 'Compute', label: 'Invariant measure', description: 'Compute the conditional State Grid transfer operator.' },
     {
       id: 'parameters-toggle',
       group: 'Configure',
@@ -107,6 +106,7 @@ export function StateGridInspector({
       label: 'State Grid setup',
       description: 'Set bounds and resolution for the free state variables.',
     },
+    { id: 'state-grid-transfer-toggle', group: 'Compute', label: 'Invariant measure', description: 'Compute the conditional State Grid transfer operator.' },
     {
       id: 'state-grid-entropy-toggle',
       group: 'Compute',
