@@ -86,6 +86,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       resolve: (value: unknown) => void
       reject: (error: Error) => void
       onProgress?: (progress: ContinuationProgress) => void
+      signal: AbortSignal
     }
   >()
 
@@ -98,7 +99,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       const message = event.data
       if ('kind' in message && message.kind === 'progress') {
         const entry = this.pending.get(message.id)
-        entry?.onProgress?.(message.progress)
+        if (!entry?.signal.aborted) entry?.onProgress?.(message.progress)
         return
       }
       if (!('ok' in message)) return
@@ -638,7 +639,12 @@ export class WasmForkCoreClient implements ForkCoreClient {
   }
 
   async close() {
+    this.queue.cancelAll()
     this.worker.terminate()
+  }
+
+  cancelAll() {
+    this.queue.cancelAll()
   }
 
   private runWorker<K extends ComputeOperationKind>(
@@ -649,25 +655,25 @@ export class WasmForkCoreClient implements ForkCoreClient {
   ): Promise<ComputeResult<K>> {
     const id = makeStableId('req')
     const message = createWorkerRequest(id, kind, payload)
+    if (signal.aborted) {
+      const error = new Error('cancelled')
+      error.name = 'AbortError'
+      return Promise.reject(error)
+    }
     const promise = new Promise<ComputeResult<K>>((resolve, reject) => {
       this.pending.set(id, {
         resolve: (value) => resolve(value as ComputeResult<K>),
         reject,
         onProgress,
+        signal,
       })
     })
 
-    if (signal.aborted) {
-      this.worker.postMessage({ id, kind: 'cancel' } satisfies WorkerRequest)
-    } else {
-      signal.addEventListener(
-        'abort',
-        () => {
-          this.worker.postMessage({ id, kind: 'cancel' } satisfies WorkerRequest)
-        },
-        { once: true }
-      )
-    }
+    signal.addEventListener(
+      'abort',
+      () => this.worker.postMessage({ id, kind: 'cancel' } satisfies WorkerRequest),
+      { once: true }
+    )
 
     this.worker.postMessage(message)
     return promise

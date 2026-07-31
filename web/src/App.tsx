@@ -277,6 +277,7 @@ function App() {
         theme={theme}
         onThemeChange={setTheme}
         onResetFork={actions.resetFork}
+        onCancelCalculation={actions.cancelCalculation}
       />
 
       <SystemDialog

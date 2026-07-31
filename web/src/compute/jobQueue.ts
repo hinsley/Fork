@@ -38,6 +38,7 @@ function createAbortError(label: string) {
 
 export class JobQueue {
   private queue: InternalJob[] = []
+  private activeJob: InternalJob | null = null
   private running = false
   private onTiming?: (timing: JobTiming) => void
   private scheduled = false
@@ -81,6 +82,11 @@ export class JobQueue {
     }
   }
 
+  cancelAll() {
+    this.activeJob?.controller.abort()
+    for (const job of this.queue) job.controller.abort()
+  }
+
   private async runNext() {
     if (this.running) return
     this.running = true
@@ -96,9 +102,16 @@ export class JobQueue {
         this.emitTiming(job, startedAt, nowPerfMs(), 'cancelled')
         continue
       }
+      this.activeJob = job
 
       try {
         const result = await job.runner(job.controller.signal)
+        if (job.controller.signal.aborted) {
+          const error = createAbortError(job.label)
+          job.reject(error)
+          this.emitTiming(job, startedAt, nowPerfMs(), 'cancelled')
+          continue
+        }
         job.resolve(result)
         this.emitTiming(job, startedAt, nowPerfMs(), 'completed')
       } catch (err) {
@@ -111,6 +124,8 @@ export class JobQueue {
         const error = err instanceof Error ? err : new Error(String(err))
         job.reject(error)
         this.emitTiming(job, startedAt, nowPerfMs(), 'failed')
+      } finally {
+        this.activeJob = null
       }
     }
 

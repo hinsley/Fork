@@ -800,6 +800,7 @@ export type MapCycleContinuationFromPDRequest = {
 export type MapCycleContinuationResult = ContinuationBranchData
 
 export interface ForkCoreClient {
+  cancelAll?: () => void
   simulateOrbit(
     request: SimulateOrbitRequest,
     opts?: { signal?: AbortSignal }

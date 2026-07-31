@@ -8,6 +8,7 @@
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -154,6 +155,21 @@
   gap: 8px;
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+.toolbar__progress-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar__progress-cancel {
+  min-height: 22px;
+  padding: 2px 6px;
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--panel-border));
+  background: transparent;
+  color: var(--danger);
+  font-size: 0.64rem;
 }
 
 .toolbar__progress-bar {
@@ -3204,7 +3220,15 @@
   }
 
   .toolbar__status {
-    display: none;
+    display: flex;
+    flex: 1 1 100%;
+    order: 3;
+    justify-content: stretch;
+  }
+
+  .toolbar__progress {
+    width: 100%;
+    min-width: 0;
   }
 
   .toolbar__actions .toolbar__button,

@@ -174,6 +174,37 @@ describe('WasmForkCoreClient', () => {
     await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
   })
 
+  it('cancels the active worker request and ignores its late progress', async () => {
+    const client = new WasmForkCoreClient()
+    const onProgress = vi.fn()
+    const controller = new AbortController()
+    const promise = client.runEquilibriumContinuation(
+      {
+        system: baseSystem,
+        equilibriumState: [0],
+        parameterName: 'p',
+        settings: continuationSettings,
+        forward: true,
+      },
+      { signal: controller.signal, onProgress }
+    )
+    await flushQueue()
+
+    const worker = MockWorker.instances[0]
+    const request = worker.posted[0]
+    controller.abort()
+    expect(worker.posted.at(-1)).toMatchObject({ id: request.id, kind: 'cancel' })
+    worker.emit({
+      id: request.id,
+      kind: 'progress',
+      progress: { done: false, current_step: 1, max_steps: 10 },
+    })
+    worker.emit({ id: request.id, ok: true, result: { points: [], bifurcations: [], indices: [] } })
+
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+    expect(onProgress).not.toHaveBeenCalled()
+  })
+
   it('sends computeIsocline requests and resolves geometry', async () => {
     const client = new WasmForkCoreClient()
     const request: ComputeIsoclineRequest = {

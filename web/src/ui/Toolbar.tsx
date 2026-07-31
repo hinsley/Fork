@@ -20,6 +20,7 @@ type ToolbarProps = {
   theme: 'light' | 'dark'
   onThemeChange: (theme: 'light' | 'dark') => void
   onResetFork: () => void
+  onCancelCalculation: () => void
 }
 
 export function Toolbar({
@@ -31,6 +32,7 @@ export function Toolbar({
   theme,
   onThemeChange,
   onResetFork,
+  onCancelCalculation,
 }: ToolbarProps) {
   const formatArclength = (value: number) => {
     if (!Number.isFinite(value)) return 'n/a'
@@ -157,16 +159,26 @@ export function Toolbar({
           <div className="toolbar__progress">
             <div className="toolbar__progress-header">
               <span>{progress.label}</span>
-              {progress.showArclength ? (
-                <span>
+              <span className="toolbar__progress-controls">
+                {progress.showArclength ? (
+                  <span>
                   {formatArclength(progress.arclength ?? progress.currentStep)} /{' '}
                   {formatArclength(progress.arclengthTarget ?? progress.maxSteps)}
-                </span>
-              ) : (
-                <span>
+                  </span>
+                ) : (
+                  <span>
                   {progress.currentStep} / {progress.maxSteps}
-                </span>
-              )}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="toolbar__progress-cancel"
+                  onClick={onCancelCalculation}
+                  data-testid="cancel-calculation"
+                >
+                  Cancel
+                </button>
+              </span>
             </div>
             <div className="toolbar__progress-bar" role="progressbar">
               <div

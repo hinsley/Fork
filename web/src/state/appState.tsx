@@ -2009,6 +2009,7 @@ function reducer(state: AppState, action: AppAction): AppState {
 }
 
 export type AppActions = {
+  cancelCalculation: () => void
   refreshSystems: () => Promise<void>
   createSystem: (name: string) => Promise<void>
   openSystem: (id: string) => Promise<void>
@@ -2203,6 +2204,7 @@ export function AppProvider({
   useEffect(() => {
     const warmupControllers = isoclineWarmupControllersRef.current
     return () => {
+      client.cancelAll?.()
       if (uiSaveTimer.current) clearTimeout(uiSaveTimer.current)
       if (systemSaveTimer.current) clearTimeout(systemSaveTimer.current)
       for (const job of warmupControllers.values()) {
@@ -2211,7 +2213,13 @@ export function AppProvider({
       warmupControllers.clear()
       isoclineWarmupSystemIdRef.current = null
     }
-  }, [])
+  }, [client])
+
+  const cancelCalculation = useCallback(() => {
+    client.cancelAll?.()
+    dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+    dispatch({ type: 'SET_BUSY', busy: false })
+  }, [client])
 
   const scheduleUiSave = useCallback(
     (nextSystem: System) => {
@@ -9660,6 +9668,7 @@ export function AppProvider({
 
   const actions: AppActions = useMemo(
     () => ({
+      cancelCalculation,
       refreshSystems,
       createSystem: createSystemAction,
       openSystem,
@@ -9747,6 +9756,7 @@ export function AppProvider({
       clearError: () => dispatch({ type: 'SET_ERROR', error: null }),
     }),
     [
+      cancelCalculation,
       createEquilibriumObject,
       createForcedPeriodicResponseObject,
       createOrbitObject,
