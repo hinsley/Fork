@@ -3,6 +3,7 @@ export const WORKFLOW_IDS = [
   'parameters-toggle',
   'state-grid-setup-toggle',
   'state-grid-entropy-toggle',
+  'state-grid-transfer-toggle',
   'appearance-toggle',
   'orbit-run-toggle',
   'orbit-data-toggle',

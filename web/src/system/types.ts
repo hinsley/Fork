@@ -1052,7 +1052,7 @@ export interface ExpansionEntropyResult {
 }
 
 export interface TransferOperatorSettings { samplesPerCell: number; iterations: number; maxStationaryIterations: number; tolerance: number; outsidePolicy: 'conditional_in_grid' }
-export interface TransferOperatorResult { analysisType: 'transfer_operator'; dynamicsType: 'map'; axes: StateGridAxis[]; settings: TransferOperatorSettings; parameters: number[]; totalBoxes: number; columnOffsets: number[]; targetIndices: number[]; probabilities: number[]; retainedMass: number; zeroSurvivorSources: number; stationaryDistribution: number[]; residual: number; stationaryIterations: number; computedAt: string }
+export interface TransferOperatorResult { analysisType: 'transfer_operator'; dynamicsType: 'map'; axes: StateGridAxis[]; settings: TransferOperatorSettings; parameters: number[]; subsystemSnapshot?: SubsystemSnapshot; totalBoxes: number; columnOffsets: number[]; targetIndices: number[]; probabilities: number[]; retainedMass: number; zeroSurvivorSources: number; stationaryDistribution: number[]; residual: number; stationaryIterations: number; computedAt: string }
 
 export interface StateGridObject {
   type: 'state_grid'

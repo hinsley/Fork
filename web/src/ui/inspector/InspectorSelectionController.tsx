@@ -210,6 +210,7 @@ type InspectorDetailsPanelProps = {
     request: StateGridComputeRequest,
     opts?: { signal?: AbortSignal }
   ) => Promise<unknown>
+  onComputeTransferOperator?: (request: StateGridComputeRequest, opts?: { signal?: AbortSignal }) => Promise<unknown>
   onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   onUpdateAnalysisViewport?: (
     id: string,
@@ -2217,6 +2218,7 @@ function InspectorSelectionSession(props: InspectorDetailsPanelProps) {
         onRename={props.onRename}
         onUpdate={props.onUpdateStateGridObject}
         onCompute={props.onComputeExpansionEntropy}
+        onComputeTransferOperator={props.onComputeTransferOperator}
         onUpdateObjectParams={props.onUpdateObjectParams}
         onUpdateObjectFrozenVariables={props.onUpdateObjectFrozenVariables}
       />

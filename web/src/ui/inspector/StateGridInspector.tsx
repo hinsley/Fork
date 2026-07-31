@@ -27,6 +27,7 @@ type StateGridInspectorProps = {
     id: string,
     frozenValuesByVarName: Record<string, number>
   ) => void
+  onComputeTransferOperator?: (request: StateGridComputeRequest, opts?: { signal?: AbortSignal }) => Promise<unknown>
 }
 
 function formatCount(value: number): string {
@@ -46,6 +47,7 @@ export function StateGridInspector({
   onCompute,
   onUpdateObjectParams = () => {},
   onUpdateObjectFrozenVariables = () => {},
+  onComputeTransferOperator,
 }: StateGridInspectorProps) {
   const workflowFocus = useWorkflowFocus()
   const [nameDraft, setNameDraft] = useState(object.name)
@@ -91,6 +93,7 @@ export function StateGridInspector({
       label: 'Frozen Variables',
       description: 'Choose variables to hold constant for this object.',
     },
+    { id: 'state-grid-transfer-toggle', group: 'Compute', label: 'Invariant measure', description: 'Compute the conditional State Grid transfer operator.' },
     {
       id: 'parameters-toggle',
       group: 'Configure',
@@ -112,6 +115,7 @@ export function StateGridInspector({
     },
   ]
   const activeWorkflow = workflowFocus ? workflowFocus.activeWorkflow : 'all'
+  const runTransferOperator = async () => { if (!onComputeTransferOperator) return; setRunning(true); try { await onComputeTransferOperator({ stateGridId: nodeId }) } finally { setRunning(false) } }
   const finalEstimate = result?.entropyEstimates.at(-1)
   const plot = useMemo(() => {
     if (!result || result.checkpoints.length === 0) return null
@@ -511,6 +515,7 @@ export function StateGridInspector({
       </section>
       </>
       ) : null}
+      {(activeWorkflow === 'state-grid-transfer-toggle' || activeWorkflow === 'all') && isMap ? <section className="inspector-section"><h3>Invariant measure</h3><p className="inspector-help">Uses this object's configured parameters and frozen variables. Frozen coordinates are embedded as constants and are not State Grid axes.</p><button type="button" onClick={() => void runTransferOperator()} disabled={running || !onComputeTransferOperator}>Calculate invariant measure</button></section> : null}
     </div>
   )
 }
