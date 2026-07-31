@@ -2,6 +2,7 @@ import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
 import { formatContinuationParameterDisplayLabel } from '../../../system/subsystemGateway'
 import { InspectorSubDisclosure } from '../selectionSession'
 import { CollocationAdaptivityFields } from './branch/CollocationAdaptivityFields'
+import { PeriodicLinearSolverField } from './branch/PeriodicLinearSolverField'
 import { OpacityPercentInput } from '../../OpacityPercentInput'
 
 export function OrbitInspectorSections({
@@ -948,6 +949,16 @@ export function OrbitInspectorSections({
                           data-testid="limit-cycle-from-orbit-step-tolerance"
                         />
                       </label>
+                      <PeriodicLinearSolverField
+                        useDenseSolve={limitCycleFromOrbitDraft.useDenseSolve}
+                        onChange={(useDenseSolve) =>
+                          setLimitCycleFromOrbitDraft((prev) => ({
+                            ...prev,
+                            useDenseSolve,
+                          }))
+                        }
+                        testId="limit-cycle-from-orbit-use-dense-solve"
+                      />
                       <CollocationAdaptivityFields
                         draft={limitCycleFromOrbitDraft}
                         onChange={(patch) =>

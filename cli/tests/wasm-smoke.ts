@@ -710,9 +710,41 @@ const periodicBpRunner = new wasm.WasmLimitCycleRunner(
   true
 );
 while (!periodicBpRunner.get_progress().done) periodicBpRunner.run_steps(1);
+const periodicBpSolverStats = periodicBpRunner.get_linear_solver_stats();
+assert.ok(periodicBpSolverStats.structured_attempts > 0);
+assert.equal(
+  periodicBpSolverStats.structured_attempts,
+  periodicBpSolverStats.structured_successes + periodicBpSolverStats.structured_failures
+);
 const periodicBpResult = periodicBpRunner.get_result_with_report();
 assert.ok(periodicBpResult.branch.points.length > 1, 'Expected a continued secondary periodic branch');
 assert.deepEqual(periodicBpResult.branch.branch_type.normalized_mesh, periodicNormalFormMesh);
+const periodicDenseRunner = new wasm.WasmLimitCycleRunner(
+  [
+    '-y+x*(1-x^2-y^2)',
+    'x+y*(1-x^2-y^2)',
+    'a*mu*z+b*z^2',
+  ],
+  new Float64Array([0, 0.7, -1.2]),
+  ['mu', 'a', 'b'],
+  ['x', 'y', 'z'],
+  'flow',
+  periodicBranchSwitch.setup,
+  'mu',
+  {
+    step_size: 0.003,
+    min_step_size: 1e-7,
+    max_step_size: 0.01,
+    max_steps: 0,
+    corrector_steps: 12,
+    corrector_tolerance: 1e-9,
+    step_tolerance: 1e-9,
+    use_dense_periodic_solver: true,
+  },
+  true
+);
+periodicDenseRunner.run_steps(1);
+assert.equal(periodicDenseRunner.get_linear_solver_stats().structured_attempts, 0);
 
 const manifoldRunner = new wasm.WasmEqManifold1DRunner(
   ['x'],
@@ -1271,6 +1303,12 @@ const nsExtensionRunner = new wasm.WasmContinuationExtensionRunner(
 while (!nsExtensionRunner.get_progress().done) {
   nsExtensionRunner.run_steps(1);
 }
+const nsExtensionSolverStats = nsExtensionRunner.get_linear_solver_stats();
+assert.ok(nsExtensionSolverStats.structured_attempts > 0);
+assert.equal(
+  nsExtensionSolverStats.structured_attempts,
+  nsExtensionSolverStats.structured_successes + nsExtensionSolverStats.structured_failures
+);
 const nsExtensionResult = nsExtensionRunner.get_result_with_report();
 assert.ok(nsExtensionResult.collocation_adaptation);
 assert.equal(nsExtensionResult.collocation_adaptation.attempts[0].sequence, 1);
@@ -1279,6 +1317,29 @@ assert.ok(
     nsPriorAdaptation.attempts.length,
   'Expected the extension to append a new mesh adaptation'
 );
+const nsDenseExtensionRunner = new wasm.WasmContinuationExtensionRunner(
+  nsEquations,
+  nsParams,
+  nsParamNames,
+  nsVarNames,
+  'flow',
+  1,
+  nsSeedBranch,
+  'mu',
+  {
+    step_size: 1e-3,
+    min_step_size: 1e-7,
+    max_step_size: 2e-3,
+    max_steps: 0,
+    corrector_steps: 10,
+    corrector_tolerance: 1e-9,
+    step_tolerance: 1e-10,
+    use_dense_periodic_solver: true,
+  },
+  true
+);
+nsDenseExtensionRunner.run_steps(1);
+assert.equal(nsDenseExtensionRunner.get_linear_solver_stats().structured_attempts, 0);
 assert.equal(
   nsExtensionResult.branch.branch_type.ntst,
   nsExtensionResult.collocation_adaptation.current_mesh_points

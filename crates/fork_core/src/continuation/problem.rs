@@ -8,6 +8,28 @@ use super::homoclinic_events::HomoclinicEventDiagnostics;
 use super::types::ContinuationPoint;
 use super::{BifurcationType, BranchType};
 
+pub(crate) fn solve_dense_bordered_linear_system(
+    jacobian: &DMatrix<f64>,
+    border_row: &DVector<f64>,
+    rhs: &DVector<f64>,
+) -> Result<Option<DVector<f64>>> {
+    let dimension = jacobian.nrows();
+    if jacobian.ncols() != dimension + 1
+        || border_row.len() != dimension + 1
+        || rhs.len() != dimension + 1
+    {
+        anyhow::bail!("Bordered linear system dimensions are inconsistent");
+    }
+    let mut bordered = DMatrix::zeros(dimension + 1, dimension + 1);
+    bordered
+        .view_mut((0, 0), (dimension, dimension + 1))
+        .copy_from(jacobian);
+    bordered
+        .row_mut(dimension)
+        .copy_from(&border_row.transpose());
+    Ok(bordered.lu().solve(rhs))
+}
+
 /// Action requested by a continuation problem after a converged trial fails
 /// its a-posteriori acceptance check.
 ///
@@ -154,6 +176,20 @@ pub trait ContinuationProblem {
 
     /// Compute the extended Jacobian (derivative of F w.r.t. [p, x]).
     fn extended_jacobian(&mut self, aug_state: &DVector<f64>) -> Result<DMatrix<f64>>;
+
+    /// Solve a square system formed by appending one row to the extended Jacobian.
+    ///
+    /// Problems with exploitable Jacobian structure may override this operation.
+    /// Returning `None` means the bordered matrix is singular.
+    fn solve_bordered_linear_system(
+        &mut self,
+        _aug_state: &DVector<f64>,
+        jacobian: &DMatrix<f64>,
+        border_row: &DVector<f64>,
+        rhs: &DVector<f64>,
+    ) -> Result<Option<DVector<f64>>> {
+        solve_dense_bordered_linear_system(jacobian, border_row, rhs)
+    }
 
     /// Diagonal weights for the pseudo-arclength inner product on `[p, x]`.
     ///

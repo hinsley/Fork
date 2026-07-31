@@ -1,5 +1,6 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
+import { PeriodicLinearSolverField } from './PeriodicLinearSolverField'
 
 export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -150,6 +151,18 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
                           data-testid="branch-extend-step-tolerance"
                         />
                       </label>
+                      {branch?.branchType === 'limit_cycle' ? (
+                        <PeriodicLinearSolverField
+                          useDenseSolve={branchExtensionDraft.useDenseSolve ?? false}
+                          onChange={(useDenseSolve) =>
+                            setBranchExtensionDraft((prev) => ({
+                              ...prev,
+                              useDenseSolve,
+                            }))
+                          }
+                          testId="branch-extend-use-dense-solve"
+                        />
+                      ) : null}
                       {branch &&
                       (branch.branchType === 'limit_cycle' ||
                         branch.branchType === 'isoperiodic_curve' ||

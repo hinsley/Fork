@@ -7,7 +7,7 @@ use fork_core::continuation::homoclinic::HomoclinicProblem;
 use fork_core::continuation::homoclinic_init::decode_homoclinic_state_with_basis;
 use fork_core::continuation::periodic::{
     uniform_normalized_mesh, CollocationAdaptationReport, CollocationAdaptivitySettings,
-    PeriodicOrbitCollocationProblem,
+    PeriodicLinearSolver, PeriodicOrbitCollocationProblem,
 };
 use fork_core::continuation::{
     decode_homoclinic_shooting_state, heteroclinic_setup_from_point,
@@ -96,6 +96,8 @@ struct ExtensionMergeContext {
 struct ExtensionRunnerOptions {
     #[serde(default)]
     collocation_adaptivity: CollocationAdaptivitySettings,
+    #[serde(default)]
+    use_dense_periodic_solver: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -1499,6 +1501,11 @@ impl WasmContinuationExtensionRunner {
                     options.collocation_adaptivity,
                 )
                 .map_err(|e| JsValue::from_str(&format!("Failed to create LC problem: {}", e)))?;
+                problem.set_linear_solver(if options.use_dense_periodic_solver {
+                    PeriodicLinearSolver::Dense
+                } else {
+                    PeriodicLinearSolver::Structured
+                });
                 if let Some(report) = merge.collocation_adaptation.clone() {
                     problem.seed_adaptation_report(report).map_err(|e| {
                         JsValue::from_str(&format!(
@@ -2197,6 +2204,16 @@ impl WasmContinuationExtensionRunner {
         }
     }
 
+    pub fn get_linear_solver_stats(&self) -> Result<JsValue, JsValue> {
+        match self.runner.as_ref() {
+            Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => {
+                to_value(&runner.problem().linear_solver_stats())
+                    .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+            }
+            _ => Ok(JsValue::NULL),
+        }
+    }
+
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
         let completed = self.take_merged_result()?;
         to_value(&completed).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
@@ -2498,7 +2515,7 @@ impl WasmContinuationExtensionRunner {
 
 #[cfg(test)]
 mod limit_cycle_system_type_tests {
-    use super::validate_limit_cycle_extension_system_type;
+    use super::{validate_limit_cycle_extension_system_type, ExtensionRunnerOptions};
 
     #[test]
     fn limit_cycle_extension_accepts_flows_and_rejects_maps() {
@@ -2506,6 +2523,19 @@ mod limit_cycle_system_type_tests {
         let error = validate_limit_cycle_extension_system_type("map")
             .expect_err("map limit-cycle extension must be rejected");
         assert!(error.contains("flow systems only"));
+    }
+
+    #[test]
+    fn extension_solver_override_defaults_to_structured_and_accepts_dense() {
+        let default_options: ExtensionRunnerOptions =
+            serde_json::from_value(serde_json::json!({})).expect("default extension options");
+        assert!(!default_options.use_dense_periodic_solver);
+
+        let dense_options: ExtensionRunnerOptions = serde_json::from_value(serde_json::json!({
+            "use_dense_periodic_solver": true
+        }))
+        .expect("dense extension options");
+        assert!(dense_options.use_dense_periodic_solver);
     }
 }
 

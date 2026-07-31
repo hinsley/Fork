@@ -4,7 +4,7 @@ use super::runner_boundary::{serialize_js, OwnedContinuationRunner};
 use crate::system::build_system;
 use fork_core::continuation::periodic::{
     correct_limit_cycle_setup_adaptive, prepare_limit_cycle_setup, CollocationAdaptivitySettings,
-    LimitCycleContinuationResult, PeriodicOrbitCollocationProblem,
+    LimitCycleContinuationResult, PeriodicLinearSolver, PeriodicOrbitCollocationProblem,
 };
 use fork_core::continuation::{
     BranchType, ContinuationPoint, ContinuationSettings, LimitCycleSetup,
@@ -24,6 +24,8 @@ fn validate_flow_system_type(system_type: &str) -> anyhow::Result<()> {
 struct LimitCycleRunnerOptions {
     #[serde(default)]
     collocation_adaptivity: CollocationAdaptivitySettings,
+    #[serde(default)]
+    use_dense_periodic_solver: bool,
 }
 
 #[cfg(test)]
@@ -94,6 +96,11 @@ impl WasmLimitCycleRunner {
         let options: LimitCycleRunnerOptions = from_value(settings_val.clone())
             .map_err(|e| JsValue::from_str(&format!("Invalid limit cycle options: {}", e)))?;
         let adaptivity = options.collocation_adaptivity;
+        let linear_solver = if options.use_dense_periodic_solver {
+            PeriodicLinearSolver::Dense
+        } else {
+            PeriodicLinearSolver::Structured
+        };
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -151,6 +158,7 @@ impl WasmLimitCycleRunner {
                     normalized_mesh,
                     adaptivity,
                 )?;
+                problem.set_linear_solver(linear_solver);
                 if let Some(report) = correction_report {
                     problem.seed_adaptation_report(report)?;
                 }
@@ -186,6 +194,10 @@ impl WasmLimitCycleRunner {
 
     pub fn get_adaptation_report(&self) -> Result<JsValue, JsValue> {
         serialize_js(self.runner.problem()?.adaptation_report())
+    }
+
+    pub fn get_linear_solver_stats(&self) -> Result<JsValue, JsValue> {
+        serialize_js(&self.runner.problem()?.linear_solver_stats())
     }
 
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
@@ -257,12 +269,14 @@ mod tests {
             absent.collocation_adaptivity,
             fork_core::continuation::CollocationAdaptivitySettings::default()
         );
+        assert!(!absent.use_dense_periodic_solver);
 
         let partial: LimitCycleRunnerOptions = serde_json::from_value(serde_json::json!({
             "collocation_adaptivity": {
                 "enabled": false,
                 "defect_tolerance": 1.0e-3
-            }
+            },
+            "use_dense_periodic_solver": true
         }))
         .expect("partial adaptivity options");
         assert!(!partial.collocation_adaptivity.enabled);
@@ -270,6 +284,7 @@ mod tests {
         assert!(partial.collocation_adaptivity.redistribution_enabled);
         assert_eq!(partial.collocation_adaptivity.max_refinements, 3);
         assert_eq!(partial.collocation_adaptivity.max_mesh_points, 512);
+        assert!(partial.use_dense_periodic_solver);
     }
 }
 

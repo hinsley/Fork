@@ -6,14 +6,17 @@
 //! `docs/limit_cycle_continuation.md`.
 
 use fork_core::continuation::{
-    continue_limit_cycle_collocation, continue_with_problem, limit_cycle_setup_from_orbit,
-    BifurcationType, BranchType, ContinuationPoint, ContinuationSettings, LPCCurveProblem,
-    NSCurveProblem, OrbitTimeMode,
+    compute_tangent_from_problem, continue_limit_cycle_collocation, continue_with_problem,
+    limit_cycle_setup_from_orbit, BifurcationType, BranchType, ContinuationBranch,
+    ContinuationPoint, ContinuationProblem, ContinuationSettings, LPCCurveProblem, NSCurveProblem,
+    OrbitTimeMode, PeriodicLinearSolver, PeriodicLinearSolverStats,
 };
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 use fork_core::solvers::RK4;
 use fork_core::traits::Steppable;
+use nalgebra::DVector;
 use num_complex::Complex;
+use std::time::{Duration, Instant};
 
 fn compiled_system(
     equations: &[&str],
@@ -277,6 +280,85 @@ fn mlfast_reference_on_grid(
     (lpc.param_value, period)
 }
 
+struct OrdinaryPeriodicPrototypeRun {
+    elapsed: Duration,
+    branch: ContinuationBranch,
+    residual_norm: f64,
+    tangent: DVector<f64>,
+    solver_stats: PeriodicLinearSolverStats,
+}
+
+fn mlfast_ordinary_periodic_prototype_run(
+    orbit_times: &[f64],
+    orbit_states: &[Vec<f64>],
+    ntst: usize,
+    ncol: usize,
+    linear_solver: PeriodicLinearSolver,
+) -> OrdinaryPeriodicPrototypeRun {
+    let initial_y = 0.084;
+    let mut system = mlfast_system(initial_y, 0.1);
+    let setup = limit_cycle_setup_from_orbit(
+        orbit_times,
+        orbit_states,
+        initial_y,
+        ntst,
+        ncol,
+        0.01,
+        OrbitTimeMode::Continuous,
+    )
+    .expect("attracting MLfast Orbit seed");
+    let mut problem = setup
+        .to_problem(&mut system, 0)
+        .expect("collocation problem");
+    problem.set_linear_solver(linear_solver);
+    let aug = setup.guess.to_aug(problem.dimension());
+    let point = ContinuationPoint {
+        state: aug.iter().skip(1).copied().collect(),
+        param_value: setup.guess.param_value,
+        stability: BifurcationType::None,
+        eigenvalues: Vec::new(),
+        cycle_points: None,
+        homoclinic_events: None,
+        heteroclinic_events: None,
+    };
+    let start = Instant::now();
+    let branch = continue_with_problem(
+        &mut problem,
+        point,
+        ContinuationSettings {
+            step_size: 2.0e-3,
+            min_step_size: 1.0e-6,
+            max_step_size: 3.0e-3,
+            max_steps: 240,
+            corrector_steps: 12,
+            corrector_tolerance: 1.0e-9,
+            step_tolerance: 1.0e-10,
+        },
+        true,
+    )
+    .expect("ordinary MLfast continuation");
+    let elapsed = start.elapsed();
+    let final_point = branch.points.last().expect("final periodic point");
+    let mut final_aug = DVector::zeros(problem.dimension() + 1);
+    final_aug[0] = final_point.param_value;
+    final_aug
+        .rows_mut(1, problem.dimension())
+        .copy_from(&DVector::from_vec(final_point.state.clone()));
+    let mut residual = DVector::zeros(problem.dimension());
+    problem
+        .residual(&final_aug, &mut residual)
+        .expect("final periodic residual");
+    let tangent =
+        compute_tangent_from_problem(&mut problem, &final_aug).expect("final periodic tangent");
+    OrdinaryPeriodicPrototypeRun {
+        elapsed,
+        branch,
+        residual_norm: residual.norm(),
+        tangent,
+        solver_stats: problem.linear_solver_stats(),
+    }
+}
+
 fn steinmetz_reference_on_grid(
     orbit_times: &[f64],
     orbit_states: &[Vec<f64>],
@@ -497,6 +579,124 @@ fn mlfast_orbit_reaches_published_lpc_and_continues_curve() {
         (coarse.1 - fine.1).abs() < 2.0e-4,
         "coarse/fine T={coarse:?}/{fine:?}"
     );
+}
+
+#[test]
+#[ignore = "release-mode structured periodic linear-solver prototype benchmark"]
+fn mlfast_structured_periodic_solver_prototype_benchmark() {
+    let system = mlfast_system(0.084, 0.1);
+    let (times, states) = settled_orbit(&system, &[-0.1, 0.2], 0.005, 80_000, 16_000);
+    for (ntst, ncol) in [(20, 4), (32, 4)] {
+        let dense = mlfast_ordinary_periodic_prototype_run(
+            &times,
+            &states,
+            ntst,
+            ncol,
+            PeriodicLinearSolver::Dense,
+        );
+        let structured = mlfast_ordinary_periodic_prototype_run(
+            &times,
+            &states,
+            ntst,
+            ncol,
+            PeriodicLinearSolver::Structured,
+        );
+        assert_eq!(dense.branch.points.len(), structured.branch.points.len());
+        let mut maximum_parameter_difference = 0.0_f64;
+        let mut maximum_state_difference = 0.0_f64;
+        for (dense_point, structured_point) in
+            dense.branch.points.iter().zip(&structured.branch.points)
+        {
+            maximum_parameter_difference = maximum_parameter_difference
+                .max((dense_point.param_value - structured_point.param_value).abs());
+            let state_difference = dense_point
+                .state
+                .iter()
+                .zip(&structured_point.state)
+                .map(|(left, right)| (left - right) * (left - right))
+                .sum::<f64>()
+                .sqrt();
+            maximum_state_difference = maximum_state_difference.max(state_difference);
+        }
+        let dense_lpc = dense
+            .branch
+            .points
+            .iter()
+            .find(|point| point.stability == BifurcationType::CycleFold)
+            .expect("dense LPC");
+        let structured_lpc = structured
+            .branch
+            .points
+            .iter()
+            .find(|point| point.stability == BifurcationType::CycleFold)
+            .expect("structured LPC");
+        let tangent_sign = if dense.tangent.dot(&structured.tangent) < 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        let tangent_difference = (&dense.tangent - tangent_sign * &structured.tangent).norm();
+        assert!(maximum_parameter_difference < 2.0e-10);
+        assert!(maximum_state_difference < 2.0e-8);
+        assert!((dense_lpc.param_value - structured_lpc.param_value).abs() < 2.0e-10);
+        assert!(dense.residual_norm < 1.0e-7);
+        assert!(structured.residual_norm < 1.0e-7);
+        assert!(tangent_difference < 2.0e-8);
+        assert!(structured.solver_stats.structured_attempts > 0);
+
+        let mut dense_times = vec![dense.elapsed.as_secs_f64()];
+        let mut structured_times = vec![structured.elapsed.as_secs_f64()];
+        for _ in 0..2 {
+            dense_times.push(
+                mlfast_ordinary_periodic_prototype_run(
+                    &times,
+                    &states,
+                    ntst,
+                    ncol,
+                    PeriodicLinearSolver::Dense,
+                )
+                .elapsed
+                .as_secs_f64(),
+            );
+            structured_times.push(
+                mlfast_ordinary_periodic_prototype_run(
+                    &times,
+                    &states,
+                    ntst,
+                    ncol,
+                    PeriodicLinearSolver::Structured,
+                )
+                .elapsed
+                .as_secs_f64(),
+            );
+        }
+        dense_times.sort_by(f64::total_cmp);
+        structured_times.sort_by(f64::total_cmp);
+        let dense_seconds = dense_times[1];
+        let structured_seconds = structured_times[1];
+        let full_dimension = ntst * (ncol + 1) * 2 + 2;
+        let reduced_dimension = ntst * 2 + 2;
+        println!(
+            "STRUCTURED_PERIODIC ntst={ntst} ncol={ncol} bordered_dimension={full_dimension} \
+             reduced_dimension={reduced_dimension} dense_seconds={dense_seconds:.6} \
+             structured_seconds={structured_seconds:.6} speedup={:.3} \
+             points={} lpc_dense={:.12} lpc_structured={:.12} max_param_diff={:.3e} \
+             max_state_l2_diff={:.3e} residual_dense={:.3e} residual_structured={:.3e} \
+             tangent_diff={:.3e} attempts={} successes={} failures={}",
+            dense_seconds / structured_seconds,
+            dense.branch.points.len(),
+            dense_lpc.param_value,
+            structured_lpc.param_value,
+            maximum_parameter_difference,
+            maximum_state_difference,
+            dense.residual_norm,
+            structured.residual_norm,
+            tangent_difference,
+            structured.solver_stats.structured_attempts,
+            structured.solver_stats.structured_successes,
+            structured.solver_stats.structured_failures,
+        );
+    }
 }
 
 #[test]

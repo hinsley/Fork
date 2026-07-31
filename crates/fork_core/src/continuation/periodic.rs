@@ -3,7 +3,8 @@ use super::periodic_normal_forms::{
 };
 use super::periodic_schur::periodic_schur_floquet_spectrum;
 use super::problem::{
-    ContinuationProblem, PointDiagnostics, StepRejectionAction, TestFunctionValues,
+    solve_dense_bordered_linear_system, ContinuationProblem, PointDiagnostics, StepRejectionAction,
+    TestFunctionValues,
 };
 use super::{
     continue_with_problem, extend_branch_with_problem, BifurcationType, BranchType,
@@ -1236,6 +1237,21 @@ pub struct PeriodicOrbitCollocationProblem<'a> {
     /// Attempts before this offset were already reflected in a restarted
     /// branch's persisted states and must not be replayed during extension.
     adaptation_transfer_start_index: usize,
+    linear_solver: PeriodicLinearSolver,
+    linear_solver_stats: PeriodicLinearSolverStats,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeriodicLinearSolver {
+    Dense,
+    Structured,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeriodicLinearSolverStats {
+    pub structured_attempts: usize,
+    pub structured_successes: usize,
+    pub structured_failures: usize,
 }
 
 const MAX_SCALED_COLLOCATION_DEFECT: f64 = 2.5e-2;
@@ -1364,7 +1380,17 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
                 termination: None,
             },
             adaptation_transfer_start_index: 0,
+            linear_solver: PeriodicLinearSolver::Dense,
+            linear_solver_stats: PeriodicLinearSolverStats::default(),
         })
+    }
+
+    pub fn set_linear_solver(&mut self, linear_solver: PeriodicLinearSolver) {
+        self.linear_solver = linear_solver;
+    }
+
+    pub fn linear_solver_stats(&self) -> PeriodicLinearSolverStats {
+        self.linear_solver_stats
     }
 
     pub fn adaptation_report(&self) -> &CollocationAdaptationReport {
@@ -1824,6 +1850,195 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
         self.adaptation_report.termination = None;
         Ok(())
     }
+
+    fn solve_structured_bordered_system(
+        &self,
+        jacobian: &DMatrix<f64>,
+        border_row: &DVector<f64>,
+        rhs: &DVector<f64>,
+    ) -> Result<Option<DVector<f64>>> {
+        let state_dimension = self.state_dim();
+        let interval_count = self.mesh_points;
+        let stage_block_dimension = self.degree * state_dimension;
+        let full_dimension = self.dimension() + 1;
+        if jacobian.nrows() + 1 != full_dimension
+            || jacobian.ncols() != full_dimension
+            || border_row.len() != full_dimension
+            || rhs.len() != full_dimension
+        {
+            bail!("Structured periodic solve received inconsistent matrix dimensions");
+        }
+
+        let reduced_mesh_dimension = interval_count * state_dimension;
+        let reduced_dimension = reduced_mesh_dimension + 2;
+        let parameter_column = 0;
+        let period_column = self.period_index();
+        let stage_column_start = self.stage_offset();
+        let continuity_row_start = interval_count * stage_block_dimension;
+        let phase_row = continuity_row_start + reduced_mesh_dimension;
+        let border_row_index = reduced_dimension - 1;
+        let parameter_reduced_column = reduced_mesh_dimension;
+        let period_reduced_column = reduced_mesh_dimension + 1;
+
+        let mut reduced = DMatrix::zeros(reduced_dimension, reduced_dimension);
+        let mut reduced_rhs = DVector::zeros(reduced_dimension);
+        let mut local_rhs_solutions = Vec::with_capacity(interval_count);
+        let mut local_mesh_solutions = Vec::with_capacity(interval_count);
+        let mut local_global_solutions = Vec::with_capacity(interval_count);
+
+        for interval in 0..interval_count {
+            let continuity_row = interval * state_dimension;
+            let full_continuity_row = continuity_row_start + continuity_row;
+            for row in 0..state_dimension {
+                for mesh_column in 0..reduced_mesh_dimension {
+                    reduced[(continuity_row + row, mesh_column)] =
+                        jacobian[(full_continuity_row + row, 1 + mesh_column)];
+                }
+                reduced[(continuity_row + row, parameter_reduced_column)] =
+                    jacobian[(full_continuity_row + row, parameter_column)];
+                reduced[(continuity_row + row, period_reduced_column)] =
+                    jacobian[(full_continuity_row + row, period_column)];
+                reduced_rhs[continuity_row + row] = rhs[full_continuity_row + row];
+            }
+        }
+        for mesh_column in 0..reduced_mesh_dimension {
+            reduced[(reduced_mesh_dimension, mesh_column)] = jacobian[(phase_row, 1 + mesh_column)];
+            reduced[(border_row_index, mesh_column)] = border_row[1 + mesh_column];
+        }
+        reduced[(reduced_mesh_dimension, parameter_reduced_column)] =
+            jacobian[(phase_row, parameter_column)];
+        reduced[(reduced_mesh_dimension, period_reduced_column)] =
+            jacobian[(phase_row, period_column)];
+        reduced[(border_row_index, parameter_reduced_column)] = border_row[parameter_column];
+        reduced[(border_row_index, period_reduced_column)] = border_row[period_column];
+        reduced_rhs[reduced_mesh_dimension] = rhs[phase_row];
+        reduced_rhs[border_row_index] = rhs[full_dimension - 1];
+
+        for interval in 0..interval_count {
+            let stage_row = interval * stage_block_dimension;
+            let stage_column = stage_column_start + interval * stage_block_dimension;
+            let mesh_column = interval * state_dimension;
+            let full_mesh_column = 1 + mesh_column;
+            let continuity_row = interval * state_dimension;
+            let full_continuity_row = continuity_row_start + continuity_row;
+
+            let stage_block = jacobian
+                .view(
+                    (stage_row, stage_column),
+                    (stage_block_dimension, stage_block_dimension),
+                )
+                .into_owned();
+            let stage_lu = stage_block.lu();
+            let local_rhs = rhs.rows(stage_row, stage_block_dimension).into_owned();
+            let local_mesh = jacobian
+                .view(
+                    (stage_row, full_mesh_column),
+                    (stage_block_dimension, state_dimension),
+                )
+                .into_owned();
+            let mut local_globals = DMatrix::zeros(stage_block_dimension, 2);
+            local_globals.column_mut(0).copy_from(
+                &jacobian
+                    .column(parameter_column)
+                    .rows(stage_row, stage_block_dimension),
+            );
+            local_globals.column_mut(1).copy_from(
+                &jacobian
+                    .column(period_column)
+                    .rows(stage_row, stage_block_dimension),
+            );
+
+            let Some(solved_rhs) = stage_lu.solve(&local_rhs) else {
+                return Ok(None);
+            };
+            let Some(solved_mesh) = stage_lu.solve(&local_mesh) else {
+                return Ok(None);
+            };
+            let Some(solved_globals) = stage_lu.solve(&local_globals) else {
+                return Ok(None);
+            };
+
+            let continuity_stage = jacobian
+                .view(
+                    (full_continuity_row, stage_column),
+                    (state_dimension, stage_block_dimension),
+                )
+                .into_owned();
+            let continuity_mesh_update = &continuity_stage * &solved_mesh;
+            let continuity_global_update = &continuity_stage * &solved_globals;
+            let continuity_rhs_update = &continuity_stage * &solved_rhs;
+            for row in 0..state_dimension {
+                for column in 0..state_dimension {
+                    reduced[(continuity_row + row, mesh_column + column)] -=
+                        continuity_mesh_update[(row, column)];
+                }
+                reduced[(continuity_row + row, parameter_reduced_column)] -=
+                    continuity_global_update[(row, 0)];
+                reduced[(continuity_row + row, period_reduced_column)] -=
+                    continuity_global_update[(row, 1)];
+                reduced_rhs[continuity_row + row] -= continuity_rhs_update[row];
+            }
+
+            let phase_stage = jacobian
+                .row(phase_row)
+                .columns(stage_column, stage_block_dimension)
+                .into_owned();
+            let phase_mesh_update = &phase_stage * &solved_mesh;
+            let phase_global_update = &phase_stage * &solved_globals;
+            let phase_rhs_update = (&phase_stage * &solved_rhs)[0];
+            let border_stage = border_row
+                .rows(stage_column, stage_block_dimension)
+                .transpose();
+            let border_mesh_update = &border_stage * &solved_mesh;
+            let border_global_update = &border_stage * &solved_globals;
+            let border_rhs_update = (&border_stage * &solved_rhs)[0];
+            for column in 0..state_dimension {
+                reduced[(reduced_mesh_dimension, mesh_column + column)] -=
+                    phase_mesh_update[(0, column)];
+                reduced[(border_row_index, mesh_column + column)] -=
+                    border_mesh_update[(0, column)];
+            }
+            reduced[(reduced_mesh_dimension, parameter_reduced_column)] -=
+                phase_global_update[(0, 0)];
+            reduced[(reduced_mesh_dimension, period_reduced_column)] -= phase_global_update[(0, 1)];
+            reduced[(border_row_index, parameter_reduced_column)] -= border_global_update[(0, 0)];
+            reduced[(border_row_index, period_reduced_column)] -= border_global_update[(0, 1)];
+            reduced_rhs[reduced_mesh_dimension] -= phase_rhs_update;
+            reduced_rhs[border_row_index] -= border_rhs_update;
+
+            local_rhs_solutions.push(solved_rhs);
+            local_mesh_solutions.push(solved_mesh);
+            local_global_solutions.push(solved_globals);
+        }
+
+        let Some(reduced_solution) = reduced.lu().solve(&reduced_rhs) else {
+            return Ok(None);
+        };
+        let mut solution = DVector::zeros(full_dimension);
+        solution[parameter_column] = reduced_solution[parameter_reduced_column];
+        solution[period_column] = reduced_solution[period_reduced_column];
+        for mesh_column in 0..reduced_mesh_dimension {
+            solution[1 + mesh_column] = reduced_solution[mesh_column];
+        }
+        let global_solution = DVector::from_vec(vec![
+            reduced_solution[parameter_reduced_column],
+            reduced_solution[period_reduced_column],
+        ]);
+        for interval in 0..interval_count {
+            let mesh_column = interval * state_dimension;
+            let stage_column = stage_column_start + interval * stage_block_dimension;
+            let mesh_solution = reduced_solution
+                .rows(mesh_column, state_dimension)
+                .into_owned();
+            let stage_solution = &local_rhs_solutions[interval]
+                - &local_mesh_solutions[interval] * mesh_solution
+                - &local_global_solutions[interval] * &global_solution;
+            solution
+                .rows_mut(stage_column, stage_block_dimension)
+                .copy_from(&stage_solution);
+        }
+        Ok(Some(solution))
+    }
 }
 
 impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
@@ -2049,6 +2264,42 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
         }
 
         Ok(jac)
+    }
+
+    fn solve_bordered_linear_system(
+        &mut self,
+        _aug_state: &DVector<f64>,
+        jacobian: &DMatrix<f64>,
+        border_row: &DVector<f64>,
+        rhs: &DVector<f64>,
+    ) -> Result<Option<DVector<f64>>> {
+        if self.linear_solver == PeriodicLinearSolver::Dense {
+            return solve_dense_bordered_linear_system(jacobian, border_row, rhs);
+        }
+        self.linear_solver_stats.structured_attempts += 1;
+        if let Some(solution) = self.solve_structured_bordered_system(jacobian, border_row, rhs)? {
+            let top_residual = jacobian * &solution - rhs.rows(0, jacobian.nrows());
+            let bottom_residual = border_row.dot(&solution) - rhs[jacobian.nrows()];
+            let residual_norm =
+                (top_residual.norm_squared() + bottom_residual * bottom_residual).sqrt();
+            let matrix_scale = jacobian.norm().hypot(border_row.norm()).max(1.0);
+            let tolerance =
+                1.0e-10 * (matrix_scale * solution.norm().max(1.0) + rhs.norm().max(1.0));
+            if residual_norm.is_finite() && residual_norm <= tolerance {
+                self.linear_solver_stats.structured_successes += 1;
+                return Ok(Some(solution));
+            }
+            self.linear_solver_stats.structured_failures += 1;
+            bail!(
+                "Structured periodic solve produced an unacceptable full residual ({:.3e} > {:.3e}). Rerun with \"Use dense solve (slower)\" enabled.",
+                residual_norm,
+                tolerance
+            );
+        }
+        self.linear_solver_stats.structured_failures += 1;
+        bail!(
+            "Structured periodic solve could not factor its local or reduced system. Rerun with \"Use dense solve (slower)\" enabled."
+        )
     }
 
     fn classify_bifurcation(
@@ -4728,6 +4979,73 @@ mod tests {
         assert!((coarse - 1.0).abs() < 1e-12, "coarse norm={coarse}");
         assert!((fine - 1.0).abs() < 1e-12, "fine norm={fine}");
         assert!((coarse - fine).abs() < 1e-12);
+    }
+
+    #[test]
+    fn structured_periodic_bordered_solve_matches_dense_lu() {
+        let mut system = parameterized_stuart_landau_system(0.0);
+        let setup = limit_cycle_setup_from_hopf(&mut system, 0, &[0.0, 0.0], 0.0, 8, 3, 5.0e-2)
+            .expect("Hopf cycle setup");
+        let mut problem = setup
+            .to_problem(&mut system, 0)
+            .expect("collocation problem");
+        let aug = setup.guess.to_aug(problem.dimension());
+        let jac = problem.extended_jacobian(&aug).expect("extended Jacobian");
+        let mut border = DVector::zeros(problem.dimension() + 1);
+        border[0] = 1.0;
+        border[problem.period_index()] = -0.25;
+        border[3] = 0.5;
+        let mut rhs = DVector::zeros(problem.dimension() + 1);
+        for (index, value) in rhs.iter_mut().enumerate() {
+            *value = ((index + 1) as f64).sin();
+        }
+
+        let mut dense = DMatrix::zeros(problem.dimension() + 1, problem.dimension() + 1);
+        dense
+            .view_mut((0, 0), (problem.dimension(), problem.dimension() + 1))
+            .copy_from(&jac);
+        dense
+            .row_mut(problem.dimension())
+            .copy_from(&border.transpose());
+        let expected = dense.clone().lu().solve(&rhs).expect("dense solve");
+        let actual = problem
+            .solve_structured_bordered_system(&jac, &border, &rhs)
+            .expect("structured solve")
+            .expect("nonsingular structured solve");
+
+        let relative_difference = (&actual - &expected).norm() / expected.norm().max(1.0);
+        assert!(
+            relative_difference < 1.0e-11,
+            "relative solution difference={relative_difference:.3e}"
+        );
+        let residual = dense * actual - rhs;
+        assert!(
+            residual.norm() < 1.0e-10,
+            "residual={:.3e}",
+            residual.norm()
+        );
+    }
+
+    #[test]
+    fn structured_periodic_solve_reports_a_singular_local_block() {
+        let mut system = constant_flow_system();
+        let mut problem =
+            PeriodicOrbitCollocationProblem::new(&mut system, 0, 4, 2, vec![0.0], vec![1.0])
+                .expect("problem");
+        problem.set_linear_solver(PeriodicLinearSolver::Structured);
+        let dimension = problem.dimension();
+        let jacobian = DMatrix::zeros(dimension, dimension + 1);
+        let border = DVector::zeros(dimension + 1);
+        let rhs = DVector::zeros(dimension + 1);
+
+        let error = problem
+            .solve_bordered_linear_system(&DVector::zeros(dimension + 1), &jacobian, &border, &rhs)
+            .expect_err("structured failure");
+
+        assert!(
+            error.to_string().contains("Use dense solve (slower)"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

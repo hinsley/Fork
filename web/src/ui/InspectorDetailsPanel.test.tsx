@@ -3130,6 +3130,7 @@ describe('InspectorDetailsPanel', () => {
     await user.type(screen.getByTestId('limit-cycle-from-orbit-corrector-tolerance'), '1e-6')
     await user.clear(screen.getByTestId('limit-cycle-from-orbit-step-tolerance'))
     await user.type(screen.getByTestId('limit-cycle-from-orbit-step-tolerance'), '1e-6')
+    expect(screen.getByTestId('limit-cycle-from-orbit-use-dense-solve')).not.toBeChecked()
     await user.click(screen.getByTestId('limit-cycle-from-orbit-submit'))
 
     expect(onCreateLimitCycleFromOrbit).toHaveBeenCalledWith({
@@ -3148,6 +3149,7 @@ describe('InspectorDetailsPanel', () => {
         corrector_steps: 10,
         corrector_tolerance: 1e-6,
         step_tolerance: 1e-6,
+        use_dense_periodic_solver: false,
         collocation_adaptivity: {
           enabled: true,
           redistribution_enabled: true,
@@ -3159,6 +3161,67 @@ describe('InspectorDetailsPanel', () => {
       forward: false,
     })
   }, 15000)
+
+  it('restores and submits the dense override for limit cycle branch extension', async () => {
+    const user = userEvent.setup()
+    const { system } = createPeriodDoublingSystem()
+    const branchId = Object.keys(system.branches)[0]
+    if (!branchId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+    system.branches[branchId] = {
+      ...system.branches[branchId],
+      settings: {
+        ...system.branches[branchId].settings,
+        use_dense_periodic_solver: true,
+      },
+    }
+    const onExtendBranch = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={branchId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={onExtendBranch}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-extend-toggle'))
+    expect(screen.getByTestId('branch-extend-use-dense-solve')).toBeChecked()
+    expect(screen.getByText('Use dense solve (slower)')).toBeVisible()
+    await user.click(screen.getByTestId('branch-extend-submit'))
+
+    expect(onExtendBranch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branchId,
+        settings: expect.objectContaining({
+          use_dense_periodic_solver: true,
+        }),
+      })
+    )
+  })
 
   it('hides limit cycle menu for map orbits', () => {
     const config: SystemConfig = {
@@ -5682,6 +5745,7 @@ describe('InspectorDetailsPanel', () => {
         corrector_steps: 10,
         corrector_tolerance: 1e-6,
         step_tolerance: 1e-6,
+        use_dense_periodic_solver: false,
         collocation_adaptivity: {
           enabled: true,
           redistribution_enabled: true,
@@ -8152,6 +8216,7 @@ describe('InspectorDetailsPanel', () => {
     expect((screen.getByTestId('branch-extend-step-size') as HTMLInputElement).value).toBe(
       '0.01'
     )
+    expect(screen.queryByTestId('branch-extend-use-dense-solve')).toBeNull()
     await user.click(screen.getByTestId('branch-extend-submit'))
 
     expect(onExtendBranch).toHaveBeenCalledWith(

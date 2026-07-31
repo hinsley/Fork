@@ -153,7 +153,8 @@ pub use periodic::{
     CollocationDefectEstimate, CollocationDefectTermination, CollocationDefectTerminationError,
     CollocationDefectTerminationReason, CollocationMeshAdaptationKind,
     CollocationRefinementAttempt, FloquetBackend, FloquetModeVectors, LimitCycleContinuationResult,
-    LimitCycleGuess, LimitCycleSetup, OrbitTimeMode,
+    LimitCycleGuess, LimitCycleSetup, OrbitTimeMode, PeriodicLinearSolver,
+    PeriodicLinearSolverStats, PeriodicOrbitCollocationProblem,
 };
 pub use periodic_normal_forms::{
     periodic_branch_point_normal_form, periodic_branch_point_normal_form_with_settings,
@@ -2468,12 +2469,13 @@ pub fn compute_tangent_from_problem<P: ContinuationProblem>(
     let jacobian_scale = jac.norm().max(1.0);
     let mut tangent = None;
     for border_index in [0, dim, 1] {
-        let mut bordered = DMatrix::zeros(dim + 1, dim + 1);
-        bordered.view_mut((0, 0), (dim, dim + 1)).copy_from(&jac);
-        bordered[(dim, border_index.min(dim))] = 1.0;
+        let mut border = DVector::zeros(dim + 1);
+        border[border_index.min(dim)] = 1.0;
         let mut rhs = DVector::zeros(dim + 1);
         rhs[dim] = 1.0;
-        if let Some(candidate) = bordered.lu().solve(&rhs) {
+        if let Some(candidate) =
+            problem.solve_bordered_linear_system(aug_state, &jac, &border, &rhs)?
+        {
             if candidate.iter().all(|value| value.is_finite()) && candidate.norm_squared() > 1e-24 {
                 let relative_residual =
                     (&jac * &candidate).norm() / (jacobian_scale * candidate.norm().max(1.0));
@@ -2627,16 +2629,11 @@ fn correct_with_problem<P: ContinuationProblem>(
         // Get the extended Jacobian [dF/dp | dF/dx], dim x (dim+1)
         let jac = problem.extended_jacobian(&current)?;
 
-        // Build bordered Jacobian: [J; v'] is (dim+1) x (dim+1)
-        let mut bordered = DMatrix::zeros(dim + 1, dim + 1);
-        for i in 0..dim {
-            for j in 0..(dim + 1) {
-                bordered[(i, j)] = jac[(i, j)];
-            }
-        }
+        // Build the PALC row appended to the extended Jacobian.
+        let mut border = DVector::zeros(dim + 1);
         let weights = validated_palc_weights(problem, prev_aug)?;
         for j in 0..(dim + 1) {
-            bordered[(dim, j)] = weights[j] * prev_tangent[j];
+            border[j] = weights[j] * prev_tangent[j];
         }
 
         // Build extended RHS: [-F; 0] to keep Newton corrections orthogonal
@@ -2647,9 +2644,7 @@ fn correct_with_problem<P: ContinuationProblem>(
         }
         rhs[dim] = 0.0;
 
-        // Solve bordered system
-        let lu = bordered.lu();
-        if let Some(delta) = lu.solve(&rhs) {
+        if let Some(delta) = problem.solve_bordered_linear_system(&current, &jac, &border, &rhs)? {
             let delta_norm = palc_norm(problem, &current, &delta)?;
 
             if !delta_norm.is_finite() {

@@ -1,6 +1,7 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
+import { PeriodicLinearSolverField } from './PeriodicLinearSolverField'
 
 export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -289,6 +290,16 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                               data-testid="limit-cycle-from-hopf-step-tolerance"
                             />
                           </label>
+                          <PeriodicLinearSolverField
+                            useDenseSolve={limitCycleFromHopfDraft.useDenseSolve}
+                            onChange={(useDenseSolve) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                useDenseSolve,
+                              }))
+                            }
+                            testId="limit-cycle-from-hopf-use-dense-solve"
+                          />
                           <CollocationAdaptivityFields
                             draft={limitCycleFromHopfDraft}
                             onChange={(patch) =>

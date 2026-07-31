@@ -1,5 +1,6 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
+import { PeriodicLinearSolverField } from './PeriodicLinearSolverField'
 
 export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -259,13 +260,25 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
                           />
                         </label>
                         {systemDraft.type === 'flow' ? (
-                          <CollocationAdaptivityFields
-                            draft={limitCycleFromPDDraft}
-                            onChange={(patch) =>
-                              setLimitCycleFromPDDraft((prev) => ({ ...prev, ...patch }))
-                            }
-                            testIdPrefix="limit-cycle-from-pd"
-                          />
+                          <>
+                            <PeriodicLinearSolverField
+                              useDenseSolve={limitCycleFromPDDraft.useDenseSolve}
+                              onChange={(useDenseSolve) =>
+                                setLimitCycleFromPDDraft((prev) => ({
+                                  ...prev,
+                                  useDenseSolve,
+                                }))
+                              }
+                              testId="limit-cycle-from-pd-use-dense-solve"
+                            />
+                            <CollocationAdaptivityFields
+                              draft={limitCycleFromPDDraft}
+                              onChange={(patch) =>
+                                setLimitCycleFromPDDraft((prev) => ({ ...prev, ...patch }))
+                              }
+                              testIdPrefix="limit-cycle-from-pd"
+                            />
+                          </>
                         ) : null}
                         {limitCycleFromPDError ? (
                           <div className="field-error">{limitCycleFromPDError}</div>

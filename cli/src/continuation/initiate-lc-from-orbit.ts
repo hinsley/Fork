@@ -106,6 +106,7 @@ export async function initiateLCFromOrbit(
   let correctorStepsInput = '10';
   let correctorToleranceInput = '1e-6';
   let stepToleranceInput = '1e-6';
+  let useDenseSolve = false;
   const adaptivityInputs = defaultCollocationAdaptivityInputs();
 
   const directionLabel = (forward: boolean) =>
@@ -295,6 +296,21 @@ export async function initiateLCFromOrbit(
         });
         correctorToleranceInput = value;
       }
+    },
+    {
+      id: 'useDenseSolve',
+      label: 'Use dense solve (slower)',
+      section: 'Corrector Settings',
+      getDisplay: () => (useDenseSolve ? 'Yes' : 'No'),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          type: 'confirm',
+          name: 'value',
+          message: 'Use dense solve (slower)',
+          default: useDenseSolve
+        });
+        useDenseSolve = value;
+      }
     }
   ];
 
@@ -336,6 +352,7 @@ export async function initiateLCFromOrbit(
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-6), Number.EPSILON),
     step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON),
+    use_dense_periodic_solver: useDenseSolve,
     collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs),
   };
 

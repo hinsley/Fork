@@ -75,6 +75,7 @@ You'll be prompted for:
 | Direction | forward | Continue in positive or negative parameter direction |
 | Step size | 0.01 | Initial continuation step size |
 | Max points | 50 | Maximum continuation steps |
+| Use dense solve (slower) | unchecked | Use dense LU instead of the structured periodic corrector and tangent solve |
 | Adaptive collocation mesh | enabled | Retry an under-resolved accepted frontier on an adapted mesh |
 | Redistribute before refinement | enabled | Move the existing intervals once before adding intervals |
 | Defect tolerance | 0.025 | Maximum scaled independent off-node defect |
@@ -83,6 +84,12 @@ You'll be prompted for:
 
 Additional settings (min/max step size, corrector steps, corrector tolerance, step tolerance) are
 available in the CLI configuration menu and the web Inspector for tighter control.
+
+Unchecked runs use the structured solver for ordinary periodic-orbit corrector and tangent systems.
+Fork does not switch solvers automatically. If a structured factorization or full-residual check
+fails, the run reports an error and can be repeated with **Use dense solve (slower)** enabled.
+Fixed-parameter initialization, Floquet diagnostics, special-cycle curves, and their extension paths
+continue to use their existing dense solves.
 
 ### Step 3: View Results
 
@@ -155,6 +162,7 @@ System Menu → Objects → [select orbit] → Create Limit Cycle Object (from t
 | Step size | 0.01 | Initial continuation step size |
 | Direction | forward | Parameter direction |
 | Max points | 50 | Continuation steps |
+| Use dense solve (slower) | unchecked | Use dense LU instead of the structured periodic corrector and tangent solve |
 | Adaptive collocation mesh | enabled | Retry an under-resolved accepted frontier on an adapted mesh |
 | Redistribute before refinement | enabled | Move the existing intervals once before adding intervals |
 | Defect tolerance | 0.025 | Maximum scaled independent off-node defect |

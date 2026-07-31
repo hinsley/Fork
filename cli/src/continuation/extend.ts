@@ -566,6 +566,7 @@ export async function extendBranch(
   let directionForward = true;
   let maxStepsInput = '300';
   let stepSizeInput = defaults.step_size?.toString() || '0.01';
+  let useDenseSolve = defaults.use_dense_periodic_solver ?? false;
   const supportsAdaptiveCollocation = [
     'limit_cycle',
     'lpc_curve',
@@ -646,6 +647,23 @@ export async function extendBranch(
   if (supportsAdaptiveCollocation) {
     entries.push(...collocationAdaptivityEntries(adaptivityInputs));
   }
+  if (branch.branchType === 'limit_cycle') {
+    entries.push({
+      id: 'useDenseSolve',
+      label: 'Use dense solve (slower)',
+      section: 'Extension Settings',
+      getDisplay: () => (useDenseSolve ? 'Yes' : 'No'),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          type: 'confirm',
+          name: 'value',
+          message: 'Use dense solve (slower)',
+          default: useDenseSolve
+        });
+        useDenseSolve = value;
+      }
+    });
+  }
 
   const result = await runConfigMenu(`Extend Branch: ${branch.name}`, entries);
   if (result === 'back') {
@@ -663,6 +681,9 @@ export async function extendBranch(
         : defaults.corrector_steps || 4,
     corrector_tolerance: defaults.corrector_tolerance || 1e-6,
     step_tolerance: defaults.step_tolerance || 1e-6,
+    ...(branch.branchType === 'limit_cycle'
+      ? { use_dense_periodic_solver: useDenseSolve }
+      : {}),
     ...(supportsAdaptiveCollocation
       ? { collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs) }
       : {}),

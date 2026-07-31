@@ -201,6 +201,7 @@ export interface ContinuationSettings {
   corrector_steps: number
   corrector_tolerance: number
   step_tolerance: number
+  use_dense_periodic_solver?: boolean
   collocation_adaptivity?: CollocationAdaptivitySettings
   homoclinic_discretization?: 'collocation' | 'shooting'
   shooting_intervals?: number

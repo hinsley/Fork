@@ -391,6 +391,7 @@ type LimitCycleFromOrbitDraft = CollocationAdaptivityDraft & {
   correctorSteps: string
   correctorTolerance: string
   stepTolerance: string
+  useDenseSolve: boolean
   forward: boolean
 }
 
@@ -408,6 +409,7 @@ type LimitCycleFromHopfDraft = CollocationAdaptivityDraft & {
   correctorSteps: string
   correctorTolerance: string
   stepTolerance: string
+  useDenseSolve: boolean
   forward: boolean
 }
 
@@ -422,6 +424,7 @@ type LimitCycleFromPDDraft = CollocationAdaptivityDraft & {
   correctorSteps: string
   correctorTolerance: string
   stepTolerance: string
+  useDenseSolve: boolean
   forward: boolean
 }
 
@@ -591,6 +594,7 @@ type ContinuationDraft = CollocationAdaptivityDraft & {
   correctorSteps: string
   correctorTolerance: string
   stepTolerance: string
+  useDenseSolve?: boolean
   forward: boolean
 }
 
@@ -1343,6 +1347,7 @@ function makeLimitCycleFromOrbitDraft(system: SystemConfig): LimitCycleFromOrbit
     correctorSteps: '10',
     correctorTolerance: '1e-6',
     stepTolerance: '1e-6',
+    useDenseSolve: false,
     adaptiveCollocationEnabled: true,
     adaptiveRedistributionEnabled: true,
     adaptiveDefectTolerance: '0.025',
@@ -1367,6 +1372,7 @@ function makeLimitCycleFromHopfDraft(system: SystemConfig): LimitCycleFromHopfDr
     correctorSteps: '10',
     correctorTolerance: '1e-6',
     stepTolerance: '1e-6',
+    useDenseSolve: false,
     adaptiveCollocationEnabled: true,
     adaptiveRedistributionEnabled: true,
     adaptiveDefectTolerance: '0.025',
@@ -1388,6 +1394,7 @@ function makeLimitCycleFromPDDraft(): LimitCycleFromPDDraft {
     correctorSteps: '10',
     correctorTolerance: '1e-6',
     stepTolerance: '1e-6',
+    useDenseSolve: false,
     adaptiveCollocationEnabled: true,
     adaptiveRedistributionEnabled: true,
     adaptiveDefectTolerance: '0.025',
@@ -1719,6 +1726,7 @@ function makeContinuationDraft(system: SystemConfig): ContinuationDraft {
     correctorSteps: '4',
     correctorTolerance: '1e-6',
     stepTolerance: '1e-6',
+    useDenseSolve: false,
     adaptiveCollocationEnabled: true,
     adaptiveRedistributionEnabled: true,
     adaptiveDefectTolerance: '0.025',
@@ -1773,6 +1781,7 @@ function makeBranchExtensionDraft(
         : defaults?.corrector_steps?.toString() ?? fallbackCorrectorSteps,
     correctorTolerance: defaults?.corrector_tolerance?.toString() ?? base.correctorTolerance,
     stepTolerance: defaults?.step_tolerance?.toString() ?? base.stepTolerance,
+    useDenseSolve: defaults?.use_dense_periodic_solver ?? false,
     forward: true,
   }
 }
@@ -1904,6 +1913,7 @@ function buildContinuationSettings(draft: ContinuationDraft) {
       corrector_steps: Math.max(Math.trunc(correctorSteps), 1),
       corrector_tolerance: Math.max(correctorTolerance, Number.EPSILON),
       step_tolerance: Math.max(stepTolerance, Number.EPSILON),
+      use_dense_periodic_solver: draft.useDenseSolve ?? false,
       collocation_adaptivity: collocationAdaptivity,
     },
     error: null,
