@@ -54,12 +54,23 @@ export default defineConfig({
   resolve: {
     alias: {
       '@fork-wasm': path.resolve(__dirname, '..', 'crates', 'fork_wasm', 'pkg-web'),
+      '@fork-wasm-threads': path.resolve(
+        __dirname,
+        '..',
+        'crates',
+        'fork_wasm',
+        'pkg-web-threads'
+      ),
     },
   },
   worker: {
     format: 'es',
   },
   server: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    },
     fs: {
       allow: [path.resolve(__dirname, '..'), path.resolve(__dirname, '..', 'crates')],
     },

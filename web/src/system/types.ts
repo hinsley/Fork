@@ -1048,6 +1048,8 @@ export interface ExpansionEntropyResult {
   totalSamples: number
   maxLogConditionNumber: number
   conditioningWarning: boolean
+  executionMode?: 'parallel' | 'serial'
+  workerCount?: number
   computedAt: string
 }
 

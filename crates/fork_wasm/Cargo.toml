@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+default = []
+wasm-threads = ["fork_core/parallel", "dep:wasm-bindgen-rayon"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -20,6 +24,9 @@ console_error_panic_hook = "0.1.7"
 nalgebra = "0.34"  # DEBUG_PD_CURVE: Added for debug residual computation
 anyhow = "1.0"
 num-complex = { version = "0.4", features = ["serde"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-rayon = { version = "1.3", optional = true }
 
 [dev-dependencies]
 serde_json = "1.0"

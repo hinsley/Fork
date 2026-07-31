@@ -492,6 +492,13 @@ export function StateGridInspector({
               {result.horizonKind === 'iteration' ? 'finite iteration' : 'finite time'}, finite
               ensemble (State Grid), and region restricted.
             </p>
+            {result.executionMode ? (
+              <p className="inspector-help">
+                Runtime: {result.executionMode === 'parallel'
+                  ? `${result.workerCount ?? 1} Rust/WASM workers`
+                  : 'serial Rust/WASM fallback'}.
+              </p>
+            ) : null}
             {result.conditioningWarning ? (
               <p className="inspector-error">
                 Tangent conditioning exceeded the reliable floating-point range for at least one

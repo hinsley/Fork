@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ContinuationProgress } from '../ForkCoreClient'
 import {
   runAdaptiveSteppedRunnerToCompletion,
+  runRustScheduledRunnerToCompletionAsync,
   runSteppedRunnerToCompletion,
   runSteppedRunnerToCompletionAsync,
 } from './steppedRunner'
@@ -137,6 +138,48 @@ describe('runSteppedRunnerToCompletion', () => {
       })
     ).rejects.toMatchObject({ name: 'AbortError' })
     expect(runSteps).toHaveBeenCalledTimes(1)
+    expect(runner.get_result).not.toHaveBeenCalled()
+  })
+
+  it('lets a Rust-scheduled runner choose each unit of work', async () => {
+    let currentStep = 0
+    const runner = {
+      get_progress: vi.fn(() => makeProgress(0, 257, false)),
+      advance: vi.fn(() => {
+        currentStep = Math.min(257, currentStep + 128)
+        return makeProgress(currentStep, 257, currentStep === 257)
+      }),
+      cancel: vi.fn(),
+      get_result: vi.fn(() => 'complete'),
+    }
+
+    await expect(runRustScheduledRunnerToCompletionAsync(
+      runner,
+      new AbortController().signal,
+      vi.fn()
+    )).resolves.toBe('complete')
+    expect(runner.advance).toHaveBeenCalledTimes(3)
+    expect(runner.cancel).not.toHaveBeenCalled()
+  })
+
+  it('cancels a Rust-scheduled runner and never publishes a late result', async () => {
+    const controller = new AbortController()
+    const runner = {
+      get_progress: vi.fn(() => makeProgress(0, 256, false)),
+      advance: vi.fn(() => makeProgress(128, 256, false)),
+      cancel: vi.fn(),
+      get_result: vi.fn(() => 'late result'),
+    }
+
+    await expect(runRustScheduledRunnerToCompletionAsync(
+      runner,
+      controller.signal,
+      (progress) => {
+        if (progress.current_step > 0) controller.abort()
+      }
+    )).rejects.toMatchObject({ name: 'AbortError' })
+    expect(runner.cancel).toHaveBeenCalledTimes(1)
+    expect(runner.advance).toHaveBeenCalledTimes(1)
     expect(runner.get_result).not.toHaveBeenCalled()
   })
 

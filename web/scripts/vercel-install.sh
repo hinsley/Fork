@@ -12,6 +12,7 @@ if ! command -v rustup >/dev/null 2>&1; then
 fi
 
 rustup target add wasm32-unknown-unknown
+rustup toolchain install nightly-2025-11-15 --profile minimal --component rust-src --target wasm32-unknown-unknown
 
 if ! command -v wasm-pack >/dev/null 2>&1; then
   cargo install --locked wasm-pack

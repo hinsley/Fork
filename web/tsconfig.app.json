@@ -7,7 +7,8 @@
     "module": "ESNext",
     "baseUrl": ".",
     "paths": {
-      "@fork-wasm": ["../crates/fork_wasm/pkg-web"]
+      "@fork-wasm": ["../crates/fork_wasm/pkg-web"],
+      "@fork-wasm-threads": ["../crates/fork_wasm/pkg-web-threads"]
     },
     "types": ["vite/client", "vitest/globals"],
     "skipLibCheck": true,

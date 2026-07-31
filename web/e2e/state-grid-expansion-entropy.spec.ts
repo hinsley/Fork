@@ -15,6 +15,20 @@ async function configureTwoDimensionalMap(
   await page.getByTestId('close-system-settings').click()
 }
 
+async function openStateGridSetup(page: Page) {
+  const action = page.getByTestId('action-state-grid-setup-toggle')
+  if (await action.count()) await action.click()
+}
+
+async function openExpansionEntropy(page: Page) {
+  const action = page.getByTestId('action-state-grid-entropy-toggle')
+  if (await action.count()) await action.click()
+}
+
+async function leaveStateGridWorkflow(page: Page) {
+  await page.getByTestId('inspector-workflow-back').click()
+}
+
 test('State Grid computes and restores a flow expansion-entropy convergence result', async ({
   page,
 }) => {
@@ -27,12 +41,15 @@ test('State Grid computes and restores a flow expansion-entropy convergence resu
   await page.getByTestId('create-state-grid').click()
 
   await expect(page.getByTestId('state-grid-inspector')).toBeVisible()
+  await openStateGridSetup(page)
   await expect(page.getByTestId('state-grid-total-points')).toHaveText('25')
   await page.getByTestId('state-grid-x-resolution').fill('3')
   await page.getByTestId('state-grid-y-resolution').fill('3')
   await expect(page.getByTestId('state-grid-total-points')).toHaveText('9')
   await expect(page.getByTestId('state-grid-workload')).toContainText('4,500')
 
+  await leaveStateGridWorkflow(page)
+  await openExpansionEntropy(page)
   await page.getByTestId('state-grid-entropy-steps').fill('100')
   await page.getByTestId('state-grid-entropy-dt').fill('0.01')
   await page.getByTestId('state-grid-entropy-checkpoint-stride').fill('20')
@@ -45,6 +62,9 @@ test('State Grid computes and restores a flow expansion-entropy convergence resu
   const estimate = Number(await page.getByTestId('state-grid-final-estimate').textContent())
   expect(Math.abs(estimate)).toBeLessThan(1e-6)
   await expect(page.getByTestId('state-grid-expansion-entropy-result')).toContainText('9 / 9')
+  await expect(page.getByTestId('state-grid-expansion-entropy-result')).toContainText(
+    'Rust/WASM workers'
+  )
   await expect(page.getByTestId('state-grid-expansion-entropy-plot')).toBeVisible()
   await expect(page.getByTestId('state-grid-expansion-entropy-plot')).toHaveAttribute(
     'data-trace-count',
@@ -70,6 +90,7 @@ test('State Grid computes and restores a flow expansion-entropy convergence resu
   await page.getByTestId('open-systems').click()
   await page.getByRole('button', { name: 'State_Grid_Entropy', exact: true }).click()
   await harness.selectTreeNode('State_Grid_1')
+  await openExpansionEntropy(page)
   await expect(page.getByTestId('state-grid-final-estimate')).toBeVisible()
   await expect(page.getByTestId('state-grid-expansion-entropy-result')).toContainText('9 / 9')
 })
@@ -86,8 +107,11 @@ test('State Grid map entropy matches the analytic diagonal-map value by iteratio
   await page.getByTestId('create-object-menu').waitFor()
   await page.getByTestId('create-state-grid').click()
 
+  await openStateGridSetup(page)
   await page.getByTestId('state-grid-x-resolution').fill('1')
   await page.getByTestId('state-grid-y-resolution').fill('1')
+  await leaveStateGridWorkflow(page)
+  await openExpansionEntropy(page)
   await page.getByTestId('state-grid-entropy-steps').fill('12')
   await page.getByTestId('state-grid-entropy-checkpoint-stride').fill('3')
   await expect(page.getByText('Iterations', { exact: true })).toBeVisible()
@@ -108,6 +132,7 @@ test('State Grid map entropy matches the analytic diagonal-map value by iteratio
   await page.getByTestId('open-systems').click()
   await page.getByRole('button', { name: 'State_Grid_Map_Log2', exact: true }).click()
   await harness.selectTreeNode('State_Grid_1')
+  await openExpansionEntropy(page)
   await expect(page.getByTestId('state-grid-final-estimate')).toHaveText('0.693147')
 })
 
@@ -120,8 +145,11 @@ test('State Grid contracting map has zero expansion estimate', async ({ page }) 
   await page.getByTestId('create-object-button').click()
   await page.getByTestId('create-object-menu').waitFor()
   await page.getByTestId('create-state-grid').click()
+  await openStateGridSetup(page)
   await page.getByTestId('state-grid-x-resolution').fill('3')
   await page.getByTestId('state-grid-y-resolution').fill('3')
+  await leaveStateGridWorkflow(page)
+  await openExpansionEntropy(page)
   await page.getByTestId('state-grid-entropy-steps').fill('10')
   await page.getByTestId('state-grid-entropy-checkpoint-stride').fill('2')
   await page.getByTestId('state-grid-run-expansion-entropy').click()

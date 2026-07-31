@@ -72,18 +72,34 @@ overflow but does not make arbitrarily ill-conditioned tangent maps exact. A con
 means that the user should shorten the horizon or stabilization stride and compare convergence
 results.
 
+## Execution
+
+Rust partitions the deterministic sample order into logical ranges of 16 points and processes up to
+eight ranges per progress advance. A threaded build may schedule those ranges concurrently, but it
+always merges them in logical-range order. The serial and parallel paths therefore produce
+bitwise-identical aggregate results.
+
+The web build uses a shared-memory Rust/WASM thread pool when the page is cross-origin isolated and
+the browser exposes `SharedArrayBuffer`. Rust selects at most four worker threads from the reported
+hardware concurrency. The browser only selects the compatible WASM bundle and initializes the
+pool; it does not partition samples or reduce partial results. Browsers, installed PWAs, and hosts
+without cross-origin isolation use the same Rust executor in serial mode. The result inspector
+records which runtime completed the calculation.
+
+Each logical range accumulates checkpoint values online with a log-sum-exp accumulator. Individual
+sample checkpoint vectors are discarded after accumulation, so retained memory scales with the
+number of logical ranges and checkpoints rather than the number of State Grid points.
+
 ## Relationship to the references
 
 The estimator follows the restraining-region and survivor-weighted definition in
 [Hunt and Ott, *Defining Chaos*](https://arxiv.org/abs/1501.07896).
 
-[ChaosTools.jl](https://juliadynamics.github.io/ChaosTools.jl/stable/chaos_detection/#Expansion-entropy)
-uses random samples, repeated batches, and an automatic linear-region slope estimate. Fork instead
-uses the State Grid's deterministic cell centers and exposes the full \(h(T)\) and \(\log E(T)\)
-series, labeled by time for flows and iteration count for maps. Fork does not report random-batch
-error bars or choose a scaling interval automatically.
-This makes the finite-grid dependence visible and reproducible, but grid-refinement comparison is
-required for a convergence study.
+Fork uses the State Grid's deterministic cell centers and exposes the full \(h(T)\) and
+\(\log E(T)\) series, labeled by time for flows and iteration count for maps. It does not report
+random-batch error bars or choose a scaling interval automatically. This makes the finite-grid
+dependence visible and reproducible, but grid-refinement comparison is required for a convergence
+study.
 
 ## Analytic checks
 

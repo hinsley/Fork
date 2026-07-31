@@ -196,6 +196,8 @@ export type ExpansionEntropyResponse = {
   totalSamples: number
   maxLogConditionNumber: number
   conditioningWarning: boolean
+  executionMode?: 'parallel' | 'serial'
+  workerCount?: number
 }
 export type TransferOperatorRequest = { system: SystemConfig; axes: StateGridAxisRequest[]; samplesPerCell: number; iterations: number; maxStationaryIterations: number; tolerance: number }
 export type TransferOperatorResponse = { totalBoxes: number; columnOffsets: number[]; targetIndices: number[]; probabilities: number[]; retainedMass: number; zeroSurvivorSources: number; stationaryDistribution: number[]; residual: number; stationaryIterations: number }

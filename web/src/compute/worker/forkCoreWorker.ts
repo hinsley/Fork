@@ -82,6 +82,7 @@ import {
   runAdaptiveSteppedRunnerToCompletion,
   runSteppedRunnerToCompletion,
   runSteppedRunnerToCompletionAsync,
+  runRustScheduledRunnerToCompletionAsync,
 } from './steppedRunner'
 import { createWorkerSuccessResponse, getComputeHandler } from '../computeProtocol'
 import type {
@@ -93,6 +94,9 @@ import type {
 } from '../computeProtocol'
 
 type GeneratedWasmModule = typeof import('@fork-wasm')
+type ThreadedWasmModule = GeneratedWasmModule & {
+  init_fork_thread_pool: () => Promise<unknown>
+}
 type GeneratedHomoclinicRunner = InstanceType<GeneratedWasmModule['WasmHomoclinicRunner']>
 type WasmModule = GeneratedWasmModule & {
   WasmHomoclinicShootingRunner?: new (
@@ -192,12 +196,29 @@ let wasmPromise: Promise<WasmModule> | null = null
 
 async function loadWasm(): Promise<WasmModule> {
   if (!wasmPromise) {
-    wasmPromise = import('@fork-wasm').then(async (module) => {
-      await module.default()
-      return module
-    })
+    wasmPromise = loadPreferredWasm()
   }
   return wasmPromise
+}
+
+async function loadPreferredWasm(): Promise<WasmModule> {
+  if (
+    globalThis.crossOriginIsolated &&
+    typeof globalThis.SharedArrayBuffer !== 'undefined'
+  ) {
+    try {
+      const threaded = await import('@fork-wasm-threads') as unknown as ThreadedWasmModule
+      await threaded.default()
+      await threaded.init_fork_thread_pool()
+      console.info('[ForkCore] Threaded WASM initialized.')
+      return threaded
+    } catch (error) {
+      console.warn('Threaded WASM initialization failed; using serial WASM.', error)
+    }
+  }
+  const serial = await import('@fork-wasm')
+  await serial.default()
+  return serial
 }
 
 function createWasmSystem(wasm: WasmModule, system: SystemConfig): WasmSystem {
@@ -475,7 +496,7 @@ async function runExpansionEntropy(
     request.checkpointStride,
     request.stabilizationStride
   )
-  return await runSteppedRunnerToCompletionAsync(runner, signal, onProgress)
+  return await runRustScheduledRunnerToCompletionAsync(runner, signal, onProgress)
 }
 
 async function runTransferOperator(request: TransferOperatorRequest, signal: AbortSignal, onProgress: (progress: ContinuationProgress) => void): Promise<TransferOperatorResponse> {

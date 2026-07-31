@@ -8,6 +8,13 @@ export type SteppedRunner<TResult> = {
   get_result: () => TResult
 }
 
+export type RustScheduledRunner<TResult> = {
+  get_progress: () => ContinuationProgress
+  advance: () => ContinuationProgress
+  cancel: () => void
+  get_result: () => TResult
+}
+
 type AdaptiveSteppedRunner<TBranch, TReport> = SteppedRunner<TBranch> & {
   get_adaptation_report?: () => TReport | null
   get_result_with_report?: () => {
@@ -64,6 +71,29 @@ export async function runSteppedRunnerToCompletionAsync<TResult>(
   }
   abortIfNeeded(signal)
   return runner.get_result()
+}
+
+export async function runRustScheduledRunnerToCompletionAsync<TResult>(
+  runner: RustScheduledRunner<TResult>,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<TResult> {
+  const cancel = () => runner.cancel()
+  signal.addEventListener('abort', cancel, { once: true })
+  try {
+    let progress = runner.get_progress()
+    onProgress(progress)
+    while (!progress.done) {
+      abortIfNeeded(signal)
+      progress = runner.advance()
+      onProgress(progress)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+    abortIfNeeded(signal)
+    return runner.get_result()
+  } finally {
+    signal.removeEventListener('abort', cancel)
+  }
 }
 
 export function runAdaptiveSteppedRunnerToCompletion<
