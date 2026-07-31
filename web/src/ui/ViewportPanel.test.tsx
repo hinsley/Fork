@@ -26,6 +26,7 @@ import type {
   IsoclineObject,
   LimitCycleObject,
   OrbitObject,
+  StateGridObject,
   Scene,
   SystemConfig
 } from '../system/types'
@@ -119,6 +120,26 @@ function buildIsoclineSignature(object: IsoclineObject): string {
 describe('ViewportPanel view state wiring', () => {
   beforeEach(() => {
     plotlyCalls.length = 0
+  })
+
+  it('renders a two-dimensional State Grid measure with fixed marker sizes and per-mass alpha', () => {
+    const config: SystemConfig = { name: 'Measure map', equations: ['x', 'y'], params: [], paramNames: [], varNames: ['x', 'y'], solver: 'discrete', type: 'map' }
+    let system = createSystem({ name: config.name, config })
+    const added = addObject(system, {
+      type: 'state_grid', name: 'Measure', systemName: config.name,
+      axes: [{ variableName: 'x', min: 0, max: 1, resolution: 2 }, { variableName: 'y', min: 0, max: 1, resolution: 2 }],
+      sampling: { type: 'cartesian_cell_centers' }, analysis: { type: 'expansion_entropy', steps: 1, dt: 1, checkpointStride: 1, stabilizationStride: 1 }, createdAt: nowIso(),
+      transferOperator: { settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' }, lastResult: { analysisType: 'transfer_operator', dynamicsType: 'map', axes: [{ variableName: 'x', min: 0, max: 1, resolution: 2 }, { variableName: 'y', min: 0, max: 1, resolution: 2 }], settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' }, parameters: [], totalBoxes: 4, columnOffsets: [0,1,2,3,4], targetIndices: [0,1,2,3], probabilities: [1,1,1,1], retainedMass: 1, zeroSurvivorSources: 0, stationaryDistribution: [0, 0.01, 0.1, 0.89], residual: 0, stationaryIterations: 1, computedAt: nowIso() } }
+    } as StateGridObject)
+    system = added.system
+    const scene = addScene(system, 'Measure scene')
+    system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
+    renderPanel(system)
+    const trace = plotlyCalls.flatMap((call) => call.data).find((data) => data.name === 'Measure invariant measure') as { type: string; marker: { size: number; color: unknown }; x: number[] }
+    expect(trace.type).toBe('scatter')
+    expect(trace.marker.size).toBe(6)
+    expect(trace.x).toHaveLength(3)
+    expect(trace.marker).toMatchObject({ color: expect.any(Array) })
   })
 
   it('renders only requested viewports without editor affordances in viewer mode', () => {

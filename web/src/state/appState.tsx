@@ -19,6 +19,7 @@ import type {
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
   ExpansionEntropyResponse,
+  TransferOperatorResponse,
   ValidateSystemResult,
 } from '../compute/ForkCoreClient'
 import type { JobTiming } from '../compute/jobQueue'
@@ -2107,6 +2108,7 @@ export type AppActions = {
     request: StateGridComputeRequest,
     opts?: { signal?: AbortSignal }
   ) => Promise<ExpansionEntropyResponse | null>
+  computeTransferOperator: (request: StateGridComputeRequest, opts?: { signal?: AbortSignal }) => Promise<TransferOperatorResponse | null>
   computeLimitCycleFloquetModes: (request: LimitCycleFloquetModesRequest) => Promise<void>
   computeNormalFormAtPoint: (request: NormalFormAtPointRequest) => Promise<void>
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
@@ -3253,6 +3255,25 @@ export function AppProvider({
     [client, state.system, store]
   )
 
+  const computeTransferOperator = useCallback(
+    async (request: StateGridComputeRequest, opts?: { signal?: AbortSignal }): Promise<TransferOperatorResponse | null> => {
+      if (!state.system) return null
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const config = state.system.config
+        if (config.type !== 'map' || config.solver !== 'discrete') throw new Error('Transfer operator currently supports discrete maps only.')
+        const object = state.system.objects[request.stateGridId]
+        if (!object || object.type !== 'state_grid') throw new Error('Select a valid State Grid object.')
+        const axes = normalizeStateGridAxes(config, object.axes)
+        const settings = object.transferOperator?.settings ?? { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 2000, tolerance: 1e-10, outsidePolicy: 'conditional_in_grid' as const }
+        const result = await client.computeTransferOperator({ system: config, axes, samplesPerCell: settings.samplesPerCell, iterations: settings.iterations, maxStationaryIterations: settings.maxStationaryIterations, tolerance: settings.tolerance }, { signal: opts?.signal, onProgress: (progress) => dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: { label: 'Transfer operator', progress } }) })
+        const updated = updateObject(state.system, request.stateGridId, { axes, transferOperator: { settings, lastResult: { analysisType: 'transfer_operator', dynamicsType: 'map', axes: structuredClone(axes), settings: structuredClone(settings), parameters: [...config.params], ...result, computedAt: new Date().toISOString() } } } as Partial<StateGridObject>)
+        dispatch({ type: 'SET_SYSTEM', system: updated }); await store.save(updated); return result
+      } catch (error) { if (error instanceof Error && error.name === 'AbortError') return null; dispatch({ type: 'SET_ERROR', error: error instanceof Error ? error.message : String(error) }); throw error }
+      finally { dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null }); dispatch({ type: 'SET_BUSY', busy: false }) }
+    }, [client, state.system, store]
+  )
+
   useEffect(() => {
     const system = state.system
     const warmupControllers = isoclineWarmupControllersRef.current
@@ -4008,6 +4029,7 @@ export function AppProvider({
             checkpointStride: 25,
             stabilizationStride: 10,
           },
+          transferOperator: { settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 2000, tolerance: 1e-10, outsidePolicy: 'conditional_in_grid' } },
           parameters: [...config.params],
           createdAt: new Date().toISOString(),
         }
@@ -9739,6 +9761,7 @@ export function AppProvider({
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
       computeExpansionEntropy,
+      computeTransferOperator,
       computeLimitCycleFloquetModes,
       solveEquilibrium,
       solveForcedPeriodicResponse,
@@ -9792,6 +9815,7 @@ export function AppProvider({
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
       computeExpansionEntropy,
+      computeTransferOperator,
       computeLimitCycleFloquetModes,
       solveEquilibrium,
       solveForcedPeriodicResponse,

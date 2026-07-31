@@ -22,6 +22,8 @@ import type {
   EquilibriumManifold2DResult,
   ExpansionEntropyRequest,
   ExpansionEntropyResponse,
+  TransferOperatorRequest,
+  TransferOperatorResponse,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   FoldCurveContinuationRequest,
@@ -208,6 +210,17 @@ export class WasmForkCoreClient implements ForkCoreClient {
       'computeExpansionEntropy',
       (signal) =>
         this.runWorker('computeExpansionEntropy', request, signal, opts?.onProgress),
+      opts
+    )
+    return await job.promise
+  }
+  async computeTransferOperator(
+    request: TransferOperatorRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<TransferOperatorResponse> {
+    const job = this.queue.enqueue(
+      'computeTransferOperator',
+      (signal) => this.runWorker('computeTransferOperator', request, signal, opts?.onProgress),
       opts
     )
     return await job.promise

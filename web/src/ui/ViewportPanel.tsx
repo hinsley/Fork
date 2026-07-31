@@ -3172,6 +3172,37 @@ function buildSceneTraces(
     const object = system.objects[nodeId]
     if (!object) continue
 
+    if (object.type === 'state_grid') {
+      const measure = object.transferOperator?.lastResult
+      if (!measure || measure.stationaryDistribution.length === 0 || object.axes.length > 3) continue
+      const centers = (cell: number) => {
+        let remaining = cell
+        const point = Array(object.axes.length).fill(0) as number[]
+        for (let axis = object.axes.length - 1; axis >= 0; axis -= 1) {
+          const entry = object.axes[axis]
+          const coordinate = remaining % entry.resolution
+          remaining = Math.floor(remaining / entry.resolution)
+          point[axis] = entry.min + (coordinate + 0.5) * (entry.max - entry.min) / entry.resolution
+        }
+        return point
+      }
+      const positive = measure.stationaryDistribution.filter((value) => value > 0)
+      const maxLog = Math.max(...positive.map((value) => Math.log(value)))
+      const minLog = Math.min(...positive.map((value) => Math.log(value)))
+      const xs: number[] = []; const ys: number[] = []; const zs: number[] = []; const colors: string[] = []
+      measure.stationaryDistribution.forEach((mass, cell) => {
+        if (!(mass > 0)) return
+        const point = centers(cell)
+        const normalized = maxLog === minLog ? 1 : (Math.log(mass) - minLog) / (maxLog - minLog)
+        const alpha = normalizeColorOpacity(node.render.opacity) * (0.15 + 0.85 * normalized)
+        xs.push(point[0]); ys.push(point[1] ?? 0); zs.push(point[2] ?? 0); colors.push(colorWithOpacity(node.render.color, alpha))
+      })
+      if (object.axes.length === 3) traces.push({ type: 'scatter3d', mode: 'markers', name: `${object.name} invariant measure`, uid: nodeId, x: xs, y: ys, z: zs, marker: { color: colors, size: 4 }, hovertemplate: 'x=%{x}<br>y=%{y}<br>z=%{z}<extra></extra>' })
+      else if (object.axes.length === 2) traces.push({ type: 'scatter', mode: 'markers', name: `${object.name} invariant measure`, uid: nodeId, x: xs, y: ys, marker: { color: colors, size: 6 }, hovertemplate: 'x=%{x}<br>y=%{y}<extra></extra>' })
+      else traces.push({ type: 'scatter', mode: 'markers', name: `${object.name} invariant measure`, uid: nodeId, x: xs, y: xs.map(() => 0), marker: { color: colors, size: 7 }, hovertemplate: 'x=%{x}<extra></extra>' })
+      continue
+    }
+
     if (object.type === 'isocline') {
       if (!object.lastComputed) continue
       const signature = buildIsoclineSnapshotSignature(object.lastComputed)

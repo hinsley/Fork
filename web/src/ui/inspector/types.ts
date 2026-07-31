@@ -17,6 +17,7 @@ export type InspectorActions = Pick<
   | 'computeIsocline'
   | 'updateStateGridObject'
   | 'computeExpansionEntropy'
+  | 'computeTransferOperator'
   | 'updateScene'
   | 'updateAnalysisViewport'
   | 'validateAnalysisExpression'

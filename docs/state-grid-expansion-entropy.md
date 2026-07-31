@@ -96,7 +96,7 @@ required for a convergence study.
 Both cases are covered in core, Node/WASM, and real-browser tests. The expanding check uses the
 grid center at the fixed point so the chosen closed region does not introduce escape loss.
 
-[GAIO.jl](https://joss.theoj.org/papers/10.21105/joss.09266.pdf) separates a regular grid from box
+Set-oriented analysis separates a regular grid from box
 collections and algorithms that refine or map those collections. Fork keeps the same conceptual
 separation: State Grid is the reusable bounded discretization. Adaptive coverings, forward box
 maps, and set-oriented refinement are future analysis modes, not hidden behavior in the current

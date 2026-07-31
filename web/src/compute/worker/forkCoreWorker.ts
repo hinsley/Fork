@@ -26,6 +26,8 @@ import type {
   EquilibriumManifold2DResult,
   ExpansionEntropyRequest,
   ExpansionEntropyResponse,
+  TransferOperatorRequest,
+  TransferOperatorResponse,
   EventSeriesResult,
   FoldCurveContinuationRequest,
   ForcedPeriodicResponseContinuationRequest,
@@ -473,6 +475,15 @@ async function runExpansionEntropy(
     request.checkpointStride,
     request.stabilizationStride
   )
+  return await runSteppedRunnerToCompletionAsync(runner, signal, onProgress)
+}
+
+async function runTransferOperator(request: TransferOperatorRequest, signal: AbortSignal, onProgress: (progress: ContinuationProgress) => void): Promise<TransferOperatorResponse> {
+  if (request.system.type !== 'map' || request.system.solver !== 'discrete') throw new Error('Transfer operator currently supports discrete maps only.')
+  const wasm = await loadWasm()
+  const axesByName = new Map(request.axes.map((axis) => [axis.variableName, axis]))
+  const axes = request.system.varNames.map((name) => { const axis = axesByName.get(name); if (!axis) throw new Error(`State Grid is missing bounds for "${name}".`); return axis })
+  const runner = new wasm.WasmTransferOperatorRunner(request.system.equations, new Float64Array(request.system.params), request.system.paramNames, request.system.varNames, new Float64Array(axes.map((x) => x.min)), new Float64Array(axes.map((x) => x.max)), new Uint32Array(axes.map((x) => x.resolution)), request.samplesPerCell, request.iterations, request.maxStationaryIterations, request.tolerance)
   return await runSteppedRunnerToCompletionAsync(runner, signal, onProgress)
 }
 
@@ -2326,6 +2337,7 @@ const handlers = {
   computeLyapunovExponents: runLyapunovExponents,
   computeCovariantLyapunovVectors: runCovariantLyapunovVectors,
   computeExpansionEntropy: runExpansionEntropy,
+  computeTransferOperator: runTransferOperator,
   solveEquilibrium: runSolveEquilibrium,
   solveForcedPeriodicResponse: runSolveForcedPeriodicResponse,
   runForcedPeriodicResponseContinuation,

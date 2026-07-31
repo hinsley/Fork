@@ -41,6 +41,7 @@ export function InspectorPanel({
           onComputeIsocline={actions.computeIsocline}
           onUpdateStateGridObject={actions.updateStateGridObject}
           onComputeExpansionEntropy={actions.computeExpansionEntropy}
+          onComputeTransferOperator={actions.computeTransferOperator}
           onUpdateScene={actions.updateScene}
           onUpdateAnalysisViewport={actions.updateAnalysisViewport}
           onValidateAnalysisExpression={actions.validateAnalysisExpression}

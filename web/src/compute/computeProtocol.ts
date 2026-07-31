@@ -49,6 +49,7 @@ export const computeOperationMetadata = {
   computeLyapunovExponents: { reportsProgress: false },
   computeCovariantLyapunovVectors: { reportsProgress: false },
   computeExpansionEntropy: { reportsProgress: true },
+  computeTransferOperator: { reportsProgress: true },
   solveEquilibrium: { reportsProgress: false },
   solveForcedPeriodicResponse: { reportsProgress: false },
   runForcedPeriodicResponseContinuation: { reportsProgress: true },

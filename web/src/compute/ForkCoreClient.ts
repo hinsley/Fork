@@ -197,6 +197,8 @@ export type ExpansionEntropyResponse = {
   maxLogConditionNumber: number
   conditioningWarning: boolean
 }
+export type TransferOperatorRequest = { system: SystemConfig; axes: StateGridAxisRequest[]; samplesPerCell: number; iterations: number; maxStationaryIterations: number; tolerance: number }
+export type TransferOperatorResponse = { totalBoxes: number; columnOffsets: number[]; targetIndices: number[]; probabilities: number[]; retainedMass: number; zeroSurvivorSources: number; stationaryDistribution: number[]; residual: number; stationaryIterations: number }
 
 export type ValidateSystemRequest = {
   system: SystemConfig
@@ -833,6 +835,7 @@ export interface ForkCoreClient {
     request: ExpansionEntropyRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<ExpansionEntropyResponse>
+  computeTransferOperator(request: TransferOperatorRequest, opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }): Promise<TransferOperatorResponse>
   solveEquilibrium(
     request: SolveEquilibriumRequest,
     opts?: { signal?: AbortSignal }

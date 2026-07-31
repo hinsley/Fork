@@ -37,6 +37,7 @@ const expectedOperationKinds = [
   'computeLyapunovExponents',
   'computeCovariantLyapunovVectors',
   'computeExpansionEntropy',
+  'computeTransferOperator',
   'solveEquilibrium',
   'solveForcedPeriodicResponse',
   'runForcedPeriodicResponseContinuation',
@@ -70,6 +71,7 @@ const expectedOperationKinds = [
 
 const expectedProgressOperationKinds = [
   'computeExpansionEntropy',
+  'computeTransferOperator',
   'runForcedPeriodicResponseContinuation',
   'runEquilibriumContinuation',
   'runContinuationExtension',

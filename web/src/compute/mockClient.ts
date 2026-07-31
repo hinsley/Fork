@@ -24,6 +24,8 @@ import type {
   EquilibriumManifold2DResult,
   ExpansionEntropyRequest,
   ExpansionEntropyResponse,
+  TransferOperatorRequest,
+  TransferOperatorResponse,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   FoldCurveContinuationRequest,
@@ -542,6 +544,19 @@ export class MockForkCoreClient implements ForkCoreClient {
       },
       opts
     )
+    return await job.promise
+  }
+
+  async computeTransferOperator(
+    request: TransferOperatorRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<TransferOperatorResponse> {
+    const job = this.queue.enqueue('computeTransferOperator', async (signal) => {
+      if (signal.aborted) { const error = new Error('cancelled'); error.name = 'AbortError'; throw error }
+      const totalBoxes = request.axes.reduce((total, axis) => total * axis.resolution, 1)
+      opts?.onProgress?.({ done: true, current_step: totalBoxes, max_steps: totalBoxes, points_computed: totalBoxes, bifurcations_found: 0, current_param: totalBoxes })
+      return { totalBoxes, columnOffsets: Array.from({ length: totalBoxes + 1 }, (_, i) => i), targetIndices: Array.from({ length: totalBoxes }, (_, i) => i), probabilities: Array.from({ length: totalBoxes }, () => 1), retainedMass: 1, zeroSurvivorSources: 0, stationaryDistribution: Array.from({ length: totalBoxes }, () => 1 / totalBoxes), residual: 0, stationaryIterations: 1 }
+    }, opts)
     return await job.promise
   }
 
