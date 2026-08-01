@@ -14,7 +14,8 @@
 
 ## Commands
 - Lint: `npm run lint`
-- Production build: `npm run build` (rebuilds `crates/fork_wasm/pkg-web`)
+- Production build: `npm run build` (rebuilds the serial and threaded web WASM packages)
+- Hosted production build: `npm run vercel:build` (uses the checked-in web WASM packages)
 - Unit + component only: `npm run test:unit`
 - E2E only: `npm run test:e2e`
 - E2E headed: `npm run test:e2e:headed`
@@ -25,9 +26,9 @@
 - All compute goes through the `ForkCoreClient` interface (`web/src/compute/ForkCoreClient.ts`).
 - Tests inject `MockForkCoreClient` to avoid real WASM.
 - E2E tests use `?mock=1` to force mock compute in the browser.
-- The Hopf curve E2E test uses real WASM (no `mock=1`) and requires an up-to-date
-  `crates/fork_wasm/pkg-web` build.
-- `npm run test:real-wasm` rebuilds `pkg-web` and runs the Hopf curve limit-cycle E2E
+- The Hopf curve E2E test uses real WASM (no `mock=1`) and requires up-to-date
+  serial and threaded web WASM packages.
+- `npm run test:real-wasm` rebuilds both web WASM packages and runs the Hopf curve limit-cycle E2E
   path without `?mock=1`.
 - Deterministic test mode: `?test=1` (or `?deterministic=1`, or `VITE_DETERMINISTIC_TEST=1`) disables
   persistence, clears `localStorage`, freezes IDs/time, and disables animations for stable UI assertions.

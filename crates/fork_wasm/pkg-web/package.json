@@ -1,0 +1,24 @@
+{
+  "name": "fork_wasm",
+  "type": "module",
+  "collaborators": [
+    "Carter Hinsley <carterhinsley@gmail.com>"
+  ],
+  "description": "WASM bridge for the Fork core library",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hinsley/Fork"
+  },
+  "files": [
+    "fork_wasm_bg.wasm",
+    "fork_wasm.js",
+    "fork_wasm.d.ts"
+  ],
+  "main": "fork_wasm.js",
+  "types": "fork_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

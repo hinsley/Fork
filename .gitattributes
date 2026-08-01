@@ -5,3 +5,4 @@
 
 # Use bd merge for beads JSONL files
 .beads/issues.jsonl merge=beads
+crates/fork_wasm/pkg-web-threads/snippets/wasm-bindgen-rayon-*/src/workerHelpers.js text eol=lf

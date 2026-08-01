@@ -165,4 +165,7 @@ npm run build
 npm test
 ```
 
-Deploy builds (including Vercel) need the Rust toolchain and `wasm-pack` to generate `pkg-web`. See `web/vercel.json` for the hosted build configuration.
+The web WASM packages in `crates/fork_wasm/pkg-web` and
+`crates/fork_wasm/pkg-web-threads` are checked in because hosted builds consume them
+directly. Regenerate both packages with `npm run wasm:web` from `web` after changing
+the Rust core or WASM bridge. See `web/vercel.json` for the hosted build configuration.

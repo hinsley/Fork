@@ -11,6 +11,7 @@
     "dev": "vite",
     "prebuild": "npm run wasm:web",
     "build": "tsc -b && vite build",
+    "build:app": "tsc -b && vite build",
     "ci": "npm run lint && npm run build && npm test",
     "vercel:install": "sh ./scripts/vercel-install.sh",
     "vercel:build": "sh ./scripts/vercel-build.sh",

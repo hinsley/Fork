@@ -15,8 +15,6 @@ web/.vite/
 web/test-results/
 web/playwright-report/
 crates/fork_wasm/pkg/
-crates/fork_wasm/pkg-web/
-crates/fork_wasm/pkg-web-threads/
 
 # CLI data artifacts
 cli/data/

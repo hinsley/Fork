@@ -89,10 +89,11 @@ existing CLI surface area and the Rust/WASM core.
   - `WasmForkCoreClient` implementation (loads WASM and runs jobs).
   - Job queue with cancellation and timing instrumentation.
 - `src/compute/worker/`: Web Worker entry for running WASM off the main thread.
-- Web builds target `wasm-pack build --target web --out-dir pkg-web` so the
-  worker can import `crates/fork_wasm/pkg-web/fork_wasm.js`. The `pkg-web/`
-  output is generated during local setup or CI builds when core bindings
-  change. The CLI still uses `pkg/` from the nodejs target.
+- Web builds use the checked-in serial and threaded outputs from
+  `wasm-pack build --target web --out-dir pkg-web` and
+  `wasm-pack build --target web --out-dir pkg-web-threads --features wasm-threads`.
+  Regenerate both outputs when core bindings change. The CLI still uses `pkg/` from
+  the nodejs target.
 
 ### Plotly Viewports / Scenes
 - `src/viewports/plotly/`:

@@ -19,6 +19,26 @@ Impact:
 References:
 ```
 
+### 2026-08-01: Check in web WASM packages for hosted build latency
+Context:
+Hosted builds compiled both serial and threaded web WASM on every deployment and installed
+`wasm-pack` plus the nightly Rust toolchain in the deployment environment.
+Decision:
+Check in `crates/fork_wasm/pkg-web` and `crates/fork_wasm/pkg-web-threads`. Hosted builds run
+`npm ci` and bundle those packages without installing Rust or rebuilding WASM. Regenerate both
+packages with `npm run wasm:web` after Rust core or WASM bridge changes.
+Why:
+An isolated cold benchmark measured 43.0 seconds to install `wasm-pack`, 17.7 seconds to install
+the nightly toolchain, 33.7 seconds for serial WASM, and 55.8 seconds for threaded WASM before
+the 4.2-second npm install and 12.7-second TypeScript/Vite build. Removing those repeated build
+steps targets the dominant measured latency without changing runtime selection or provider settings.
+Impact:
+The repository carries generated WASM binaries and must keep them synchronized with the Rust/WASM
+sources. Hosted build correctness no longer depends on Rust tooling being available.
+References:
+`.gitignore`, `web/package.json`, `web/scripts/vercel-install.sh`, `web/scripts/vercel-build.sh`,
+`crates/fork_wasm/pkg-web`, `crates/fork_wasm/pkg-web-threads`
+
 ---
 
 ### 2026-07-14: Continue periodic forced responses with a stroboscopic return map
