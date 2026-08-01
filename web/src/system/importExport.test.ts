@@ -600,6 +600,7 @@ describe('system import/export (zip)', () => {
         retainedMass: 1,
         zeroSurvivorSources: 0,
         stationaryDistribution: [0.1, 0.2, 0.3, 0.4],
+        dominantEigenvalue: 1,
         residual: 1e-11,
         stationaryIterations: 12,
         computedAt: '2026-08-01T00:01:00.000Z',
@@ -622,6 +623,7 @@ describe('system import/export (zip)', () => {
     expect(restoredMeasure.type).toBe('invariant_measure')
     if (restoredMeasure.type === 'invariant_measure') {
       expect(restoredMeasure.sourceStateGridId).toBe(grid.nodeId)
+      expect(restoredMeasure.result.dominantEigenvalue).toBe(1)
     }
     expect(restored.nodes[added.nodeId].render).toMatchObject({
       color: '#123456',

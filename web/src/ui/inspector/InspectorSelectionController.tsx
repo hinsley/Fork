@@ -2814,7 +2814,9 @@ function useInspectorSelectionController({
       : selectionNode?.objectType === 'forced_periodic_response'
         ? 'forced periodic response'
         : selectionNode?.objectType === 'invariant_measure'
-          ? 'invariant measure'
+          ? Math.abs((invariantMeasure?.result.dominantEigenvalue ?? 1) - 1) <= 1e-8
+            ? 'invariant measure'
+            : 'finite-box mode'
           : selectionNode?.objectType ?? selectionNode?.kind
   const [paramOverrideDraft, setParamOverrideDraft] = useState<string[]>(() =>
     makeParamOverrideDraft(system.config, paramOverrideTarget)
@@ -4567,8 +4569,9 @@ function useInspectorSelectionController({
         const occupiedCells = object.result.stationaryDistribution.filter(
           (mass) => mass > 0
         ).length
+        const dominantEigenvalue = object.result.dominantEigenvalue ?? 1
         return {
-          label: 'Invariant measure',
+          label: Math.abs(dominantEigenvalue - 1) <= 1e-8 ? 'Invariant measure' : 'Finite-box mode',
           detail: `${occupiedCells} / ${object.result.totalBoxes} occupied cells`,
         }
       }

@@ -30,6 +30,8 @@ export function InvariantMeasureInspectorSections({
         : invariantMeasure.sourceStateGridName
   const occupiedCells = result.stationaryDistribution.filter((mass) => mass > 0).length
   const resolution = result.axes.map((axis) => axis.resolution).join(' × ')
+  const dominantEigenvalue = result.dominantEigenvalue ?? 1
+  const massPreserving = Math.abs(dominantEigenvalue - 1) <= 1e-8
   const snapshotCompatible =
     !result.subsystemSnapshot ||
     isSubsystemSnapshotCompatible(system.config, result.subsystemSnapshot)
@@ -37,7 +39,7 @@ export function InvariantMeasureInspectorSections({
   return (
     <InspectorDisclosure
       key={`${selectionKey}-invariant-measure-data`}
-      title="Invariant measure data"
+      title={massPreserving ? 'Invariant measure data' : 'Finite-box mode data'}
       testId="invariant-measure-data-toggle"
       actionOnly
     >
@@ -71,6 +73,15 @@ export function InvariantMeasureInspectorSections({
             </span>
           </div>
           <div className="inspector-metrics__row">
+            <span className="inspector-metrics__label">Leading eigenvalue</span>
+            <span
+              className="inspector-metrics__value"
+              data-testid="invariant-measure-leading-eigenvalue"
+            >
+              {formatScientific(dominantEigenvalue)}
+            </span>
+          </div>
+          <div className="inspector-metrics__row">
             <span className="inspector-metrics__label">Stationary residual</span>
             <span className="inspector-metrics__value" data-testid="invariant-measure-residual">
               {formatScientific(result.residual)}
@@ -96,10 +107,21 @@ export function InvariantMeasureInspectorSections({
           {formatScientific(result.settings.tolerance)}. Computed {result.computedAt}.
         </p>
         <p className="inspector-help">
-          Marker opacity encodes positive stationary mass logarithmically. Zero-mass cells are
-          omitted. The stored result is a snapshot and does not change when its source grid is
-          edited.
+          Marker opacity encodes positive mode mass logarithmically. Zero-mass cells are omitted.
+          The stored result is a snapshot and does not change when its source grid is edited.
         </p>
+        {massPreserving ? (
+          <p className="inspector-help">
+            The leading eigenvalue is approximately one, so this result is mass-preserving on the
+            retained grid.
+          </p>
+        ) : (
+          <p className="inspector-error" data-testid="invariant-measure-leakage-warning">
+            This finite-box mode is not mass-preserving: its leading eigenvalue is{' '}
+            {formatScientific(dominantEigenvalue)}. Retained sample mass is{' '}
+            {(100 * result.retainedMass).toPrecision(6)}%.
+          </p>
+        )}
         {!sourceExists ? (
           <p className="inspector-error">
             The source State Grid is no longer available. This stored measure remains renderable.

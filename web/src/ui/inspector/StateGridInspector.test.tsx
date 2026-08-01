@@ -388,41 +388,6 @@ describe('StateGridInspector', () => {
     )
   })
 
-  it('surfaces location-rich invariant-measure failures in the State Grid workflow', async () => {
-    const initial = fixture()
-    const mapSystem = {
-      ...initial.system,
-      config: {
-        ...initial.system.config,
-        type: 'map' as const,
-        solver: 'discrete' as const,
-      },
-    }
-    const diagnostic =
-      'The conditional transfer domain is not closed: source cell coordinates [0] with bounds x ∈ [0, 0.5] has an in-grid transition to zero-survivor target cell coordinates [1] with bounds x ∈ [0.5, 1].'
-    const onComputeTransferOperator = vi.fn(async () => {
-      throw new Error(diagnostic)
-    })
-
-    render(
-      <WorkflowFocusProvider>
-        <StateGridInspector
-          system={mapSystem}
-          nodeId={initial.nodeId}
-          object={initial.object}
-          onRename={() => {}}
-          onUpdate={() => {}}
-          onCompute={async () => null}
-          onComputeTransferOperator={onComputeTransferOperator}
-        />
-      </WorkflowFocusProvider>
-    )
-
-    fireEvent.click(screen.getByTestId('action-state-grid-transfer-toggle'))
-    fireEvent.click(screen.getByTestId('state-grid-create-invariant-measure'))
-    await waitFor(() => expect(screen.getByTestId('state-grid-transfer-error')).toHaveTextContent(diagnostic))
-  })
-
   it('shows a stored finite-time estimate and survivor diagnostics', () => {
     const initial = fixture()
     const object: StateGridObject = {

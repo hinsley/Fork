@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createDemoSystem, createPeriodDoublingSystem } from '../system/fixtures'
@@ -267,6 +267,7 @@ describe('InspectorDetailsPanel', () => {
         retainedMass: 1,
         zeroSurvivorSources: 0,
         stationaryDistribution: [0, 0.2, 0.3, 0.5],
+        dominantEigenvalue: 1,
         residual: 1e-11,
         stationaryIterations: 12,
         computedAt: '2026-08-01T00:01:00.000Z',
@@ -282,7 +283,29 @@ describe('InspectorDetailsPanel', () => {
     fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
     expect(screen.getByTestId('invariant-measure-source')).toHaveTextContent('State_Grid_1')
     expect(screen.getByTestId('invariant-measure-occupied-cells')).toHaveTextContent('3 / 4')
+    expect(screen.getByTestId('invariant-measure-leading-eigenvalue')).toHaveTextContent('1.000000e+0')
     expect(screen.getByTestId('invariant-measure-residual')).toHaveTextContent('1.000000e-11')
+
+    const leakyMeasure: InvariantMeasureObject = {
+      ...measure,
+      name: 'Finite_Box_Mode_State_Grid_1',
+      result: {
+        ...measure.result,
+        dominantEigenvalue: 0.5,
+        retainedMass: 0.25,
+      },
+    }
+    const leaky = addObject(system, leakyMeasure)
+    cleanup()
+    renderInspectorForStateSpaceStride(leaky.system, leaky.nodeId, vi.fn())
+    expect(screen.getByText('finite-box mode')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
+    expect(screen.getByTestId('invariant-measure-leading-eigenvalue')).toHaveTextContent(
+      '5.000000e-1'
+    )
+    expect(screen.getByTestId('invariant-measure-leakage-warning')).toHaveTextContent(
+      'not mass-preserving'
+    )
   })
 
   it('uses the object index for an invariant measure whose source grid is not hydrated', () => {

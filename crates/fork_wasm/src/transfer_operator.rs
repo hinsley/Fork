@@ -27,6 +27,7 @@ struct ResultData {
     retained_mass: f64,
     zero_survivor_sources: usize,
     stationary_distribution: Vec<f64>,
+    dominant_eigenvalue: f64,
     residual: f64,
     stationary_iterations: usize,
 }
@@ -155,7 +156,7 @@ impl WasmTransferOperatorRunner {
             &state.axis_names,
         )
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let (p, residual, stationary_iterations) =
+        let (p, dominant_eigenvalue, residual, stationary_iterations) =
             stationary_distribution(&op, state.max_stationary_iterations, state.tolerance)
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
         to_value(&ResultData {
@@ -166,6 +167,7 @@ impl WasmTransferOperatorRunner {
             retained_mass: op.retained_mass,
             zero_survivor_sources: op.zero_survivor_sources,
             stationary_distribution: p,
+            dominant_eigenvalue,
             residual,
             stationary_iterations,
         })

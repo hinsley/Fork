@@ -555,7 +555,7 @@ export class MockForkCoreClient implements ForkCoreClient {
       if (signal.aborted) { const error = new Error('cancelled'); error.name = 'AbortError'; throw error }
       const totalBoxes = request.axes.reduce((total, axis) => total * axis.resolution, 1)
       opts?.onProgress?.({ done: true, current_step: totalBoxes, max_steps: totalBoxes, points_computed: totalBoxes, bifurcations_found: 0, current_param: totalBoxes })
-      return { totalBoxes, columnOffsets: Array.from({ length: totalBoxes + 1 }, (_, i) => i), targetIndices: Array.from({ length: totalBoxes }, (_, i) => i), probabilities: Array.from({ length: totalBoxes }, () => 1), retainedMass: 1, zeroSurvivorSources: 0, stationaryDistribution: Array.from({ length: totalBoxes }, () => 1 / totalBoxes), residual: 0, stationaryIterations: 1 }
+      return { totalBoxes, columnOffsets: Array.from({ length: totalBoxes + 1 }, (_, i) => i), targetIndices: Array.from({ length: totalBoxes }, (_, i) => i), probabilities: Array.from({ length: totalBoxes }, () => 1), retainedMass: 1, zeroSurvivorSources: 0, stationaryDistribution: Array.from({ length: totalBoxes }, () => 1 / totalBoxes), dominantEigenvalue: 1, residual: 0, stationaryIterations: 1 }
     }, opts)
     return await job.promise
   }

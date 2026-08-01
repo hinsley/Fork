@@ -400,6 +400,7 @@ describe('appState State Grid subsystem configuration', () => {
     expect(measure.result.axes.map((axis) => axis.variableName)).toEqual(['x'])
     expect(measure.result.parameters).toEqual([3])
     expect(measure.result.subsystemSnapshot?.frozenValuesByVarName).toEqual({ y: 7 })
+    expect(measure.result.dominantEigenvalue).toBe(1)
 
     const grid = system.objects[fixture.nodeId]
     expect(grid.type).toBe('state_grid')

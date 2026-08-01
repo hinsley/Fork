@@ -13,12 +13,15 @@ an already computed measure.
 
 The stored sparse columns define a conditional transfer operator. For each source cell with one or
 more in-grid endpoints, Fork divides each target count by that source cell's in-grid count, so every
-eligible column sums to one. A source cell with no in-grid endpoints is excluded and counted in the
-result. The stationary iteration runs on the eligible source domain without global renormalization;
-it rejects a domain that is not closed because a transition enters an excluded source cell. The
-result records retained mass, excluded-source count, the final L1 residual, and iteration count.
+eligible column sums to one. A source cell with no in-grid endpoints remains a zero column and is
+counted in the result. In-grid transitions are retained even when their target cell has no surviving
+source samples. The stationary iteration returns the normalized dominant mode of this nonnegative
+operator and its leading eigenvalue. When that eigenvalue is approximately one, the result is a
+mass-preserving invariant measure; below one, the result is a leaky finite-box mode and the leading
+eigenvalue exposes the per-application retention. The result also records retained sample mass,
+excluded-source count, the final L1 residual, and iteration count.
 
-For one, two, and three active grid variables, a Scene renders positive stationary mass at cell
+For one, two, and three active grid variables, a Scene renders positive mode mass at cell
 centers. Every marker in one measure has the same user-selectable size. Mass is mapped
 logarithmically to marker alpha from 15% to 100%, and the Invariant Measure object's opacity
 multiplies that alpha once. Zero mass has no marker. Frozen coordinates are restored from the
@@ -38,6 +41,6 @@ active grid variables are stored but are not rendered as a misleading state-spac
    **State Space Scene**.
 
 Fork creates and selects `Invariant_Measure_State_Grid_1`. In a Scene, the separate object appears
-as fixed-size points along the state axis; more opaque points have larger stationary mass. With the
+as fixed-size points along the state axis; more opaque points have larger mode mass. With the
 settings above, the closed region retains all sampled endpoints and the distribution is visibly
 nonuniform.

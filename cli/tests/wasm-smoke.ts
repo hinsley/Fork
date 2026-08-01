@@ -37,6 +37,7 @@ const requiredExports = [
   'WasmLyapunovRunner',
   'WasmCovariantLyapunovRunner',
   'WasmExpansionEntropyRunner',
+  'WasmTransferOperatorRunner',
   'WasmEquilibriumSolverRunner',
 ];
 
@@ -2066,5 +2067,24 @@ for (const fixture of [
   assert.equal(payload.exterior_orientation.length, 2);
   assert.ok(Number.isFinite(payload.gauge_invariant_overlap_volume));
 }
+
+const transferRunner = new wasm.WasmTransferOperatorRunner(
+  ['x + 0.6'],
+  new Float64Array(),
+  [],
+  ['x'],
+  new Float64Array([0]),
+  new Float64Array([1]),
+  new Uint32Array([2]),
+  3,
+  1,
+  10,
+  1e-12
+);
+while (!transferRunner.get_progress().done) transferRunner.run_steps(1);
+const transfer = transferRunner.get_result();
+assert.equal(transfer.dominantEigenvalue, 0);
+assert.deepEqual(Array.from(transfer.stationaryDistribution), [0, 0]);
+assert.equal(transfer.zeroSurvivorSources, 1);
 
 console.log('PASS real WASM node boundary smoke');

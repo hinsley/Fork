@@ -160,73 +160,33 @@ pub fn sampled_box_transition_operator_with_axis_names<S: DynamicalSystem<f64>>(
     })
 }
 
-fn cell_coordinates(mut index: usize, resolution: &[usize]) -> Vec<usize> {
-    let mut coordinates = vec![0; resolution.len()];
-    for axis in (0..resolution.len()).rev() {
-        coordinates[axis] = index % resolution[axis];
-        index /= resolution[axis];
-    }
-    coordinates
-}
-
-fn describe_cell(operator: &BoxTransitionOperator, index: usize) -> String {
-    let coordinates = cell_coordinates(index, &operator.resolution);
-    let bounds = coordinates
-        .iter()
-        .enumerate()
-        .map(|(axis, &coordinate)| {
-            let (min, max) = operator.bounds[axis];
-            let width = (max - min) / operator.resolution[axis] as f64;
-            let lower = min + coordinate as f64 * width;
-            let upper = lower + width;
-            let name = operator
-                .axis_names
-                .get(axis)
-                .map(String::as_str)
-                .unwrap_or("axis");
-            format!("{name} ∈ [{lower}, {upper}]")
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    format!("coordinates {coordinates:?} with bounds {bounds}")
-}
-
-fn first_nonclosed_transition(
-    operator: &BoxTransitionOperator,
-    distribution: &[f64],
-    is_eligible: &[bool],
-) -> Option<(usize, usize)> {
+fn apply_operator(operator: &BoxTransitionOperator, distribution: &[f64]) -> Vec<f64> {
+    let mut applied = vec![0.0; operator.total_boxes];
     for source in 0..operator.total_boxes {
-        if distribution[source] <= 0.0 {
-            continue;
-        }
         for edge in operator.column_offsets[source]..operator.column_offsets[source + 1] {
-            let target = operator.target_indices[edge];
-            if operator.probabilities[edge] > 0.0 && !is_eligible[target] {
-                return Some((source, target));
-            }
+            applied[operator.target_indices[edge]] +=
+                operator.probabilities[edge] * distribution[source];
         }
     }
-    None
+    applied
 }
 
-fn nonclosed_domain_error(
-    operator: &BoxTransitionOperator,
-    source: usize,
-    target: usize,
-) -> anyhow::Error {
-    anyhow::anyhow!(
-        "The conditional transfer domain is not closed: source cell {} has an in-grid transition to zero-survivor target cell {}.",
-        describe_cell(operator, source),
-        describe_cell(operator, target),
-    )
+fn eigenvalue_and_residual(operator: &BoxTransitionOperator, distribution: &[f64]) -> (f64, f64) {
+    let applied = apply_operator(operator, distribution);
+    let eigenvalue: f64 = applied.iter().sum();
+    let residual: f64 = applied
+        .iter()
+        .zip(distribution)
+        .map(|(applied, value)| (applied - eigenvalue * value).abs())
+        .sum();
+    (eigenvalue, residual)
 }
 
 pub fn stationary_distribution(
     operator: &BoxTransitionOperator,
     max_iterations: usize,
     tolerance: f64,
-) -> Result<(Vec<f64>, f64, usize)> {
+) -> Result<(Vec<f64>, f64, f64, usize)> {
     if max_iterations == 0 || !tolerance.is_finite() || tolerance <= 0.0 {
         bail!("Stationary iteration settings must be positive.");
     }
@@ -234,44 +194,34 @@ pub fn stationary_distribution(
     let eligible: Vec<usize> = (0..n)
         .filter(|source| operator.column_offsets[*source] < operator.column_offsets[*source + 1])
         .collect();
-    if eligible.is_empty() {
-        bail!("All State Grid source cells have zero in-grid endpoints.");
-    }
-    let mut is_eligible = vec![false; n];
-    for source in &eligible {
-        is_eligible[*source] = true;
-    }
     let mut p = vec![0.0; n];
-    for source in &eligible {
-        p[*source] = 1.0 / eligible.len() as f64;
+    if eligible.is_empty() {
+        if n == 0 {
+            return Ok((p, 0.0, 0.0, 0));
+        }
+        p.fill(1.0 / n as f64);
+    } else {
+        for source in &eligible {
+            p[*source] = 1.0 / eligible.len() as f64;
+        }
     }
+
     for iteration in 1..=max_iterations {
-        let mut next = vec![0.0; n];
-        for source in 0..n {
-            for edge in operator.column_offsets[source]..operator.column_offsets[source + 1] {
-                next[operator.target_indices[edge]] += operator.probabilities[edge] * p[source];
-            }
+        let applied = apply_operator(operator, &p);
+        let survival = applied.iter().sum::<f64>();
+        if survival <= 0.0 {
+            return Ok((vec![0.0; n], 0.0, 0.0, iteration));
         }
-        if let Some((source, target)) = first_nonclosed_transition(operator, &p, &is_eligible) {
-            return Err(nonclosed_domain_error(operator, source, target));
-        }
-        let residual: f64 = next.iter().zip(&p).map(|(a, b)| (a - b).abs()).sum();
+
+        let next: Vec<f64> = applied.iter().map(|value| value / survival).collect();
+        let (next_eigenvalue, next_residual) = eigenvalue_and_residual(operator, &next);
         p = next;
-        if residual <= tolerance {
-            return Ok((p, residual, iteration));
+        if next_eigenvalue > 0.0 && next_residual <= tolerance {
+            return Ok((p, next_eigenvalue, next_residual, iteration));
         }
     }
-    let mut applied = vec![0.0; n];
-    for source in 0..n {
-        for edge in operator.column_offsets[source]..operator.column_offsets[source + 1] {
-            applied[operator.target_indices[edge]] += operator.probabilities[edge] * p[source];
-        }
-    }
-    if let Some((source, target)) = first_nonclosed_transition(operator, &p, &is_eligible) {
-        return Err(nonclosed_domain_error(operator, source, target));
-    }
-    let residual = applied.iter().zip(&p).map(|(a, b)| (a - b).abs()).sum();
-    Ok((p, residual, max_iterations))
+    let (eigenvalue, residual) = eigenvalue_and_residual(operator, &p);
+    Ok((p, eigenvalue, residual, max_iterations))
 }
 
 #[cfg(test)]
@@ -296,10 +246,11 @@ mod tests {
                 .sum();
             assert!((sum - 1.).abs() < 1e-12);
         }
-        let (p, r, _) = stationary_distribution(&op, 10, 1e-12).unwrap();
+        let (p, eigenvalue, residual, _) = stationary_distribution(&op, 10, 1e-12).unwrap();
         assert!((p.iter().sum::<f64>() - 1.).abs() < 1e-12);
         assert!(p.iter().all(|x| *x >= 0.));
-        assert!(r < 1e-12);
+        assert!((eigenvalue - 1.).abs() < 1e-12);
+        assert!(residual < 1e-12);
     }
     #[test]
     fn upper_boundary_belongs_to_last_box() {
@@ -318,7 +269,10 @@ mod tests {
     fn zero_survivor_sources_are_excluded_and_not_renormalized_globally() {
         let op = sampled_box_transition_operator(&Escape, &[(0., 1.)], &[2], 3, 1).unwrap();
         assert_eq!(op.zero_survivor_sources, 2);
-        assert!(stationary_distribution(&op, 10, 1e-12).is_err());
+        let (p, eigenvalue, residual, _) = stationary_distribution(&op, 10, 1e-12).unwrap();
+        assert!(p.iter().all(|value| *value == 0.));
+        assert_eq!(eigenvalue, 0.);
+        assert_eq!(residual, 0.);
     }
 
     struct IntoZeroSurvivor;
@@ -332,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn nonclosed_domain_error_identifies_source_and_target_cells() {
+    fn retained_transition_into_zero_survivor_target_returns_relaxed_mode() {
         let op = sampled_box_transition_operator_with_axis_names(
             &IntoZeroSurvivor,
             &[(0., 1.)],
@@ -342,10 +296,31 @@ mod tests {
             &["x".to_string()],
         )
         .unwrap();
-        let error = stationary_distribution(&op, 10, 1e-12).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "The conditional transfer domain is not closed: source cell coordinates [0] with bounds x ∈ [0, 0.5] has an in-grid transition to zero-survivor target cell coordinates [1] with bounds x ∈ [0.5, 1]."
-        );
+        assert_eq!(op.zero_survivor_sources, 1);
+        let (p, eigenvalue, residual, _) = stationary_distribution(&op, 10, 1e-12).unwrap();
+        assert!(p.iter().all(|value| *value == 0.));
+        assert_eq!(eigenvalue, 0.);
+        assert_eq!(residual, 0.);
+    }
+
+    #[test]
+    fn leaky_operator_returns_its_normalized_dominant_mode() {
+        let op = BoxTransitionOperator {
+            dimension: 1,
+            total_boxes: 2,
+            bounds: vec![(0., 1.)],
+            resolution: vec![2],
+            axis_names: vec!["x".to_string()],
+            column_offsets: vec![0, 2, 2],
+            target_indices: vec![0, 1],
+            probabilities: vec![0.5, 0.5],
+            retained_mass: 0.5,
+            zero_survivor_sources: 1,
+        };
+        let (p, eigenvalue, residual, _) = stationary_distribution(&op, 100, 1e-12).unwrap();
+        assert!((p[0] - 0.5).abs() < 1e-12);
+        assert!((p[1] - 0.5).abs() < 1e-12);
+        assert!((eigenvalue - 0.5).abs() < 1e-12);
+        assert!(residual < 1e-12);
     }
 }
