@@ -33,6 +33,12 @@ Fork is a monorepo with a Rust/WASM core and a web/CLI interface.
 - PRs should include a short summary, test commands run, and note any WASM rebuilds; include screenshots for UI changes and link relevant issues.
 
 ## Agent-Specific Instructions
+The generated serial and threaded web WASM packages in `crates/fork_wasm/pkg-web` and
+`crates/fork_wasm/pkg-web-threads` are tracked because hosted deployments no longer rebuild
+them. When changing Rust/WASM runtime code, run `cd web && npm run build` to regenerate both
+packages and stage and commit their updates with the source changes. For web-only, UI, or docs
+changes, do not regenerate or stage the WASM packages unless they actually changed.
+
 If you touch `crates/fork_core`, `crates/fork_wasm`, or `cli`, you must rebuild WASM (`wasm-pack build --target nodejs`) and validate behavior interactively in the CLI.
 Update `web/docs/plotly-injections.md` whenever Plotly touchpoints are added or removed.
 OPFS is Chromium-only (Safari/Firefox lack `FileSystemFileHandle.createWritable`), so any work that
