@@ -155,6 +155,11 @@ describe('ViewportPanel view state wiring', () => {
     expect(trace.x).toHaveLength(3)
     expect(trace.marker.color).toHaveLength(3)
     expect(new Set(trace.marker.color).size).toBe(3)
+    expect(trace.marker.color).toEqual([
+      'rgba(51, 102, 153, 0.011235955056179775)',
+      'rgba(51, 102, 153, 0.11235955056179776)',
+      '#336699',
+    ])
     expect(trace.opacity).toBe(0.5)
     expect(trace.customdata).toEqual([[1, 0.01], [2, 0.1], [3, 0.89]])
   })

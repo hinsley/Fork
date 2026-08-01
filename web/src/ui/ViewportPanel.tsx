@@ -3226,8 +3226,7 @@ function buildSceneTraces(
       }
       const positive = measure.stationaryDistribution.filter((value) => value > 0)
       if (positive.length === 0) continue
-      const maxLog = Math.max(...positive.map((value) => Math.log(value)))
-      const minLog = Math.min(...positive.map((value) => Math.log(value)))
+      const maxMass = Math.max(...positive)
       const xs: number[] = []
       const ys: number[] = []
       const zs: number[] = []
@@ -3236,8 +3235,7 @@ function buildSceneTraces(
       measure.stationaryDistribution.forEach((mass, cell) => {
         if (!(mass > 0)) return
         const point = centers(cell)
-        const normalized = maxLog === minLog ? 1 : (Math.log(mass) - minLog) / (maxLog - minLog)
-        const alpha = 0.15 + 0.85 * normalized
+        const alpha = maxMass > 0 ? mass / maxMass : 0
         const projectedPoint = projectedAxisIndices.map((index) => point[index])
         if (projectedPoint.some((coordinate) => !Number.isFinite(coordinate))) return
         xs.push(projectedPoint[0] ?? 0)

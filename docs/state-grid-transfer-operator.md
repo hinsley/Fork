@@ -22,8 +22,8 @@ eigenvalue exposes the per-application retention. The result also records retain
 excluded-source count, the final L1 residual, and iteration count.
 
 For one, two, and three active grid variables, a Scene renders positive mode mass at cell
-centers. Every marker in one measure has the same user-selectable size. Mass is mapped
-logarithmically to marker alpha from 15% to 100%, and the Invariant Measure object's opacity
+centers. Every marker in one measure has the same user-selectable size. Each positive mass is
+mapped linearly relative to the maximum mass to marker alpha from 0% to 100%, and the Invariant Measure object's opacity
 multiplies that alpha once. Zero mass has no marker. Frozen coordinates are restored from the
 stored subsystem snapshot before applying the Scene's axis order. Results with more than three
 active grid variables are stored but are not rendered as a misleading state-space projection.
