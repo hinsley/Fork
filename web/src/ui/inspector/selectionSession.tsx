@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useReducer, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react'
 import { isDeterministicMode } from '../../utils/determinism'
 import {
+  isWorkflowId,
   selectionSessionReducer,
   type WorkflowActionEntry,
   type WorkflowId,
@@ -145,5 +146,57 @@ export function WorkflowFocusToolbar({
         <strong>{entry?.label ?? 'Workflow'}</strong>
       </div>
     </div>
+  )
+}
+
+export function InspectorDisclosure({
+  title,
+  defaultOpen = false,
+  open,
+  onOpenChange,
+  children,
+  testId,
+  actionOnly = false,
+}: {
+  title: ReactNode
+  defaultOpen?: boolean
+  open?: boolean
+  onOpenChange?: (nextOpen: boolean) => void
+  children: ReactNode
+  testId?: string
+  actionOnly?: boolean
+}) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen)
+  const workflowFocus = useWorkflowFocus()
+  const workflowId = isWorkflowId(testId) ? testId : null
+  const workflowFocused = Boolean(
+    workflowId && workflowFocus?.activeWorkflow === workflowId
+  )
+  const resolvedOpen = workflowFocus?.activeWorkflow
+    ? workflowFocused
+    : typeof open === 'boolean'
+      ? open
+      : uncontrolledOpen
+
+  return (
+    <details
+      className={`inspector-disclosure${actionOnly ? ' inspector-disclosure--action-only' : ''}`}
+      open={resolvedOpen}
+      data-workflow-id={workflowId ?? undefined}
+      data-workflow-active={workflowFocused ? 'true' : undefined}
+      onToggle={(event) => {
+        const nextOpen = (event.currentTarget as HTMLDetailsElement).open
+        if (workflowFocus?.activeWorkflow) return
+        if (typeof open !== 'boolean') {
+          setUncontrolledOpen(nextOpen)
+        }
+        onOpenChange?.(nextOpen)
+      }}
+    >
+      <summary className="inspector-disclosure__summary" data-testid={testId}>
+        {title}
+      </summary>
+      <div className="inspector-disclosure__content">{children}</div>
+    </details>
   )
 }

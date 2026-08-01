@@ -66,6 +66,65 @@ describe('StateGridInspector', () => {
     expect(onUpdateObjectFrozenVariables).toHaveBeenCalledWith(initial.nodeId, { x: 0 })
   })
 
+  it('keeps State Grid setup in Configure and only offers invariant measure for maps', () => {
+    const initial = fixture()
+    const mapSystem = {
+      ...initial.system,
+      config: {
+        ...initial.system.config,
+        type: 'map' as const,
+        solver: 'discrete' as const,
+      },
+    }
+    const { unmount } = render(
+      <WorkflowFocusProvider>
+        <StateGridInspector
+          system={mapSystem}
+          nodeId={initial.nodeId}
+          object={initial.object}
+          onRename={() => {}}
+          onUpdate={() => {}}
+          onCompute={async () => null}
+        />
+      </WorkflowFocusProvider>
+    )
+
+    const configureGroup = screen.getByText('Configure').closest('.inspector-actions__group')
+    expect(
+      Array.from(configureGroup?.querySelectorAll('button') ?? []).map((button) =>
+        button.getAttribute('data-testid')
+      )
+    ).toEqual([
+      'action-frozen-variables-toggle',
+      'action-parameters-toggle',
+      'action-state-grid-setup-toggle',
+    ])
+    expect(screen.getByTestId('action-state-grid-transfer-toggle')).toBeInTheDocument()
+    unmount()
+
+    const flowSystem = {
+      ...initial.system,
+      config: {
+        ...initial.system.config,
+        type: 'flow' as const,
+        solver: 'rk4' as const,
+      },
+    }
+    render(
+      <WorkflowFocusProvider>
+        <StateGridInspector
+          system={flowSystem}
+          nodeId={initial.nodeId}
+          object={initial.object}
+          onRename={() => {}}
+          onUpdate={() => {}}
+          onCompute={async () => null}
+        />
+      </WorkflowFocusProvider>
+    )
+    expect(screen.queryByTestId('action-state-grid-transfer-toggle')).not.toBeInTheDocument()
+  })
+
   it('updates the Cartesian product count live as a resolution changes', () => {
     const initial = fixture()
 

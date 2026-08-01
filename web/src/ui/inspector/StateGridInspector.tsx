@@ -5,7 +5,11 @@ import type { StateGridComputeRequest } from '../../state/appState'
 import { PlotlyViewport } from '../../viewports/plotly/PlotlyViewport'
 import { resolveObjectParams } from '../../system/parameters'
 import { buildSubsystemSnapshot } from '../../system/subsystemGateway'
-import { WorkflowActionList, WorkflowFocusToolbar } from './selectionSession'
+import {
+  InspectorDisclosure,
+  WorkflowActionList,
+  WorkflowFocusToolbar,
+} from './selectionSession'
 import { useWorkflowFocus } from './useWorkflowFocus'
 import type { WorkflowActionEntry } from './selectionSessionState'
 
@@ -102,11 +106,18 @@ export function StateGridInspector({
     },
     {
       id: 'state-grid-setup-toggle',
-      group: 'Compute',
+      group: 'Configure',
       label: 'State Grid setup',
       description: 'Set bounds and resolution for the free state variables.',
     },
-    { id: 'state-grid-transfer-toggle', group: 'Compute', label: 'Invariant measure', description: 'Compute the conditional State Grid transfer operator.' },
+    ...(isMap
+      ? [{
+          id: 'state-grid-transfer-toggle' as const,
+          group: 'Compute' as const,
+          label: 'Invariant measure',
+          description: 'Compute the conditional State Grid transfer operator.',
+        }]
+      : []),
     {
       id: 'state-grid-entropy-toggle',
       group: 'Compute',
@@ -114,7 +125,6 @@ export function StateGridInspector({
       description: 'Configure and run the finite-region expansion-entropy calculation.',
     },
   ]
-  const activeWorkflow = workflowFocus ? workflowFocus.activeWorkflow : 'all'
   const transferSettings = object.transferOperator?.settings ?? {
     samplesPerCell: 4,
     iterations: 1,
@@ -240,61 +250,94 @@ export function StateGridInspector({
     }
   }
 
-  return (
-    <div className="inspector-selection" data-testid="state-grid-inspector">
-      <WorkflowFocusToolbar entries={workflowActions} />
-      <section className="inspector-section">
-        <label>
-          Name
-          <input
-            value={nameDraft}
-            onChange={(event) => setNameDraft(event.target.value)}
-            onBlur={() => {
-              const trimmed = nameDraft.trim()
-              if (trimmed && trimmed !== object.name) onRename(nodeId, trimmed)
-            }}
-            data-testid="state-grid-name"
-          />
-        </label>
-        <h3>State Grid</h3>
-        <p className="inspector-help">
-          A bounded regular Cartesian grid in the full state space. Resolution is the number of
-          cell-center samples on each coordinate.
-        </p>
-        {activeWorkflow === null ? <WorkflowActionList entries={workflowActions} /> : null}
-        {activeWorkflow === 'state-grid-setup-toggle' || activeWorkflow === 'all' ? (
-          <>
-        <div className="inspector-metrics" data-testid="state-grid-workload">
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">Total grid points</span>
-            <strong className="inspector-metrics__value" data-testid="state-grid-total-points">
-              {formatCount(totalPoints)}
-            </strong>
-          </div>
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">
-              {isMap ? 'Map/tangent iterations' : 'Forward/tangent steps'}
-            </span>
-            <span className="inspector-metrics__value">{formatCount(integrationWork)}</span>
-          </div>
+  const navigationClass =
+    workflowFocus?.navigationPhase !== 'idle' && workflowFocus?.navigationDirection
+      ? ` inspector-navigation-page--${workflowFocus.navigationPhase}-${workflowFocus.navigationDirection}`
+      : ''
+  const actionOnly = Boolean(workflowFocus)
+  const workloadSummary = (
+    <>
+      <div className="inspector-metrics" data-testid="state-grid-workload">
+        <div className="inspector-metrics__row">
+          <span className="inspector-metrics__label">Total grid points</span>
+          <strong className="inspector-metrics__value" data-testid="state-grid-total-points">
+            {formatCount(totalPoints)}
+          </strong>
         </div>
-        <p
-          className={workloadLevel === 'large' ? 'inspector-error' : 'inspector-help'}
-          data-testid="state-grid-workload-warning"
-        >
-          {workloadLevel === 'large'
-            ? 'Large Cartesian product. Runtime and memory pressure grow exponentially with state dimension.'
-            : workloadLevel === 'moderate'
-              ? 'Moderate Cartesian product. Increasing one resolution multiplies the full workload.'
-              : 'The Cartesian product is currently small.'}
-        </p>
-          </>
-        ) : null}
-      </section>
+        <div className="inspector-metrics__row">
+          <span className="inspector-metrics__label">
+            {isMap ? 'Map/tangent iterations' : 'Forward/tangent steps'}
+          </span>
+          <span className="inspector-metrics__value">{formatCount(integrationWork)}</span>
+        </div>
+      </div>
+      <p
+        className={workloadLevel === 'large' ? 'inspector-error' : 'inspector-help'}
+        data-testid="state-grid-workload-warning"
+      >
+        {workloadLevel === 'large'
+          ? 'Large Cartesian product. Runtime and memory pressure grow exponentially with state dimension.'
+          : workloadLevel === 'moderate'
+            ? 'Moderate Cartesian product. Increasing one resolution multiplies the full workload.'
+            : 'The Cartesian product is currently small.'}
+      </p>
+    </>
+  )
 
-      {activeWorkflow === 'frozen-variables-toggle' ? (
-        <section className="inspector-section" data-testid="frozen-variables-section">
-          <h3>Frozen Variables</h3>
+  return (
+    <div
+      className={`inspector-panel inspector-browser${workflowFocus?.activeWorkflow ? ' inspector-browser--workflow' : ''}`}
+      data-testid="state-grid-inspector"
+      data-active-workflow={workflowFocus?.activeWorkflow ?? undefined}
+      data-navigation-direction={workflowFocus?.navigationDirection ?? undefined}
+      data-navigation-phase={workflowFocus?.navigationPhase ?? 'idle'}
+    >
+      <div
+        className={`inspector-group inspector-navigation-page${navigationClass}`}
+        key={workflowFocus?.activeWorkflow ?? 'state-grid-root'}
+      >
+        {!workflowFocus?.activeWorkflow ? (
+          <div className="inspector-section inspector-entity-header">
+            <label>
+              Name
+              <input
+                value={nameDraft}
+                onChange={(event) => setNameDraft(event.target.value)}
+                onBlur={() => {
+                  const trimmed = nameDraft.trim()
+                  if (trimmed && trimmed !== object.name) onRename(nodeId, trimmed)
+                }}
+                data-testid="state-grid-name"
+              />
+            </label>
+            <div className="inspector-meta">
+              <span>State Grid</span>
+              <span>{isMap ? 'Discrete map' : 'Flow'}</span>
+            </div>
+          </div>
+        ) : null}
+
+        <WorkflowFocusToolbar entries={workflowActions} />
+        <WorkflowActionList entries={workflowActions} />
+
+        {!workflowFocus?.activeWorkflow ? (
+          <section className="inspector-section" data-testid="state-grid-summary">
+            <h3 className="inspector-subheading">State Grid</h3>
+            <p className="inspector-help">
+              A bounded regular Cartesian grid in the full state space. Resolution is the number of
+              cell-center samples on each coordinate.
+            </p>
+            {workloadSummary}
+          </section>
+        ) : null}
+
+        <InspectorDisclosure
+          title="Frozen Variables"
+          testId="frozen-variables-toggle"
+          actionOnly={actionOnly}
+          defaultOpen={!workflowFocus}
+        >
+          <section className="inspector-section" data-testid="frozen-variables-section">
           <div className="state-table__wrap" role="region" aria-label="Frozen variables">
             <table className="state-table__grid">
               <thead>
@@ -349,11 +392,16 @@ export function StateGridInspector({
               </tbody>
             </table>
           </div>
-        </section>
-      ) : null}
+          </section>
+        </InspectorDisclosure>
 
-      {activeWorkflow === 'parameters-toggle' ? (
-        <section className="inspector-section" data-testid="param-override-section">
+        <InspectorDisclosure
+          title="Parameters"
+          testId="parameters-toggle"
+          actionOnly={actionOnly}
+          defaultOpen={!workflowFocus}
+        >
+          <section className="inspector-section" data-testid="param-override-section">
           <h3>Parameter values</h3>
           {system.config.paramNames.map((parameterName, index) => (
             <label key={parameterName}>
@@ -382,52 +430,77 @@ export function StateGridInspector({
               Restore default parameters
             </button>
           ) : null}
-        </section>
-      ) : null}
+          </section>
+        </InspectorDisclosure>
 
-      {activeWorkflow === 'state-grid-setup-toggle' || activeWorkflow === 'all' ? (
-      <section className="inspector-section">
-        <h3>Bounds and resolution</h3>
-        <div className="state-grid-axis-table">
-          <div className="state-grid-axis-table__header">
-            <span>Variable</span>
-            <span>Min</span>
-            <span>Max</span>
-            <span>Resolution</span>
-          </div>
-          {object.axes.map((axis, index) => freeVariableNames.has(axis.variableName) ? (
-            <div className="state-grid-axis-table__row" key={axis.variableName}>
-              <span>{axis.variableName}</span>
-              <input
-                type="number"
-                value={axis.min}
-                onChange={(event) => updateAxis(index, 'min', event.target.value)}
-                data-testid={`state-grid-${axis.variableName}-min`}
-              />
-              <input
-                type="number"
-                value={axis.max}
-                onChange={(event) => updateAxis(index, 'max', event.target.value)}
-                data-testid={`state-grid-${axis.variableName}-max`}
-              />
-              <input
-                type="number"
-                min={1}
-                step={1}
-                value={axis.resolution}
-                onChange={(event) => updateAxis(index, 'resolution', event.target.value)}
-                data-testid={`state-grid-${axis.variableName}-resolution`}
-              />
-            </div>
-          ) : null)}
+        <InspectorDisclosure
+          title="State Grid setup"
+          testId="state-grid-setup-toggle"
+          actionOnly={actionOnly}
+          defaultOpen={!workflowFocus}
+        >
+          <section className="inspector-section">
+        {workflowFocus?.activeWorkflow === 'state-grid-setup-toggle' ? workloadSummary : null}
+        <h4 className="inspector-subheading">Bounds and resolution</h4>
+        <div className="state-table__wrap" role="region" aria-label="Bounds and resolution">
+          <table className="state-table__grid">
+            <thead>
+              <tr>
+                <th>Variable</th>
+                <th>Min</th>
+                <th>Max</th>
+                <th>Resolution</th>
+              </tr>
+            </thead>
+            <tbody>
+              {object.axes.map((axis, index) => freeVariableNames.has(axis.variableName) ? (
+                <tr key={axis.variableName}>
+                  <td>{axis.variableName}</td>
+                  <td>
+                    <input
+                      type="number"
+                      className="state-table__input"
+                      value={axis.min}
+                      onChange={(event) => updateAxis(index, 'min', event.target.value)}
+                      data-testid={`state-grid-${axis.variableName}-min`}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      className="state-table__input"
+                      value={axis.max}
+                      onChange={(event) => updateAxis(index, 'max', event.target.value)}
+                      data-testid={`state-grid-${axis.variableName}-max`}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      className="state-table__input"
+                      value={axis.resolution}
+                      onChange={(event) => updateAxis(index, 'resolution', event.target.value)}
+                      data-testid={`state-grid-${axis.variableName}-resolution`}
+                    />
+                  </td>
+                </tr>
+              ) : null)}
+            </tbody>
+          </table>
         </div>
-      </section>
-      ) : null}
+          </section>
+        </InspectorDisclosure>
 
-      {activeWorkflow === 'state-grid-entropy-toggle' || activeWorkflow === 'all' ? (
-      <>
-      <section className="inspector-section">
-        <h3>Expansion Entropy</h3>
+        <InspectorDisclosure
+          title="Expansion entropy"
+          testId="state-grid-entropy-toggle"
+          actionOnly={actionOnly}
+          defaultOpen={!workflowFocus}
+        >
+          <section className="inspector-section">
+        <h4 className="inspector-subheading">Expansion Entropy</h4>
         <p className="inspector-help">
           {isMap
             ? 'Hunt–Ott estimate restricted to this region, iteration horizon, and finite grid. Escaped trajectories contribute zero after the first map iterate outside the closed region. This is not unrestricted or exact topological entropy.'
@@ -478,7 +551,7 @@ export function StateGridInspector({
             data-testid="state-grid-entropy-stabilization-stride"
           />
         </label>
-        <div className="inspector-actions">
+        <div className="inspector-inline-actions">
           <button
             type="button"
             onClick={() => void run()}
@@ -558,12 +631,18 @@ export function StateGridInspector({
         ) : (
           <p className="empty-state">No expansion-entropy result stored yet.</p>
         )}
-      </section>
-      </>
-      ) : null}
-      {(activeWorkflow === 'state-grid-transfer-toggle' || activeWorkflow === 'all') && isMap ? (
-        <section className="inspector-section" data-testid="state-grid-invariant-measure-workflow">
-          <h3>Invariant measure</h3>
+          </section>
+        </InspectorDisclosure>
+
+        {isMap ? (
+        <InspectorDisclosure
+          title="Invariant measure"
+          testId="state-grid-transfer-toggle"
+          actionOnly={actionOnly}
+          defaultOpen={!workflowFocus}
+        >
+          <section className="inspector-section" data-testid="state-grid-invariant-measure-workflow">
+          <h4 className="inspector-subheading">Invariant measure</h4>
           <p className="inspector-help">
             Create a separate invariant-measure object from this State Grid. The result keeps its
             own rendering and computation snapshot, while this grid remains available for later
@@ -620,7 +699,7 @@ export function StateGridInspector({
             Endpoints outside the closed grid are discarded. Each surviving source column is
             normalized by its own in-grid sample count.
           </p>
-          <div className="inspector-actions">
+          <div className="inspector-inline-actions">
             <button
               type="button"
               onClick={() => void runTransferOperator()}
@@ -640,8 +719,10 @@ export function StateGridInspector({
             ) : null}
           </div>
           {error ? <p className="inspector-error">{error}</p> : null}
-        </section>
-      ) : null}
+          </section>
+        </InspectorDisclosure>
+        ) : null}
+      </div>
     </div>
   )
 }
