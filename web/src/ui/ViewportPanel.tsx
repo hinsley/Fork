@@ -3231,17 +3231,21 @@ function buildSceneTraces(
       const ys: number[] = []
       const zs: number[] = []
       const colors: string[] = []
+      const opacities: number[] = []
       const hoverData: Array<[number, number]> = []
       measure.stationaryDistribution.forEach((mass, cell) => {
         if (!(mass > 0)) return
         const point = centers(cell)
-        const alpha = maxMass > 0 ? mass / maxMass : 0
+        const alpha = maxMass > 0 ? Math.max(0, mass) / maxMass : 0
         const projectedPoint = projectedAxisIndices.map((index) => point[index])
         if (projectedPoint.some((coordinate) => !Number.isFinite(coordinate))) return
         xs.push(projectedPoint[0] ?? 0)
         ys.push(projectedPoint[1] ?? 0)
         zs.push(projectedPoint[2] ?? 0)
-        colors.push(colorWithOpacity(node.render.color, alpha))
+        if (projectionPlotDim === 3) {
+          colors.push(colorWithOpacity(node.render.color, alpha))
+        }
+        opacities.push(alpha)
         hoverData.push([cell, mass])
       })
       if (xs.length === 0) continue
@@ -3272,7 +3276,11 @@ function buildSceneTraces(
           x: xs,
           y: projectionPlotDim === 1 ? xs.map(() => 0) : ys,
           customdata: hoverData,
-          marker: { color: colors, size: node.render.pointSize },
+          marker: {
+            color: node.render.color,
+            opacity: opacities,
+            size: node.render.pointSize,
+          },
           hovertemplate:
             projectionPlotDim === 1
               ? 'x=%{x}<br>cell=%{customdata[0]}<br>mass=%{customdata[1]:.6g}<extra></extra>'

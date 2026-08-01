@@ -136,7 +136,7 @@ describe('ViewportPanel view state wiring', () => {
         axes: [{ variableName: 'x', min: 0, max: 1, resolution: 2 }, { variableName: 'y', min: 0, max: 1, resolution: 2 }],
         settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' },
         parameters: [], totalBoxes: 4, columnOffsets: [0,1,2,3,4], targetIndices: [0,1,2,3], probabilities: [1,1,1,1], retainedMass: 1, zeroSurvivorSources: 0,
-        stationaryDistribution: [0, 0.01, 0.1, 0.89], residual: 0, stationaryIterations: 1, computedAt: nowIso()
+        stationaryDistribution: [0, 3.70926e-36, 0.01, 0.99], residual: 0, stationaryIterations: 1, computedAt: nowIso()
       },
       createdAt: nowIso(),
     } as InvariantMeasureObject)
@@ -148,20 +148,20 @@ describe('ViewportPanel view state wiring', () => {
     const scene = addScene(system, 'Measure scene')
     system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
     renderPanel(system)
-    const trace = plotlyCalls.flatMap((call) => call.data).find((data) => data.name === 'Invariant_Measure_1') as { type: string; uid: string; opacity: number; marker: { size: number; color: string[] }; x: number[]; customdata: Array<[number, number]> }
+    const trace = plotlyCalls.flatMap((call) => call.data).find((data) => data.name === 'Invariant_Measure_1') as { type: string; uid: string; opacity: number; marker: { size: number; color: string; opacity: number[] }; x: number[]; customdata: Array<[number, number]> }
     expect(trace.type).toBe('scatter')
     expect(trace.uid).toBe(added.nodeId)
     expect(trace.marker.size).toBe(9)
     expect(trace.x).toHaveLength(3)
-    expect(trace.marker.color).toHaveLength(3)
-    expect(new Set(trace.marker.color).size).toBe(3)
-    expect(trace.marker.color).toEqual([
-      'rgba(51, 102, 153, 0.011235955056179775)',
-      'rgba(51, 102, 153, 0.11235955056179776)',
-      '#336699',
+    expect(trace.marker.color).toBe('#336699')
+    expect(trace.marker.opacity).toEqual([
+      3.70926e-36 / 0.99,
+      0.01 / 0.99,
+      1,
     ])
+    expect(trace.marker.opacity.every((value) => typeof value === 'number')).toBe(true)
     expect(trace.opacity).toBe(0.5)
-    expect(trace.customdata).toEqual([[1, 0.01], [2, 0.1], [3, 0.89]])
+    expect(trace.customdata).toEqual([[1, 3.70926e-36], [2, 0.01], [3, 0.99]])
   })
 
   it('embeds frozen coordinates and respects the Scene axis order', () => {
