@@ -4,6 +4,7 @@ export const WORKFLOW_IDS = [
   'state-grid-setup-toggle',
   'state-grid-entropy-toggle',
   'state-grid-transfer-toggle',
+  'invariant-measure-data-toggle',
   'appearance-toggle',
   'orbit-run-toggle',
   'orbit-data-toggle',

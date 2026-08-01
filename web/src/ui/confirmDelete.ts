@@ -32,6 +32,7 @@ export function getDeleteKindLabel(node: TreeNode, system: System): string {
       return formatEquilibriumLabel(system.config.type, { mapIterations })
     }
     if (node.objectType === 'limit_cycle') return 'Limit cycle'
+    if (node.objectType === 'invariant_measure') return 'Invariant measure'
     return 'Object'
   }
   return 'Item'

@@ -62,6 +62,7 @@ function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type
     if (node.objectType === 'limit_cycle') return 'Limit cycle'
     if (node.objectType === 'isocline') return 'Isocline'
     if (node.objectType === 'state_grid') return 'State Grid'
+    if (node.objectType === 'invariant_measure') return 'Invariant measure'
     return 'Object'
   }
   return 'Item'

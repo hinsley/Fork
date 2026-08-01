@@ -15,6 +15,7 @@ export type DefaultNameKind =
   | 'forcedPeriodicResponse'
   | 'isocline'
   | 'stateGrid'
+  | 'invariantMeasure'
   | 'folder'
   | 'scene'
   | 'bifurcationDiagram'
@@ -234,6 +235,9 @@ export function suggestDefaultName(
       break
     case 'manifold2d':
       baseName = composeDerivedName(['manifold'], source || 'object', ['2d'])
+      break
+    case 'invariantMeasure':
+      baseName = composeDerivedName(['Invariant', 'Measure'], source || 'State_Grid')
       break
     case 'limitCycle':
       baseName = composeDerivedName(['LC'], source || 'source')

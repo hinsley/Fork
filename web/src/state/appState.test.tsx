@@ -19,6 +19,7 @@ import type {
   ContinuationPoint,
   ContinuationSettings,
   EquilibriumObject,
+  InvariantMeasureObject,
   IsoclineObject,
   LimitCycleObject,
   OrbitObject,
@@ -26,7 +27,10 @@ import type {
   System,
   SystemConfig,
 } from '../system/types'
-import type { ExpansionEntropyRequest } from '../compute/ForkCoreClient'
+import type {
+  ExpansionEntropyRequest,
+  TransferOperatorRequest,
+} from '../compute/ForkCoreClient'
 
 const continuationSettings: ContinuationSettings = {
   step_size: 0.01,
@@ -358,6 +362,251 @@ describe('appState State Grid subsystem configuration', () => {
       expect(stored.lastResult?.subsystemSnapshot?.hash).toBe(stored.subsystemSnapshot?.hash)
     })
   }
+
+  it('creates and selects a separate invariant-measure object with source provenance', async () => {
+    const fixture = createConfiguredStateGridSystem('map')
+    const client = new MockForkCoreClient(0)
+    let captured: TransferOperatorRequest | null = null
+    const original = client.computeTransferOperator.bind(client)
+    client.computeTransferOperator = async (request, opts) => {
+      captured = request
+      return await original(request, opts)
+    }
+    const { getContext } = setupApp(fixture.system, client)
+
+    await act(async () => {
+      await getContext().actions.computeTransferOperator({
+        stateGridId: fixture.nodeId,
+      })
+    })
+
+    expect(captured).not.toBeNull()
+    expect(captured!.system.varNames).toEqual(['x'])
+    expect(captured!.axes.map((axis) => axis.variableName)).toEqual(['x'])
+    expect(captured!.system.params[0]).toBe(3)
+    expect(captured!.system.params).toContain(7)
+
+    const system = getContext().state.system!
+    const measures = Object.entries(system.objects).filter(
+      (entry): entry is [string, InvariantMeasureObject] =>
+        entry[1].type === 'invariant_measure'
+    )
+    expect(measures).toHaveLength(1)
+    const [measureId, measure] = measures[0]
+    expect(system.ui.selectedNodeId).toBe(measureId)
+    expect(measure.name).toBe('Invariant_Measure_State_Grid_1')
+    expect(measure.sourceStateGridId).toBe(fixture.nodeId)
+    expect(measure.sourceStateGridName).toBe('State_Grid_1')
+    expect(measure.result.axes.map((axis) => axis.variableName)).toEqual(['x'])
+    expect(measure.result.parameters).toEqual([3])
+    expect(measure.result.subsystemSnapshot?.frozenValuesByVarName).toEqual({ y: 7 })
+
+    const grid = system.objects[fixture.nodeId]
+    expect(grid.type).toBe('state_grid')
+    if (grid.type === 'state_grid') {
+      expect(grid.transferOperator?.lastResult).toBeUndefined()
+      expect(grid.transferOperator?.settings.outsidePolicy).toBe('conditional_in_grid')
+    }
+  })
+
+  it('uses unique names for repeated invariant measures and creates none after cancellation', async () => {
+    const fixture = createConfiguredStateGridSystem('map')
+    const { getContext } = setupApp(fixture.system)
+
+    await act(async () => {
+      await getContext().actions.computeTransferOperator({ stateGridId: fixture.nodeId })
+    })
+    await act(async () => {
+      await getContext().actions.computeTransferOperator({ stateGridId: fixture.nodeId })
+    })
+
+    let measures = Object.values(getContext().state.system!.objects).filter(
+      (object): object is InvariantMeasureObject => object.type === 'invariant_measure'
+    )
+    expect(measures.map((measure) => measure.name).sort()).toEqual([
+      'Invariant_Measure_State_Grid_1',
+      'Invariant_Measure_State_Grid_1_2',
+    ])
+
+    const controller = new AbortController()
+    controller.abort()
+    await act(async () => {
+      await getContext().actions.computeTransferOperator(
+        { stateGridId: fixture.nodeId },
+        { signal: controller.signal }
+      )
+    })
+    measures = Object.values(getContext().state.system!.objects).filter(
+      (object): object is InvariantMeasureObject => object.type === 'invariant_measure'
+    )
+    expect(measures).toHaveLength(2)
+  })
+
+  it('preserves State Grid edits made while the invariant measure is computing', async () => {
+    const fixture = createConfiguredStateGridSystem('map')
+    const client = new MockForkCoreClient(0)
+    const original = client.computeTransferOperator.bind(client)
+    let release: (() => void) | null = null
+    client.computeTransferOperator = (request, opts) =>
+      new Promise((resolve, reject) => {
+        release = () => {
+          void original(request, opts).then(resolve, reject)
+        }
+      })
+    const { getContext } = setupApp(fixture.system, client)
+    let computation: Promise<unknown> | null = null
+
+    act(() => {
+      computation = getContext().actions.computeTransferOperator({
+        stateGridId: fixture.nodeId,
+      })
+    })
+    act(() => {
+      getContext().actions.renameNode(fixture.nodeId, 'Renamed_State_Grid')
+    })
+    await act(async () => {
+      release?.()
+      await computation
+    })
+
+    const system = getContext().state.system!
+    expect(system.objects[fixture.nodeId].name).toBe('Renamed_State_Grid')
+    const measure = Object.values(system.objects).find(
+      (object): object is InvariantMeasureObject => object.type === 'invariant_measure'
+    )
+    expect(measure?.sourceStateGridName).toBe('Renamed_State_Grid')
+    expect(measure?.name).toBe('Invariant_Measure_Renamed_State_Grid')
+  })
+
+  it('does not publish a result when cancellation arrives before a non-cooperative client returns', async () => {
+    const fixture = createConfiguredStateGridSystem('map')
+    const client = new MockForkCoreClient(0)
+    const original = client.computeTransferOperator.bind(client)
+    let release: (() => void) | null = null
+    client.computeTransferOperator = (request) =>
+      new Promise((resolve, reject) => {
+        release = () => {
+          void original(request).then(resolve, reject)
+        }
+      })
+    const { getContext } = setupApp(fixture.system, client)
+    const controller = new AbortController()
+    let computation: Promise<unknown> | null = null
+
+    act(() => {
+      computation = getContext().actions.computeTransferOperator(
+        { stateGridId: fixture.nodeId },
+        { signal: controller.signal }
+      )
+    })
+    controller.abort()
+    await act(async () => {
+      release?.()
+      await computation
+    })
+
+    expect(
+      Object.values(getContext().state.system!.objects).filter(
+        (object) => object.type === 'invariant_measure'
+      )
+    ).toHaveLength(0)
+  })
+
+  it('does not let a pending State Grid settings save remove a newly created measure', async () => {
+    const fixture = createConfiguredStateGridSystem('map')
+    const store = new MemorySystemStore()
+    const { getContext } = setupAppWithStore(store, { initialSystem: fixture.system })
+
+    await act(async () => {
+      getContext().actions.updateStateGridObject(fixture.nodeId, {
+        axes: [
+          { variableName: 'x', min: -1, max: 1, resolution: 7 },
+          { variableName: 'y', min: -2, max: 2, resolution: 5 },
+        ],
+      })
+    })
+    await act(async () => {
+      await getContext().actions.computeTransferOperator({ stateGridId: fixture.nodeId })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 350))
+
+    const persisted = await store.load(fixture.system.id)
+    expect(
+      Object.values(persisted.objects).filter(
+        (object) => object.type === 'invariant_measure'
+      )
+    ).toHaveLength(1)
+  })
+
+  it('waits for an in-flight debounced save before persisting a new measure', async () => {
+    class DeferredSaveStore extends MemorySystemStore {
+      private saveCount = 0
+      private releaseFirstSave: (() => void) | null = null
+      private markFirstSaveStarted: () => void = () => undefined
+      readonly firstSaveStarted = new Promise<void>((resolve) => {
+        this.markFirstSaveStarted = resolve
+      })
+
+      release() {
+        this.releaseFirstSave?.()
+      }
+
+      override async save(system: System): Promise<void> {
+        this.saveCount += 1
+        if (this.saveCount === 1) {
+          const snapshot = structuredClone(system)
+          this.markFirstSaveStarted()
+          await new Promise<void>((resolve) => {
+            this.releaseFirstSave = resolve
+          })
+          await super.save(snapshot)
+          return
+        }
+        await super.save(system)
+      }
+    }
+
+    const fixture = createConfiguredStateGridSystem('map')
+    const store = new DeferredSaveStore()
+    const { getContext } = setupAppWithStore(store, { initialSystem: fixture.system })
+
+    act(() => {
+      getContext().actions.updateStateGridObject(fixture.nodeId, {
+        axes: [
+          { variableName: 'x', min: -1, max: 1, resolution: 7 },
+          { variableName: 'y', min: -2, max: 2, resolution: 5 },
+        ],
+      })
+    })
+    await store.firstSaveStarted
+
+    let computation: Promise<unknown> | null = null
+    act(() => {
+      computation = getContext().actions.computeTransferOperator({
+        stateGridId: fixture.nodeId,
+      })
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(
+      Object.values(getContext().state.system!.objects).filter(
+        (object) => object.type === 'invariant_measure'
+      )
+    ).toHaveLength(0)
+    store.release()
+    await act(async () => {
+      await computation
+    })
+
+    const persisted = await store.load(fixture.system.id)
+    expect(
+      Object.values(persisted.objects).filter(
+        (object) => object.type === 'invariant_measure'
+      )
+    ).toHaveLength(1)
+  })
 })
 
 describe('appState initialization', () => {

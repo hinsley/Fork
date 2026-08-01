@@ -115,7 +115,46 @@ export function StateGridInspector({
     },
   ]
   const activeWorkflow = workflowFocus ? workflowFocus.activeWorkflow : 'all'
-  const runTransferOperator = async () => { if (!onComputeTransferOperator) return; setRunning(true); try { await onComputeTransferOperator({ stateGridId: nodeId }) } finally { setRunning(false) } }
+  const transferSettings = object.transferOperator?.settings ?? {
+    samplesPerCell: 4,
+    iterations: 1,
+    maxStationaryIterations: 2000,
+    tolerance: 1e-10,
+    outsidePolicy: 'conditional_in_grid' as const,
+  }
+  const updateTransferSettings = (
+    field: 'samplesPerCell' | 'iterations' | 'maxStationaryIterations' | 'tolerance',
+    rawValue: string
+  ) => {
+    const value = Number(rawValue)
+    if (!Number.isFinite(value) || value <= 0) return
+    if (field !== 'tolerance' && !Number.isInteger(value)) return
+    onUpdate(nodeId, {
+      transferOperator: {
+        settings: { ...transferSettings, [field]: value },
+      },
+    })
+  }
+  const runTransferOperator = async () => {
+    if (!onComputeTransferOperator) return
+    setError(null)
+    const controller = new AbortController()
+    controllerRef.current = controller
+    setRunning(true)
+    try {
+      await onComputeTransferOperator(
+        { stateGridId: nodeId },
+        { signal: controller.signal }
+      )
+    } catch (reason) {
+      if (!(reason instanceof Error && reason.name === 'AbortError')) {
+        setError(reason instanceof Error ? reason.message : String(reason))
+      }
+    } finally {
+      if (controllerRef.current === controller) controllerRef.current = null
+      setRunning(false)
+    }
+  }
   const finalEstimate = result?.entropyEstimates.at(-1)
   const plot = useMemo(() => {
     if (!result || result.checkpoints.length === 0) return null
@@ -522,7 +561,87 @@ export function StateGridInspector({
       </section>
       </>
       ) : null}
-      {(activeWorkflow === 'state-grid-transfer-toggle' || activeWorkflow === 'all') && isMap ? <section className="inspector-section"><h3>Invariant measure</h3><p className="inspector-help">Uses this object's configured parameters and frozen variables. Frozen coordinates are embedded as constants and are not State Grid axes.</p><button type="button" onClick={() => void runTransferOperator()} disabled={running || !onComputeTransferOperator}>Calculate invariant measure</button></section> : null}
+      {(activeWorkflow === 'state-grid-transfer-toggle' || activeWorkflow === 'all') && isMap ? (
+        <section className="inspector-section" data-testid="state-grid-invariant-measure-workflow">
+          <h3>Invariant measure</h3>
+          <p className="inspector-help">
+            Create a separate invariant-measure object from this State Grid. The result keeps its
+            own rendering and computation snapshot, while this grid remains available for later
+            analyses.
+          </p>
+          <label>
+            Samples per cell
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={transferSettings.samplesPerCell}
+              onChange={(event) =>
+                updateTransferSettings('samplesPerCell', event.target.value)
+              }
+              data-testid="state-grid-transfer-samples-per-cell"
+            />
+          </label>
+          <label>
+            Map iterations per transition
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={transferSettings.iterations}
+              onChange={(event) => updateTransferSettings('iterations', event.target.value)}
+              data-testid="state-grid-transfer-iterations"
+            />
+          </label>
+          <label>
+            Stationary iteration limit
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={transferSettings.maxStationaryIterations}
+              onChange={(event) =>
+                updateTransferSettings('maxStationaryIterations', event.target.value)
+              }
+              data-testid="state-grid-transfer-stationary-iterations"
+            />
+          </label>
+          <label>
+            Convergence tolerance
+            <input
+              type="number"
+              min="0"
+              value={transferSettings.tolerance}
+              onChange={(event) => updateTransferSettings('tolerance', event.target.value)}
+              data-testid="state-grid-transfer-tolerance"
+            />
+          </label>
+          <p className="inspector-help">
+            Endpoints outside the closed grid are discarded. Each surviving source column is
+            normalized by its own in-grid sample count.
+          </p>
+          <div className="inspector-actions">
+            <button
+              type="button"
+              onClick={() => void runTransferOperator()}
+              disabled={running || !onComputeTransferOperator || !Number.isFinite(totalPoints)}
+              data-testid="state-grid-create-invariant-measure"
+            >
+              {running ? 'Creating…' : 'Create invariant measure'}
+            </button>
+            {running ? (
+              <button
+                type="button"
+                onClick={() => controllerRef.current?.abort()}
+                data-testid="state-grid-cancel-invariant-measure"
+              >
+                Cancel
+              </button>
+            ) : null}
+          </div>
+          {error ? <p className="inspector-error">{error}</p> : null}
+        </section>
+      ) : null}
     </div>
   )
 }

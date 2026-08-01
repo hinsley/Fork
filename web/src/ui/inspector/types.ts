@@ -18,7 +18,6 @@ export type InspectorActions = Pick<
   | 'updateStateGridObject'
   | 'computeExpansionEntropy'
   | 'computeTransferOperator'
-  | 'computeTransferOperator'
   | 'updateScene'
   | 'updateAnalysisViewport'
   | 'validateAnalysisExpression'

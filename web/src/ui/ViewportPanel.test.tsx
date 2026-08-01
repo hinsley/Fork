@@ -23,10 +23,10 @@ import type {
   ContinuationSettings,
   EquilibriumObject,
   ForcedPeriodicResponseObject,
+  InvariantMeasureObject,
   IsoclineObject,
   LimitCycleObject,
   OrbitObject,
-  StateGridObject,
   Scene,
   SystemConfig
 } from '../system/types'
@@ -122,24 +122,159 @@ describe('ViewportPanel view state wiring', () => {
     plotlyCalls.length = 0
   })
 
-  it('renders a two-dimensional State Grid measure with fixed marker sizes and per-mass alpha', () => {
+  it('renders a separate two-dimensional invariant measure with independent styling', () => {
     const config: SystemConfig = { name: 'Measure map', equations: ['x', 'y'], params: [], paramNames: [], varNames: ['x', 'y'], solver: 'discrete', type: 'map' }
     let system = createSystem({ name: config.name, config })
     const added = addObject(system, {
-      type: 'state_grid', name: 'Measure', systemName: config.name,
-      axes: [{ variableName: 'x', min: 0, max: 1, resolution: 2 }, { variableName: 'y', min: 0, max: 1, resolution: 2 }],
-      sampling: { type: 'cartesian_cell_centers' }, analysis: { type: 'expansion_entropy', steps: 1, dt: 1, checkpointStride: 1, stabilizationStride: 1 }, createdAt: nowIso(),
-      transferOperator: { settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' }, lastResult: { analysisType: 'transfer_operator', dynamicsType: 'map', axes: [{ variableName: 'x', min: 0, max: 1, resolution: 2 }, { variableName: 'y', min: 0, max: 1, resolution: 2 }], settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' }, parameters: [], totalBoxes: 4, columnOffsets: [0,1,2,3,4], targetIndices: [0,1,2,3], probabilities: [1,1,1,1], retainedMass: 1, zeroSurvivorSources: 0, stationaryDistribution: [0, 0.01, 0.1, 0.89], residual: 0, stationaryIterations: 1, computedAt: nowIso() } }
-    } as StateGridObject)
-    system = added.system
+      type: 'invariant_measure',
+      name: 'Invariant_Measure_1',
+      systemName: config.name,
+      sourceStateGridId: 'grid-source',
+      sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator', dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: 0, max: 1, resolution: 2 }, { variableName: 'y', min: 0, max: 1, resolution: 2 }],
+        settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' },
+        parameters: [], totalBoxes: 4, columnOffsets: [0,1,2,3,4], targetIndices: [0,1,2,3], probabilities: [1,1,1,1], retainedMass: 1, zeroSurvivorSources: 0,
+        stationaryDistribution: [0, 0.01, 0.1, 0.89], residual: 0, stationaryIterations: 1, computedAt: nowIso()
+      },
+      createdAt: nowIso(),
+    } as InvariantMeasureObject)
+    system = updateNodeRender(added.system, added.nodeId, {
+      color: '#336699',
+      opacity: 0.5,
+      pointSize: 9,
+    })
     const scene = addScene(system, 'Measure scene')
     system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
     renderPanel(system)
-    const trace = plotlyCalls.flatMap((call) => call.data).find((data) => data.name === 'Measure invariant measure') as { type: string; marker: { size: number; color: unknown }; x: number[] }
+    const trace = plotlyCalls.flatMap((call) => call.data).find((data) => data.name === 'Invariant_Measure_1') as { type: string; uid: string; opacity: number; marker: { size: number; color: string[] }; x: number[]; customdata: Array<[number, number]> }
     expect(trace.type).toBe('scatter')
-    expect(trace.marker.size).toBe(6)
+    expect(trace.uid).toBe(added.nodeId)
+    expect(trace.marker.size).toBe(9)
     expect(trace.x).toHaveLength(3)
-    expect(trace.marker).toMatchObject({ color: expect.any(Array) })
+    expect(trace.marker.color).toHaveLength(3)
+    expect(new Set(trace.marker.color).size).toBe(3)
+    expect(trace.opacity).toBe(0.5)
+    expect(trace.customdata).toEqual([[1, 0.01], [2, 0.1], [3, 0.89]])
+  })
+
+  it('embeds frozen coordinates and respects the Scene axis order', () => {
+    const config: SystemConfig = { name: 'Frozen measure map', equations: ['x', 'y', 'z'], params: [], paramNames: [], varNames: ['x', 'y', 'z'], solver: 'discrete', type: 'map' }
+    let system = createSystem({ name: config.name, config })
+    const snapshot = buildSubsystemSnapshot(config, {
+      frozenValuesByVarName: { z: 0.75 },
+    })
+    const added = addObject(system, {
+      type: 'invariant_measure', name: 'Frozen_Measure', systemName: config.name,
+      sourceStateGridId: 'grid-source', sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator', dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: 0, max: 2, resolution: 2 }, { variableName: 'y', min: 10, max: 12, resolution: 2 }],
+        settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' },
+        parameters: [], subsystemSnapshot: snapshot, totalBoxes: 4,
+        columnOffsets: [0,1,2,3,4], targetIndices: [0,1,2,3], probabilities: [1,1,1,1], retainedMass: 1, zeroSurvivorSources: 0,
+        stationaryDistribution: [0.25, 0.25, 0.25, 0.25], residual: 0, stationaryIterations: 1, computedAt: nowIso(),
+      },
+      createdAt: nowIso(),
+    } as InvariantMeasureObject)
+    system = added.system
+    const scene = addScene(system, 'Frozen measure scene')
+    system = updateScene(scene.system, scene.nodeId, {
+      selectedNodeIds: [added.nodeId],
+      axisVariables: ['y', 'x', 'z'],
+    })
+    renderPanel(system)
+
+    const trace = plotlyCalls.flatMap((call) => call.data).find((data) => data.name === 'Frozen_Measure') as { type: string; x: number[]; y: number[]; z: number[] }
+    expect(trace.type).toBe('scatter3d')
+    expect(trace.x).toEqual([10.5, 11.5, 10.5, 11.5])
+    expect(trace.y).toEqual([0.5, 0.5, 1.5, 1.5])
+    expect(trace.z).toEqual([0.75, 0.75, 0.75, 0.75])
+  })
+
+  it('maps snapshot-free result axes by variable name', () => {
+    const config: SystemConfig = { name: 'Legacy measure map', equations: ['x', 'y'], params: [], paramNames: [], varNames: ['x', 'y'], solver: 'discrete', type: 'map' }
+    const added = addObject(createSystem({ name: config.name, config }), {
+      type: 'invariant_measure', name: 'Legacy_Measure', systemName: config.name,
+      sourceStateGridId: 'grid-source', sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator', dynamicsType: 'map',
+        axes: [{ variableName: 'y', min: 10, max: 12, resolution: 1 }, { variableName: 'x', min: 0, max: 2, resolution: 1 }],
+        settings: { samplesPerCell: 1, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' },
+        parameters: [], totalBoxes: 1, columnOffsets: [0,1], targetIndices: [0], probabilities: [1], retainedMass: 1, zeroSurvivorSources: 0,
+        stationaryDistribution: [1], residual: 0, stationaryIterations: 1, computedAt: nowIso(),
+      },
+      createdAt: nowIso(),
+    } as InvariantMeasureObject)
+    const scene = addScene(added.system, 'Legacy measure scene')
+    const system = updateScene(scene.system, scene.nodeId, {
+      selectedNodeIds: [added.nodeId],
+      axisVariables: ['x', 'y'],
+    })
+
+    renderPanel(system)
+
+    const trace = plotlyCalls.flatMap((call) => call.data).find((data) => data.name === 'Legacy_Measure') as { x: number[]; y: number[] }
+    expect(trace.x).toEqual([1])
+    expect(trace.y).toEqual([11])
+  })
+
+  it('does not fabricate coordinates from an incompatible subsystem snapshot', () => {
+    const config: SystemConfig = { name: 'Changed measure map', equations: ['x', 'y', 'z'], params: [], paramNames: [], varNames: ['x', 'y', 'z'], solver: 'discrete', type: 'map' }
+    const snapshot = buildSubsystemSnapshot(config, {
+      frozenValuesByVarName: { z: 0.5 },
+    })
+    const added = addObject(createSystem({ name: config.name, config }), {
+      type: 'invariant_measure', name: 'Changed_Measure', systemName: config.name,
+      sourceStateGridId: 'grid-source', sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator', dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: 0, max: 1, resolution: 1 }, { variableName: 'y', min: 0, max: 1, resolution: 1 }],
+        settings: { samplesPerCell: 1, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' },
+        parameters: [], subsystemSnapshot: snapshot, totalBoxes: 1,
+        columnOffsets: [0,1], targetIndices: [0], probabilities: [1], retainedMass: 1, zeroSurvivorSources: 0,
+        stationaryDistribution: [1], residual: 0, stationaryIterations: 1, computedAt: nowIso(),
+      },
+      createdAt: nowIso(),
+    } as InvariantMeasureObject)
+    const scene = addScene(added.system, 'Changed measure scene')
+    const system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
+    system.config = {
+      ...system.config,
+      equations: ['x', 'y', 'w'],
+      varNames: ['x', 'y', 'w'],
+    }
+
+    renderPanel(system)
+
+    expect(
+      plotlyCalls.flatMap((call) => call.data).find((data) => data.name === 'Changed_Measure')
+    ).toBeUndefined()
+  })
+
+  it('does not render a measure with more than three active grid axes', () => {
+    const config: SystemConfig = { name: 'Four dimensional map', equations: ['a', 'b', 'c', 'd'], params: [], paramNames: [], varNames: ['a', 'b', 'c', 'd'], solver: 'discrete', type: 'map' }
+    let system = createSystem({ name: config.name, config })
+    const added = addObject(system, {
+      type: 'invariant_measure', name: 'Measure_4d', systemName: config.name,
+      sourceStateGridId: 'grid-source', sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator', dynamicsType: 'map',
+        axes: config.varNames.map((variableName) => ({ variableName, min: 0, max: 1, resolution: 1 })),
+        settings: { samplesPerCell: 1, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' },
+        parameters: [], totalBoxes: 1, columnOffsets: [0,1], targetIndices: [0], probabilities: [1], retainedMass: 1, zeroSurvivorSources: 0,
+        stationaryDistribution: [1], residual: 0, stationaryIterations: 1, computedAt: nowIso(),
+      },
+      createdAt: nowIso(),
+    } as InvariantMeasureObject)
+    const scene = addScene(added.system, 'Measure 4d scene')
+    system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
+    renderPanel(system)
+
+    expect(
+      plotlyCalls.flatMap((call) => call.data).find((data) => data.name === 'Measure_4d')
+    ).toBeUndefined()
   })
 
   it('renders only requested viewports without editor affordances in viewer mode', () => {

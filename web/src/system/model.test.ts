@@ -28,8 +28,10 @@ import { buildSubsystemSnapshot } from './subsystemGateway'
 import type {
   ContinuationObject,
   ForcedPeriodicResponseObject,
+  InvariantMeasureObject,
   LimitCycleObject,
   OrbitObject,
+  StateGridObject,
 } from './types'
 
 describe('system model', () => {
@@ -763,6 +765,94 @@ describe('system model', () => {
     expect(renamedOrbit.type).toBe('orbit')
     if (renamedOrbit.type === 'orbit' && originalOrbit.type === 'orbit') {
       expect(renamedOrbit.data).toBe(originalOrbit.data)
+    }
+  })
+
+  it('remaps an invariant measure to its duplicated State Grid', () => {
+    const base = createSystem({
+      name: 'Duplicate_State_Grid_Measure',
+      config: {
+        name: 'Duplicate_State_Grid_Measure',
+        equations: ['x'],
+        params: [],
+        paramNames: [],
+        varNames: ['x'],
+        solver: 'discrete',
+        type: 'map',
+      },
+    })
+    const folder = addFolder(base, 'Grid_Analysis')
+    const grid = addObject(folder.system, {
+      type: 'state_grid',
+      name: 'State_Grid_1',
+      systemName: base.name,
+      axes: [{ variableName: 'x', min: 0, max: 1, resolution: 1 }],
+      sampling: { type: 'cartesian_cell_centers' },
+      analysis: {
+        type: 'expansion_entropy',
+        steps: 1,
+        dt: 1,
+        checkpointStride: 1,
+        stabilizationStride: 1,
+      },
+      createdAt: '2026-08-01T00:00:00.000Z',
+    } as StateGridObject)
+    const measure = addObject(grid.system, {
+      type: 'invariant_measure',
+      name: 'Invariant_Measure_State_Grid_1',
+      systemName: base.name,
+      sourceStateGridId: grid.nodeId,
+      sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator',
+        dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: 0, max: 1, resolution: 1 }],
+        settings: {
+          samplesPerCell: 1,
+          iterations: 1,
+          maxStationaryIterations: 10,
+          tolerance: 1e-8,
+          outsidePolicy: 'conditional_in_grid',
+        },
+        parameters: [],
+        totalBoxes: 1,
+        columnOffsets: [0, 1],
+        targetIndices: [0],
+        probabilities: [1],
+        retainedMass: 1,
+        zeroSurvivorSources: 0,
+        stationaryDistribution: [1],
+        residual: 0,
+        stationaryIterations: 1,
+        computedAt: '2026-08-01T00:01:00.000Z',
+      },
+      createdAt: '2026-08-01T00:01:00.000Z',
+    } as InvariantMeasureObject)
+    let system = moveNodeIntoParent(measure.system, grid.nodeId, folder.nodeId)
+    system = moveNodeIntoParent(system, measure.nodeId, folder.nodeId)
+
+    const duplicated = duplicateNode(system, folder.nodeId)
+    expect(duplicated).toBeTruthy()
+    if (!duplicated) throw new Error('Expected duplicated folder.')
+    const duplicatedChildren = duplicated.system.nodes[duplicated.nodeId].children
+    const duplicatedGridId = duplicatedChildren.find(
+      (id) => duplicated.system.objects[id]?.type === 'state_grid'
+    )
+    const duplicatedMeasureId = duplicatedChildren.find(
+      (id) => duplicated.system.objects[id]?.type === 'invariant_measure'
+    )
+    const duplicatedMeasure = duplicatedMeasureId
+      ? duplicated.system.objects[duplicatedMeasureId]
+      : null
+
+    expect(duplicatedGridId).toBeTruthy()
+    if (!duplicatedGridId) throw new Error('Expected duplicated State Grid.')
+    expect(duplicatedMeasure?.type).toBe('invariant_measure')
+    if (duplicatedMeasure?.type === 'invariant_measure') {
+      expect(duplicatedMeasure.sourceStateGridId).toBe(duplicatedGridId)
+      expect(duplicatedMeasure.sourceStateGridName).toBe(
+        duplicated.system.objects[duplicatedGridId].name
+      )
     }
   })
 

@@ -2299,6 +2299,7 @@ function useInspectorSelectionController({
     object?.type === 'forced_periodic_response' ? object : null
   const limitCycle = object?.type === 'limit_cycle' ? object : null
   const isocline = object?.type === 'isocline' ? object : null
+  const invariantMeasure = object?.type === 'invariant_measure' ? object : null
   const paramOverrideTarget =
     orbit || equilibrium || forcedPeriodicResponse || limitCycle || isocline
   const selectedOrbitPointIndex =
@@ -2863,7 +2864,9 @@ function useInspectorSelectionController({
       ? equilibriumLabelLower
       : selectionNode?.objectType === 'forced_periodic_response'
         ? 'forced periodic response'
-      : selectionNode?.objectType ?? selectionNode?.kind
+        : selectionNode?.objectType === 'invariant_measure'
+          ? 'invariant measure'
+          : selectionNode?.objectType ?? selectionNode?.kind
   const [paramOverrideDraft, setParamOverrideDraft] = useState<string[]>(() =>
     makeParamOverrideDraft(system.config, paramOverrideTarget)
   )
@@ -4611,6 +4614,15 @@ function useInspectorSelectionController({
           detail: object.lastComputed ? `Computed ${object.lastComputed.computedAt}` : 'Not computed',
         }
       }
+      if (object.type === 'invariant_measure') {
+        const occupiedCells = object.result.stationaryDistribution.filter(
+          (mass) => mass > 0
+        ).length
+        return {
+          label: 'Invariant measure',
+          detail: `${occupiedCells} / ${object.result.totalBoxes} occupied cells`,
+        }
+      }
       return null
     }
 
@@ -5305,6 +5317,14 @@ function useInspectorSelectionController({
       group: 'Compute',
       label: 'Configure and compute isocline',
       description: 'Choose active axes, frozen values, and recompute the geometry.',
+    })
+  }
+  if (invariantMeasure) {
+    workflowActions.push({
+      id: 'invariant-measure-data-toggle',
+      group: 'Inspect',
+      label: 'View Data',
+      description: 'Inspect the source grid, method settings, and convergence diagnostics.',
     })
   }
   if (branch) {
@@ -8930,6 +8950,7 @@ function useInspectorSelectionController({
     isoperiodicParam1Options,
     isoperiodicParam2Options,
     isocline,
+    invariantMeasure,
     isoclineActiveAxes,
     isoclineActiveSet,
     isoclineAxisDrafts,

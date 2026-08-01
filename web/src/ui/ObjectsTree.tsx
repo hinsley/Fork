@@ -130,6 +130,7 @@ function getNodeLabel(node: TreeNode, system: System) {
   }
   if (node.objectType === 'isocline') return `${node.name} (isocline)`
   if (node.objectType === 'state_grid') return `${node.name} (state grid)`
+  if (node.objectType === 'invariant_measure') return `${node.name} (invariant measure)`
   if (node.objectType === 'orbit') return `${node.name} (orbit)`
   if (node.kind === 'scene') return `${node.name} (scene)`
   if (node.kind === 'diagram') return `${node.name} (bifurcation)`
@@ -777,10 +778,13 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const visibilityStyle = { '--node-color': nodeColor } as CSSProperties
     const object = system.objects[nodeId]
     const customParameters =
-      object && object.type !== 'continuation' ? object.customParameters : null
+      object && object.type !== 'continuation' && 'customParameters' in object
+        ? object.customParameters
+        : null
     const hasFrozenVariables =
       object &&
       object.type !== 'continuation' &&
+      'frozenVariables' in object &&
       Object.keys(object.frozenVariables?.frozenValuesByVarName ?? {}).length > 0
 
     return (

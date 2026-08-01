@@ -59,6 +59,9 @@ describe('naming utils', () => {
       suggestDefaultName('manifold2d', { sourceName: 'Equilibrium_1' })
     ).toBe('manifold_Equilibrium_1_2d')
     expect(
+      suggestDefaultName('invariantMeasure', { sourceName: 'State_Grid_1' })
+    ).toBe('Invariant_Measure_State_Grid_1')
+    expect(
       suggestDefaultName('limitCycle', { sourceName: 'hopf_curve_Equilibrium_1_mu' })
     ).toBe('LC_Equilibrium_1_mu')
     expect(

@@ -10,6 +10,7 @@ import {
   addScene,
   createSystem,
   selectNode,
+  toggleNodeVisibility,
   updateAnalysisViewport,
   updateLayout,
   updateNodeRender,
@@ -20,6 +21,7 @@ import type {
   ContinuationSettings,
   EquilibriumObject,
   ForcedPeriodicResponseObject,
+  InvariantMeasureObject,
   LimitCycleObject,
   OrbitObject,
   StateGridObject,
@@ -534,6 +536,99 @@ describe('system import/export (zip)', () => {
     expect(restored.objects[added.nodeId]).toEqual(added.system.objects[added.nodeId])
     expect(restored.nodes[added.nodeId].id).toBe(added.nodeId)
     expect(restored.nodes[added.nodeId].name).toBe('Grid with result')
+  })
+
+  it('round-trips a separate invariant measure with its stable source link and rendering', async () => {
+    const base = createSystem({
+      name: 'Invariant measure archive',
+      config: {
+        name: 'Invariant measure archive',
+        equations: ['r*x*(1-x)'],
+        params: [3.9],
+        paramNames: ['r'],
+        varNames: ['x'],
+        solver: 'discrete',
+        type: 'map',
+      },
+    })
+    const grid = addObject(base, {
+      type: 'state_grid',
+      name: 'State_Grid_1',
+      systemName: base.name,
+      axes: [{ variableName: 'x', min: 0, max: 1, resolution: 4 }],
+      sampling: { type: 'cartesian_cell_centers' },
+      analysis: {
+        type: 'expansion_entropy',
+        steps: 100,
+        dt: 1,
+        checkpointStride: 10,
+        stabilizationStride: 5,
+      },
+      transferOperator: {
+        settings: {
+          samplesPerCell: 4,
+          iterations: 1,
+          maxStationaryIterations: 2000,
+          tolerance: 1e-10,
+          outsidePolicy: 'conditional_in_grid',
+        },
+      },
+      createdAt: '2026-08-01T00:00:00.000Z',
+    } as StateGridObject)
+    const measure: InvariantMeasureObject = {
+      type: 'invariant_measure',
+      name: 'Invariant_Measure_State_Grid_1',
+      systemName: base.name,
+      sourceStateGridId: grid.nodeId,
+      sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator',
+        dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: 0, max: 1, resolution: 4 }],
+        settings: {
+          samplesPerCell: 4,
+          iterations: 1,
+          maxStationaryIterations: 2000,
+          tolerance: 1e-10,
+          outsidePolicy: 'conditional_in_grid',
+        },
+        parameters: [3.9],
+        totalBoxes: 4,
+        columnOffsets: [0, 1, 2, 3, 4],
+        targetIndices: [0, 1, 2, 3],
+        probabilities: [1, 1, 1, 1],
+        retainedMass: 1,
+        zeroSurvivorSources: 0,
+        stationaryDistribution: [0.1, 0.2, 0.3, 0.4],
+        residual: 1e-11,
+        stationaryIterations: 12,
+        computedAt: '2026-08-01T00:01:00.000Z',
+      },
+      createdAt: '2026-08-01T00:01:00.000Z',
+    }
+    const added = addObject(grid.system, measure)
+    let system = updateNodeRender(added.system, added.nodeId, {
+      color: '#123456',
+      opacity: 0.42,
+      pointSize: 9,
+    })
+    system = toggleNodeVisibility(system, added.nodeId)
+
+    const restored = await roundTripSystem(system)
+
+    expect(restored.objects[grid.nodeId]).toEqual(system.objects[grid.nodeId])
+    expect(restored.objects[added.nodeId]).toEqual(system.objects[added.nodeId])
+    const restoredMeasure = restored.objects[added.nodeId]
+    expect(restoredMeasure.type).toBe('invariant_measure')
+    if (restoredMeasure.type === 'invariant_measure') {
+      expect(restoredMeasure.sourceStateGridId).toBe(grid.nodeId)
+    }
+    expect(restored.nodes[added.nodeId].render).toMatchObject({
+      color: '#123456',
+      opacity: 0.42,
+      pointSize: 9,
+    })
+    expect(restored.nodes[added.nodeId].visibility).toBe(false)
   })
 
   it('transfers archives between IndexedDB and OPFS stores', async () => {

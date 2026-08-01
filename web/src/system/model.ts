@@ -1210,6 +1210,17 @@ export function duplicateNode(
   const duplicatedRootId = cloneSubtree(nodeId, rootParentId, true)
   if (!duplicatedRootId) return null
 
+  idMap.forEach((newId) => {
+    const object = next.objects[newId]
+    if (!object || object.type !== 'invariant_measure') return
+    const sourceStateGridId = idMap.get(object.sourceStateGridId) ?? object.sourceStateGridId
+    object.sourceStateGridId = sourceStateGridId
+    const sourceStateGrid = next.objects[sourceStateGridId]
+    if (sourceStateGrid?.type === 'state_grid') {
+      object.sourceStateGridName = sourceStateGrid.name
+    }
+  })
+
   const siblings = rootParentId
     ? next.nodes[rootParentId]?.children
     : next.rootIds

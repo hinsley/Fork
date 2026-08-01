@@ -6,6 +6,7 @@ import { ForcedPeriodicResponseInspectorSections } from './sections/ForcedPeriod
 import { LimitCycleInspectorSections } from './sections/LimitCycleInspectorSections'
 import { LimitCycleManifoldSection } from './sections/LimitCycleManifoldSection'
 import { IsoclineInspectorSections } from './sections/IsoclineInspectorSections'
+import { InvariantMeasureInspectorSections } from './sections/InvariantMeasureInspectorSections'
 import { SceneInspectorSections } from './sections/SceneInspectorSections'
 import { AnalysisInspectorSections } from './sections/AnalysisInspectorSections'
 import { DiagramInspectorSections } from './sections/DiagramInspectorSections'
@@ -542,6 +543,8 @@ export function SelectionInspectorView({
           ) : null}
 
           <LimitCycleInspectorSections scope={scope} />
+
+          <InvariantMeasureInspectorSections scope={scope} />
 
           {paramOverrideTarget ? (
             <InspectorDisclosure

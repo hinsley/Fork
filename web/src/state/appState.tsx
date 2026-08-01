@@ -43,6 +43,7 @@ import type {
   IsoclineAxis,
   IsoclineObject,
   IsoclineSource,
+  InvariantMeasureObject,
   LimitCycleRenderTarget,
   LimitCycleObject,
   LimitCycleManifold2DSettings,
@@ -130,7 +131,7 @@ import {
   validateObjectName,
 } from './systemTreeCommands'
 import { validateSystemConfig } from './systemValidation'
-import { isValidDisplayName } from '../utils/naming'
+import { isValidDisplayName, suggestDefaultName } from '../utils/naming'
 import { makeStableId } from '../utils/determinism'
 import {
   DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT,
@@ -2189,6 +2190,7 @@ export function AppProvider({
 
   const uiSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const systemSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const inFlightDebouncedWritesRef = useRef(new Set<Promise<void>>())
   const latestSystemRef = useRef<System | null>(null)
   const isoclineWarmupSystemIdRef = useRef<string | null>(null)
   const isoclineWarmupControllersRef = useRef(
@@ -2233,11 +2235,15 @@ export function AppProvider({
         uiSaveTimer.current = null
         const latest = latestSystemRef.current
         if (!latest) return
+        const write = store.saveUi(latest)
+        inFlightDebouncedWritesRef.current.add(write)
         try {
-          await store.saveUi(latest)
+          await write
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           dispatch({ type: 'SET_ERROR', error: message })
+        } finally {
+          inFlightDebouncedWritesRef.current.delete(write)
         }
       }, 200)
     },
@@ -2252,11 +2258,15 @@ export function AppProvider({
         systemSaveTimer.current = null
         const latest = latestSystemRef.current
         if (!latest) return
+        const write = store.save(latest)
+        inFlightDebouncedWritesRef.current.add(write)
         try {
-          await store.save(latest)
+          await write
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           dispatch({ type: 'SET_ERROR', error: message })
+        } finally {
+          inFlightDebouncedWritesRef.current.delete(write)
         }
       }, 250)
     },
@@ -3256,25 +3266,154 @@ export function AppProvider({
   )
 
   const computeTransferOperator = useCallback(
-    async (request: StateGridComputeRequest, opts?: { signal?: AbortSignal }): Promise<TransferOperatorResponse | null> => {
-      if (!state.system) return null
+    async (
+      request: StateGridComputeRequest,
+      opts?: { signal?: AbortSignal }
+    ): Promise<TransferOperatorResponse | null> => {
+      const launchSystem = latestSystemRef.current ?? state.system
+      if (!launchSystem) return null
+      const launchSystemId = launchSystem.id
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
-        const config = state.system.config
-        if (config.type !== 'map' || config.solver !== 'discrete') throw new Error('Transfer operator currently supports discrete maps only.')
-        const object = state.system.objects[request.stateGridId]
-        if (!object || object.type !== 'state_grid') throw new Error('Select a valid State Grid object.')
+        const config = launchSystem.config
+        if (config.type !== 'map' || config.solver !== 'discrete') {
+          throw new Error('Transfer operator currently supports discrete maps only.')
+        }
+        const object = launchSystem.objects[request.stateGridId]
+        if (!object || object.type !== 'state_grid') {
+          throw new Error('Select a valid State Grid object.')
+        }
         const axes = normalizeStateGridAxes(config, object.axes)
-        const settings = object.transferOperator?.settings ?? { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 2000, tolerance: 1e-10, outsidePolicy: 'conditional_in_grid' as const }
+        const settings = object.transferOperator?.settings ?? {
+          samplesPerCell: 4,
+          iterations: 1,
+          maxStationaryIterations: 2000,
+          tolerance: 1e-10,
+          outsidePolicy: 'conditional_in_grid' as const,
+        }
+        for (const axis of axes) {
+          if (!Number.isFinite(axis.min) || !Number.isFinite(axis.max) || axis.min >= axis.max) {
+            throw new Error(`State Grid bounds for "${axis.variableName}" require min < max.`)
+          }
+          if (!Number.isInteger(axis.resolution) || axis.resolution < 1) {
+            throw new Error(
+              `State Grid resolution for "${axis.variableName}" must be a positive integer.`
+            )
+          }
+        }
+        if (!Number.isInteger(settings.samplesPerCell) || settings.samplesPerCell < 1) {
+          throw new Error('Samples per cell must be a positive integer.')
+        }
+        if (!Number.isInteger(settings.iterations) || settings.iterations < 1) {
+          throw new Error('Map iterations per transition must be a positive integer.')
+        }
+        if (
+          !Number.isInteger(settings.maxStationaryIterations) ||
+          settings.maxStationaryIterations < 1
+        ) {
+          throw new Error('Stationary iteration limit must be a positive integer.')
+        }
+        if (!Number.isFinite(settings.tolerance) || settings.tolerance <= 0) {
+          throw new Error('Convergence tolerance must be positive.')
+        }
         const baseParams = resolveObjectParams(config, object.customParameters)
-        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(config, object, baseParams)
-        const freeAxes = snapshot.freeVariableNames.map((variableName) => axes.find((axis) => axis.variableName === variableName) ?? (() => { throw new Error(`State Grid is missing bounds for "${variableName}".`) })())
-        const result = await client.computeTransferOperator({ system: runConfig, axes: freeAxes, samplesPerCell: settings.samplesPerCell, iterations: settings.iterations, maxStationaryIterations: settings.maxStationaryIterations, tolerance: settings.tolerance }, { signal: opts?.signal, onProgress: (progress) => dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: { label: 'Transfer operator', progress } }) })
-        const updated = updateObject(state.system, request.stateGridId, { axes, parameters: [...baseParams], subsystemSnapshot: snapshot, transferOperator: { settings, lastResult: { analysisType: 'transfer_operator', dynamicsType: 'map', axes: structuredClone(freeAxes), settings: structuredClone(settings), parameters: [...baseParams], subsystemSnapshot: snapshot, ...result, computedAt: new Date().toISOString() } } } as Partial<StateGridObject>)
-        dispatch({ type: 'SET_SYSTEM', system: updated }); await store.save(updated); return result
-      } catch (error) { if (error instanceof Error && error.name === 'AbortError') return null; dispatch({ type: 'SET_ERROR', error: error instanceof Error ? error.message : String(error) }); throw error }
-      finally { dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null }); dispatch({ type: 'SET_BUSY', busy: false }) }
-    }, [client, state.system, store]
+        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(
+          config,
+          object,
+          baseParams
+        )
+        const freeAxes = snapshot.freeVariableNames.map((variableName) => {
+          const axis = axes.find((candidate) => candidate.variableName === variableName)
+          if (!axis) {
+            throw new Error(`State Grid is missing bounds for "${variableName}".`)
+          }
+          return axis
+        })
+        const result = await client.computeTransferOperator(
+          {
+            system: runConfig,
+            axes: freeAxes,
+            samplesPerCell: settings.samplesPerCell,
+            iterations: settings.iterations,
+            maxStationaryIterations: settings.maxStationaryIterations,
+            tolerance: settings.tolerance,
+          },
+          {
+            signal: opts?.signal,
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Invariant measure', progress },
+              }),
+          }
+        )
+        const computedAt = new Date().toISOString()
+        const measureResult: InvariantMeasureObject['result'] = {
+          analysisType: 'transfer_operator',
+          dynamicsType: 'map',
+          axes: structuredClone(freeAxes),
+          settings: structuredClone(settings),
+          parameters: [...baseParams],
+          subsystemSnapshot: snapshot,
+          ...result,
+          computedAt,
+        }
+        if (opts?.signal?.aborted) return null
+        if (uiSaveTimer.current) {
+          clearTimeout(uiSaveTimer.current)
+          uiSaveTimer.current = null
+        }
+        if (systemSaveTimer.current) {
+          clearTimeout(systemSaveTimer.current)
+          systemSaveTimer.current = null
+        }
+        while (inFlightDebouncedWritesRef.current.size > 0) {
+          await Promise.allSettled([...inFlightDebouncedWritesRef.current])
+        }
+        if (opts?.signal?.aborted) return null
+        const current = latestSystemRef.current
+        if (!current || current.id !== launchSystemId) return null
+        const currentGrid = current.objects[request.stateGridId]
+        if (!currentGrid || currentGrid.type !== 'state_grid') return null
+        const existingNames = Object.values(current.index.objects).map((entry) => entry.name)
+        const updatedCurrent = updateObject(current, request.stateGridId, {
+          transferOperator: {
+            settings: structuredClone(currentGrid.transferOperator?.settings ?? settings),
+          },
+        } as Partial<StateGridObject>)
+        const measureObject: InvariantMeasureObject = {
+          type: 'invariant_measure',
+          name: suggestDefaultName('invariantMeasure', {
+            sourceName: currentGrid.name,
+            existingNames,
+          }),
+          systemName: current.config.name,
+          sourceStateGridId: request.stateGridId,
+          sourceStateGridName: currentGrid.name,
+          result: measureResult,
+          createdAt: computedAt,
+        }
+        const created = addObject(updatedCurrent, measureObject)
+        const selected = selectNode(created.system, created.nodeId)
+        if (systemSaveTimer.current) {
+          clearTimeout(systemSaveTimer.current)
+          systemSaveTimer.current = null
+        }
+        latestSystemRef.current = selected
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+        return result
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') return null
+        const message = error instanceof Error ? error.message : String(error)
+        dispatch({ type: 'SET_ERROR', error: message })
+        throw error instanceof Error ? error : new Error(message)
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
   )
 
   useEffect(() => {

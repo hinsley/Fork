@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { addObject, createSystem } from '../../system/model'
 import type { StateGridObject } from '../../system/types'
+import type { StateGridComputeRequest } from '../../state/appState'
 import { StateGridInspector } from './StateGridInspector'
 import { WorkflowFocusProvider } from './selectionSession'
 
@@ -153,6 +154,69 @@ describe('StateGridInspector', () => {
     )
     fireEvent.click(screen.getByTestId('state-grid-run-expansion-entropy'))
     await waitFor(() => expect(onCompute).toHaveBeenCalled())
+  })
+
+  it('configures and creates a separate invariant measure for maps', async () => {
+    const initial = fixture()
+    const mapSystem = {
+      ...initial.system,
+      config: {
+        ...initial.system.config,
+        type: 'map' as const,
+        solver: 'discrete' as const,
+      },
+    }
+    const onUpdate = vi.fn()
+    let resolveRun: () => void = () => {}
+    let receivedSignal: AbortSignal | undefined
+    const onComputeTransferOperator = vi.fn(
+      (request: StateGridComputeRequest, opts?: { signal?: AbortSignal }) => {
+        void request
+        receivedSignal = opts?.signal
+        return new Promise<void>((resolve) => {
+          resolveRun = resolve
+        })
+      }
+    )
+
+    render(
+      <WorkflowFocusProvider>
+        <StateGridInspector
+          system={mapSystem}
+          nodeId={initial.nodeId}
+          object={initial.object}
+          onRename={() => {}}
+          onUpdate={onUpdate}
+          onCompute={async () => null}
+          onComputeTransferOperator={onComputeTransferOperator}
+        />
+      </WorkflowFocusProvider>
+    )
+
+    fireEvent.click(screen.getByTestId('action-state-grid-transfer-toggle'))
+    expect(screen.getByTestId('state-grid-invariant-measure-workflow')).toHaveTextContent(
+      'Create a separate invariant-measure object'
+    )
+    fireEvent.change(screen.getByTestId('state-grid-transfer-samples-per-cell'), {
+      target: { value: '8' },
+    })
+    expect(onUpdate).toHaveBeenCalledWith(initial.nodeId, {
+      transferOperator: {
+        settings: expect.objectContaining({ samplesPerCell: 8 }),
+      },
+    })
+
+    fireEvent.click(screen.getByTestId('state-grid-create-invariant-measure'))
+    expect(onComputeTransferOperator).toHaveBeenCalledWith(
+      { stateGridId: initial.nodeId },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+    fireEvent.click(screen.getByTestId('state-grid-cancel-invariant-measure'))
+    expect(receivedSignal?.aborted).toBe(true)
+    resolveRun()
+    await waitFor(() =>
+      expect(screen.queryByTestId('state-grid-cancel-invariant-measure')).not.toBeInTheDocument()
+    )
   })
 
   it('shows a stored finite-time estimate and survivor diagnostics', () => {

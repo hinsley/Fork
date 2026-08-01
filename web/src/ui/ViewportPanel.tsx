@@ -3172,34 +3172,115 @@ function buildSceneTraces(
     const object = system.objects[nodeId]
     if (!object) continue
 
-    if (object.type === 'state_grid') {
-      const measure = object.transferOperator?.lastResult
-      if (!measure || measure.stationaryDistribution.length === 0 || object.axes.length > 3) continue
+    if (object.type === 'state_grid' || object.type === 'invariant_measure') {
+      const measure =
+        object.type === 'invariant_measure'
+          ? object.result
+          : object.transferOperator?.lastResult
+      if (!measure || measure.stationaryDistribution.length === 0) continue
+      const axes = measure.axes
+      if (axes.length < 1 || axes.length > 3) continue
+      const expectedCellCount = axes.reduce(
+        (total, axis) => total * axis.resolution,
+        1
+      )
+      if (expectedCellCount !== measure.stationaryDistribution.length) continue
+      if (
+        measure.subsystemSnapshot &&
+        !isSubsystemSnapshotCompatible(system.config, measure.subsystemSnapshot)
+      ) {
+        continue
+      }
+      const snapshot = measure.subsystemSnapshot ?? null
+      const axisPositionByName = new Map(
+        axes.map((axis, index) => [axis.variableName, index] as const)
+      )
+      if (axisPositionByName.size !== axes.length) continue
+      const projectedAxisIndices = projectionAxisIndices.slice(0, projectionPlotDim)
+      if (
+        !snapshot &&
+        projectedAxisIndices.some((index) => {
+          const variableName = system.config.varNames[index]
+          return !variableName || !axisPositionByName.has(variableName)
+        })
+      ) {
+        continue
+      }
       const centers = (cell: number) => {
         let remaining = cell
-        const point = Array(object.axes.length).fill(0) as number[]
-        for (let axis = object.axes.length - 1; axis >= 0; axis -= 1) {
-          const entry = object.axes[axis]
+        const reducedPoint = Array(axes.length).fill(0) as number[]
+        for (let axis = axes.length - 1; axis >= 0; axis -= 1) {
+          const entry = axes[axis]
           const coordinate = remaining % entry.resolution
           remaining = Math.floor(remaining / entry.resolution)
-          point[axis] = entry.min + (coordinate + 0.5) * (entry.max - entry.min) / entry.resolution
+          reducedPoint[axis] =
+            entry.min + (coordinate + 0.5) * (entry.max - entry.min) / entry.resolution
         }
-        return point
+        if (snapshot) return stateVectorToDisplay(snapshot, reducedPoint)
+        const displayPoint = Array(system.config.varNames.length).fill(Number.NaN) as number[]
+        system.config.varNames.forEach((variableName, index) => {
+          const axisPosition = axisPositionByName.get(variableName)
+          if (axisPosition !== undefined) displayPoint[index] = reducedPoint[axisPosition]
+        })
+        return displayPoint
       }
       const positive = measure.stationaryDistribution.filter((value) => value > 0)
+      if (positive.length === 0) continue
       const maxLog = Math.max(...positive.map((value) => Math.log(value)))
       const minLog = Math.min(...positive.map((value) => Math.log(value)))
-      const xs: number[] = []; const ys: number[] = []; const zs: number[] = []; const colors: string[] = []
+      const xs: number[] = []
+      const ys: number[] = []
+      const zs: number[] = []
+      const colors: string[] = []
+      const hoverData: Array<[number, number]> = []
       measure.stationaryDistribution.forEach((mass, cell) => {
         if (!(mass > 0)) return
         const point = centers(cell)
         const normalized = maxLog === minLog ? 1 : (Math.log(mass) - minLog) / (maxLog - minLog)
-        const alpha = normalizeColorOpacity(node.render.opacity) * (0.15 + 0.85 * normalized)
-        xs.push(point[0]); ys.push(point[1] ?? 0); zs.push(point[2] ?? 0); colors.push(colorWithOpacity(node.render.color, alpha))
+        const alpha = 0.15 + 0.85 * normalized
+        const projectedPoint = projectedAxisIndices.map((index) => point[index])
+        if (projectedPoint.some((coordinate) => !Number.isFinite(coordinate))) return
+        xs.push(projectedPoint[0] ?? 0)
+        ys.push(projectedPoint[1] ?? 0)
+        zs.push(projectedPoint[2] ?? 0)
+        colors.push(colorWithOpacity(node.render.color, alpha))
+        hoverData.push([cell, mass])
       })
-      if (object.axes.length === 3) traces.push({ type: 'scatter3d', mode: 'markers', name: `${object.name} invariant measure`, uid: nodeId, x: xs, y: ys, z: zs, marker: { color: colors, size: 4 }, hovertemplate: 'x=%{x}<br>y=%{y}<br>z=%{z}<extra></extra>' })
-      else if (object.axes.length === 2) traces.push({ type: 'scatter', mode: 'markers', name: `${object.name} invariant measure`, uid: nodeId, x: xs, y: ys, marker: { color: colors, size: 6 }, hovertemplate: 'x=%{x}<br>y=%{y}<extra></extra>' })
-      else traces.push({ type: 'scatter', mode: 'markers', name: `${object.name} invariant measure`, uid: nodeId, x: xs, y: xs.map(() => 0), marker: { color: colors, size: 7 }, hovertemplate: 'x=%{x}<extra></extra>' })
+      if (xs.length === 0) continue
+      const traceName =
+        object.type === 'invariant_measure'
+          ? object.name
+          : `${object.name} invariant measure`
+      if (projectionPlotDim === 3) {
+        traces.push({
+          type: 'scatter3d',
+          mode: 'markers',
+          name: traceName,
+          uid: nodeId,
+          x: xs,
+          y: ys,
+          z: zs,
+          customdata: hoverData,
+          marker: { color: colors, size: node.render.pointSize },
+          hovertemplate:
+            'x=%{x}<br>y=%{y}<br>z=%{z}<br>cell=%{customdata[0]}<br>mass=%{customdata[1]:.6g}<extra></extra>',
+        })
+      } else {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: traceName,
+          uid: nodeId,
+          x: xs,
+          y: projectionPlotDim === 1 ? xs.map(() => 0) : ys,
+          customdata: hoverData,
+          marker: { color: colors, size: node.render.pointSize },
+          hovertemplate:
+            projectionPlotDim === 1
+              ? 'x=%{x}<br>cell=%{customdata[0]}<br>mass=%{customdata[1]:.6g}<extra></extra>'
+              : 'x=%{x}<br>y=%{y}<br>cell=%{customdata[0]}<br>mass=%{customdata[1]:.6g}<extra></extra>',
+        })
+      }
       continue
     }
 

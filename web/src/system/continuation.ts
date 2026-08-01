@@ -934,10 +934,13 @@ export function getBranchParams(
     (branch.parentObjectId ? system.objects[branch.parentObjectId] : undefined) ??
     Object.values(system.objects).find((obj) => obj.name === branch.parentObject)
   if (parent && parent.type !== 'continuation') {
-    if (isValidParameterSet(system.config.params, parent.customParameters)) {
+    if (
+      'customParameters' in parent &&
+      isValidParameterSet(system.config.params, parent.customParameters)
+    ) {
       return [...parent.customParameters]
     }
-    if (isValidParameterSet(system.config.params, parent.parameters)) {
+    if ('parameters' in parent && isValidParameterSet(system.config.params, parent.parameters)) {
       return [...parent.parameters]
     }
   }

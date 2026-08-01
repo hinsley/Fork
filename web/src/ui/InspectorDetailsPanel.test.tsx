@@ -26,6 +26,7 @@ import type {
   ContinuationObject,
   EquilibriumObject,
   ForcedPeriodicResponseObject,
+  InvariantMeasureObject,
   IsoclineObject,
   LimitCycleObject,
   OrbitObject,
@@ -214,6 +215,150 @@ function renderInspectorForStateSpaceStride(
 }
 
 describe('InspectorDetailsPanel', () => {
+  it('shows source and convergence diagnostics for an invariant-measure object', () => {
+    const config: SystemConfig = {
+      name: 'Measure_Map',
+      equations: ['x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: config.name, config })
+    const grid = addObject(system, {
+      type: 'state_grid',
+      name: 'State_Grid_1',
+      systemName: config.name,
+      axes: [{ variableName: 'x', min: 0, max: 1, resolution: 4 }],
+      sampling: { type: 'cartesian_cell_centers' },
+      analysis: {
+        type: 'expansion_entropy',
+        steps: 10,
+        dt: 1,
+        checkpointStride: 1,
+        stabilizationStride: 1,
+      },
+      createdAt: '2026-08-01T00:00:00.000Z',
+    })
+    system = grid.system
+    const measure: InvariantMeasureObject = {
+      type: 'invariant_measure',
+      name: 'Invariant_Measure_State_Grid_1',
+      systemName: config.name,
+      sourceStateGridId: grid.nodeId,
+      sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator',
+        dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: 0, max: 1, resolution: 4 }],
+        settings: {
+          samplesPerCell: 4,
+          iterations: 1,
+          maxStationaryIterations: 2000,
+          tolerance: 1e-10,
+          outsidePolicy: 'conditional_in_grid',
+        },
+        parameters: [],
+        totalBoxes: 4,
+        columnOffsets: [0, 1, 2, 3, 4],
+        targetIndices: [0, 1, 2, 3],
+        probabilities: [1, 1, 1, 1],
+        retainedMass: 1,
+        zeroSurvivorSources: 0,
+        stationaryDistribution: [0, 0.2, 0.3, 0.5],
+        residual: 1e-11,
+        stationaryIterations: 12,
+        computedAt: '2026-08-01T00:01:00.000Z',
+      },
+      createdAt: '2026-08-01T00:01:00.000Z',
+    }
+    const added = addObject(system, measure)
+
+    renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
+
+    expect(screen.getByText('invariant measure')).toBeInTheDocument()
+    expect(screen.getByText('3 / 4 occupied cells')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
+    expect(screen.getByTestId('invariant-measure-source')).toHaveTextContent('State_Grid_1')
+    expect(screen.getByTestId('invariant-measure-occupied-cells')).toHaveTextContent('3 / 4')
+    expect(screen.getByTestId('invariant-measure-residual')).toHaveTextContent('1.000000e-11')
+  })
+
+  it('uses the object index for an invariant measure whose source grid is not hydrated', () => {
+    const config: SystemConfig = {
+      name: 'Lazy_Measure_Map',
+      equations: ['x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    const base = createSystem({ name: config.name, config })
+    const grid = addObject(base, {
+      type: 'state_grid',
+      name: 'State_Grid_1',
+      systemName: config.name,
+      axes: [{ variableName: 'x', min: 0, max: 1, resolution: 1 }],
+      sampling: { type: 'cartesian_cell_centers' },
+      analysis: {
+        type: 'expansion_entropy',
+        steps: 1,
+        dt: 1,
+        checkpointStride: 1,
+        stabilizationStride: 1,
+      },
+      createdAt: '2026-08-01T00:00:00.000Z',
+    })
+    const added = addObject(grid.system, {
+      type: 'invariant_measure',
+      name: 'Invariant_Measure_State_Grid_1',
+      systemName: config.name,
+      sourceStateGridId: grid.nodeId,
+      sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator',
+        dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: 0, max: 1, resolution: 1 }],
+        settings: {
+          samplesPerCell: 1,
+          iterations: 1,
+          maxStationaryIterations: 10,
+          tolerance: 1e-8,
+          outsidePolicy: 'conditional_in_grid',
+        },
+        parameters: [],
+        totalBoxes: 1,
+        columnOffsets: [0, 1],
+        targetIndices: [0],
+        probabilities: [1],
+        retainedMass: 1,
+        zeroSurvivorSources: 0,
+        stationaryDistribution: [1],
+        residual: 0,
+        stationaryIterations: 1,
+        computedAt: '2026-08-01T00:01:00.000Z',
+      },
+      createdAt: '2026-08-01T00:01:00.000Z',
+    } as InvariantMeasureObject)
+    const lazySystem = structuredClone(added.system)
+    delete lazySystem.objects[grid.nodeId]
+    lazySystem.index.objects[grid.nodeId].name = 'Renamed_State_Grid'
+
+    renderInspectorForStateSpaceStride(lazySystem, added.nodeId, vi.fn())
+    fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
+
+    expect(screen.getByTestId('invariant-measure-source')).toHaveTextContent(
+      'Renamed_State_Grid'
+    )
+    expect(
+      screen.queryByText(
+        'The source State Grid is no longer available. This stored measure remains renderable.'
+      )
+    ).toBeNull()
+  })
+
   it('solves and continues forced periodic responses with live forcing', async () => {
     const config: SystemConfig = {
       name: 'Forced_Flow',
