@@ -164,6 +164,39 @@ describe('ViewportPanel view state wiring', () => {
     expect(trace.customdata).toEqual([[1, 3.70926e-36], [2, 0.01], [3, 0.99]])
   })
 
+  it('serializes tiny three-dimensional invariant measure opacity as bounded decimals', () => {
+    const config: SystemConfig = { name: 'Three-dimensional measure map', equations: ['x', 'y', 'z'], params: [], paramNames: [], varNames: ['x', 'y', 'z'], solver: 'discrete', type: 'map' }
+    let system = createSystem({ name: config.name, config })
+    const added = addObject(system, {
+      type: 'invariant_measure',
+      name: 'Three_Dimensional_Measure',
+      systemName: config.name,
+      sourceStateGridId: 'grid-source',
+      sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator', dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: 0, max: 3, resolution: 3 }, { variableName: 'y', min: 0, max: 1, resolution: 1 }, { variableName: 'z', min: 0, max: 1, resolution: 1 }],
+        settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' },
+        parameters: [], totalBoxes: 3, columnOffsets: [0,1,2,3], targetIndices: [0,1,2], probabilities: [1,1,1], retainedMass: 1, zeroSurvivorSources: 0,
+        stationaryDistribution: [1e-16, 3e-15, 1], residual: 0, stationaryIterations: 1, computedAt: nowIso()
+      },
+      createdAt: nowIso(),
+    } as InvariantMeasureObject)
+    system = updateNodeRender(added.system, added.nodeId, { color: '#336699' })
+    const scene = addScene(system, 'Three-dimensional measure scene')
+    system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
+    renderPanel(system)
+
+    const trace = plotlyCalls.flatMap((call) => call.data).find((data) => data.name === 'Three_Dimensional_Measure') as { type: string; marker: { color: string[] } }
+    expect(trace.type).toBe('scatter3d')
+    expect(trace.marker.color).toEqual([
+      'rgba(51, 102, 153, 0)',
+      'rgba(51, 102, 153, 0.00000000000000300000)',
+      '#336699',
+    ])
+    expect(trace.marker.color.every((color) => !color.includes('e-'))).toBe(true)
+  })
+
   it('embeds frozen coordinates and respects the Scene axis order', () => {
     const config: SystemConfig = { name: 'Frozen measure map', equations: ['x', 'y', 'z'], params: [], paramNames: [], varNames: ['x', 'y', 'z'], solver: 'discrete', type: 'map' }
     let system = createSystem({ name: config.name, config })

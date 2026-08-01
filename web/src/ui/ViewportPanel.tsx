@@ -280,7 +280,23 @@ const CLV_HEAD_RATIO = 0.25
 const COBWEB_DIAGONAL_COLOR = 'rgba(120,120,120,0.45)'
 const COBWEB_FUNCTION_COLOR = '#6f7a89'
 const MAP_FUNCTION_SAMPLE_COUNT = 256
+const STATE_GRID_3D_ALPHA_DECIMAL_PLACES = 20
 const EMPTY_TRACES: Data[] = []
+
+function stateGrid3dColorWithOpacity(color: string, opacity: number): string {
+  const alpha = normalizeColorOpacity(opacity)
+  if (alpha >= 1) return color
+  const match = /^#([0-9a-fA-F]{6})$/.exec(color.trim())
+  if (!match) return color
+  const digits = match[1]
+  const red = Number.parseInt(digits.slice(0, 2), 16)
+  const green = Number.parseInt(digits.slice(2, 4), 16)
+  const blue = Number.parseInt(digits.slice(4, 6), 16)
+  const serializedAlpha = alpha < Number.EPSILON
+    ? '0'
+    : alpha.toFixed(STATE_GRID_3D_ALPHA_DECIMAL_PLACES)
+  return `rgba(${red}, ${green}, ${blue}, ${serializedAlpha})`
+}
 
 function statePeriodicPeriods(config: SystemConfig): Array<number | null> {
   return normalizePeriodicVariables(config).map((entry) =>
@@ -3236,16 +3252,17 @@ function buildSceneTraces(
       measure.stationaryDistribution.forEach((mass, cell) => {
         if (!(mass > 0)) return
         const point = centers(cell)
-        const alpha = maxMass > 0 ? Math.max(0, mass) / maxMass : 0
+        const normalizedOpacity = maxMass > 0 ? Math.max(0, mass) / maxMass : 0
         const projectedPoint = projectedAxisIndices.map((index) => point[index])
         if (projectedPoint.some((coordinate) => !Number.isFinite(coordinate))) return
         xs.push(projectedPoint[0] ?? 0)
         ys.push(projectedPoint[1] ?? 0)
         zs.push(projectedPoint[2] ?? 0)
         if (projectionPlotDim === 3) {
-          colors.push(colorWithOpacity(node.render.color, alpha))
+          colors.push(stateGrid3dColorWithOpacity(node.render.color, normalizedOpacity))
+        } else {
+          opacities.push(normalizedOpacity)
         }
-        opacities.push(alpha)
         hoverData.push([cell, mass])
       })
       if (xs.length === 0) continue
