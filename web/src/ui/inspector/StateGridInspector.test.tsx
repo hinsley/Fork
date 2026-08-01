@@ -151,6 +151,116 @@ describe('StateGridInspector', () => {
     expect(screen.getByTestId('state-grid-workload')).toHaveTextContent('2,000')
   })
 
+  it.each(['flow', 'map'] as const)(
+    'keeps transient State Grid bounds and resolution drafts for %s systems',
+    (dynamicsType) => {
+      const initial = fixture()
+      const system =
+        dynamicsType === 'map'
+          ? {
+              ...initial.system,
+              config: {
+                ...initial.system.config,
+                type: 'map' as const,
+                solver: 'discrete' as const,
+              },
+            }
+          : initial.system
+      const onUpdate = vi.fn()
+
+      render(
+        <StateGridInspector
+          system={system}
+          nodeId={initial.nodeId}
+          object={initial.object}
+          onRename={() => {}}
+          onUpdate={onUpdate}
+          onCompute={async () => null}
+        />
+      )
+
+      const fields = [
+        screen.getByTestId('state-grid-x-min'),
+        screen.getByTestId('state-grid-x-max'),
+        screen.getByTestId('state-grid-x-resolution'),
+      ]
+      for (const field of fields) {
+        fireEvent.change(field, { target: { value: '-' } })
+      }
+
+      for (const field of fields) {
+        expect(field).toHaveValue('-')
+      }
+      expect(onUpdate).not.toHaveBeenCalled()
+
+      fireEvent.change(screen.getByTestId('state-grid-x-min'), {
+        target: { value: '-0.5' },
+      })
+      fireEvent.change(screen.getByTestId('state-grid-x-max'), {
+        target: { value: '0.5' },
+      })
+      fireEvent.change(screen.getByTestId('state-grid-x-resolution'), {
+        target: { value: '5' },
+      })
+      expect(onUpdate).toHaveBeenCalledWith(initial.nodeId, {
+        axes: expect.arrayContaining([
+          expect.objectContaining({ variableName: 'x', min: -0.5 }),
+        ]),
+      })
+      expect(onUpdate).toHaveBeenCalledWith(initial.nodeId, {
+        axes: expect.arrayContaining([
+          expect.objectContaining({ variableName: 'x', max: 0.5 }),
+        ]),
+      })
+      expect(onUpdate).toHaveBeenCalledWith(initial.nodeId, {
+        axes: expect.arrayContaining([
+          expect.objectContaining({ variableName: 'x', resolution: 5 }),
+        ]),
+      })
+      expect(onUpdate).toHaveBeenCalledTimes(3)
+    }
+  )
+
+  it.each(['flow', 'map'] as const)(
+    'rejects an unfinished State Grid draft at entropy submit for %s systems',
+    async (dynamicsType) => {
+      const initial = fixture()
+      const system =
+        dynamicsType === 'map'
+          ? {
+              ...initial.system,
+              config: {
+                ...initial.system.config,
+                type: 'map' as const,
+                solver: 'discrete' as const,
+              },
+            }
+          : initial.system
+      const onCompute = vi.fn(async () => null)
+
+      render(
+        <StateGridInspector
+          system={system}
+          nodeId={initial.nodeId}
+          object={initial.object}
+          onRename={() => {}}
+          onUpdate={() => {}}
+          onCompute={onCompute}
+        />
+      )
+
+      fireEvent.change(screen.getByTestId('state-grid-x-min'), {
+        target: { value: '-' },
+      })
+      fireEvent.click(screen.getByTestId('state-grid-run-expansion-entropy'))
+
+      expect(onCompute).not.toHaveBeenCalled()
+      expect(screen.getByTestId('state-grid-inspector')).toHaveTextContent(
+        'State Grid min for "x" must be a finite number.'
+      )
+    }
+  )
+
   it('runs expansion entropy and exposes cancellation while work is active', async () => {
     const initial = fixture()
     let resolveRun: () => void = () => {}
@@ -276,6 +386,41 @@ describe('StateGridInspector', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('state-grid-cancel-invariant-measure')).not.toBeInTheDocument()
     )
+  })
+
+  it('surfaces location-rich invariant-measure failures in the State Grid workflow', async () => {
+    const initial = fixture()
+    const mapSystem = {
+      ...initial.system,
+      config: {
+        ...initial.system.config,
+        type: 'map' as const,
+        solver: 'discrete' as const,
+      },
+    }
+    const diagnostic =
+      'The conditional transfer domain is not closed: source cell coordinates [0] with bounds x ∈ [0, 0.5] has an in-grid transition to zero-survivor target cell coordinates [1] with bounds x ∈ [0.5, 1].'
+    const onComputeTransferOperator = vi.fn(async () => {
+      throw new Error(diagnostic)
+    })
+
+    render(
+      <WorkflowFocusProvider>
+        <StateGridInspector
+          system={mapSystem}
+          nodeId={initial.nodeId}
+          object={initial.object}
+          onRename={() => {}}
+          onUpdate={() => {}}
+          onCompute={async () => null}
+          onComputeTransferOperator={onComputeTransferOperator}
+        />
+      </WorkflowFocusProvider>
+    )
+
+    fireEvent.click(screen.getByTestId('action-state-grid-transfer-toggle'))
+    fireEvent.click(screen.getByTestId('state-grid-create-invariant-measure'))
+    await waitFor(() => expect(screen.getByTestId('state-grid-transfer-error')).toHaveTextContent(diagnostic))
   })
 
   it('shows a stored finite-time estimate and survivor diagnostics', () => {

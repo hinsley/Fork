@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type { StateGridObject, System } from '../../system/types'
 import type { StateGridComputeRequest } from '../../state/appState'
@@ -34,6 +34,40 @@ type StateGridInspectorProps = {
   onComputeTransferOperator?: (request: StateGridComputeRequest, opts?: { signal?: AbortSignal }) => Promise<unknown>
 }
 
+type StateGridAxisDraft = {
+  min: string
+  max: string
+  resolution: string
+}
+
+function parseDraftNumber(value: string): number | null {
+  const trimmed = value.trim()
+  if (trimmed.length === 0) return null
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed)) return null
+  return parsed
+}
+
+function parseDraftInteger(value: string): number | null {
+  const parsed = parseDraftNumber(value)
+  if (parsed === null || !Number.isInteger(parsed)) return null
+  return parsed
+}
+
+function buildStateGridAxisDrafts(
+  axes: StateGridObject['axes']
+): Record<string, StateGridAxisDraft> {
+  const drafts: Record<string, StateGridAxisDraft> = {}
+  for (const axis of axes) {
+    drafts[axis.variableName] = {
+      min: axis.min.toString(),
+      max: axis.max.toString(),
+      resolution: axis.resolution.toString(),
+    }
+  }
+  return drafts
+}
+
 function formatCount(value: number): string {
   return Number.isSafeInteger(value) ? value.toLocaleString() : 'Too large to represent safely'
 }
@@ -55,9 +89,26 @@ export function StateGridInspector({
 }: StateGridInspectorProps) {
   const workflowFocus = useWorkflowFocus()
   const [nameDraft, setNameDraft] = useState(object.name)
+  const [axisDrafts, setAxisDrafts] = useState<Record<string, StateGridAxisDraft>>(
+    () => buildStateGridAxisDrafts(object.axes)
+  )
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    setAxisDrafts((previous) => {
+      const next: Record<string, StateGridAxisDraft> = {}
+      for (const axis of object.axes) {
+        const current = previous[axis.variableName]
+        next[axis.variableName] = {
+          min: current?.min ?? axis.min.toString(),
+          max: current?.max ?? axis.max.toString(),
+          resolution: current?.resolution ?? axis.resolution.toString(),
+        }
+      }
+      return next
+    })
+  }, [object.axes])
   const isMap = system.config.type === 'map'
   const frozenValues = object.frozenVariables?.frozenValuesByVarName ?? {}
   const resolvedParameters = resolveObjectParams(system.config, object.customParameters)
@@ -207,9 +258,24 @@ export function StateGridInspector({
     field: 'min' | 'max' | 'resolution',
     rawValue: string
   ) => {
-    const value = Number(rawValue)
-    if (!Number.isFinite(value)) return
-    if (field === 'resolution' && (!Number.isInteger(value) || value < 1)) return
+    const axis = object.axes[index]
+    if (!axis) return
+    setAxisDrafts((previous) => {
+      const current = previous[axis.variableName] ?? {
+        min: axis.min.toString(),
+        max: axis.max.toString(),
+        resolution: axis.resolution.toString(),
+      }
+      return {
+        ...previous,
+        [axis.variableName]: { ...current, [field]: rawValue },
+      }
+    })
+    const value = field === 'resolution'
+      ? parseDraftInteger(rawValue)
+      : parseDraftNumber(rawValue)
+    if (value === null) return
+    if (field === 'resolution' && value < 1) return
     const axes = object.axes.map((axis, axisIndex) =>
       axisIndex === index ? { ...axis, [field]: value } : axis
     )
@@ -228,12 +294,41 @@ export function StateGridInspector({
 
   const run = async () => {
     setError(null)
-    const invalidAxis = object.axes.find(
-      (axis) => !Number.isFinite(axis.min) || !Number.isFinite(axis.max) || axis.min >= axis.max
-    )
-    if (invalidAxis) {
-      setError(`Bounds for ${invalidAxis.variableName} require min < max.`)
-      return
+    const committedAxes = object.axes.map((axis) => {
+      const draft = axisDrafts[axis.variableName]
+      const min = parseDraftNumber(draft?.min ?? axis.min.toString())
+      const max = parseDraftNumber(draft?.max ?? axis.max.toString())
+      const resolution = parseDraftInteger(draft?.resolution ?? axis.resolution.toString())
+      return { axis, min, max, resolution }
+    })
+    for (const { axis, min, max, resolution } of committedAxes) {
+      if (min === null) {
+        setError(`State Grid min for "${axis.variableName}" must be a finite number.`)
+        return
+      }
+      if (max === null) {
+        setError(`State Grid max for "${axis.variableName}" must be a finite number.`)
+        return
+      }
+      if (resolution === null || resolution < 1) {
+        setError(
+          `State Grid resolution for "${axis.variableName}" must be a positive integer.`
+        )
+        return
+      }
+      if (min >= max) {
+        setError(`Bounds for ${axis.variableName} require min < max.`)
+        return
+      }
+    }
+    const nextAxes = committedAxes.map(({ axis, min, max, resolution }) => ({
+      ...axis,
+      min: min as number,
+      max: max as number,
+      resolution: resolution as number,
+    }))
+    if (!sameJson(nextAxes, object.axes)) {
+      onUpdate(nodeId, { axes: nextAxes })
     }
     const controller = new AbortController()
     controllerRef.current = controller
@@ -458,29 +553,32 @@ export function StateGridInspector({
                   <td>{axis.variableName}</td>
                   <td>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       className="state-table__input"
-                      value={axis.min}
+                      value={axisDrafts[axis.variableName]?.min ?? axis.min.toString()}
                       onChange={(event) => updateAxis(index, 'min', event.target.value)}
                       data-testid={`state-grid-${axis.variableName}-min`}
                     />
                   </td>
                   <td>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       className="state-table__input"
-                      value={axis.max}
+                      value={axisDrafts[axis.variableName]?.max ?? axis.max.toString()}
                       onChange={(event) => updateAxis(index, 'max', event.target.value)}
                       data-testid={`state-grid-${axis.variableName}-max`}
                     />
                   </td>
                   <td>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
                       min={1}
                       step={1}
                       className="state-table__input"
-                      value={axis.resolution}
+                      value={axisDrafts[axis.variableName]?.resolution ?? axis.resolution.toString()}
                       onChange={(event) => updateAxis(index, 'resolution', event.target.value)}
                       data-testid={`state-grid-${axis.variableName}-resolution`}
                     />
@@ -718,7 +816,11 @@ export function StateGridInspector({
               </button>
             ) : null}
           </div>
-          {error ? <p className="inspector-error">{error}</p> : null}
+          {error ? (
+            <p className="inspector-error" data-testid="state-grid-transfer-error">
+              {error}
+            </p>
+          ) : null}
           </section>
         </InspectorDisclosure>
         ) : null}

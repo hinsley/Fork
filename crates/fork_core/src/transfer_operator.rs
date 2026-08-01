@@ -6,6 +6,9 @@ use std::collections::BTreeMap;
 pub struct BoxTransitionOperator {
     pub dimension: usize,
     pub total_boxes: usize,
+    pub bounds: Vec<(f64, f64)>,
+    pub resolution: Vec<usize>,
+    pub axis_names: Vec<String>,
     pub column_offsets: Vec<usize>,
     pub target_indices: Vec<usize>,
     pub probabilities: Vec<f64>,
@@ -87,6 +90,24 @@ pub fn sampled_box_transition_operator<S: DynamicalSystem<f64>>(
     samples_per_cell: usize,
     iterations: usize,
 ) -> Result<BoxTransitionOperator> {
+    sampled_box_transition_operator_with_axis_names(
+        system,
+        bounds,
+        resolution,
+        samples_per_cell,
+        iterations,
+        &[],
+    )
+}
+
+pub fn sampled_box_transition_operator_with_axis_names<S: DynamicalSystem<f64>>(
+    system: &S,
+    bounds: &[(f64, f64)],
+    resolution: &[usize],
+    samples_per_cell: usize,
+    iterations: usize,
+    axis_names: &[String],
+) -> Result<BoxTransitionOperator> {
     if iterations == 0 || system.dimension() != bounds.len() {
         bail!("Map iterations and grid dimension must be positive and match the system.");
     }
@@ -128,12 +149,77 @@ pub fn sampled_box_transition_operator<S: DynamicalSystem<f64>>(
     Ok(BoxTransitionOperator {
         dimension: bounds.len(),
         total_boxes: total,
+        bounds: bounds.to_vec(),
+        resolution: resolution.to_vec(),
+        axis_names: axis_names.to_vec(),
         column_offsets: offsets,
         target_indices: targets,
         probabilities,
         retained_mass: retained as f64 / (total * samples_per_cell) as f64,
         zero_survivor_sources,
     })
+}
+
+fn cell_coordinates(mut index: usize, resolution: &[usize]) -> Vec<usize> {
+    let mut coordinates = vec![0; resolution.len()];
+    for axis in (0..resolution.len()).rev() {
+        coordinates[axis] = index % resolution[axis];
+        index /= resolution[axis];
+    }
+    coordinates
+}
+
+fn describe_cell(operator: &BoxTransitionOperator, index: usize) -> String {
+    let coordinates = cell_coordinates(index, &operator.resolution);
+    let bounds = coordinates
+        .iter()
+        .enumerate()
+        .map(|(axis, &coordinate)| {
+            let (min, max) = operator.bounds[axis];
+            let width = (max - min) / operator.resolution[axis] as f64;
+            let lower = min + coordinate as f64 * width;
+            let upper = lower + width;
+            let name = operator
+                .axis_names
+                .get(axis)
+                .map(String::as_str)
+                .unwrap_or("axis");
+            format!("{name} ∈ [{lower}, {upper}]")
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!("coordinates {coordinates:?} with bounds {bounds}")
+}
+
+fn first_nonclosed_transition(
+    operator: &BoxTransitionOperator,
+    distribution: &[f64],
+    is_eligible: &[bool],
+) -> Option<(usize, usize)> {
+    for source in 0..operator.total_boxes {
+        if distribution[source] <= 0.0 {
+            continue;
+        }
+        for edge in operator.column_offsets[source]..operator.column_offsets[source + 1] {
+            let target = operator.target_indices[edge];
+            if operator.probabilities[edge] > 0.0 && !is_eligible[target] {
+                return Some((source, target));
+            }
+        }
+    }
+    None
+}
+
+fn nonclosed_domain_error(
+    operator: &BoxTransitionOperator,
+    source: usize,
+    target: usize,
+) -> anyhow::Error {
+    anyhow::anyhow!(
+        "The conditional transfer domain is not closed: source cell {} has an in-grid transition to zero-survivor target cell {}.",
+        describe_cell(operator, source),
+        describe_cell(operator, target),
+    )
 }
 
 pub fn stationary_distribution(
@@ -166,12 +252,8 @@ pub fn stationary_distribution(
                 next[operator.target_indices[edge]] += operator.probabilities[edge] * p[source];
             }
         }
-        if next
-            .iter()
-            .zip(&is_eligible)
-            .any(|(mass, eligible)| *mass > 0.0 && !eligible)
-        {
-            bail!("The conditional transfer domain is not closed: an in-grid transition enters a zero-survivor source cell.");
+        if let Some((source, target)) = first_nonclosed_transition(operator, &p, &is_eligible) {
+            return Err(nonclosed_domain_error(operator, source, target));
         }
         let residual: f64 = next.iter().zip(&p).map(|(a, b)| (a - b).abs()).sum();
         p = next;
@@ -185,12 +267,8 @@ pub fn stationary_distribution(
             applied[operator.target_indices[edge]] += operator.probabilities[edge] * p[source];
         }
     }
-    if applied
-        .iter()
-        .zip(&is_eligible)
-        .any(|(mass, eligible)| *mass > 0.0 && !eligible)
-    {
-        bail!("The conditional transfer domain is not closed: an in-grid transition enters a zero-survivor source cell.");
+    if let Some((source, target)) = first_nonclosed_transition(operator, &p, &is_eligible) {
+        return Err(nonclosed_domain_error(operator, source, target));
     }
     let residual = applied.iter().zip(&p).map(|(a, b)| (a - b).abs()).sum();
     Ok((p, residual, max_iterations))
@@ -241,5 +319,33 @@ mod tests {
         let op = sampled_box_transition_operator(&Escape, &[(0., 1.)], &[2], 3, 1).unwrap();
         assert_eq!(op.zero_survivor_sources, 2);
         assert!(stationary_distribution(&op, 10, 1e-12).is_err());
+    }
+
+    struct IntoZeroSurvivor;
+    impl DynamicalSystem<f64> for IntoZeroSurvivor {
+        fn dimension(&self) -> usize {
+            1
+        }
+        fn apply(&self, _: f64, x: &[f64], out: &mut [f64]) {
+            out[0] = if x[0] < 0.5 { 0.75 } else { 2.0 };
+        }
+    }
+
+    #[test]
+    fn nonclosed_domain_error_identifies_source_and_target_cells() {
+        let op = sampled_box_transition_operator_with_axis_names(
+            &IntoZeroSurvivor,
+            &[(0., 1.)],
+            &[2],
+            3,
+            1,
+            &["x".to_string()],
+        )
+        .unwrap();
+        let error = stationary_distribution(&op, 10, 1e-12).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "The conditional transfer domain is not closed: source cell coordinates [0] with bounds x ∈ [0, 0.5] has an in-grid transition to zero-survivor target cell coordinates [1] with bounds x ∈ [0.5, 1]."
+        );
     }
 }

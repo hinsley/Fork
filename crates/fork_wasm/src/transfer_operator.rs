@@ -1,7 +1,7 @@
 use crate::system::build_system_with_context;
 use fork_core::{
     equation_engine::{EquationSystem, ExpressionContext},
-    transfer_operator::{sampled_box_transition_operator, stationary_distribution},
+    transfer_operator::{sampled_box_transition_operator_with_axis_names, stationary_distribution},
 };
 use serde::Serialize;
 use serde_wasm_bindgen::to_value;
@@ -32,6 +32,7 @@ struct ResultData {
 }
 struct State {
     system: EquationSystem,
+    axis_names: Vec<String>,
     bounds: Vec<(f64, f64)>,
     resolution: Vec<usize>,
     samples_per_cell: usize,
@@ -93,6 +94,7 @@ impl WasmTransferOperatorRunner {
         Ok(Self {
             state: Some(State {
                 system,
+                axis_names: var_names,
                 bounds,
                 resolution: resolution.into_iter().map(|x| x as usize).collect(),
                 samples_per_cell: samples_per_cell as usize,
@@ -144,12 +146,13 @@ impl WasmTransferOperatorRunner {
                 "Transfer-operator calculation is not complete.",
             ));
         }
-        let op = sampled_box_transition_operator(
+        let op = sampled_box_transition_operator_with_axis_names(
             &state.system,
             &state.bounds,
             &state.resolution,
             state.samples_per_cell,
             state.iterations,
+            &state.axis_names,
         )
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let (p, residual, stationary_iterations) =
