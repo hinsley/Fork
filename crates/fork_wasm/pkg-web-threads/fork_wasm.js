@@ -204,13 +204,6 @@ function takeFromExternrefTable0(idx) {
     return value;
 }
 
-function passArrayF64ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 8, 8) >>> 0;
-    getFloat64ArrayMemory0().set(arg, ptr / 8);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
-}
-
 function passArrayJsValueToWasm0(array, malloc) {
     const ptr = malloc(array.length * 4, 4) >>> 0;
     for (let i = 0; i < array.length; i++) {
@@ -218,6 +211,13 @@ function passArrayJsValueToWasm0(array, malloc) {
         getDataViewMemory0().setUint32(ptr + 4 * i, add, true);
     }
     WASM_VECTOR_LEN = array.length;
+    return ptr;
+}
+
+function passArrayF64ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 8, 8) >>> 0;
+    getFloat64ArrayMemory0().set(arg, ptr / 8);
+    WASM_VECTOR_LEN = arg.length;
     return ptr;
 }
 
@@ -931,7 +931,7 @@ export class WasmEqManifold1DRunner {
      * @returns {boolean}
      */
     is_done() {
-        const ret = wasm.wasmeqmanifold1dgroupextensionrunner_is_done(this.__wbg_ptr);
+        const ret = wasm.wasmeqmanifold1drunner_is_done(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -1019,7 +1019,7 @@ export class WasmEqManifold2DRunner {
      * @returns {boolean}
      */
     is_done() {
-        const ret = wasm.wasmcyclemanifold2drunner_is_done(this.__wbg_ptr);
+        const ret = wasm.wasmeqmanifold2drunner_is_done(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -2888,62 +2888,121 @@ export class WasmSystem {
         wasm.__wbg_wasmsystem_free(ptr, 0);
     }
     /**
-     * @param {Float64Array} initial_guess
-     * @param {number} max_steps
-     * @param {number} damping
+     * Compute local normal-form coefficients at a refined map bifurcation.
+     *
+     * `normal_form_type` accepts `branchPoint`, `periodDoubling`, or
+     * `neimarkSacker`. The returned object is tagged by its `type` field and
+     * includes coefficient and conditioning diagnostics.
+     * @param {Float64Array} state
+     * @param {number} param_index
+     * @param {number} param_value
      * @param {number} map_iterations
+     * @param {string} normal_form_type
      * @returns {any}
      */
-    solve_equilibrium(initial_guess, max_steps, damping, map_iterations) {
-        const ptr0 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
+    compute_map_normal_form(state, param_index, param_value, map_iterations, normal_form_type) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_solve_equilibrium(this.__wbg_ptr, ptr0, len0, max_steps, damping, map_iterations);
+        const ptr1 = passStringToWasm0(normal_form_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_map_normal_form(this.__wbg_ptr, ptr0, len0, param_index, param_value, map_iterations, ptr1, len1);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * @param {Float64Array} initial_guess
-     * @param {number} max_steps
-     * @param {number} damping
-     * @param {number} map_iterations
-     * @param {Float64Array} flattened_roots
-     * @param {number} exponent
-     * @param {number} shift
+     * Construct a collocation predictor on the periodic branch emanating
+     * from a generic periodic branch point.
+     * @param {any} setup_val
+     * @param {number} param_index
+     * @param {any} normal_form_val
+     * @param {number} amplitude
      * @returns {any}
      */
-    solve_equilibrium_deflated(initial_guess, max_steps, damping, map_iterations, flattened_roots, exponent, shift) {
-        const ptr0 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(flattened_roots, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_solve_equilibrium_deflated(this.__wbg_ptr, ptr0, len0, max_steps, damping, map_iterations, ptr1, len1, exponent, shift);
+    switch_periodic_orbit_branch(setup_val, param_index, normal_form_val, amplitude) {
+        const ret = wasm.wasmsystem_switch_periodic_orbit_branch(this.__wbg_ptr, setup_val, param_index, normal_form_val, amplitude);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * @param {Float64Array} initial_guess
-     * @param {number} max_steps
-     * @param {number} damping
-     * @param {number} map_iterations
-     * @param {Float64Array} flattened_roots
-     * @param {Float64Array} exponents
-     * @param {Float64Array} shifts
+     * Compute a Poincare-return-map normal form at a corrected limit cycle.
+     *
+     * The returned tagged object contains PD, NS, or generic `+1`
+     * coefficients and residual/conditioning diagnostics.  A `+1` form is
+     * explicitly classified as either an LPC or a generic periodic branch
+     * point.
+     * @param {any} setup_val
+     * @param {number} param_index
+     * @param {string} normal_form_type
      * @returns {any}
      */
-    solve_equilibrium_deflated_targets(initial_guess, max_steps, damping, map_iterations, flattened_roots, exponents, shifts) {
-        const ptr0 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
+    compute_periodic_orbit_normal_form(setup_val, param_index, normal_form_type) {
+        const ptr0 = passStringToWasm0(normal_form_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(flattened_roots, wasm.__wbindgen_malloc);
+        const ret = wasm.wasmsystem_compute_periodic_orbit_normal_form(this.__wbg_ptr, setup_val, param_index, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} point_state
+     * @param {number} source_intervals
+     * @param {boolean} source_free_time
+     * @param {boolean} source_free_eps0
+     * @param {boolean} source_free_eps1
+     * @param {number} source_fixed_time
+     * @param {number} source_fixed_eps0
+     * @param {number} source_fixed_eps1
+     * @param {string} param1_name
+     * @param {string} param2_name
+     * @param {number} target_intervals
+     * @param {number} integration_steps_per_segment
+     * @param {boolean} free_time
+     * @param {boolean} free_eps0
+     * @param {boolean} free_eps1
+     * @returns {any}
+     */
+    init_homoclinic_shooting_from_shooting(point_state, source_intervals, source_free_time, source_free_eps0, source_free_eps1, source_fixed_time, source_fixed_eps0, source_fixed_eps1, param1_name, param2_name, target_intervals, integration_steps_per_segment, free_time, free_eps0, free_eps1) {
+        const ptr0 = passArrayF64ToWasm0(point_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passArrayF64ToWasm0(exponents, wasm.__wbindgen_malloc);
+        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passArrayF64ToWasm0(shifts, wasm.__wbindgen_malloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_solve_equilibrium_deflated_targets(this.__wbg_ptr, ptr0, len0, max_steps, damping, map_iterations, ptr1, len1, ptr2, len2, ptr3, len3);
+        const ret = wasm.wasmsystem_init_homoclinic_shooting_from_shooting(this.__wbg_ptr, ptr0, len0, source_intervals, source_free_time, source_free_eps0, source_free_eps1, source_fixed_time, source_fixed_eps0, source_fixed_eps1, ptr1, len1, ptr2, len2, target_intervals, integration_steps_per_segment, free_time, free_eps0, free_eps1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Blocking standard-shooting continuation, retained for CLI compatibility.
+     * @param {any} setup_val
+     * @param {any} settings_val
+     * @param {boolean} forward
+     * @returns {any}
+     */
+    compute_homoclinic_shooting_continuation(setup_val, settings_val, forward) {
+        const ret = wasm.wasmsystem_compute_homoclinic_shooting_continuation(this.__wbg_ptr, setup_val, settings_val, forward);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Convert any existing collocation homoclinic seed (including large-cycle
+     * and BT predictors) into standard single/multiple-shooting nodes.
+     * @param {any} setup_val
+     * @param {number} intervals
+     * @param {number} integration_steps_per_segment
+     * @returns {any}
+     */
+    init_homoclinic_shooting_from_collocation(setup_val, intervals, integration_steps_per_segment) {
+        const ret = wasm.wasmsystem_init_homoclinic_shooting_from_collocation(this.__wbg_ptr, setup_val, intervals, integration_steps_per_segment);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -3142,323 +3201,6 @@ export class WasmSystem {
         const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         wasm.wasmsystem_set_state(this.__wbg_ptr, ptr0, len0);
-    }
-    /**
-     * Compute local normal-form coefficients at a refined map bifurcation.
-     *
-     * `normal_form_type` accepts `branchPoint`, `periodDoubling`, or
-     * `neimarkSacker`. The returned object is tagged by its `type` field and
-     * includes coefficient and conditioning diagnostics.
-     * @param {Float64Array} state
-     * @param {number} param_index
-     * @param {number} param_value
-     * @param {number} map_iterations
-     * @param {string} normal_form_type
-     * @returns {any}
-     */
-    compute_map_normal_form(state, param_index, param_value, map_iterations, normal_form_type) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(normal_form_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_map_normal_form(this.__wbg_ptr, ptr0, len0, param_index, param_value, map_iterations, ptr1, len1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Produce corrected Hopf-Hopf switches to both orientations of both Hopf
-     * curves and to both periodic-orbit Neimark-Sacker curves.
-     * @param {Float64Array} state
-     * @param {number} param1_index
-     * @param {number} param2_index
-     * @param {number} param1_value
-     * @param {number} param2_value
-     * @param {number} source_frequency
-     * @param {number} curve_perturbation
-     * @param {number} cycle_amplitude
-     * @param {number} ntst
-     * @param {number} ncol
-     * @param {number} tolerance
-     * @returns {any}
-     */
-    switch_from_hopf_hopf(state, param1_index, param2_index, param1_value, param2_value, source_frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_switch_from_hopf_hopf(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, source_frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Produce corrected Zero-Hopf switches to both fold/Hopf orientations
-     * and, when the coefficient sign condition permits it, the periodic-orbit
-     * Neimark-Sacker curve.
-     * @param {Float64Array} state
-     * @param {number} param1_index
-     * @param {number} param2_index
-     * @param {number} param1_value
-     * @param {number} param2_value
-     * @param {number} frequency
-     * @param {number} curve_perturbation
-     * @param {number} cycle_amplitude
-     * @param {number} ntst
-     * @param {number} ncol
-     * @param {number} tolerance
-     * @returns {any}
-     */
-    switch_from_zero_hopf(state, param1_index, param2_index, param1_value, param2_value, frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_switch_from_zero_hopf(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Compute detailed, serializable nonresonant Hopf-Hopf coefficients and
-     * both NS unfolding predictors.
-     * @param {Float64Array} state
-     * @param {number} param1_index
-     * @param {number} param2_index
-     * @param {number} param1_value
-     * @param {number} param2_value
-     * @param {number} source_frequency
-     * @returns {any}
-     */
-    compute_hopf_hopf_normal_form(state, param1_index, param2_index, param1_value, param2_value, source_frequency) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_hopf_hopf_normal_form(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, source_frequency);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Compute detailed, serializable Zero-Hopf coefficients and numerical
-     * conditioning diagnostics at a refined equilibrium codimension-two
-     * point.
-     * @param {Float64Array} state
-     * @param {number} param1_index
-     * @param {number} param2_index
-     * @param {number} param1_value
-     * @param {number} param2_value
-     * @param {number} frequency
-     * @returns {any}
-     */
-    compute_zero_hopf_normal_form(state, param1_index, param2_index, param1_value, param2_value, frequency) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_zero_hopf_normal_form(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, frequency);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Construct a collocation predictor on the periodic branch emanating
-     * from a generic periodic branch point.
-     * @param {any} setup_val
-     * @param {number} param_index
-     * @param {any} normal_form_val
-     * @param {number} amplitude
-     * @returns {any}
-     */
-    switch_periodic_orbit_branch(setup_val, param_index, normal_form_val, amplitude) {
-        const ret = wasm.wasmsystem_switch_periodic_orbit_branch(this.__wbg_ptr, setup_val, param_index, normal_form_val, amplitude);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Compute a Poincare-return-map normal form at a corrected limit cycle.
-     *
-     * The returned tagged object contains PD, NS, or generic `+1`
-     * coefficients and residual/conditioning diagnostics.  A `+1` form is
-     * explicitly classified as either an LPC or a generic periodic branch
-     * point.
-     * @param {any} setup_val
-     * @param {number} param_index
-     * @param {string} normal_form_type
-     * @returns {any}
-     */
-    compute_periodic_orbit_normal_form(setup_val, param_index, normal_form_type) {
-        const ptr0 = passStringToWasm0(normal_form_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_periodic_orbit_normal_form(this.__wbg_ptr, setup_val, param_index, ptr0, len0);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} point_state
-     * @param {number} source_intervals
-     * @param {boolean} source_free_time
-     * @param {boolean} source_free_eps0
-     * @param {boolean} source_free_eps1
-     * @param {number} source_fixed_time
-     * @param {number} source_fixed_eps0
-     * @param {number} source_fixed_eps1
-     * @param {string} param1_name
-     * @param {string} param2_name
-     * @param {number} target_intervals
-     * @param {number} integration_steps_per_segment
-     * @param {boolean} free_time
-     * @param {boolean} free_eps0
-     * @param {boolean} free_eps1
-     * @returns {any}
-     */
-    init_homoclinic_shooting_from_shooting(point_state, source_intervals, source_free_time, source_free_eps0, source_free_eps1, source_fixed_time, source_fixed_eps0, source_fixed_eps1, param1_name, param2_name, target_intervals, integration_steps_per_segment, free_time, free_eps0, free_eps1) {
-        const ptr0 = passArrayF64ToWasm0(point_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_homoclinic_shooting_from_shooting(this.__wbg_ptr, ptr0, len0, source_intervals, source_free_time, source_free_eps0, source_free_eps1, source_fixed_time, source_fixed_eps0, source_fixed_eps1, ptr1, len1, ptr2, len2, target_intervals, integration_steps_per_segment, free_time, free_eps0, free_eps1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Blocking standard-shooting continuation, retained for CLI compatibility.
-     * @param {any} setup_val
-     * @param {any} settings_val
-     * @param {boolean} forward
-     * @returns {any}
-     */
-    compute_homoclinic_shooting_continuation(setup_val, settings_val, forward) {
-        const ret = wasm.wasmsystem_compute_homoclinic_shooting_continuation(this.__wbg_ptr, setup_val, settings_val, forward);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Convert any existing collocation homoclinic seed (including large-cycle
-     * and BT predictors) into standard single/multiple-shooting nodes.
-     * @param {any} setup_val
-     * @param {number} intervals
-     * @param {number} integration_steps_per_segment
-     * @returns {any}
-     */
-    init_homoclinic_shooting_from_collocation(setup_val, intervals, integration_steps_per_segment) {
-        const ret = wasm.wasmsystem_init_homoclinic_shooting_from_collocation(this.__wbg_ptr, setup_val, intervals, integration_steps_per_segment);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Compute the generic `+1` normal form and construct its secondary-cycle
-     * predictor directly from a saved branch point.
-     * @param {Float64Array} packed_state
-     * @param {number} param_index
-     * @param {number} param_value
-     * @param {number} collocation_degree
-     * @param {Float64Array} normalized_mesh
-     * @param {number} amplitude
-     * @returns {any}
-     */
-    switch_periodic_branch_from_packed_state(packed_state, param_index, param_value, collocation_degree, normalized_mesh, amplitude) {
-        const ptr0 = passArrayF64ToWasm0(packed_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(normalized_mesh, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_switch_periodic_branch_from_packed_state(this.__wbg_ptr, ptr0, len0, param_index, param_value, collocation_degree, ptr1, len1, amplitude);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Compute a periodic-orbit normal form directly from the full persisted
-     * collocation state.  The exact saved mesh is mandatory; the setup and
-     * phase direction are reconstructed inside Rust.
-     * @param {Float64Array} packed_state
-     * @param {number} param_index
-     * @param {number} param_value
-     * @param {number} collocation_degree
-     * @param {Float64Array} normalized_mesh
-     * @param {string} normal_form_type
-     * @returns {any}
-     */
-    compute_periodic_normal_form_from_packed_state(packed_state, param_index, param_value, collocation_degree, normalized_mesh, normal_form_type) {
-        const ptr0 = passArrayF64ToWasm0(packed_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(normalized_mesh, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(normal_form_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_periodic_normal_form_from_packed_state(this.__wbg_ptr, ptr0, len0, param_index, param_value, collocation_degree, ptr1, len1, ptr2, len2);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {string} period_expression
-     * @param {number} iteration_period
-     * @param {number} phase
-     * @param {number} response_multiple
-     * @param {number} steps_per_forcing_period
-     * @param {Float64Array} initial_guess
-     * @param {number} max_steps
-     * @param {number} damping
-     * @param {number} tolerance
-     * @returns {any}
-     */
-    solve_forced_response(period_expression, iteration_period, phase, response_multiple, steps_per_forcing_period, initial_guess, max_steps, damping, tolerance) {
-        const ptr0 = passStringToWasm0(period_expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_solve_forced_response(this.__wbg_ptr, ptr0, len0, iteration_period, phase, response_multiple, steps_per_forcing_period, ptr1, len1, max_steps, damping, tolerance);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {string} period_expression
-     * @param {number} iteration_period
-     * @returns {number}
-     */
-    validate_periodic_forcing(period_expression, iteration_period) {
-        const ptr0 = passStringToWasm0(period_expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_validate_periodic_forcing(this.__wbg_ptr, ptr0, len0, iteration_period);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return ret[0];
-    }
-    /**
-     * @param {string} period_expression
-     * @param {number} iteration_period
-     * @param {number} phase
-     * @param {number} steps_per_forcing_period
-     * @param {number} initial_context
-     * @param {Float64Array} initial_state
-     * @returns {any}
-     */
-    advance_forced_response_seed(period_expression, iteration_period, phase, steps_per_forcing_period, initial_context, initial_state) {
-        const ptr0 = passStringToWasm0(period_expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(initial_state, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_advance_forced_response_seed(this.__wbg_ptr, ptr0, len0, iteration_period, phase, steps_per_forcing_period, initial_context, ptr1, len1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * Initializes a period-doubled limit cycle from a period-doubling bifurcation.
@@ -4412,6 +4154,264 @@ export class WasmSystem {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @param {string} period_expression
+     * @param {number} iteration_period
+     * @param {number} phase
+     * @param {number} response_multiple
+     * @param {number} steps_per_forcing_period
+     * @param {Float64Array} initial_guess
+     * @param {number} max_steps
+     * @param {number} damping
+     * @param {number} tolerance
+     * @returns {any}
+     */
+    solve_forced_response(period_expression, iteration_period, phase, response_multiple, steps_per_forcing_period, initial_guess, max_steps, damping, tolerance) {
+        const ptr0 = passStringToWasm0(period_expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_solve_forced_response(this.__wbg_ptr, ptr0, len0, iteration_period, phase, response_multiple, steps_per_forcing_period, ptr1, len1, max_steps, damping, tolerance);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {string} period_expression
+     * @param {number} iteration_period
+     * @returns {number}
+     */
+    validate_periodic_forcing(period_expression, iteration_period) {
+        const ptr0 = passStringToWasm0(period_expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_validate_periodic_forcing(this.__wbg_ptr, ptr0, len0, iteration_period);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0];
+    }
+    /**
+     * @param {string} period_expression
+     * @param {number} iteration_period
+     * @param {number} phase
+     * @param {number} steps_per_forcing_period
+     * @param {number} initial_context
+     * @param {Float64Array} initial_state
+     * @returns {any}
+     */
+    advance_forced_response_seed(period_expression, iteration_period, phase, steps_per_forcing_period, initial_context, initial_state) {
+        const ptr0 = passStringToWasm0(period_expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(initial_state, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_advance_forced_response_seed(this.__wbg_ptr, ptr0, len0, iteration_period, phase, steps_per_forcing_period, initial_context, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} initial_guess
+     * @param {number} max_steps
+     * @param {number} damping
+     * @param {number} map_iterations
+     * @returns {any}
+     */
+    solve_equilibrium(initial_guess, max_steps, damping, map_iterations) {
+        const ptr0 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_solve_equilibrium(this.__wbg_ptr, ptr0, len0, max_steps, damping, map_iterations);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} initial_guess
+     * @param {number} max_steps
+     * @param {number} damping
+     * @param {number} map_iterations
+     * @param {Float64Array} flattened_roots
+     * @param {number} exponent
+     * @param {number} shift
+     * @returns {any}
+     */
+    solve_equilibrium_deflated(initial_guess, max_steps, damping, map_iterations, flattened_roots, exponent, shift) {
+        const ptr0 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(flattened_roots, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_solve_equilibrium_deflated(this.__wbg_ptr, ptr0, len0, max_steps, damping, map_iterations, ptr1, len1, exponent, shift);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} initial_guess
+     * @param {number} max_steps
+     * @param {number} damping
+     * @param {number} map_iterations
+     * @param {Float64Array} flattened_roots
+     * @param {Float64Array} exponents
+     * @param {Float64Array} shifts
+     * @returns {any}
+     */
+    solve_equilibrium_deflated_targets(initial_guess, max_steps, damping, map_iterations, flattened_roots, exponents, shifts) {
+        const ptr0 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(flattened_roots, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayF64ToWasm0(exponents, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArrayF64ToWasm0(shifts, wasm.__wbindgen_malloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_solve_equilibrium_deflated_targets(this.__wbg_ptr, ptr0, len0, max_steps, damping, map_iterations, ptr1, len1, ptr2, len2, ptr3, len3);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Produce corrected Hopf-Hopf switches to both orientations of both Hopf
+     * curves and to both periodic-orbit Neimark-Sacker curves.
+     * @param {Float64Array} state
+     * @param {number} param1_index
+     * @param {number} param2_index
+     * @param {number} param1_value
+     * @param {number} param2_value
+     * @param {number} source_frequency
+     * @param {number} curve_perturbation
+     * @param {number} cycle_amplitude
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {number} tolerance
+     * @returns {any}
+     */
+    switch_from_hopf_hopf(state, param1_index, param2_index, param1_value, param2_value, source_frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_switch_from_hopf_hopf(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, source_frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Produce corrected Zero-Hopf switches to both fold/Hopf orientations
+     * and, when the coefficient sign condition permits it, the periodic-orbit
+     * Neimark-Sacker curve.
+     * @param {Float64Array} state
+     * @param {number} param1_index
+     * @param {number} param2_index
+     * @param {number} param1_value
+     * @param {number} param2_value
+     * @param {number} frequency
+     * @param {number} curve_perturbation
+     * @param {number} cycle_amplitude
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {number} tolerance
+     * @returns {any}
+     */
+    switch_from_zero_hopf(state, param1_index, param2_index, param1_value, param2_value, frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_switch_from_zero_hopf(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Compute detailed, serializable nonresonant Hopf-Hopf coefficients and
+     * both NS unfolding predictors.
+     * @param {Float64Array} state
+     * @param {number} param1_index
+     * @param {number} param2_index
+     * @param {number} param1_value
+     * @param {number} param2_value
+     * @param {number} source_frequency
+     * @returns {any}
+     */
+    compute_hopf_hopf_normal_form(state, param1_index, param2_index, param1_value, param2_value, source_frequency) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_hopf_hopf_normal_form(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, source_frequency);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Compute detailed, serializable Zero-Hopf coefficients and numerical
+     * conditioning diagnostics at a refined equilibrium codimension-two
+     * point.
+     * @param {Float64Array} state
+     * @param {number} param1_index
+     * @param {number} param2_index
+     * @param {number} param1_value
+     * @param {number} param2_value
+     * @param {number} frequency
+     * @returns {any}
+     */
+    compute_zero_hopf_normal_form(state, param1_index, param2_index, param1_value, param2_value, frequency) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_zero_hopf_normal_form(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, frequency);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Compute the generic `+1` normal form and construct its secondary-cycle
+     * predictor directly from a saved branch point.
+     * @param {Float64Array} packed_state
+     * @param {number} param_index
+     * @param {number} param_value
+     * @param {number} collocation_degree
+     * @param {Float64Array} normalized_mesh
+     * @param {number} amplitude
+     * @returns {any}
+     */
+    switch_periodic_branch_from_packed_state(packed_state, param_index, param_value, collocation_degree, normalized_mesh, amplitude) {
+        const ptr0 = passArrayF64ToWasm0(packed_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(normalized_mesh, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_switch_periodic_branch_from_packed_state(this.__wbg_ptr, ptr0, len0, param_index, param_value, collocation_degree, ptr1, len1, amplitude);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Compute a periodic-orbit normal form directly from the full persisted
+     * collocation state.  The exact saved mesh is mandatory; the setup and
+     * phase direction are reconstructed inside Rust.
+     * @param {Float64Array} packed_state
+     * @param {number} param_index
+     * @param {number} param_value
+     * @param {number} collocation_degree
+     * @param {Float64Array} normalized_mesh
+     * @param {string} normal_form_type
+     * @returns {any}
+     */
+    compute_periodic_normal_form_from_packed_state(packed_state, param_index, param_value, collocation_degree, normalized_mesh, normal_form_type) {
+        const ptr0 = passArrayF64ToWasm0(packed_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(normalized_mesh, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(normal_form_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_periodic_normal_form_from_packed_state(this.__wbg_ptr, ptr0, len0, param_index, param_value, collocation_degree, ptr1, len1, ptr2, len2);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmSystem.prototype[Symbol.dispose] = WasmSystem.prototype.free;
 
@@ -4500,11 +4500,11 @@ export class WasmTransferOperatorRunner {
         return this;
     }
     /**
-     * @param {number} _batch_size
+     * @param {number} batch_size
      * @returns {any}
      */
-    run_steps(_batch_size) {
-        const ret = wasm.wasmtransferoperatorrunner_run_steps(this.__wbg_ptr, _batch_size);
+    run_steps(batch_size) {
+        const ret = wasm.wasmtransferoperatorrunner_run_steps(this.__wbg_ptr, batch_size);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }

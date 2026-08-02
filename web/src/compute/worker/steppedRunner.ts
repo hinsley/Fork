@@ -23,9 +23,16 @@ type AdaptiveSteppedRunner<TBranch, TReport> = SteppedRunner<TBranch> & {
   }
 }
 
-function computeBatchSize(maxSteps: number): number {
-  if (!Number.isFinite(maxSteps) || maxSteps <= 0) return 1
-  return Math.max(1, Math.ceil(maxSteps / DEFAULT_PROGRESS_UPDATES))
+function computeBatchSize(progress: ContinuationProgress): number {
+  if (
+    Number.isFinite(progress.batch_size_hint) &&
+    Number.isInteger(progress.batch_size_hint) &&
+    (progress.batch_size_hint ?? 0) > 0
+  ) {
+    return progress.batch_size_hint as number
+  }
+  if (!Number.isFinite(progress.max_steps) || progress.max_steps <= 0) return 1
+  return Math.max(1, Math.ceil(progress.max_steps / DEFAULT_PROGRESS_UPDATES))
 }
 
 function abortIfNeeded(signal: AbortSignal): void {
@@ -44,7 +51,7 @@ export function runSteppedRunnerToCompletion<TResult>(
   let progress = runner.get_progress()
   onProgress(progress)
 
-  const batchSize = computeBatchSize(progress.max_steps)
+  const batchSize = computeBatchSize(progress)
   while (!progress.done) {
     abortIfNeeded(signal)
     progress = runner.run_steps(batchSize)
@@ -61,7 +68,7 @@ export async function runSteppedRunnerToCompletionAsync<TResult>(
 ): Promise<TResult> {
   let progress = runner.get_progress()
   onProgress(progress)
-  const batchSize = computeBatchSize(progress.max_steps)
+  const batchSize = computeBatchSize(progress)
 
   while (!progress.done) {
     abortIfNeeded(signal)

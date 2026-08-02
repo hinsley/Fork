@@ -449,6 +449,96 @@ beforeAll(async () => {
       }
     }
 
+    class MockWasmTransferOperatorRunner {
+      private progress: {
+        done: boolean
+        current_step: number
+        max_steps: number
+        points_computed: number
+        bifurcations_found: number
+        current_param: number
+        phase: string
+        batch_size_hint: number
+        discovered_boxes: number
+        frontier_boxes: number
+        edges_built: number
+        residual?: number
+        tolerance?: number
+      } = {
+        done: false,
+        current_step: 0,
+        max_steps: 0,
+        points_computed: 0,
+        bifurcations_found: 0,
+        current_param: 1,
+        phase: 'exploring_cover',
+        batch_size_hint: 128,
+        discovered_boxes: 1,
+        frontier_boxes: 1,
+        edges_built: 0,
+      }
+
+      run_steps(batchSize: number) {
+        wasmState.lastRunStepsArg = batchSize
+        if (this.progress.phase === 'exploring_cover') {
+          this.progress = {
+            ...this.progress,
+            current_step: 0,
+            max_steps: 4,
+            phase: 'building_transitions',
+            discovered_boxes: 4,
+            frontier_boxes: 0,
+          }
+        } else if (this.progress.phase === 'building_transitions') {
+          this.progress = {
+            ...this.progress,
+            current_step: 0,
+            max_steps: 20,
+            points_computed: 0,
+            phase: 'solving_stationary',
+            edges_built: 6,
+            residual: undefined,
+            tolerance: 1e-10,
+          }
+        } else {
+          this.progress = {
+            ...this.progress,
+            done: true,
+            current_step: 8,
+            max_steps: 20,
+            points_computed: 8,
+            phase: 'complete',
+            residual: 5e-11,
+            tolerance: 1e-10,
+          }
+        }
+        return this.progress
+      }
+
+      get_progress() {
+        return this.progress
+      }
+
+      get_result() {
+        return {
+          totalBoxes: 4,
+          ambientBoxCount: 4,
+          coverBoxIndices: [0, 1, 2, 3],
+          seedBoxIndex: 2,
+          coverGrowthIterations: 2,
+          columnOffsets: [0, 1, 2, 3, 4],
+          targetIndices: [0, 1, 2, 3],
+          probabilities: [1, 1, 1, 1],
+          retainedMass: 1,
+          zeroSurvivorSources: 0,
+          stationaryDistribution: [0.25, 0.25, 0.25, 0.25],
+          dominantEigenvalue: 1,
+          residual: 5e-11,
+          stationaryIterations: 8,
+        }
+      }
+    }
+
     class MockContinuationRunner {
       private progress = {
         done: true,
@@ -774,6 +864,7 @@ beforeAll(async () => {
       default: vi.fn(() => wasmState.initPromise ?? Promise.resolve()),
       WasmSystem: MockWasmSystem,
       WasmEquilibriumRunner: MockWasmEquilibriumRunner,
+      WasmTransferOperatorRunner: MockWasmTransferOperatorRunner,
       WasmForcedResponseRunner: MockContinuationRunner,
       WasmEqManifold1DRunner: MockEqManifold1DRunner,
       WasmEqManifold1DExtensionRunner: MockEqManifold1DExtensionRunner,
@@ -885,6 +976,56 @@ describe('forkCoreWorker', () => {
       ok: true,
       result: { points: [], bifurcations: [], indices: [] },
     })
+  })
+
+  it.each([
+    ['map', 'discrete'],
+    ['flow', 'rk4'],
+  ] as const)('reports all invariant-measure phases for a %s system', async (type, solver) => {
+    const handler = requireHandler()
+    await handler({
+      data: {
+        id: `job-transfer-${type}`,
+        kind: 'computeTransferOperator',
+        payload: {
+          system: { ...baseSystem, type, solver },
+          axes: [{ variableName: 'x', min: 0, max: 1, resolution: 4 }],
+          startingPoint: [0.5],
+          samplesPerCell: 4,
+          iterations: 1,
+          timeStep: 1,
+          integrationStep: 0.01,
+          maxStationaryIterations: 20,
+          tolerance: 1e-10,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    const messages = workerScope.postMessage.mock.calls.map(([payload]) => payload)
+    const phases = messages
+      .filter((message) => message.kind === 'progress')
+      .map((message) => message.progress.phase)
+    expect(phases).toEqual([
+      'exploring_cover',
+      'building_transitions',
+      'solving_stationary',
+      'complete',
+    ])
+    expect(messages[0]).toMatchObject({
+      progress: { max_steps: 0, batch_size_hint: 128, discovered_boxes: 1 },
+    })
+    expect(messages[1]).toMatchObject({
+      progress: { max_steps: 4, discovered_boxes: 4 },
+    })
+    expect(messages[2]).toMatchObject({
+      progress: { max_steps: 20, tolerance: 1e-10 },
+    })
+    expect(messages.at(-1)).toMatchObject({
+      id: `job-transfer-${type}`,
+      ok: true,
+      result: { totalBoxes: 4, stationaryIterations: 8 },
+    })
+    expect(wasmState.lastRunStepsArg).toBe(128)
   })
 
   it('solves and continues a declared forced periodic response', async () => {

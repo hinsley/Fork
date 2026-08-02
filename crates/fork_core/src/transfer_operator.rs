@@ -1,6 +1,6 @@
 use crate::traits::DynamicalSystem;
 use anyhow::{bail, Result};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoxTransitionOperator {
@@ -18,6 +18,266 @@ pub struct BoxTransitionOperator {
     pub probabilities: Vec<f64>,
     pub retained_mass: f64,
     pub zero_survivor_sources: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrownCoverBuildPhase {
+    ExploringCover,
+    BuildingTransitions,
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GrownCoverBuildProgress {
+    pub phase: GrownCoverBuildPhase,
+    pub completed_source_boxes: usize,
+    pub total_source_boxes: Option<usize>,
+    pub discovered_boxes: usize,
+    pub frontier_boxes: usize,
+    pub sampled_transitions: usize,
+    pub edges_built: usize,
+}
+
+pub struct GrownCoverTransferOperatorBuilder {
+    dimension: usize,
+    bounds: Vec<(f64, f64)>,
+    resolution: Vec<usize>,
+    samples_per_cell: usize,
+    iterations: usize,
+    axis_names: Vec<String>,
+    ambient_box_count: usize,
+    seed_box_index: usize,
+    phase: GrownCoverBuildPhase,
+    discovered: BTreeSet<usize>,
+    frontier: VecDeque<usize>,
+    next_frontier: BTreeSet<usize>,
+    explored_source_boxes: usize,
+    cover_growth_iterations: usize,
+    cover_box_indices: Vec<usize>,
+    local_indices: BTreeMap<usize, usize>,
+    assembly_source_index: usize,
+    column_offsets: Vec<usize>,
+    target_indices: Vec<usize>,
+    probabilities: Vec<f64>,
+    retained_samples: usize,
+    zero_survivor_sources: usize,
+}
+
+impl GrownCoverTransferOperatorBuilder {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        dimension: usize,
+        bounds: &[(f64, f64)],
+        resolution: &[usize],
+        samples_per_cell: usize,
+        iterations: usize,
+        axis_names: &[String],
+        seed_box_index: usize,
+    ) -> Result<Self> {
+        let ambient_box_count =
+            validate_transition_grid(dimension, bounds, resolution, samples_per_cell, iterations)?;
+        if seed_box_index >= ambient_box_count {
+            bail!("The transfer-operator starting point must select a valid ambient box.");
+        }
+        Ok(Self {
+            dimension,
+            bounds: bounds.to_vec(),
+            resolution: resolution.to_vec(),
+            samples_per_cell,
+            iterations,
+            axis_names: axis_names.to_vec(),
+            ambient_box_count,
+            seed_box_index,
+            phase: GrownCoverBuildPhase::ExploringCover,
+            discovered: BTreeSet::from([seed_box_index]),
+            frontier: VecDeque::from([seed_box_index]),
+            next_frontier: BTreeSet::new(),
+            explored_source_boxes: 0,
+            cover_growth_iterations: 1,
+            cover_box_indices: Vec::new(),
+            local_indices: BTreeMap::new(),
+            assembly_source_index: 0,
+            column_offsets: Vec::new(),
+            target_indices: Vec::new(),
+            probabilities: Vec::new(),
+            retained_samples: 0,
+            zero_survivor_sources: 0,
+        })
+    }
+
+    pub fn progress(&self) -> GrownCoverBuildProgress {
+        match self.phase {
+            GrownCoverBuildPhase::ExploringCover => GrownCoverBuildProgress {
+                phase: self.phase,
+                completed_source_boxes: self.explored_source_boxes,
+                total_source_boxes: None,
+                discovered_boxes: self.discovered.len() + self.next_frontier.len(),
+                frontier_boxes: self.frontier.len() + self.next_frontier.len(),
+                sampled_transitions: self
+                    .explored_source_boxes
+                    .saturating_mul(self.samples_per_cell),
+                edges_built: 0,
+            },
+            GrownCoverBuildPhase::BuildingTransitions | GrownCoverBuildPhase::Complete => {
+                GrownCoverBuildProgress {
+                    phase: self.phase,
+                    completed_source_boxes: self.assembly_source_index,
+                    total_source_boxes: Some(self.cover_box_indices.len()),
+                    discovered_boxes: self.cover_box_indices.len(),
+                    frontier_boxes: 0,
+                    sampled_transitions: self
+                        .assembly_source_index
+                        .saturating_mul(self.samples_per_cell),
+                    edges_built: self.target_indices.len(),
+                }
+            }
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.phase == GrownCoverBuildPhase::Complete
+    }
+
+    pub fn advance<F>(&mut self, source_box_budget: usize, step: &mut F) -> Result<()>
+    where
+        F: FnMut(usize, usize, usize, &mut [f64], &mut [f64]) -> Result<()>,
+    {
+        let start_phase = self.phase;
+        let mut remaining = source_box_budget.max(1);
+        while remaining > 0 && self.phase == start_phase {
+            match self.phase {
+                GrownCoverBuildPhase::ExploringCover => self.explore_one_source(step)?,
+                GrownCoverBuildPhase::BuildingTransitions => self.build_one_source_column(step)?,
+                GrownCoverBuildPhase::Complete => break,
+            }
+            remaining -= 1;
+        }
+        Ok(())
+    }
+
+    pub fn into_operator(mut self) -> Result<BoxTransitionOperator> {
+        if !self.is_complete() {
+            bail!("The transfer-operator construction is not complete.");
+        }
+        let retained_denominator = self
+            .cover_box_indices
+            .len()
+            .checked_mul(self.samples_per_cell)
+            .ok_or_else(|| anyhow::anyhow!("Transfer sample count overflows usize."))?;
+        Ok(BoxTransitionOperator {
+            dimension: self.dimension,
+            total_boxes: self.cover_box_indices.len(),
+            ambient_box_count: self.ambient_box_count,
+            bounds: self.bounds,
+            resolution: self.resolution,
+            axis_names: self.axis_names,
+            cover_box_indices: self.cover_box_indices,
+            seed_box_index: self.seed_box_index,
+            cover_growth_iterations: self.cover_growth_iterations,
+            column_offsets: std::mem::take(&mut self.column_offsets),
+            target_indices: std::mem::take(&mut self.target_indices),
+            probabilities: std::mem::take(&mut self.probabilities),
+            retained_mass: self.retained_samples as f64 / retained_denominator as f64,
+            zero_survivor_sources: self.zero_survivor_sources,
+        })
+    }
+
+    fn explore_one_source<F>(&mut self, step: &mut F) -> Result<()>
+    where
+        F: FnMut(usize, usize, usize, &mut [f64], &mut [f64]) -> Result<()>,
+    {
+        let Some(source) = self.frontier.pop_front() else {
+            self.finish_cover_layer();
+            return Ok(());
+        };
+        for sample in 0..self.samples_per_cell {
+            if let Some(target) = sampled_transition_target(
+                &self.bounds,
+                &self.resolution,
+                source,
+                sample,
+                self.samples_per_cell,
+                self.iterations,
+                step,
+            )? {
+                if !self.discovered.contains(&target) {
+                    self.next_frontier.insert(target);
+                }
+            }
+        }
+        self.explored_source_boxes += 1;
+        if self.frontier.is_empty() {
+            self.finish_cover_layer();
+        }
+        Ok(())
+    }
+
+    fn finish_cover_layer(&mut self) {
+        if self.next_frontier.is_empty() {
+            self.cover_box_indices = self.discovered.iter().copied().collect();
+            self.local_indices = self
+                .cover_box_indices
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(local, ambient)| (ambient, local))
+                .collect();
+            self.column_offsets = Vec::with_capacity(self.cover_box_indices.len() + 1);
+            self.phase = GrownCoverBuildPhase::BuildingTransitions;
+            return;
+        }
+        let next = std::mem::take(&mut self.next_frontier);
+        self.discovered.extend(next.iter().copied());
+        self.frontier = next.into_iter().collect();
+        self.cover_growth_iterations += 1;
+    }
+
+    fn build_one_source_column<F>(&mut self, step: &mut F) -> Result<()>
+    where
+        F: FnMut(usize, usize, usize, &mut [f64], &mut [f64]) -> Result<()>,
+    {
+        if self.assembly_source_index >= self.cover_box_indices.len() {
+            if self.column_offsets.len() == self.cover_box_indices.len() {
+                self.column_offsets.push(self.target_indices.len());
+            }
+            self.phase = GrownCoverBuildPhase::Complete;
+            return Ok(());
+        }
+        let source = self.cover_box_indices[self.assembly_source_index];
+        self.column_offsets.push(self.target_indices.len());
+        let mut counts = BTreeMap::new();
+        for sample in 0..self.samples_per_cell {
+            if let Some(target) = sampled_transition_target(
+                &self.bounds,
+                &self.resolution,
+                source,
+                sample,
+                self.samples_per_cell,
+                self.iterations,
+                step,
+            )? {
+                let Some(&local_target) = self.local_indices.get(&target) else {
+                    continue;
+                };
+                *counts.entry(local_target).or_insert(0usize) += 1;
+                self.retained_samples += 1;
+            }
+        }
+        let in_grid_count: usize = counts.values().sum();
+        if in_grid_count == 0 {
+            self.zero_survivor_sources += 1;
+        }
+        for (target, count) in counts {
+            self.target_indices.push(target);
+            self.probabilities.push(count as f64 / in_grid_count as f64);
+        }
+        self.assembly_source_index += 1;
+        if self.assembly_source_index == self.cover_box_indices.len() {
+            self.column_offsets.push(self.target_indices.len());
+            self.phase = GrownCoverBuildPhase::Complete;
+        }
+        Ok(())
+    }
 }
 
 pub fn box_index(point: &[f64], bounds: &[(f64, f64)], resolution: &[usize]) -> Option<usize> {
@@ -183,52 +443,19 @@ pub fn sampled_box_transition_operator_on_grown_cover_with_axis_names_and_step<F
 where
     F: FnMut(usize, usize, usize, &mut [f64], &mut [f64]) -> Result<()>,
 {
-    let total =
-        validate_transition_grid(dimension, bounds, resolution, samples_per_cell, iterations)?;
-    if seed_box_index >= total {
-        bail!("The transfer-operator starting point must select a valid ambient box.");
-    }
-
-    let mut discovered = BTreeSet::from([seed_box_index]);
-    let mut frontier = BTreeSet::from([seed_box_index]);
-    let mut cover_growth_iterations = 0usize;
-    while !frontier.is_empty() {
-        cover_growth_iterations += 1;
-        let mut next = BTreeSet::new();
-        for source in frontier {
-            for sample in 0..samples_per_cell {
-                if let Some(target) = sampled_transition_target(
-                    bounds,
-                    resolution,
-                    source,
-                    sample,
-                    samples_per_cell,
-                    iterations,
-                    &mut step,
-                )? {
-                    if !discovered.contains(&target) {
-                        next.insert(target);
-                    }
-                }
-            }
-        }
-        discovered.extend(next.iter().copied());
-        frontier = next;
-    }
-
-    let cover_box_indices: Vec<usize> = discovered.into_iter().collect();
-    assemble_sampled_box_transition_operator(
+    let mut builder = GrownCoverTransferOperatorBuilder::new(
         dimension,
         bounds,
         resolution,
         samples_per_cell,
         iterations,
         axis_names,
-        &cover_box_indices,
         seed_box_index,
-        cover_growth_iterations,
-        &mut step,
-    )
+    )?;
+    while !builder.is_complete() {
+        builder.advance(usize::MAX, &mut step)?;
+    }
+    builder.into_operator()
 }
 
 fn validate_transition_grid(
@@ -366,6 +593,125 @@ where
     })
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct StationaryDistributionState {
+    distribution: Vec<f64>,
+    eigenvalue: f64,
+    residual: f64,
+    iterations: usize,
+    max_iterations: usize,
+    tolerance: f64,
+    done: bool,
+}
+
+impl StationaryDistributionState {
+    pub fn new(
+        operator: &BoxTransitionOperator,
+        max_iterations: usize,
+        tolerance: f64,
+    ) -> Result<Self> {
+        if max_iterations == 0 || !tolerance.is_finite() || tolerance <= 0.0 {
+            bail!("Stationary iteration settings must be positive.");
+        }
+        let eligible: Vec<usize> = (0..operator.total_boxes)
+            .filter(|source| {
+                operator.column_offsets[*source] < operator.column_offsets[*source + 1]
+            })
+            .collect();
+        let mut distribution = vec![0.0; operator.total_boxes];
+        if eligible.is_empty() {
+            if operator.total_boxes > 0 {
+                distribution.fill(1.0 / operator.total_boxes as f64);
+            }
+        } else {
+            for source in &eligible {
+                distribution[*source] = 1.0 / eligible.len() as f64;
+            }
+        }
+        Ok(Self {
+            distribution,
+            eigenvalue: 0.0,
+            residual: f64::INFINITY,
+            iterations: 0,
+            max_iterations,
+            tolerance,
+            done: operator.total_boxes == 0,
+        })
+    }
+
+    pub fn advance(
+        &mut self,
+        operator: &BoxTransitionOperator,
+        iteration_budget: usize,
+    ) -> Result<()> {
+        if operator.total_boxes != self.distribution.len() {
+            bail!("Stationary distribution and transfer operator sizes do not match.");
+        }
+        for _ in 0..iteration_budget.max(1) {
+            if self.done {
+                break;
+            }
+            let applied = apply_operator(operator, &self.distribution);
+            let survival = applied.iter().sum::<f64>();
+            self.iterations += 1;
+            if survival <= 0.0 {
+                self.distribution.fill(0.0);
+                self.eigenvalue = 0.0;
+                self.residual = 0.0;
+                self.done = true;
+                break;
+            }
+            self.distribution = applied.iter().map(|value| value / survival).collect();
+            (self.eigenvalue, self.residual) =
+                eigenvalue_and_residual(operator, &self.distribution);
+            self.done = (self.eigenvalue > 0.0 && self.residual <= self.tolerance)
+                || self.iterations >= self.max_iterations;
+        }
+        Ok(())
+    }
+
+    pub fn is_done(&self) -> bool {
+        self.done
+    }
+
+    pub fn distribution(&self) -> &[f64] {
+        &self.distribution
+    }
+
+    pub fn eigenvalue(&self) -> f64 {
+        self.eigenvalue
+    }
+
+    pub fn residual(&self) -> Option<f64> {
+        (self.iterations > 0).then_some(self.residual)
+    }
+
+    pub fn iterations(&self) -> usize {
+        self.iterations
+    }
+
+    pub fn max_iterations(&self) -> usize {
+        self.max_iterations
+    }
+
+    pub fn tolerance(&self) -> f64 {
+        self.tolerance
+    }
+
+    pub fn into_result(self) -> (Vec<f64>, f64, f64, usize) {
+        (
+            self.distribution,
+            self.eigenvalue,
+            if self.residual.is_finite() {
+                self.residual
+            } else {
+                0.0
+            },
+            self.iterations,
+        )
+    }
+}
+
 fn apply_operator(operator: &BoxTransitionOperator, distribution: &[f64]) -> Vec<f64> {
     let mut applied = vec![0.0; operator.total_boxes];
     for (source, &source_mass) in distribution.iter().enumerate().take(operator.total_boxes) {
@@ -392,41 +738,11 @@ pub fn stationary_distribution(
     max_iterations: usize,
     tolerance: f64,
 ) -> Result<(Vec<f64>, f64, f64, usize)> {
-    if max_iterations == 0 || !tolerance.is_finite() || tolerance <= 0.0 {
-        bail!("Stationary iteration settings must be positive.");
+    let mut state = StationaryDistributionState::new(operator, max_iterations, tolerance)?;
+    while !state.is_done() {
+        state.advance(operator, max_iterations)?;
     }
-    let n = operator.total_boxes;
-    let eligible: Vec<usize> = (0..n)
-        .filter(|source| operator.column_offsets[*source] < operator.column_offsets[*source + 1])
-        .collect();
-    let mut p = vec![0.0; n];
-    if eligible.is_empty() {
-        if n == 0 {
-            return Ok((p, 0.0, 0.0, 0));
-        }
-        p.fill(1.0 / n as f64);
-    } else {
-        for source in &eligible {
-            p[*source] = 1.0 / eligible.len() as f64;
-        }
-    }
-
-    for iteration in 1..=max_iterations {
-        let applied = apply_operator(operator, &p);
-        let survival = applied.iter().sum::<f64>();
-        if survival <= 0.0 {
-            return Ok((vec![0.0; n], 0.0, 0.0, iteration));
-        }
-
-        let next: Vec<f64> = applied.iter().map(|value| value / survival).collect();
-        let (next_eigenvalue, next_residual) = eigenvalue_and_residual(operator, &next);
-        p = next;
-        if next_eigenvalue > 0.0 && next_residual <= tolerance {
-            return Ok((p, next_eigenvalue, next_residual, iteration));
-        }
-    }
-    let (eigenvalue, residual) = eigenvalue_and_residual(operator, &p);
-    Ok((p, eigenvalue, residual, max_iterations))
+    Ok(state.into_result())
 }
 
 #[cfg(test)]
@@ -576,6 +892,67 @@ mod tests {
         assert_eq!(op.total_boxes, 4);
         assert_eq!(op.target_indices, vec![1, 2, 3]);
         assert_eq!(op.zero_survivor_sources, 1);
+    }
+
+    #[test]
+    fn grown_cover_builder_reports_dynamic_exploration_then_bounded_assembly() {
+        let mut builder = GrownCoverTransferOperatorBuilder::new(
+            1,
+            &[(0.0, 1.0)],
+            &[4],
+            1,
+            1,
+            &["x".to_string()],
+            0,
+        )
+        .unwrap();
+        let mut step = |_: usize, _: usize, _: usize, state: &mut [f64], out: &mut [f64]| {
+            out[0] = state[0] + 0.25;
+            Ok(())
+        };
+
+        assert_eq!(
+            builder.progress().phase,
+            GrownCoverBuildPhase::ExploringCover
+        );
+        assert_eq!(builder.progress().total_source_boxes, None);
+        builder.advance(1, &mut step).unwrap();
+        assert_eq!(builder.progress().completed_source_boxes, 1);
+        assert_eq!(builder.progress().discovered_boxes, 2);
+
+        while builder.progress().phase == GrownCoverBuildPhase::ExploringCover {
+            builder.advance(1, &mut step).unwrap();
+        }
+        assert_eq!(
+            builder.progress().phase,
+            GrownCoverBuildPhase::BuildingTransitions
+        );
+        assert_eq!(builder.progress().completed_source_boxes, 0);
+        assert_eq!(builder.progress().total_source_boxes, Some(4));
+
+        builder.advance(2, &mut step).unwrap();
+        assert_eq!(builder.progress().completed_source_boxes, 2);
+        assert_eq!(builder.progress().sampled_transitions, 2);
+        while !builder.is_complete() {
+            builder.advance(2, &mut step).unwrap();
+        }
+        let op = builder.into_operator().unwrap();
+        assert_eq!(op.cover_box_indices, vec![0, 1, 2, 3]);
+        assert_eq!(op.column_offsets.len(), 5);
+    }
+
+    #[test]
+    fn stationary_distribution_state_reports_iteration_residual_and_completion() {
+        let op = sampled_box_transition_operator(&Identity, &[(0.0, 1.0)], &[4], 1, 1).unwrap();
+        let mut state = StationaryDistributionState::new(&op, 20, 1.0e-12).unwrap();
+
+        assert_eq!(state.iterations(), 0);
+        assert_eq!(state.residual(), None);
+        state.advance(&op, 1).unwrap();
+        assert!(state.is_done());
+        assert_eq!(state.iterations(), 1);
+        assert!(state.residual().unwrap() <= state.tolerance());
+        assert!((state.distribution().iter().sum::<f64>() - 1.0).abs() < 1.0e-12);
     }
 
     #[test]

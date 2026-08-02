@@ -13,6 +13,13 @@ integration step. The default flow-map time is `1`, and the default integration 
 This is a fixed-time sampling map, not a Poincaré return map. A target endpoint on the upper grid
 boundary belongs to the last cell. An endpoint outside the closed grid is dropped.
 
+Progress is reported in three phases. Cover exploration reports explored, discovered, and queued
+cells without a percentage because the final cover size is not known yet. Once the cover closes,
+transition construction reports completed source cells against the known cover size, along with
+dynamics-step and sparse-edge counts. The stationary solve then reports iterations against its
+configured limit and the current residual against the requested tolerance. The calculation yields
+between bounded batches so cancellation can interrupt every phase.
+
 Explicitly time-dependent flows are shown in the State Grid workflow but their invariant-measure
 action is disabled until a phase-locked or otherwise non-autonomous construction is implemented.
 

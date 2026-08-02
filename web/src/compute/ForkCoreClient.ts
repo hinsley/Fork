@@ -41,6 +41,13 @@ export type ContinuationProgress = {
   bifurcations_found: number
   current_param: number
   rings_computed?: number
+  phase?: 'exploring_cover' | 'building_transitions' | 'solving_stationary' | 'complete'
+  batch_size_hint?: number
+  discovered_boxes?: number
+  frontier_boxes?: number
+  edges_built?: number
+  residual?: number
+  tolerance?: number
 }
 
 export type SimulateOrbitRequest = {

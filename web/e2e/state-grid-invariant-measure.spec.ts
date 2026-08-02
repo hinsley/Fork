@@ -184,4 +184,65 @@ test('State Grid creates a sampled flow-map measure for an autonomous flow', asy
   await expect(page.getByTestId('invariant-measure-data-section')).toContainText(
     equilibriumCoordinate.toString()
   )
+  await expect(page.getByTestId('invariant-measure-effective-support')).toContainText('cells')
+  await expect(page.getByTestId('invariant-measure-convergence-status')).toContainText(
+    /Converged|Iteration limit reached/
+  )
+})
+
+test('State Grid reports advancing cover progress and cancels without a late result', async ({
+  page,
+}) => {
+  test.setTimeout(120_000)
+  const harness = createHarness(page)
+  await harness.goto({ deterministic: true, mock: false })
+  await harness.openSystem('Langford')
+
+  await page.getByTestId('create-object-button').click()
+  await page.getByTestId('create-object-menu').waitFor()
+  await page.getByTestId('create-state-grid').click()
+  await openStateGridWorkflow(page, 'state-grid-setup-toggle')
+  await page.getByTestId('state-grid-x-resolution').fill('50')
+  await page.getByTestId('state-grid-y-resolution').fill('50')
+  await page.getByTestId('state-grid-z-min').fill('-1')
+  await page.getByTestId('state-grid-z-max').fill('2')
+  await page.getByTestId('state-grid-z-resolution').fill('50')
+  await page.getByTestId('inspector-workflow-back').click()
+  await openStateGridWorkflow(page, 'state-grid-transfer-toggle')
+  await expect(page.getByTestId('state-grid-transfer-time-step')).toHaveValue('1')
+  await expect(page.getByTestId('state-grid-transfer-integration-step')).toHaveValue('0.01')
+  await page.getByTestId('state-grid-create-invariant-measure').click()
+
+  const toolbar = page.getByTestId('toolbar')
+  await expect(toolbar).toContainText('Invariant measure · Exploring cover')
+  await expect(toolbar).toContainText('dynamics steps')
+  const initialProgress = await toolbar.innerText()
+  const initialMatch = initialProgress.match(/([\d,]+) cells explored/)
+  expect(initialMatch).not.toBeNull()
+  const initialCells = Number(initialMatch?.[1].replaceAll(',', ''))
+  expect(initialCells).toBeGreaterThan(0)
+  await expect
+    .poll(async () => {
+      const match = (await toolbar.innerText()).match(/([\d,]+) cells explored/)
+      return Number(match?.[1].replaceAll(',', '') ?? 0)
+    })
+    .toBeGreaterThan(initialCells)
+
+  await page.getByTestId('cancel-calculation').click()
+  await expect(toolbar).toContainText('Ready')
+  await expect(page.getByTestId('state-grid-create-invariant-measure')).toBeEnabled()
+  await expect(
+    page.getByRole('button', {
+      name: 'Invariant_Measure_State_Grid_1 (invariant measure)',
+      exact: true,
+    })
+  ).toHaveCount(0)
+  await page.waitForTimeout(500)
+  await expect(toolbar).toContainText('Ready')
+  await expect(
+    page.getByRole('button', {
+      name: 'Invariant_Measure_State_Grid_1 (invariant measure)',
+      exact: true,
+    })
+  ).toHaveCount(0)
 })

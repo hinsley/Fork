@@ -14,6 +14,12 @@ type ToolbarProps = {
     arclength?: number
     arclengthTarget?: number
     radius?: number
+    phase?: 'exploring_cover' | 'building_transitions' | 'solving_stationary' | 'complete'
+    discoveredBoxes?: number
+    frontierBoxes?: number
+    edgesBuilt?: number
+    residual?: number
+    tolerance?: number
   } | null
   onHome: () => void
   onOpenSystems: () => void
@@ -41,6 +47,22 @@ export function Toolbar({
     }
     return value.toFixed(3)
   }
+  const formatCount = (value: number) =>
+    Number.isFinite(value) ? Math.max(0, Math.trunc(value)).toLocaleString() : 'n/a'
+  const formatResidual = (value: number | undefined) =>
+    typeof value === 'number' && Number.isFinite(value) ? value.toExponential(2) : 'pending'
+  const transferPhase = progress?.phase
+  const transferPhaseLabel =
+    transferPhase === 'exploring_cover'
+      ? 'Exploring cover'
+      : transferPhase === 'building_transitions'
+        ? 'Building transitions'
+        : transferPhase === 'solving_stationary'
+          ? 'Solving stationary mode'
+          : transferPhase === 'complete'
+            ? 'Complete'
+            : null
+  const indeterminateProgress = transferPhase === 'exploring_cover'
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsRef = useRef<HTMLDivElement | null>(null)
@@ -158,9 +180,22 @@ export function Toolbar({
         {progress ? (
           <div className="toolbar__progress">
             <div className="toolbar__progress-header">
-              <span>{progress.label}</span>
+              <span>
+                {progress.label}
+                {transferPhaseLabel ? ` · ${transferPhaseLabel}` : ''}
+              </span>
               <span className="toolbar__progress-controls">
-                {progress.showArclength ? (
+                {transferPhase === 'exploring_cover' ? (
+                  <span>{formatCount(progress.currentStep)} cells explored</span>
+                ) : transferPhase === 'building_transitions' ? (
+                  <span>
+                    {formatCount(progress.currentStep)} / {formatCount(progress.maxSteps)} cells
+                  </span>
+                ) : transferPhase === 'solving_stationary' || transferPhase === 'complete' ? (
+                  <span>
+                    {formatCount(progress.currentStep)} / {formatCount(progress.maxSteps)} iterations
+                  </span>
+                ) : progress.showArclength ? (
                   <span>
                   {formatArclength(progress.arclength ?? progress.currentStep)} /{' '}
                   {formatArclength(progress.arclengthTarget ?? progress.maxSteps)}
@@ -180,28 +215,57 @@ export function Toolbar({
                 </button>
               </span>
             </div>
-            <div className="toolbar__progress-bar" role="progressbar">
+            <div
+              className={`toolbar__progress-bar${indeterminateProgress ? ' toolbar__progress-bar--indeterminate' : ''}`}
+              role="progressbar"
+              aria-label={transferPhaseLabel ?? progress.label}
+              aria-valuemin={indeterminateProgress ? undefined : 0}
+              aria-valuenow={indeterminateProgress ? undefined : progress.currentStep}
+              aria-valuemax={
+                indeterminateProgress || progress.maxSteps <= 0 ? undefined : progress.maxSteps
+              }
+            >
               <div
                 className="toolbar__progress-fill"
                 style={{
-                  width: `${
-                    progress.maxSteps > 0
-                      ? Math.min(100, (progress.currentStep / progress.maxSteps) * 100)
-                      : 0
-                  }%`,
+                  width: indeterminateProgress
+                    ? undefined
+                    : `${
+                        progress.maxSteps > 0
+                          ? Math.min(100, (progress.currentStep / progress.maxSteps) * 100)
+                          : 0
+                      }%`,
                 }}
               />
             </div>
             <div className="toolbar__progress-meta">
-              {typeof progress.ringsComputed === 'number' ? (
+              {transferPhase === 'exploring_cover' ? (
+                <>
+                  <span>
+                    {formatCount(progress.discoveredBoxes ?? 0)} discovered ·{' '}
+                    {formatCount(progress.frontierBoxes ?? 0)} queued
+                  </span>
+                  <span>{formatCount(progress.points)} dynamics steps</span>
+                </>
+              ) : transferPhase === 'building_transitions' ? (
+                <>
+                  <span>{formatCount(progress.points)} dynamics steps</span>
+                  <span>{formatCount(progress.edgesBuilt ?? 0)} edges</span>
+                </>
+              ) : transferPhase === 'solving_stationary' || transferPhase === 'complete' ? (
+                <>
+                  <span>residual {formatResidual(progress.residual)}</span>
+                  <span>target {formatResidual(progress.tolerance)}</span>
+                </>
+              ) : typeof progress.ringsComputed === 'number' ? (
                 <span>{progress.ringsComputed} rings</span>
               ) : null}
-              <span>{progress.points} pts</span>
-              {progress.showArclength ? (
+              {!transferPhase ? <span>{progress.points} pts</span> : null}
+              {!transferPhase && progress.showArclength ? (
                 <span>radius {formatArclength(progress.radius ?? 0)}</span>
-              ) : (
+              ) : !transferPhase ? (
                 <span>{progress.bifurcations} bifurcations</span>
-              )}
+              ) : null}
             </div>
           </div>
         ) : (

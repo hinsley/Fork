@@ -71,6 +71,36 @@ describe('runSteppedRunnerToCompletion', () => {
     expect(runSteps).toHaveBeenCalledWith(1)
   })
 
+  it('uses a runner batch hint when the current phase has no known total', () => {
+    let calls = 0
+    const runSteps = vi.fn((batchSize: number) => {
+      calls += 1
+      return {
+        ...makeProgress(calls * batchSize, 0, calls === 2),
+        batch_size_hint: 128,
+      }
+    })
+    const runner = {
+      get_progress: vi.fn(() => ({
+        ...makeProgress(0, 0, false),
+        phase: 'exploring_cover' as const,
+        batch_size_hint: 128,
+      })),
+      run_steps: runSteps,
+      get_result: vi.fn(() => 'complete'),
+    }
+
+    expect(
+      runSteppedRunnerToCompletion(
+        runner,
+        new AbortController().signal,
+        vi.fn()
+      )
+    ).toBe('complete')
+    expect(runSteps).toHaveBeenCalledTimes(2)
+    expect(runSteps).toHaveBeenCalledWith(128)
+  })
+
   it('returns immediately when the runner is already done', () => {
     const runSteps = vi.fn()
     const getResult = vi.fn(() => 'complete')
@@ -138,6 +168,33 @@ describe('runSteppedRunnerToCompletion', () => {
       })
     ).rejects.toMatchObject({ name: 'AbortError' })
     expect(runSteps).toHaveBeenCalledTimes(1)
+    expect(runner.get_result).not.toHaveBeenCalled()
+  })
+
+  it('cancels a dynamically growing hinted runner before another batch or result', async () => {
+    const controller = new AbortController()
+    const runSteps = vi.fn(() => ({
+      ...makeProgress(128, 0, false),
+      phase: 'exploring_cover' as const,
+      batch_size_hint: 128,
+    }))
+    const runner = {
+      get_progress: vi.fn(() => ({
+        ...makeProgress(0, 0, false),
+        phase: 'exploring_cover' as const,
+        batch_size_hint: 128,
+      })),
+      run_steps: runSteps,
+      get_result: vi.fn(() => 'late result'),
+    }
+
+    await expect(
+      runSteppedRunnerToCompletionAsync(runner, controller.signal, (progress) => {
+        if (progress.current_step > 0) controller.abort()
+      })
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(runSteps).toHaveBeenCalledTimes(1)
+    expect(runSteps).toHaveBeenCalledWith(128)
     expect(runner.get_result).not.toHaveBeenCalled()
   })
 

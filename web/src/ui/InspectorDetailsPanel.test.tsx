@@ -291,6 +291,12 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByTestId('invariant-measure-cover-size')).toHaveTextContent('3 / 4')
     expect(screen.getByTestId('invariant-measure-leading-eigenvalue')).toHaveTextContent('1.000000e+0')
     expect(screen.getByTestId('invariant-measure-residual')).toHaveTextContent('1.000000e-11')
+    expect(screen.getByTestId('invariant-measure-effective-support')).toHaveTextContent(
+      '2.632 cells'
+    )
+    expect(screen.getByTestId('invariant-measure-convergence-status')).toHaveTextContent(
+      'Converged'
+    )
 
     const leakyMeasure: InvariantMeasureObject = {
       ...measure,

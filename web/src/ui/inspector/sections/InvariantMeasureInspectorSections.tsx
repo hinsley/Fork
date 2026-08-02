@@ -36,6 +36,18 @@ export function InvariantMeasureInspectorSections({
   const resolution = result.axes.map((axis) => axis.resolution).join(' × ')
   const dominantEigenvalue = result.dominantEigenvalue ?? 1
   const massPreserving = Math.abs(dominantEigenvalue - 1) <= 1e-8
+  const totalModeMass = result.stationaryDistribution.reduce((sum, mass) => sum + mass, 0)
+  const squaredModeMass = result.stationaryDistribution.reduce(
+    (sum, mass) => sum + mass * mass,
+    0
+  )
+  const participationSupport = squaredModeMass > 0 ? 1 / squaredModeMass : 0
+  const peakCellMass = result.stationaryDistribution.reduce(
+    (peak, mass) => Math.max(peak, mass),
+    0
+  )
+  const stationaryConverged =
+    totalModeMass > 0 && result.residual <= result.settings.tolerance
   const snapshotCompatible =
     !result.subsystemSnapshot ||
     isSubsystemSnapshotCompatible(system.config, result.subsystemSnapshot)
@@ -85,6 +97,21 @@ export function InvariantMeasureInspectorSections({
             </span>
           </div>
           <div className="inspector-metrics__row">
+            <span className="inspector-metrics__label">Participation support</span>
+            <span
+              className="inspector-metrics__value"
+              data-testid="invariant-measure-effective-support"
+            >
+              {participationSupport.toLocaleString(undefined, { maximumFractionDigits: 3 })} cells
+            </span>
+          </div>
+          <div className="inspector-metrics__row">
+            <span className="inspector-metrics__label">Peak cell mass</span>
+            <span className="inspector-metrics__value">
+              {(100 * peakCellMass).toPrecision(6)}%
+            </span>
+          </div>
+          <div className="inspector-metrics__row">
             <span className="inspector-metrics__label">Excluded source cells</span>
             <span className="inspector-metrics__value">
               {result.zeroSurvivorSources.toLocaleString()}
@@ -109,6 +136,19 @@ export function InvariantMeasureInspectorSections({
             <span className="inspector-metrics__label">Stationary iterations</span>
             <span className="inspector-metrics__value">
               {result.stationaryIterations.toLocaleString()}
+            </span>
+          </div>
+          <div className="inspector-metrics__row">
+            <span className="inspector-metrics__label">Stationary solve</span>
+            <span
+              className="inspector-metrics__value"
+              data-testid="invariant-measure-convergence-status"
+            >
+              {stationaryConverged
+                ? 'Converged'
+                : totalModeMass > 0
+                  ? 'Iteration limit reached'
+                  : 'No surviving mode'}
             </span>
           </div>
         </div>
@@ -143,6 +183,10 @@ export function InvariantMeasureInspectorSections({
         <p className="inspector-help">
           Marker opacity encodes positive mode mass linearly. Zero-mass cells are omitted.
           The stored result is a snapshot and does not change when its source grid is edited.
+        </p>
+        <p className="inspector-help">
+          Participation support is 1 / Σp². It is the number of equally weighted cells that would
+          have the same concentration as this normalized mode.
         </p>
         {massPreserving ? (
           <p className="inspector-help">

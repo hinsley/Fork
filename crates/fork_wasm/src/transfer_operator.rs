@@ -1,14 +1,15 @@
 use crate::system::WasmSystem;
 use fork_core::traits::DynamicalSystem;
 use fork_core::transfer_operator::{
-    box_index, sampled_box_transition_operator_on_grown_cover_with_axis_names_and_step,
-    stationary_distribution,
+    box_index, BoxTransitionOperator, GrownCoverBuildPhase, GrownCoverTransferOperatorBuilder,
+    StationaryDistributionState,
 };
 use serde::Serialize;
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
 
 const MAX_FLOW_INTEGRATION_STEPS_PER_TRANSITION: usize = 1_000_000;
+const TRANSFER_OPERATOR_BATCH_SIZE: usize = 128;
 
 fn flow_integration_step_count(flow_map_time: f64, integration_step: f64) -> anyhow::Result<usize> {
     if !flow_map_time.is_finite()
@@ -48,7 +49,6 @@ fn advance_flow_map(
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct Progress {
     done: bool,
     current_step: usize,
@@ -56,39 +56,44 @@ struct Progress {
     points_computed: usize,
     bifurcations_found: usize,
     current_param: f64,
+    phase: &'static str,
+    batch_size_hint: usize,
+    discovered_boxes: usize,
+    frontier_boxes: usize,
+    edges_built: usize,
+    residual: Option<f64>,
+    tolerance: Option<f64>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ResultData {
+struct ResultData<'a> {
     total_boxes: usize,
     ambient_box_count: usize,
-    cover_box_indices: Vec<usize>,
+    cover_box_indices: &'a [usize],
     seed_box_index: usize,
     cover_growth_iterations: usize,
-    column_offsets: Vec<usize>,
-    target_indices: Vec<usize>,
-    probabilities: Vec<f64>,
+    column_offsets: &'a [usize],
+    target_indices: &'a [usize],
+    probabilities: &'a [f64],
     retained_mass: f64,
     zero_survivor_sources: usize,
-    stationary_distribution: Vec<f64>,
+    stationary_distribution: &'a [f64],
     dominant_eigenvalue: f64,
     residual: f64,
     stationary_iterations: usize,
 }
 struct State {
     system: WasmSystem,
-    axis_names: Vec<String>,
-    bounds: Vec<(f64, f64)>,
-    resolution: Vec<usize>,
-    seed_box_index: usize,
-    samples_per_cell: usize,
-    iterations: usize,
     is_flow: bool,
     flow_map_time: f64,
     integration_step: f64,
+    dynamics_steps_per_sample: usize,
     max_stationary_iterations: usize,
     tolerance: f64,
-    done: bool,
+    builder: Option<GrownCoverTransferOperatorBuilder>,
+    operator: Option<BoxTransitionOperator>,
+    stationary: Option<StationaryDistributionState>,
+    stationary_completion_reported: bool,
 }
 #[wasm_bindgen]
 pub struct WasmTransferOperatorRunner {
@@ -148,10 +153,12 @@ impl WasmTransferOperatorRunner {
                 "Transfer operator requires RK4 or Tsit5 for flows and the discrete solver for maps.",
             ));
         }
-        if is_flow {
+        let dynamics_steps_per_sample = if is_flow {
             flow_integration_step_count(time_step, integration_step)
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-        }
+                .map_err(|error| JsValue::from_str(&error.to_string()))?
+        } else {
+            iterations as usize
+        };
         let bounds: Vec<_> = minimums.into_iter().zip(maximums).collect();
         if bounds.iter().zip(&resolution).any(|((a, b), count)| {
             !a.is_finite() || !b.is_finite() || a > b || *count == 0 || (a == b && *count != 1)
@@ -175,109 +182,184 @@ impl WasmTransferOperatorRunner {
         if is_flow {
             system.require_autonomous("State Grid invariant-measure calculation")?;
         }
+        let builder = GrownCoverTransferOperatorBuilder::new(
+            var_names.len(),
+            &bounds,
+            &resolution,
+            samples_per_cell as usize,
+            if is_flow { 1 } else { iterations as usize },
+            &var_names,
+            seed_box_index,
+        )
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
         Ok(Self {
             state: Some(State {
                 system,
-                axis_names: var_names,
-                bounds,
-                resolution,
-                seed_box_index,
-                samples_per_cell: samples_per_cell as usize,
-                iterations: if is_flow { 1 } else { iterations as usize },
                 is_flow,
                 flow_map_time: time_step,
                 integration_step,
+                dynamics_steps_per_sample,
                 max_stationary_iterations: max_stationary_iterations as usize,
                 tolerance,
-                done: false,
+                builder: Some(builder),
+                operator: None,
+                stationary: None,
+                stationary_completion_reported: false,
             }),
         })
     }
-    pub fn run_steps(&mut self, _batch_size: u32) -> Result<JsValue, JsValue> {
+    pub fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
         let state = self
             .state
             .as_mut()
             .ok_or_else(|| JsValue::from_str("Runner not initialized."))?;
-        state.done = true;
-        to_value(&Progress {
-            done: true,
-            current_step: 1,
-            max_steps: 1,
-            points_computed: 1,
-            bifurcations_found: 0,
-            current_param: 1.,
-        })
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+        if let Some(builder) = state.builder.as_mut() {
+            let was_complete = builder.is_complete();
+            if !was_complete {
+                let is_flow = state.is_flow;
+                let flow_map_time = state.flow_map_time;
+                let integration_step = state.integration_step;
+                let system = &mut state.system;
+                builder
+                    .advance(batch_size.max(1) as usize, &mut |_, _, _, sample, out| {
+                        if is_flow {
+                            advance_flow_map(system, sample, flow_map_time, integration_step)?;
+                            out.copy_from_slice(sample);
+                        } else {
+                            system.system.apply(0.0, sample, out);
+                        }
+                        Ok(())
+                    })
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            }
+            if was_complete {
+                let builder = state.builder.take().expect("builder exists");
+                let operator = builder
+                    .into_operator()
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                state.stationary = Some(
+                    StationaryDistributionState::new(
+                        &operator,
+                        state.max_stationary_iterations,
+                        state.tolerance,
+                    )
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?,
+                );
+                state.operator = Some(operator);
+            }
+        } else {
+            let operator = state
+                .operator
+                .as_ref()
+                .ok_or_else(|| JsValue::from_str("Transfer operator is unavailable."))?;
+            let stationary = state
+                .stationary
+                .as_mut()
+                .ok_or_else(|| JsValue::from_str("Stationary solver is unavailable."))?;
+            if stationary.is_done() {
+                state.stationary_completion_reported = true;
+            } else {
+                stationary
+                    .advance(operator, batch_size.max(1) as usize)
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            }
+        }
+        to_value(&progress(state)).map_err(|error| JsValue::from_str(&error.to_string()))
     }
     pub fn get_progress(&self) -> Result<JsValue, JsValue> {
         let state = self
             .state
             .as_ref()
             .ok_or_else(|| JsValue::from_str("Runner not initialized."))?;
-        to_value(&Progress {
-            done: state.done,
-            current_step: usize::from(state.done),
-            max_steps: 1,
-            points_computed: usize::from(state.done),
-            bifurcations_found: 0,
-            current_param: usize::from(state.done) as f64,
-        })
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+        to_value(&progress(state)).map_err(|error| JsValue::from_str(&error.to_string()))
     }
-    pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
+    pub fn get_result(&self) -> Result<JsValue, JsValue> {
         let state = self
             .state
-            .as_mut()
+            .as_ref()
             .ok_or_else(|| JsValue::from_str("Runner not initialized."))?;
-        if !state.done {
+        let operator = state
+            .operator
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("Transfer-operator calculation is not complete."))?;
+        let stationary = state
+            .stationary
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("Stationary solver is unavailable."))?;
+        if !stationary.is_done() || !state.stationary_completion_reported {
             return Err(JsValue::from_str(
                 "Transfer-operator calculation is not complete.",
             ));
         }
-        let op = sampled_box_transition_operator_on_grown_cover_with_axis_names_and_step(
-            state.axis_names.len(),
-            &state.bounds,
-            &state.resolution,
-            state.samples_per_cell,
-            state.iterations,
-            &state.axis_names,
-            state.seed_box_index,
-            |_, _, _, sample, out| {
-                if state.is_flow {
-                    advance_flow_map(
-                        &mut state.system,
-                        sample,
-                        state.flow_map_time,
-                        state.integration_step,
-                    )?;
-                    out.copy_from_slice(sample);
-                } else {
-                    state.system.system.apply(0.0, sample, out);
-                }
-                Ok(())
-            },
-        )
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let (p, dominant_eigenvalue, residual, stationary_iterations) =
-            stationary_distribution(&op, state.max_stationary_iterations, state.tolerance)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
         to_value(&ResultData {
-            total_boxes: op.total_boxes,
-            ambient_box_count: op.ambient_box_count,
-            cover_box_indices: op.cover_box_indices,
-            seed_box_index: op.seed_box_index,
-            cover_growth_iterations: op.cover_growth_iterations,
-            column_offsets: op.column_offsets,
-            target_indices: op.target_indices,
-            probabilities: op.probabilities,
-            retained_mass: op.retained_mass,
-            zero_survivor_sources: op.zero_survivor_sources,
-            stationary_distribution: p,
-            dominant_eigenvalue,
-            residual,
-            stationary_iterations,
+            total_boxes: operator.total_boxes,
+            ambient_box_count: operator.ambient_box_count,
+            cover_box_indices: &operator.cover_box_indices,
+            seed_box_index: operator.seed_box_index,
+            cover_growth_iterations: operator.cover_growth_iterations,
+            column_offsets: &operator.column_offsets,
+            target_indices: &operator.target_indices,
+            probabilities: &operator.probabilities,
+            retained_mass: operator.retained_mass,
+            zero_survivor_sources: operator.zero_survivor_sources,
+            stationary_distribution: stationary.distribution(),
+            dominant_eigenvalue: stationary.eigenvalue(),
+            residual: stationary.residual().unwrap_or(0.0),
+            stationary_iterations: stationary.iterations(),
         })
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+}
+
+fn progress(state: &State) -> Progress {
+    if let Some(builder) = state.builder.as_ref() {
+        let build = builder.progress();
+        return Progress {
+            done: false,
+            current_step: build.completed_source_boxes,
+            max_steps: build.total_source_boxes.unwrap_or(0),
+            points_computed: build
+                .sampled_transitions
+                .saturating_mul(state.dynamics_steps_per_sample),
+            bifurcations_found: 0,
+            current_param: build.discovered_boxes as f64,
+            phase: match build.phase {
+                GrownCoverBuildPhase::ExploringCover => "exploring_cover",
+                GrownCoverBuildPhase::BuildingTransitions => "building_transitions",
+                GrownCoverBuildPhase::Complete => "building_transitions",
+            },
+            batch_size_hint: TRANSFER_OPERATOR_BATCH_SIZE,
+            discovered_boxes: build.discovered_boxes,
+            frontier_boxes: build.frontier_boxes,
+            edges_built: build.edges_built,
+            residual: None,
+            tolerance: None,
+        };
+    }
+    let operator = state.operator.as_ref();
+    let stationary = state.stationary.as_ref();
+    let done = stationary.is_some_and(StationaryDistributionState::is_done)
+        && state.stationary_completion_reported;
+    Progress {
+        done,
+        current_step: stationary.map_or(0, StationaryDistributionState::iterations),
+        max_steps: stationary.map_or(0, StationaryDistributionState::max_iterations),
+        points_computed: stationary.map_or(0, StationaryDistributionState::iterations),
+        bifurcations_found: 0,
+        current_param: stationary
+            .and_then(StationaryDistributionState::residual)
+            .unwrap_or(0.0),
+        phase: if done {
+            "complete"
+        } else {
+            "solving_stationary"
+        },
+        batch_size_hint: TRANSFER_OPERATOR_BATCH_SIZE,
+        discovered_boxes: operator.map_or(0, |value| value.total_boxes),
+        frontier_boxes: 0,
+        edges_built: operator.map_or(0, |value| value.target_indices.len()),
+        residual: stationary.and_then(StationaryDistributionState::residual),
+        tolerance: stationary.map(StationaryDistributionState::tolerance),
     }
 }
 

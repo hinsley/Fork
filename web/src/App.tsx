@@ -269,6 +269,12 @@ function App() {
                 arclength: continuationProgress.progress.current_step,
                 arclengthTarget: continuationProgress.progress.max_steps,
                 radius: continuationProgress.progress.current_param,
+                phase: continuationProgress.progress.phase,
+                discoveredBoxes: continuationProgress.progress.discovered_boxes,
+                frontierBoxes: continuationProgress.progress.frontier_boxes,
+                edgesBuilt: continuationProgress.progress.edges_built,
+                residual: continuationProgress.progress.residual,
+                tolerance: continuationProgress.progress.tolerance,
               }
             : null
         }

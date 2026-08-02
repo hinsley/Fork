@@ -186,6 +186,17 @@
   transition: width 0.15s ease;
 }
 
+.toolbar__progress-bar--indeterminate .toolbar__progress-fill {
+  width: 34%;
+  animation: toolbar-progress-indeterminate 1.1s ease-in-out infinite;
+}
+
+@keyframes toolbar-progress-indeterminate {
+  0% { transform: translateX(-110%); }
+  50% { transform: translateX(95%); }
+  100% { transform: translateX(295%); }
+}
+
 .error-banner {
   background: #fce7dd;
   color: #702c16;
