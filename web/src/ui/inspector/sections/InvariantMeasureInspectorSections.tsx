@@ -121,7 +121,9 @@ export function InvariantMeasureInspectorSections({
         <p className="inspector-help">
           {result.settings.samplesPerCell} deterministic samples per cell,{' '}
           {result.dynamicsType === 'flow'
-            ? `${result.settings.timeStep ?? 0} flow time-step per transition`
+            ? result.settings.integrationStep !== undefined
+              ? `${result.settings.timeStep ?? 0} flow-map time per transition with integration steps no larger than ${result.settings.integrationStep}`
+              : `${result.settings.timeStep ?? 0} legacy single-step flow transition`
             : `${result.settings.iterations} map iteration${result.settings.iterations === 1 ? '' : 's'} per transition`}, tolerance{' '}
           {formatScientific(result.settings.tolerance)}. Computed {result.computedAt}.
         </p>

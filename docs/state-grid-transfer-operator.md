@@ -8,9 +8,10 @@ stops growing. It then assembles the operator only on that grown cover.
 
 For each cover cell, Fork evaluates a deterministic low-discrepancy sample set. Maps route each
 sample through the configured number of map iterates. Flows route each sample through the configured
-fixed time-step of the sampled flow map Φτ using the system's RK4 or Tsit5 solver. This is a
-fixed-time sampling map, not a Poincaré return map. A target endpoint on the upper grid boundary
-belongs to the last cell. An endpoint outside the closed grid is dropped.
+fixed-time flow map Φτ using RK4 or Tsit5 integration steps no larger than the configured
+integration step. The default flow-map time is `1`, and the default integration step is `0.01`.
+This is a fixed-time sampling map, not a Poincaré return map. A target endpoint on the upper grid
+boundary belongs to the last cell. An endpoint outside the closed grid is dropped.
 
 Explicitly time-dependent flows are shown in the State Grid workflow but their invariant-measure
 action is disabled until a phase-locked or otherwise non-autonomous construction is implemented.
@@ -61,6 +62,8 @@ nonuniform.
 ## Flow interpretation
 
 For an autonomous flow, the fixed-time map Φτ supplies the same finite-box transition operator
-used for maps. A result with leading eigenvalue approximately one is mass-preserving on the retained
-cover. A result below one remains a leaky finite-box mode; conditional column normalization does
-not turn it into a globally mass-preserving invariant measure.
+used for maps. The flow-map time controls τ, while the integration step controls the numerical
+resolution of each application of Φτ. A result with leading eigenvalue approximately one is
+mass-preserving on the retained cover. A result below one remains a leaky finite-box mode;
+conditional column normalization does not turn it into a globally mass-preserving invariant
+measure.

@@ -1057,6 +1057,7 @@ export interface TransferOperatorSettings {
   samplesPerCell: number
   iterations: number
   timeStep?: number
+  integrationStep?: number
   maxStationaryIterations: number
   tolerance: number
   outsidePolicy: 'conditional_in_grid'

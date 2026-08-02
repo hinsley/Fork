@@ -413,7 +413,7 @@ describe('appState State Grid subsystem configuration', () => {
     }
   })
 
-  it('creates a sampled flow-map measure with its persisted time-step', async () => {
+  it('creates a sampled flow-map measure with separate map time and integration step', async () => {
     const fixture = createConfiguredStateGridSystem('flow')
     const client = new MockForkCoreClient(0)
     let captured: TransferOperatorRequest | null = null
@@ -435,14 +435,69 @@ describe('appState State Grid subsystem configuration', () => {
     const request = captured as unknown as TransferOperatorRequest
     expect(request.system.type).toBe('flow')
     expect(request.system.solver).toBe('rk4')
-    expect(request.timeStep).toBe(0.01)
+    expect(request.timeStep).toBe(1)
+    expect(request.integrationStep).toBe(0.01)
     expect(request.startingPoint).toEqual([0.25])
     const measure = Object.values(getContext().state.system!.objects).find(
       (object): object is InvariantMeasureObject => object.type === 'invariant_measure'
     )
     expect(measure?.result.dynamicsType).toBe('flow')
-    expect(measure?.result.settings.timeStep).toBe(0.01)
+    expect(measure?.result.settings.timeStep).toBe(1)
+    expect(measure?.result.settings.integrationStep).toBe(0.01)
     expect(measure?.result.settings.startingPoint).toEqual({ x: 0.25 })
+    const sourceGrid = getContext().state.system!.objects[fixture.nodeId]
+    expect(sourceGrid.type).toBe('state_grid')
+    if (sourceGrid.type === 'state_grid') {
+      expect(sourceGrid.transferOperator?.settings.timeStep).toBe(1)
+      expect(sourceGrid.transferOperator?.settings.integrationStep).toBe(0.01)
+    }
+  })
+
+  it('migrates the original flow time setting to the numerical integration step', async () => {
+    const fixture = createConfiguredStateGridSystem('flow')
+    const grid = fixture.system.objects[fixture.nodeId] as StateGridObject
+    const legacySystem = {
+      ...fixture.system,
+      objects: {
+        ...fixture.system.objects,
+        [fixture.nodeId]: {
+          ...grid,
+          transferOperator: {
+            settings: {
+              samplesPerCell: 4,
+              iterations: 1,
+              timeStep: 0.02,
+              maxStationaryIterations: 2000,
+              tolerance: 1e-10,
+              outsidePolicy: 'conditional_in_grid' as const,
+            },
+          },
+        },
+      },
+    }
+    const client = new MockForkCoreClient(0)
+    let captured: TransferOperatorRequest | null = null
+    const original = client.computeTransferOperator.bind(client)
+    client.computeTransferOperator = async (request, opts) => {
+      captured = request
+      return await original(request, opts)
+    }
+    const { getContext } = setupApp(legacySystem, client)
+
+    await act(async () => {
+      await getContext().actions.computeTransferOperator({ stateGridId: fixture.nodeId })
+    })
+
+    expect(captured).not.toBeNull()
+    const request = captured as unknown as TransferOperatorRequest
+    expect(request.timeStep).toBe(1)
+    expect(request.integrationStep).toBe(0.02)
+    const storedGrid = getContext().state.system!.objects[fixture.nodeId]
+    expect(storedGrid.type).toBe('state_grid')
+    if (storedGrid.type === 'state_grid') {
+      expect(storedGrid.transferOperator?.settings.timeStep).toBe(1)
+      expect(storedGrid.transferOperator?.settings.integrationStep).toBe(0.02)
+    }
   })
 
   it('uses unique names for repeated invariant measures and creates none after cancellation', async () => {

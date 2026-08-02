@@ -156,7 +156,8 @@ test('State Grid creates a sampled flow-map measure for an autonomous flow', asy
   await page.getByTestId('state-grid-z-resolution').fill('24')
   await page.getByTestId('inspector-workflow-back').click()
   await openStateGridWorkflow(page, 'state-grid-transfer-toggle')
-  await expect(page.getByTestId('state-grid-transfer-time-step')).toHaveValue('0.01')
+  await expect(page.getByTestId('state-grid-transfer-time-step')).toHaveValue('1')
+  await expect(page.getByTestId('state-grid-transfer-integration-step')).toHaveValue('0.01')
   await expect(page.getByText(/sampled flow map/)).toBeVisible()
   const equilibriumCoordinate = Math.sqrt(0.4 * 27)
   await page

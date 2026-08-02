@@ -8,6 +8,45 @@ use serde::Serialize;
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
 
+const MAX_FLOW_INTEGRATION_STEPS_PER_TRANSITION: usize = 1_000_000;
+
+fn flow_integration_step_count(flow_map_time: f64, integration_step: f64) -> anyhow::Result<usize> {
+    if !flow_map_time.is_finite()
+        || flow_map_time <= 0.0
+        || !integration_step.is_finite()
+        || integration_step <= 0.0
+    {
+        anyhow::bail!("Flow-map time and integration step must be positive.");
+    }
+    let step_count = (flow_map_time / integration_step).ceil();
+    if !step_count.is_finite() || step_count > MAX_FLOW_INTEGRATION_STEPS_PER_TRANSITION as f64 {
+        anyhow::bail!(
+            "Flow-map integration requires at most {} steps per sampled transition.",
+            MAX_FLOW_INTEGRATION_STEPS_PER_TRANSITION
+        );
+    }
+    Ok((step_count as usize).max(1))
+}
+
+fn advance_flow_map(
+    system: &mut WasmSystem,
+    state: &mut [f64],
+    flow_map_time: f64,
+    integration_step: f64,
+) -> anyhow::Result<()> {
+    let step_count = flow_integration_step_count(flow_map_time, integration_step)?;
+    let mut solver_time = 0.0;
+    for step in 0..step_count {
+        let elapsed = step as f64 * integration_step;
+        let step_size = integration_step.min(flow_map_time - elapsed);
+        if step_size <= 0.0 {
+            break;
+        }
+        system.step_state(&mut solver_time, state, step_size);
+    }
+    Ok(())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Progress {
@@ -45,7 +84,8 @@ struct State {
     samples_per_cell: usize,
     iterations: usize,
     is_flow: bool,
-    time_step: f64,
+    flow_map_time: f64,
+    integration_step: f64,
     max_stationary_iterations: usize,
     tolerance: f64,
     done: bool,
@@ -74,6 +114,7 @@ impl WasmTransferOperatorRunner {
         max_stationary_iterations: u32,
         tolerance: f64,
         time_step: f64,
+        integration_step: f64,
     ) -> Result<Self, JsValue> {
         if var_names.is_empty()
             || minimums.len() != var_names.len()
@@ -87,6 +128,8 @@ impl WasmTransferOperatorRunner {
             || tolerance <= 0.
             || !time_step.is_finite()
             || time_step <= 0.
+            || !integration_step.is_finite()
+            || integration_step <= 0.
         {
             return Err(JsValue::from_str("Transfer-operator settings are invalid."));
         }
@@ -104,6 +147,10 @@ impl WasmTransferOperatorRunner {
             return Err(JsValue::from_str(
                 "Transfer operator requires RK4 or Tsit5 for flows and the discrete solver for maps.",
             ));
+        }
+        if is_flow {
+            flow_integration_step_count(time_step, integration_step)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
         }
         let bounds: Vec<_> = minimums.into_iter().zip(maximums).collect();
         if bounds.iter().zip(&resolution).any(|((a, b), count)| {
@@ -136,9 +183,10 @@ impl WasmTransferOperatorRunner {
                 resolution,
                 seed_box_index,
                 samples_per_cell: samples_per_cell as usize,
-                iterations: iterations as usize,
+                iterations: if is_flow { 1 } else { iterations as usize },
                 is_flow,
-                time_step,
+                flow_map_time: time_step,
+                integration_step,
                 max_stationary_iterations: max_stationary_iterations as usize,
                 tolerance,
                 done: false,
@@ -186,7 +234,6 @@ impl WasmTransferOperatorRunner {
                 "Transfer-operator calculation is not complete.",
             ));
         }
-        let mut flow_time = 0.0;
         let op = sampled_box_transition_operator_on_grown_cover_with_axis_names_and_step(
             state.axis_names.len(),
             &state.bounds,
@@ -195,14 +242,14 @@ impl WasmTransferOperatorRunner {
             state.iterations,
             &state.axis_names,
             state.seed_box_index,
-            |_, _, iteration, sample, out| {
+            |_, _, _, sample, out| {
                 if state.is_flow {
-                    if iteration == 0 {
-                        flow_time = 0.0;
-                    }
-                    state
-                        .system
-                        .step_state(&mut flow_time, sample, state.time_step);
+                    advance_flow_map(
+                        &mut state.system,
+                        sample,
+                        state.flow_map_time,
+                        state.integration_step,
+                    )?;
                     out.copy_from_slice(sample);
                 } else {
                     state.system.system.apply(0.0, sample, out);
@@ -231,5 +278,78 @@ impl WasmTransferOperatorRunner {
             stationary_iterations,
         })
         .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flow_map_duration_is_split_into_bounded_integration_steps() {
+        assert_eq!(flow_integration_step_count(1.0, 0.01).unwrap(), 100);
+        assert_eq!(flow_integration_step_count(1.0, 0.3).unwrap(), 4);
+        assert!(flow_integration_step_count(1.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn flow_map_advances_over_the_full_duration() {
+        let mut system = WasmSystem::new(
+            vec!["1".to_string()],
+            vec![],
+            vec![],
+            vec!["x".to_string()],
+            "rk4",
+            "flow",
+        )
+        .unwrap();
+        let mut state = [0.0_f64];
+
+        advance_flow_map(&mut system, &mut state, 1.0, 0.01).unwrap();
+
+        assert!((state[0] - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn langford_time_one_map_leaves_the_reported_seed_cell() {
+        let mut system = WasmSystem::new(
+            vec![
+                "(z - b) * x - d * y".to_string(),
+                "d * x + (z - b) * y".to_string(),
+                "c + a * z - z^3 / 3 - (x^2 + y^2) * (1 + e * z) + f * z * x^3".to_string(),
+            ],
+            vec![0.95, 0.7, 0.6, 3.5, 0.25, 0.1],
+            vec![
+                "a".to_string(),
+                "b".to_string(),
+                "c".to_string(),
+                "d".to_string(),
+                "e".to_string(),
+                "f".to_string(),
+            ],
+            vec!["x".to_string(), "y".to_string(), "z".to_string()],
+            "rk4",
+            "flow",
+        )
+        .unwrap();
+        let bounds = [(-2.0, 2.0), (-2.0, 2.0), (-1.0, 2.0)];
+        let resolution = [50, 50, 50];
+        let seed = box_index(&[0.0, 0.0, 0.5], &bounds, &resolution).unwrap();
+        let mut targets = Vec::new();
+
+        for sample_index in 0..4 {
+            let mut sample = fork_core::transfer_operator::stratified_cell_sample(
+                &bounds,
+                &resolution,
+                seed,
+                sample_index,
+                4,
+            )
+            .unwrap();
+            advance_flow_map(&mut system, &mut sample, 1.0, 0.01).unwrap();
+            targets.push(box_index(&sample, &bounds, &resolution));
+        }
+
+        assert!(targets.into_iter().any(|target| target != Some(seed)));
     }
 }

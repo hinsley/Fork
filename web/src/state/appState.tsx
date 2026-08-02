@@ -3316,18 +3316,31 @@ export function AppProvider({
           throw new Error('Invariant measures are not implemented for non-autonomous flows yet.')
         }
         const axes = normalizeStateGridAxes(config, object.axes)
-        const storedSettings = object.transferOperator?.settings ?? {
+        const storedSettings = object.transferOperator?.settings
+        const legacyFlowSettings =
+          config.type === 'flow' &&
+          storedSettings !== undefined &&
+          storedSettings.integrationStep === undefined
+        const settings = {
           samplesPerCell: 4,
           iterations: 1,
-          timeStep: config.type === 'map' ? 1 : object.analysis.dt,
           maxStationaryIterations: 2000,
           tolerance: 1e-10,
           outsidePolicy: 'conditional_in_grid' as const,
           startingPoint: stateGridMidpointByVariable(axes),
-        }
-        const settings = {
           ...storedSettings,
-          timeStep: storedSettings.timeStep ?? (config.type === 'map' ? 1 : object.analysis.dt),
+          timeStep:
+            config.type === 'map'
+              ? storedSettings?.timeStep ?? 1
+              : legacyFlowSettings
+                ? 1
+                : storedSettings?.timeStep ?? 1,
+          integrationStep:
+            config.type === 'map'
+              ? 1
+              : legacyFlowSettings
+                ? storedSettings?.timeStep ?? object.analysis.dt
+                : storedSettings?.integrationStep ?? object.analysis.dt,
         }
         for (const axis of axes) {
           if (
@@ -3353,7 +3366,13 @@ export function AppProvider({
           throw new Error('Map iterations per transition must be a positive integer.')
         }
         if (config.type === 'flow' && (!Number.isFinite(settings.timeStep) || settings.timeStep <= 0)) {
-          throw new Error('Flow time-step per transition must be positive.')
+          throw new Error('Flow-map time per transition must be positive.')
+        }
+        if (
+          config.type === 'flow' &&
+          (!Number.isFinite(settings.integrationStep) || settings.integrationStep <= 0)
+        ) {
+          throw new Error('Flow integration step must be positive.')
         }
         if (
           !Number.isInteger(settings.maxStationaryIterations) ||
@@ -3410,6 +3429,7 @@ export function AppProvider({
             samplesPerCell: resolvedSettings.samplesPerCell,
             iterations: resolvedSettings.iterations,
             timeStep: resolvedSettings.timeStep,
+            integrationStep: resolvedSettings.integrationStep,
             maxStationaryIterations: resolvedSettings.maxStationaryIterations,
             tolerance: resolvedSettings.tolerance,
           },
@@ -3452,12 +3472,22 @@ export function AppProvider({
         if (!currentGrid || currentGrid.type !== 'state_grid') return null
         const existingNames = Object.values(current.index.objects).map((entry) => entry.name)
         const currentTransferSettings = currentGrid.transferOperator?.settings
-        const persistedSettings = currentTransferSettings?.startingPoint
-          ? currentTransferSettings
-          : {
-              ...(currentTransferSettings ?? resolvedSettings),
-              startingPoint: resolvedStartingPoint,
+        const currentSettingsAreLegacyFlow =
+          config.type === 'flow' &&
+          currentTransferSettings !== undefined &&
+          currentTransferSettings.integrationStep === undefined
+        const normalizedCurrentTransferSettings = currentSettingsAreLegacyFlow
+          ? {
+              ...currentTransferSettings,
+              timeStep: 1,
+              integrationStep: currentTransferSettings.timeStep ?? currentGrid.analysis.dt,
             }
+          : currentTransferSettings
+        const persistedSettings = {
+          ...(normalizedCurrentTransferSettings ?? resolvedSettings),
+          startingPoint:
+            normalizedCurrentTransferSettings?.startingPoint ?? resolvedStartingPoint,
+        }
         const updatedCurrent = updateObject(current, request.stateGridId, {
           transferOperator: {
             settings: structuredClone(persistedSettings),
@@ -4253,7 +4283,17 @@ export function AppProvider({
             checkpointStride: 25,
             stabilizationStride: 10,
           },
-          transferOperator: { settings: { samplesPerCell: 4, iterations: 1, timeStep: config.type === 'map' ? 1 : 0.01, maxStationaryIterations: 2000, tolerance: 1e-10, outsidePolicy: 'conditional_in_grid' } },
+          transferOperator: {
+            settings: {
+              samplesPerCell: 4,
+              iterations: 1,
+              timeStep: 1,
+              integrationStep: config.type === 'map' ? 1 : 0.01,
+              maxStationaryIterations: 2000,
+              tolerance: 1e-10,
+              outsidePolicy: 'conditional_in_grid',
+            },
+          },
           parameters: [...config.params],
           createdAt: new Date().toISOString(),
         }

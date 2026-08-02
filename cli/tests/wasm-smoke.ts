@@ -2078,10 +2078,12 @@ const transferRunner = new wasm.WasmTransferOperatorRunner(
   new Float64Array([0]),
   new Float64Array([1]),
   new Uint32Array([2]),
+  new Float64Array([0.25]),
   3,
   1,
   10,
   1e-12,
+  1,
   1
 );
 while (!transferRunner.get_progress().done) transferRunner.run_steps(1);

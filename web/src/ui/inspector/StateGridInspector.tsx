@@ -206,16 +206,31 @@ export function StateGridInspector({
       description: 'Configure and run the finite-region expansion-entropy calculation.',
     },
   ]
-  const transferSettings = object.transferOperator?.settings ?? {
+  const storedTransferSettings = object.transferOperator?.settings
+  const legacyFlowSettings =
+    isFlow &&
+    storedTransferSettings !== undefined &&
+    storedTransferSettings.integrationStep === undefined
+  const transferSettings = {
     samplesPerCell: 4,
     iterations: 1,
-    timeStep: isMap ? 1 : object.analysis.dt,
     maxStationaryIterations: 2000,
     tolerance: 1e-10,
     outsidePolicy: 'conditional_in_grid' as const,
     startingPoint: Object.fromEntries(
       freeAxes.map((axis) => [axis.variableName, (axis.min + axis.max) / 2])
     ),
+    ...storedTransferSettings,
+    timeStep: isMap
+      ? storedTransferSettings?.timeStep ?? 1
+      : legacyFlowSettings
+        ? 1
+        : storedTransferSettings?.timeStep ?? 1,
+    integrationStep: isMap
+      ? 1
+      : legacyFlowSettings
+        ? storedTransferSettings?.timeStep ?? object.analysis.dt
+        : storedTransferSettings?.integrationStep ?? object.analysis.dt,
   }
   const resolvedStartingPoint = Object.fromEntries(
     freeAxes.map((axis) => [
@@ -236,7 +251,6 @@ export function StateGridInspector({
     // The serialized key changes only when the free axes or persisted point changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startingPointKey])
-  const transferTimeStep = transferSettings.timeStep ?? (isMap ? 1 : object.analysis.dt)
   const updateStartingPoint = (next: string[]) => {
     setStartingPointDraft(next)
     const values = next.map(parseDraftNumber)
@@ -253,12 +267,17 @@ export function StateGridInspector({
     })
   }
   const updateTransferSettings = (
-    field: 'samplesPerCell' | 'iterations' | 'timeStep' | 'maxStationaryIterations' | 'tolerance',
+    field: 'samplesPerCell' | 'iterations' | 'timeStep' | 'integrationStep' | 'maxStationaryIterations' | 'tolerance',
     rawValue: string
   ) => {
     const value = Number(rawValue)
     if (!Number.isFinite(value) || value <= 0) return
-    if (field !== 'tolerance' && field !== 'timeStep' && !Number.isInteger(value)) return
+    if (
+      field !== 'tolerance' &&
+      field !== 'timeStep' &&
+      field !== 'integrationStep' &&
+      !Number.isInteger(value)
+    ) return
     onUpdate(nodeId, {
       transferOperator: {
         settings: { ...transferSettings, [field]: value },
@@ -886,17 +905,30 @@ export function StateGridInspector({
             </label>
           ) : (
             <label>
-              Flow time-step per transition
+              Flow-map time per transition
               <input
                 type="number"
                 min={0}
                 step="any"
-                value={transferTimeStep}
+                value={transferSettings.timeStep}
                 onChange={(event) => updateTransferSettings('timeStep', event.target.value)}
                 data-testid="state-grid-transfer-time-step"
               />
             </label>
           )}
+          {isFlow ? (
+            <label>
+              Integration step size
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={transferSettings.integrationStep}
+                onChange={(event) => updateTransferSettings('integrationStep', event.target.value)}
+                data-testid="state-grid-transfer-integration-step"
+              />
+            </label>
+          ) : null}
           <label>
             Stationary iteration limit
             <input
@@ -922,7 +954,7 @@ export function StateGridInspector({
           </label>
           <p className="inspector-help">
             {isFlow
-              ? 'Each transition advances the autonomous flow by this fixed time-step. This is a sampled flow map, not a return map.'
+              ? 'Each transition advances the autonomous flow for the fixed map time using integration steps no larger than the configured step size. This is a sampled flow map, not a return map.'
               : 'Endpoints outside the closed grid are discarded. Each surviving source column is normalized by its own in-grid sample count.'}
           </p>
           <div className="inspector-inline-actions">

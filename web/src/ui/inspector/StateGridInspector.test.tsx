@@ -511,13 +511,22 @@ describe('StateGridInspector', () => {
     expect(screen.getByTestId('state-grid-invariant-measure-workflow')).toHaveTextContent(
       'sampled flow map'
     )
-    expect(screen.getByTestId('state-grid-transfer-time-step')).toHaveValue(0.01)
+    expect(screen.getByTestId('state-grid-transfer-time-step')).toHaveValue(1)
+    expect(screen.getByTestId('state-grid-transfer-integration-step')).toHaveValue(0.01)
     fireEvent.change(screen.getByTestId('state-grid-transfer-time-step'), {
       target: { value: '0.02' },
     })
     expect(onUpdate).toHaveBeenCalledWith(initial.nodeId, {
       transferOperator: {
         settings: expect.objectContaining({ timeStep: 0.02 }),
+      },
+    })
+    fireEvent.change(screen.getByTestId('state-grid-transfer-integration-step'), {
+      target: { value: '0.005' },
+    })
+    expect(onUpdate).toHaveBeenCalledWith(initial.nodeId, {
+      transferOperator: {
+        settings: expect.objectContaining({ integrationStep: 0.005 }),
       },
     })
     fireEvent.click(screen.getByTestId('state-grid-create-invariant-measure'))
