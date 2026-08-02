@@ -199,8 +199,8 @@ export type ExpansionEntropyResponse = {
   executionMode?: 'parallel' | 'serial'
   workerCount?: number
 }
-export type TransferOperatorRequest = { system: SystemConfig; axes: StateGridAxisRequest[]; samplesPerCell: number; iterations: number; timeStep: number; maxStationaryIterations: number; tolerance: number }
-export type TransferOperatorResponse = { totalBoxes: number; columnOffsets: number[]; targetIndices: number[]; probabilities: number[]; retainedMass: number; zeroSurvivorSources: number; stationaryDistribution: number[]; dominantEigenvalue: number; residual: number; stationaryIterations: number }
+export type TransferOperatorRequest = { system: SystemConfig; axes: StateGridAxisRequest[]; startingPoint: number[]; samplesPerCell: number; iterations: number; timeStep: number; maxStationaryIterations: number; tolerance: number }
+export type TransferOperatorResponse = { totalBoxes: number; ambientBoxCount: number; coverBoxIndices: number[]; seedBoxIndex: number; coverGrowthIterations: number; columnOffsets: number[]; targetIndices: number[]; probabilities: number[]; retainedMass: number; zeroSurvivorSources: number; stationaryDistribution: number[]; dominantEigenvalue: number; residual: number; stationaryIterations: number }
 
 export type ValidateSystemRequest = {
   system: SystemConfig

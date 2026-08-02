@@ -3200,7 +3200,18 @@ function buildSceneTraces(
         (total, axis) => total * axis.resolution,
         1
       )
-      if (expectedCellCount !== measure.stationaryDistribution.length) continue
+      const storedCover = measure.coverBoxIndices
+      const coverBoxIndices =
+        storedCover &&
+        storedCover.length === measure.stationaryDistribution.length &&
+        storedCover.every(
+          (cell) => Number.isInteger(cell) && cell >= 0 && cell < expectedCellCount
+        )
+          ? storedCover
+          : null
+      if (!coverBoxIndices && expectedCellCount !== measure.stationaryDistribution.length) {
+        continue
+      }
       if (
         measure.subsystemSnapshot &&
         !isSubsystemSnapshotCompatible(system.config, measure.subsystemSnapshot)
@@ -3249,8 +3260,9 @@ function buildSceneTraces(
       const colors: string[] = []
       const opacities: number[] = []
       const hoverData: Array<[number, number]> = []
-      measure.stationaryDistribution.forEach((mass, cell) => {
+      measure.stationaryDistribution.forEach((mass, compactCell) => {
         if (!(mass > 0)) return
+        const cell = coverBoxIndices?.[compactCell] ?? compactCell
         const point = centers(cell)
         const normalizedOpacity = maxMass > 0 ? Math.max(0, mass) / maxMass : 0
         const projectedPoint = projectedAxisIndices.map((index) => point[index])

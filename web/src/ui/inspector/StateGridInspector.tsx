@@ -7,6 +7,14 @@ import { resolveObjectParams } from '../../system/parameters'
 import { buildSubsystemSnapshot } from '../../system/subsystemGateway'
 import { autonomousContextError } from '../../system/expressionContext'
 import {
+  applyPointValues,
+  formatPointValues,
+  parsePointValues,
+  readClipboardText,
+  writeClipboardText,
+} from './stateTableValues'
+import { StateTable } from './StateTable'
+import {
   InspectorDisclosure,
   WorkflowActionList,
   WorkflowFocusToolbar,
@@ -123,6 +131,10 @@ export function StateGridInspector({
   const resolvedParameters = resolveObjectParams(system.config, object.customParameters)
   const subsystemSnapshot = buildSubsystemSnapshot(system.config, object.frozenVariables)
   const freeVariableNames = new Set(subsystemSnapshot.freeVariableNames)
+  const freeAxes = subsystemSnapshot.freeVariableNames.flatMap((variableName) => {
+    const axis = object.axes.find((candidate) => candidate.variableName === variableName)
+    return axis ? [axis] : []
+  })
   const totalPoints = object.axes
     .filter((axis) => freeVariableNames.has(axis.variableName))
     .reduce((total, axis) => {
@@ -201,8 +213,45 @@ export function StateGridInspector({
     maxStationaryIterations: 2000,
     tolerance: 1e-10,
     outsidePolicy: 'conditional_in_grid' as const,
+    startingPoint: Object.fromEntries(
+      freeAxes.map((axis) => [axis.variableName, (axis.min + axis.max) / 2])
+    ),
   }
+  const resolvedStartingPoint = Object.fromEntries(
+    freeAxes.map((axis) => [
+      axis.variableName,
+      transferSettings.startingPoint?.[axis.variableName] ?? (axis.min + axis.max) / 2,
+    ])
+  )
+  const startingPointKey = JSON.stringify(
+    freeAxes.map((axis) => [axis.variableName, resolvedStartingPoint[axis.variableName]])
+  )
+  const [startingPointDraft, setStartingPointDraft] = useState<string[]>(() =>
+    freeAxes.map((axis) => resolvedStartingPoint[axis.variableName].toString())
+  )
+  useEffect(() => {
+    setStartingPointDraft(
+      freeAxes.map((axis) => resolvedStartingPoint[axis.variableName].toString())
+    )
+    // The serialized key changes only when the free axes or persisted point changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startingPointKey])
   const transferTimeStep = transferSettings.timeStep ?? (isMap ? 1 : object.analysis.dt)
+  const updateStartingPoint = (next: string[]) => {
+    setStartingPointDraft(next)
+    const values = next.map(parseDraftNumber)
+    if (values.some((value) => value === null)) return
+    onUpdate(nodeId, {
+      transferOperator: {
+        settings: {
+          ...transferSettings,
+          startingPoint: Object.fromEntries(
+            freeAxes.map((axis, index) => [axis.variableName, values[index] as number])
+          ),
+        },
+      },
+    })
+  }
   const updateTransferSettings = (
     field: 'samplesPerCell' | 'iterations' | 'timeStep' | 'maxStationaryIterations' | 'tolerance',
     rawValue: string
@@ -219,12 +268,28 @@ export function StateGridInspector({
   const runTransferOperator = async () => {
     if (!onComputeTransferOperator) return
     setError(null)
+    const startingPointValues = freeAxes.map((axis, index) => {
+      const value = parseDraftNumber(startingPointDraft[index] ?? '')
+      if (value === null) {
+        setError(`Starting point for "${axis.variableName}" must be a finite number.`)
+        return null
+      }
+      if (value < axis.min || value > axis.max) {
+        setError(`Starting point for "${axis.variableName}" must be within the State Grid bounds.`)
+        return null
+      }
+      return value
+    })
+    if (startingPointValues.some((value) => value === null)) return
+    const startingPoint = Object.fromEntries(
+      freeAxes.map((axis, index) => [axis.variableName, startingPointValues[index] as number])
+    )
     const controller = new AbortController()
     controllerRef.current = controller
     setRunning(true)
     try {
       await onComputeTransferOperator(
-        { stateGridId: nodeId },
+        { stateGridId: nodeId, startingPoint },
         { signal: controller.signal }
       )
     } catch (reason) {
@@ -336,8 +401,10 @@ export function StateGridInspector({
         )
         return
       }
-      if (min >= max) {
-        setError(`Bounds for ${axis.variableName} require min < max.`)
+      if (min > max || (min === max && resolution !== 1)) {
+        setError(
+          `Bounds for ${axis.variableName} require min < max, or min = max with resolution 1.`
+        )
         return
       }
     }
@@ -765,6 +832,32 @@ export function StateGridInspector({
             Create a separate invariant-measure object from this State Grid. The result keeps its
             own rendering and computation snapshot, while this grid remains available for later
             analyses.
+          </p>
+          <StateTable
+            title="Starting point"
+            varNames={freeAxes.map((axis) => axis.variableName)}
+            values={startingPointDraft}
+            onChange={updateStartingPoint}
+            onCopy={() => void writeClipboardText(formatPointValues(startingPointDraft))}
+            onPaste={() => {
+              void (async () => {
+                const text = await readClipboardText()
+                if (text === null) return
+                updateStartingPoint(
+                  applyPointValues(
+                    startingPointDraft,
+                    freeAxes.length,
+                    parsePointValues(text)
+                  )
+                )
+              })()
+            }}
+            testIdPrefix="state-grid-transfer-starting-point"
+          />
+          <p className="inspector-help">
+            The ambient cell containing this point is the only initial cover cell. Newly reached
+            cells are added within the State Grid before the conditional operator is built on the
+            grown cover.
           </p>
           <label>
             Samples per cell

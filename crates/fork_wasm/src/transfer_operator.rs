@@ -1,7 +1,8 @@
 use crate::system::WasmSystem;
 use fork_core::traits::DynamicalSystem;
 use fork_core::transfer_operator::{
-    sampled_box_transition_operator_with_axis_names_and_step, stationary_distribution,
+    box_index, sampled_box_transition_operator_on_grown_cover_with_axis_names_and_step,
+    stationary_distribution,
 };
 use serde::Serialize;
 use serde_wasm_bindgen::to_value;
@@ -21,6 +22,10 @@ struct Progress {
 #[serde(rename_all = "camelCase")]
 struct ResultData {
     total_boxes: usize,
+    ambient_box_count: usize,
+    cover_box_indices: Vec<usize>,
+    seed_box_index: usize,
+    cover_growth_iterations: usize,
     column_offsets: Vec<usize>,
     target_indices: Vec<usize>,
     probabilities: Vec<f64>,
@@ -36,6 +41,7 @@ struct State {
     axis_names: Vec<String>,
     bounds: Vec<(f64, f64)>,
     resolution: Vec<usize>,
+    seed_box_index: usize,
     samples_per_cell: usize,
     iterations: usize,
     is_flow: bool,
@@ -62,6 +68,7 @@ impl WasmTransferOperatorRunner {
         minimums: Vec<f64>,
         maximums: Vec<f64>,
         resolution: Vec<u32>,
+        starting_point: Vec<f64>,
         samples_per_cell: u32,
         iterations: u32,
         max_stationary_iterations: u32,
@@ -72,6 +79,7 @@ impl WasmTransferOperatorRunner {
             || minimums.len() != var_names.len()
             || maximums.len() != var_names.len()
             || resolution.len() != var_names.len()
+            || starting_point.len() != var_names.len()
             || samples_per_cell == 0
             || iterations == 0
             || max_stationary_iterations == 0
@@ -98,15 +106,17 @@ impl WasmTransferOperatorRunner {
             ));
         }
         let bounds: Vec<_> = minimums.into_iter().zip(maximums).collect();
-        if bounds
-            .iter()
-            .any(|(a, b)| !a.is_finite() || !b.is_finite() || a >= b)
-            || resolution.contains(&0)
-        {
+        if bounds.iter().zip(&resolution).any(|((a, b), count)| {
+            !a.is_finite() || !b.is_finite() || a > b || *count == 0 || (a == b && *count != 1)
+        }) {
             return Err(JsValue::from_str(
                 "State Grid bounds and resolution are invalid.",
             ));
         }
+        let resolution: Vec<usize> = resolution.into_iter().map(|x| x as usize).collect();
+        let seed_box_index = box_index(&starting_point, &bounds, &resolution).ok_or_else(|| {
+            JsValue::from_str("The starting point must lie inside the State Grid.")
+        })?;
         let system = WasmSystem::new(
             equations,
             params,
@@ -123,7 +133,8 @@ impl WasmTransferOperatorRunner {
                 system,
                 axis_names: var_names,
                 bounds,
-                resolution: resolution.into_iter().map(|x| x as usize).collect(),
+                resolution,
+                seed_box_index,
                 samples_per_cell: samples_per_cell as usize,
                 iterations: iterations as usize,
                 is_flow,
@@ -176,13 +187,14 @@ impl WasmTransferOperatorRunner {
             ));
         }
         let mut flow_time = 0.0;
-        let op = sampled_box_transition_operator_with_axis_names_and_step(
+        let op = sampled_box_transition_operator_on_grown_cover_with_axis_names_and_step(
             state.axis_names.len(),
             &state.bounds,
             &state.resolution,
             state.samples_per_cell,
             state.iterations,
             &state.axis_names,
+            state.seed_box_index,
             |_, _, iteration, sample, out| {
                 if state.is_flow {
                     if iteration == 0 {
@@ -204,6 +216,10 @@ impl WasmTransferOperatorRunner {
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
         to_value(&ResultData {
             total_boxes: op.total_boxes,
+            ambient_box_count: op.ambient_box_count,
+            cover_box_indices: op.cover_box_indices,
+            seed_box_index: op.seed_box_index,
+            cover_growth_iterations: op.cover_growth_iterations,
             column_offsets: op.column_offsets,
             target_indices: op.target_indices,
             probabilities: op.probabilities,

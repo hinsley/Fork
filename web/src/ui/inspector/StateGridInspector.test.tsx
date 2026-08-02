@@ -291,6 +291,46 @@ describe('StateGridInspector', () => {
     }
   )
 
+  it('accepts an equal-bound point axis only at resolution one', async () => {
+    const initial = fixture()
+    const onUpdate = vi.fn()
+    const onCompute = vi.fn(async () => null)
+
+    render(
+      <StateGridInspector
+        system={initial.system}
+        nodeId={initial.nodeId}
+        object={initial.object}
+        onRename={() => {}}
+        onUpdate={onUpdate}
+        onCompute={onCompute}
+      />
+    )
+
+    fireEvent.change(screen.getByTestId('state-grid-x-min'), {
+      target: { value: '0.25' },
+    })
+    fireEvent.change(screen.getByTestId('state-grid-x-max'), {
+      target: { value: '0.25' },
+    })
+    fireEvent.change(screen.getByTestId('state-grid-x-resolution'), {
+      target: { value: '1' },
+    })
+    fireEvent.click(screen.getByTestId('state-grid-run-expansion-entropy'))
+
+    await waitFor(() => expect(onCompute).toHaveBeenCalled())
+    expect(onUpdate).toHaveBeenLastCalledWith(initial.nodeId, {
+      axes: expect.arrayContaining([
+        expect.objectContaining({
+          variableName: 'x',
+          min: 0.25,
+          max: 0.25,
+          resolution: 1,
+        }),
+      ]),
+    })
+  })
+
   it('runs expansion entropy and exposes cancellation while work is active', async () => {
     const initial = fixture()
     let resolveRun: () => void = () => {}
@@ -366,6 +406,12 @@ describe('StateGridInspector', () => {
       },
     }
     const onUpdate = vi.fn()
+    const writeText = vi.fn(async () => undefined)
+    const readText = vi.fn(async () => '[0.5, -0.5]')
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText, readText },
+    })
     let resolveRun: () => void = () => {}
     let receivedSignal: AbortSignal | undefined
     const onComputeTransferOperator = vi.fn(
@@ -396,6 +442,24 @@ describe('StateGridInspector', () => {
     expect(screen.getByTestId('state-grid-invariant-measure-workflow')).toHaveTextContent(
       'Create a separate invariant-measure object'
     )
+    expect(screen.getByTestId('state-grid-transfer-starting-point-0')).toHaveValue(0)
+    expect(screen.getByTestId('state-grid-transfer-starting-point-1')).toHaveValue(0)
+    fireEvent.change(screen.getByTestId('state-grid-transfer-starting-point-0'), {
+      target: { value: '0.25' },
+    })
+    expect(onUpdate).toHaveBeenCalledWith(initial.nodeId, {
+      transferOperator: {
+        settings: expect.objectContaining({ startingPoint: { x: 0.25, y: 0 } }),
+      },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('[0.25, 0]'))
+    fireEvent.click(screen.getByRole('button', { name: 'Paste' }))
+    await waitFor(() => expect(readText).toHaveBeenCalled())
+    await waitFor(() => {
+      expect(screen.getByTestId('state-grid-transfer-starting-point-0')).toHaveValue(0.5)
+      expect(screen.getByTestId('state-grid-transfer-starting-point-1')).toHaveValue(-0.5)
+    })
     fireEvent.change(screen.getByTestId('state-grid-transfer-samples-per-cell'), {
       target: { value: '8' },
     })
@@ -407,7 +471,7 @@ describe('StateGridInspector', () => {
 
     fireEvent.click(screen.getByTestId('state-grid-create-invariant-measure'))
     expect(onComputeTransferOperator).toHaveBeenCalledWith(
-      { stateGridId: initial.nodeId },
+      { stateGridId: initial.nodeId, startingPoint: { x: 0.5, y: -0.5 } },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
     fireEvent.click(screen.getByTestId('state-grid-cancel-invariant-measure'))
@@ -458,7 +522,7 @@ describe('StateGridInspector', () => {
     })
     fireEvent.click(screen.getByTestId('state-grid-create-invariant-measure'))
     expect(onComputeTransferOperator).toHaveBeenCalledWith(
-      { stateGridId: initial.nodeId },
+      { stateGridId: initial.nodeId, startingPoint: { x: 0, y: 0 } },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
     resolveRun()

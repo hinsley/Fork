@@ -258,15 +258,20 @@ describe('InspectorDetailsPanel', () => {
           maxStationaryIterations: 2000,
           tolerance: 1e-10,
           outsidePolicy: 'conditional_in_grid',
+          startingPoint: { x: 0.5 },
         },
         parameters: [],
-        totalBoxes: 4,
-        columnOffsets: [0, 1, 2, 3, 4],
-        targetIndices: [0, 1, 2, 3],
-        probabilities: [1, 1, 1, 1],
+        totalBoxes: 3,
+        ambientBoxCount: 4,
+        coverBoxIndices: [1, 2, 3],
+        seedBoxIndex: 2,
+        coverGrowthIterations: 2,
+        columnOffsets: [0, 1, 2, 3],
+        targetIndices: [0, 1, 2],
+        probabilities: [1, 1, 1],
         retainedMass: 1,
         zeroSurvivorSources: 0,
-        stationaryDistribution: [0, 0.2, 0.3, 0.5],
+        stationaryDistribution: [0.2, 0.3, 0.5],
         dominantEigenvalue: 1,
         residual: 1e-11,
         stationaryIterations: 12,
@@ -279,10 +284,11 @@ describe('InspectorDetailsPanel', () => {
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
     expect(screen.getByText('invariant measure')).toBeInTheDocument()
-    expect(screen.getByText('3 / 4 occupied cells')).toBeInTheDocument()
+    expect(screen.getByText('3 / 3 occupied cells')).toBeInTheDocument()
     fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
     expect(screen.getByTestId('invariant-measure-source')).toHaveTextContent('State_Grid_1')
-    expect(screen.getByTestId('invariant-measure-occupied-cells')).toHaveTextContent('3 / 4')
+    expect(screen.getByTestId('invariant-measure-occupied-cells')).toHaveTextContent('3 / 3')
+    expect(screen.getByTestId('invariant-measure-cover-size')).toHaveTextContent('3 / 4')
     expect(screen.getByTestId('invariant-measure-leading-eigenvalue')).toHaveTextContent('1.000000e+0')
     expect(screen.getByTestId('invariant-measure-residual')).toHaveTextContent('1.000000e-11')
 

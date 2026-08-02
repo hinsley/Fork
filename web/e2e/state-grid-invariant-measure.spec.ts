@@ -69,6 +69,7 @@ test('State Grid creates a separately rendered and persisted invariant-measure o
 
   await page.getByTestId('inspector-workflow-back').click()
   await openStateGridWorkflow(page, 'state-grid-transfer-toggle')
+  await expect(page.getByTestId('state-grid-transfer-starting-point-0')).toHaveValue('0.5')
   await expect(page.getByTestId('state-grid-transfer-samples-per-cell')).toHaveValue('4')
   await expect(page.getByTestId('state-grid-transfer-iterations')).toHaveValue('1')
   await page.getByTestId('state-grid-create-invariant-measure').click()
@@ -87,15 +88,26 @@ test('State Grid creates a separately rendered and persisted invariant-measure o
 
   await page.getByTestId('action-invariant-measure-data-toggle').click()
   await expect(page.getByTestId('invariant-measure-source')).toHaveText('State_Grid_1')
-  await expect(page.getByTestId('invariant-measure-occupied-cells')).toHaveText('94 / 100')
   await expect(page.getByTestId('invariant-measure-residual')).not.toHaveText('NaN')
+  const coverText = await page.getByTestId('invariant-measure-cover-size').innerText()
+  const [coverSize, ambientSize] = coverText.split('/').map((value) => Number(value.trim()))
+  expect(ambientSize).toBe(100)
+  expect(coverSize).toBeGreaterThan(1)
+  expect(coverSize).toBeLessThan(ambientSize)
+  const occupiedText = await page.getByTestId('invariant-measure-occupied-cells').innerText()
+  const [occupiedSize, occupiedCoverSize] = occupiedText
+    .split('/')
+    .map((value) => Number(value.trim()))
+  expect(occupiedCoverSize).toBe(coverSize)
+  expect(occupiedSize).toBeGreaterThan(0)
+  expect(occupiedSize).toBeLessThanOrEqual(coverSize)
 
   const plot = page.locator('[data-testid^="plotly-viewport-"]').first()
   await expect.poll(() => plotHasTrace(plot, measureName)).toBe(true)
   const trace = await readMeasureTrace(plot, measureName)
   expect(trace).toMatchObject({
-    pointCount: 94,
-    massCount: 94,
+    pointCount: occupiedSize,
+    massCount: occupiedSize,
     markerSize: 4,
   })
   expect(trace?.uniqueOpacities).toBeGreaterThan(1)
@@ -129,9 +141,33 @@ test('State Grid creates a sampled flow-map measure for an autonomous flow', asy
   await page.getByTestId('create-object-button').click()
   await page.getByTestId('create-object-menu').waitFor()
   await page.getByTestId('create-state-grid').click()
+  await openStateGridWorkflow(page, 'parameters-toggle')
+  await page.getByTestId('param-override-beta').fill('0.4')
+  await page.getByTestId('inspector-workflow-back').click()
+  await openStateGridWorkflow(page, 'state-grid-setup-toggle')
+  await page.getByTestId('state-grid-x-min').fill('-30')
+  await page.getByTestId('state-grid-x-max').fill('30')
+  await page.getByTestId('state-grid-x-resolution').fill('24')
+  await page.getByTestId('state-grid-y-min').fill('-30')
+  await page.getByTestId('state-grid-y-max').fill('30')
+  await page.getByTestId('state-grid-y-resolution').fill('24')
+  await page.getByTestId('state-grid-z-min').fill('-5')
+  await page.getByTestId('state-grid-z-max').fill('55')
+  await page.getByTestId('state-grid-z-resolution').fill('24')
+  await page.getByTestId('inspector-workflow-back').click()
   await openStateGridWorkflow(page, 'state-grid-transfer-toggle')
   await expect(page.getByTestId('state-grid-transfer-time-step')).toHaveValue('0.01')
   await expect(page.getByText(/sampled flow map/)).toBeVisible()
+  const equilibriumCoordinate = Math.sqrt(0.4 * 27)
+  await page
+    .getByTestId('state-grid-transfer-starting-point-0')
+    .fill(equilibriumCoordinate.toString())
+  await page
+    .getByTestId('state-grid-transfer-starting-point-1')
+    .fill(equilibriumCoordinate.toString())
+  await page.getByTestId('state-grid-transfer-starting-point-2').fill('27')
+  await page.getByTestId('state-grid-transfer-samples-per-cell').fill('8')
+  await page.getByTestId('state-grid-transfer-time-step').fill('0.25')
   await page.getByTestId('state-grid-create-invariant-measure').click()
 
   const measureName = 'Invariant_Measure_State_Grid_1'
@@ -143,4 +179,8 @@ test('State Grid creates a sampled flow-map measure for an autonomous flow', asy
     'fixed-time sampled flow map'
   )
   await expect(page.getByTestId('invariant-measure-residual')).not.toHaveText('NaN')
+  await expect(page.getByTestId('invariant-measure-cover-size')).toHaveText(/\/ 13,824$/)
+  await expect(page.getByTestId('invariant-measure-data-section')).toContainText(
+    equilibriumCoordinate.toString()
+  )
 })

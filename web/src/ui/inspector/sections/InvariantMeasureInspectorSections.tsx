@@ -29,6 +29,10 @@ export function InvariantMeasureInspectorSections({
         ? sourceIndex.name
         : invariantMeasure.sourceStateGridName
   const occupiedCells = result.stationaryDistribution.filter((mass) => mass > 0).length
+  const ambientBoxCount = result.ambientBoxCount ?? result.axes.reduce(
+    (total, axis) => total * axis.resolution,
+    1
+  )
   const resolution = result.axes.map((axis) => axis.resolution).join(' × ')
   const dominantEigenvalue = result.dominantEigenvalue ?? 1
   const massPreserving = Math.abs(dominantEigenvalue - 1) <= 1e-8
@@ -60,6 +64,20 @@ export function InvariantMeasureInspectorSections({
               {occupiedCells.toLocaleString()} / {result.totalBoxes.toLocaleString()}
             </strong>
           </div>
+          <div className="inspector-metrics__row">
+            <span className="inspector-metrics__label">Reachable cover</span>
+            <span className="inspector-metrics__value" data-testid="invariant-measure-cover-size">
+              {result.totalBoxes.toLocaleString()} / {ambientBoxCount.toLocaleString()}
+            </span>
+          </div>
+          {result.coverGrowthIterations !== undefined ? (
+            <div className="inspector-metrics__row">
+              <span className="inspector-metrics__label">Cover growth passes</span>
+              <span className="inspector-metrics__value">
+                {result.coverGrowthIterations.toLocaleString()}
+              </span>
+            </div>
+          ) : null}
           <div className="inspector-metrics__row">
             <span className="inspector-metrics__label">Retained sample mass</span>
             <span className="inspector-metrics__value">
@@ -107,6 +125,13 @@ export function InvariantMeasureInspectorSections({
             : `${result.settings.iterations} map iteration${result.settings.iterations === 1 ? '' : 's'} per transition`}, tolerance{' '}
           {formatScientific(result.settings.tolerance)}. Computed {result.computedAt}.
         </p>
+        {result.settings.startingPoint ? (
+          <p className="inspector-help">
+            Starting point: [{result.axes.map((axis) =>
+              result.settings.startingPoint?.[axis.variableName]
+            ).join(', ')}]. Its containing ambient cell was the only initial cover cell.
+          </p>
+        ) : null}
         {result.dynamicsType === 'flow' ? (
           <p className="inspector-help">
             This result uses the fixed-time sampled flow map for the autonomous system; it is not a
@@ -114,13 +139,13 @@ export function InvariantMeasureInspectorSections({
           </p>
         ) : null}
         <p className="inspector-help">
-          Marker opacity encodes positive mode mass logarithmically. Zero-mass cells are omitted.
+          Marker opacity encodes positive mode mass linearly. Zero-mass cells are omitted.
           The stored result is a snapshot and does not change when its source grid is edited.
         </p>
         {massPreserving ? (
           <p className="inspector-help">
             The leading eigenvalue is approximately one, so this result is mass-preserving on the
-            retained grid.
+            grown cover.
           </p>
         ) : (
           <p className="inspector-error" data-testid="invariant-measure-leakage-warning">

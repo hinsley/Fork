@@ -1053,8 +1053,39 @@ export interface ExpansionEntropyResult {
   computedAt: string
 }
 
-export interface TransferOperatorSettings { samplesPerCell: number; iterations: number; timeStep?: number; maxStationaryIterations: number; tolerance: number; outsidePolicy: 'conditional_in_grid' }
-export interface TransferOperatorResult { analysisType: 'transfer_operator'; dynamicsType: 'flow' | 'map'; axes: StateGridAxis[]; settings: TransferOperatorSettings; parameters: number[]; subsystemSnapshot?: SubsystemSnapshot; totalBoxes: number; columnOffsets: number[]; targetIndices: number[]; probabilities: number[]; retainedMass: number; zeroSurvivorSources: number; stationaryDistribution: number[]; dominantEigenvalue?: number; residual: number; stationaryIterations: number; computedAt: string }
+export interface TransferOperatorSettings {
+  samplesPerCell: number
+  iterations: number
+  timeStep?: number
+  maxStationaryIterations: number
+  tolerance: number
+  outsidePolicy: 'conditional_in_grid'
+  startingPoint?: Record<string, number>
+}
+
+export interface TransferOperatorResult {
+  analysisType: 'transfer_operator'
+  dynamicsType: 'flow' | 'map'
+  axes: StateGridAxis[]
+  settings: TransferOperatorSettings
+  parameters: number[]
+  subsystemSnapshot?: SubsystemSnapshot
+  totalBoxes: number
+  ambientBoxCount?: number
+  coverBoxIndices?: number[]
+  seedBoxIndex?: number
+  coverGrowthIterations?: number
+  columnOffsets: number[]
+  targetIndices: number[]
+  probabilities: number[]
+  retainedMass: number
+  zeroSurvivorSources: number
+  stationaryDistribution: number[]
+  dominantEigenvalue?: number
+  residual: number
+  stationaryIterations: number
+  computedAt: string
+}
 
 export interface InvariantMeasureObject {
   type: 'invariant_measure'

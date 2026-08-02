@@ -1,14 +1,18 @@
 use crate::traits::DynamicalSystem;
 use anyhow::{bail, Result};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoxTransitionOperator {
     pub dimension: usize,
     pub total_boxes: usize,
+    pub ambient_box_count: usize,
     pub bounds: Vec<(f64, f64)>,
     pub resolution: Vec<usize>,
     pub axis_names: Vec<String>,
+    pub cover_box_indices: Vec<usize>,
+    pub seed_box_index: usize,
+    pub cover_growth_iterations: usize,
     pub column_offsets: Vec<usize>,
     pub target_indices: Vec<usize>,
     pub probabilities: Vec<f64>,
@@ -22,10 +26,20 @@ pub fn box_index(point: &[f64], bounds: &[(f64, f64)], resolution: &[usize]) -> 
     }
     let mut index = 0usize;
     for ((&value, &(min, max)), &count) in point.iter().zip(bounds).zip(resolution) {
-        if !value.is_finite() || value < min || value > max || count == 0 {
+        if !value.is_finite()
+            || !min.is_finite()
+            || !max.is_finite()
+            || min > max
+            || count == 0
+            || (min == max && (count != 1 || value != min))
+            || value < min
+            || value > max
+        {
             return None;
         }
-        let coordinate = if value == max {
+        let coordinate = if min == max {
+            0
+        } else if value == max {
             count - 1
         } else {
             ((value - min) / (max - min) * count as f64).floor() as usize
@@ -138,31 +152,184 @@ pub fn sampled_box_transition_operator_with_axis_names_and_step<F>(
 where
     F: FnMut(usize, usize, usize, &mut [f64], &mut [f64]) -> Result<()>,
 {
-    if iterations == 0 || dimension != bounds.len() {
-        bail!("Transition iterations and grid dimension must be positive and match the system.");
+    let total =
+        validate_transition_grid(dimension, bounds, resolution, samples_per_cell, iterations)?;
+    let cover_box_indices: Vec<usize> = (0..total).collect();
+    assemble_sampled_box_transition_operator(
+        dimension,
+        bounds,
+        resolution,
+        samples_per_cell,
+        iterations,
+        axis_names,
+        &cover_box_indices,
+        0,
+        0,
+        &mut step,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn sampled_box_transition_operator_on_grown_cover_with_axis_names_and_step<F>(
+    dimension: usize,
+    bounds: &[(f64, f64)],
+    resolution: &[usize],
+    samples_per_cell: usize,
+    iterations: usize,
+    axis_names: &[String],
+    seed_box_index: usize,
+    mut step: F,
+) -> Result<BoxTransitionOperator>
+where
+    F: FnMut(usize, usize, usize, &mut [f64], &mut [f64]) -> Result<()>,
+{
+    let total =
+        validate_transition_grid(dimension, bounds, resolution, samples_per_cell, iterations)?;
+    if seed_box_index >= total {
+        bail!("The transfer-operator starting point must select a valid ambient box.");
     }
-    let total = resolution
+
+    let mut discovered = BTreeSet::from([seed_box_index]);
+    let mut frontier = BTreeSet::from([seed_box_index]);
+    let mut cover_growth_iterations = 0usize;
+    while !frontier.is_empty() {
+        cover_growth_iterations += 1;
+        let mut next = BTreeSet::new();
+        for source in frontier {
+            for sample in 0..samples_per_cell {
+                if let Some(target) = sampled_transition_target(
+                    bounds,
+                    resolution,
+                    source,
+                    sample,
+                    samples_per_cell,
+                    iterations,
+                    &mut step,
+                )? {
+                    if !discovered.contains(&target) {
+                        next.insert(target);
+                    }
+                }
+            }
+        }
+        discovered.extend(next.iter().copied());
+        frontier = next;
+    }
+
+    let cover_box_indices: Vec<usize> = discovered.into_iter().collect();
+    assemble_sampled_box_transition_operator(
+        dimension,
+        bounds,
+        resolution,
+        samples_per_cell,
+        iterations,
+        axis_names,
+        &cover_box_indices,
+        seed_box_index,
+        cover_growth_iterations,
+        &mut step,
+    )
+}
+
+fn validate_transition_grid(
+    dimension: usize,
+    bounds: &[(f64, f64)],
+    resolution: &[usize],
+    samples_per_cell: usize,
+    iterations: usize,
+) -> Result<usize> {
+    if iterations == 0
+        || samples_per_cell == 0
+        || dimension == 0
+        || dimension != bounds.len()
+        || bounds.len() != resolution.len()
+    {
+        bail!("Transition settings and grid dimension must be positive and match the system.");
+    }
+    for (&(min, max), &count) in bounds.iter().zip(resolution) {
+        if !min.is_finite()
+            || !max.is_finite()
+            || min > max
+            || count == 0
+            || (min == max && count != 1)
+        {
+            bail!("Each grid axis requires min < max, or min = max with resolution 1.");
+        }
+    }
+    resolution
         .iter()
         .try_fold(1usize, |n, &r| n.checked_mul(r))
-        .ok_or_else(|| anyhow::anyhow!("Grid size overflows usize."))?;
-    let mut offsets = Vec::with_capacity(total + 1);
+        .ok_or_else(|| anyhow::anyhow!("Grid size overflows usize."))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sampled_transition_target<F>(
+    bounds: &[(f64, f64)],
+    resolution: &[usize],
+    source: usize,
+    sample: usize,
+    samples_per_cell: usize,
+    iterations: usize,
+    step: &mut F,
+) -> Result<Option<usize>>
+where
+    F: FnMut(usize, usize, usize, &mut [f64], &mut [f64]) -> Result<()>,
+{
+    let mut state = stratified_cell_sample(bounds, resolution, source, sample, samples_per_cell)?;
+    let mut out = vec![0.0; state.len()];
+    for iteration in 0..iterations {
+        step(source, sample, iteration, &mut state, &mut out)?;
+        state.copy_from_slice(&out);
+    }
+    Ok(box_index(&state, bounds, resolution))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn assemble_sampled_box_transition_operator<F>(
+    dimension: usize,
+    bounds: &[(f64, f64)],
+    resolution: &[usize],
+    samples_per_cell: usize,
+    iterations: usize,
+    axis_names: &[String],
+    cover_box_indices: &[usize],
+    seed_box_index: usize,
+    cover_growth_iterations: usize,
+    step: &mut F,
+) -> Result<BoxTransitionOperator>
+where
+    F: FnMut(usize, usize, usize, &mut [f64], &mut [f64]) -> Result<()>,
+{
+    let ambient_box_count =
+        validate_transition_grid(dimension, bounds, resolution, samples_per_cell, iterations)?;
+    let local_indices: BTreeMap<usize, usize> = cover_box_indices
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(local, ambient)| (ambient, local))
+        .collect();
+    let mut offsets = Vec::with_capacity(cover_box_indices.len() + 1);
     let mut targets = Vec::new();
     let mut probabilities = Vec::new();
     let mut retained = 0usize;
     let mut zero_survivor_sources = 0usize;
-    for source in 0..total {
+    for &source in cover_box_indices {
         offsets.push(targets.len());
         let mut counts = BTreeMap::new();
         for sample in 0..samples_per_cell {
-            let mut state =
-                stratified_cell_sample(bounds, resolution, source, sample, samples_per_cell)?;
-            let mut out = vec![0.0; state.len()];
-            for iteration in 0..iterations {
-                step(source, sample, iteration, &mut state, &mut out)?;
-                state.copy_from_slice(&out);
-            }
-            if let Some(target) = box_index(&state, bounds, resolution) {
-                *counts.entry(target).or_insert(0usize) += 1;
+            if let Some(target) = sampled_transition_target(
+                bounds,
+                resolution,
+                source,
+                sample,
+                samples_per_cell,
+                iterations,
+                step,
+            )? {
+                let Some(&local_target) = local_indices.get(&target) else {
+                    continue;
+                };
+                *counts.entry(local_target).or_insert(0usize) += 1;
                 retained += 1;
             }
         }
@@ -178,24 +345,32 @@ where
     offsets.push(targets.len());
     Ok(BoxTransitionOperator {
         dimension: bounds.len(),
-        total_boxes: total,
+        total_boxes: cover_box_indices.len(),
+        ambient_box_count,
         bounds: bounds.to_vec(),
         resolution: resolution.to_vec(),
         axis_names: axis_names.to_vec(),
+        cover_box_indices: cover_box_indices.to_vec(),
+        seed_box_index,
+        cover_growth_iterations,
         column_offsets: offsets,
         target_indices: targets,
         probabilities,
-        retained_mass: retained as f64 / (total * samples_per_cell) as f64,
+        retained_mass: retained as f64
+            / cover_box_indices
+                .len()
+                .checked_mul(samples_per_cell)
+                .ok_or_else(|| anyhow::anyhow!("Transfer sample count overflows usize."))?
+                as f64,
         zero_survivor_sources,
     })
 }
 
 fn apply_operator(operator: &BoxTransitionOperator, distribution: &[f64]) -> Vec<f64> {
     let mut applied = vec![0.0; operator.total_boxes];
-    for source in 0..operator.total_boxes {
+    for (source, &source_mass) in distribution.iter().enumerate().take(operator.total_boxes) {
         for edge in operator.column_offsets[source]..operator.column_offsets[source + 1] {
-            applied[operator.target_indices[edge]] +=
-                operator.probabilities[edge] * distribution[source];
+            applied[operator.target_indices[edge]] += operator.probabilities[edge] * source_mass;
         }
     }
     applied
@@ -358,9 +533,13 @@ mod tests {
         let op = BoxTransitionOperator {
             dimension: 1,
             total_boxes: 2,
+            ambient_box_count: 2,
             bounds: vec![(0., 1.)],
             resolution: vec![2],
             axis_names: vec!["x".to_string()],
+            cover_box_indices: vec![0, 1],
+            seed_box_index: 0,
+            cover_growth_iterations: 0,
             column_offsets: vec![0, 2, 2],
             target_indices: vec![0, 1],
             probabilities: vec![0.5, 0.5],
@@ -372,5 +551,109 @@ mod tests {
         assert!((p[1] - 0.5).abs() < 1e-12);
         assert!((eigenvalue - 0.5).abs() < 1e-12);
         assert!(residual < 1e-12);
+    }
+
+    #[test]
+    fn one_starting_point_grows_a_compact_forward_cover() {
+        let op = sampled_box_transition_operator_on_grown_cover_with_axis_names_and_step(
+            1,
+            &[(0., 1.)],
+            &[5],
+            1,
+            1,
+            &["x".to_string()],
+            1,
+            |_, _, _, state, out| {
+                out[0] = state[0] + 0.2;
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(op.ambient_box_count, 5);
+        assert_eq!(op.cover_box_indices, vec![1, 2, 3, 4]);
+        assert_eq!(op.seed_box_index, 1);
+        assert_eq!(op.total_boxes, 4);
+        assert_eq!(op.target_indices, vec![1, 2, 3]);
+        assert_eq!(op.zero_survivor_sources, 1);
+    }
+
+    #[test]
+    fn a_degenerate_axis_selects_its_single_cell() {
+        assert_eq!(box_index(&[2.0], &[(2.0, 2.0)], &[1]), Some(0));
+        assert_eq!(box_index(&[2.1], &[(2.0, 2.0)], &[1]), None);
+        assert_eq!(box_index(&[2.0], &[(2.0, 2.0)], &[2]), None);
+
+        let sample = stratified_cell_sample(&[(2.0, 2.0)], &[1], 0, 0, 1).unwrap();
+        assert_eq!(sample, vec![2.0]);
+    }
+
+    #[test]
+    fn lorenz_flow_grows_from_the_selected_positive_equilibrium() {
+        let rho = 28.0;
+        let sigma = 10.0;
+        let beta = 0.4;
+        let equilibrium_coordinate = (beta * (rho - 1.0_f64)).sqrt();
+        let starting_point = [equilibrium_coordinate, equilibrium_coordinate, rho - 1.0];
+        let bounds = [(-30.0, 30.0), (-30.0, 30.0), (-5.0, 55.0)];
+        let resolution = [64, 64, 64];
+        let seed_box_index = box_index(&starting_point, &bounds, &resolution).unwrap();
+        let op = sampled_box_transition_operator_on_grown_cover_with_axis_names_and_step(
+            3,
+            &bounds,
+            &resolution,
+            2,
+            1,
+            &["x".to_string(), "y".to_string(), "z".to_string()],
+            seed_box_index,
+            |_, _, _, state, out| {
+                let mut current = [state[0], state[1], state[2]];
+                for _ in 0..100 {
+                    current = lorenz_rk4_step(current, 0.01, sigma, rho, beta);
+                }
+                out.copy_from_slice(&current);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(op.seed_box_index, seed_box_index);
+        assert!(op.cover_box_indices.contains(&seed_box_index));
+        assert!(op.total_boxes > 1);
+        assert!(op.total_boxes < op.ambient_box_count);
+        for source in 0..op.total_boxes {
+            let sum: f64 = op.probabilities
+                [op.column_offsets[source]..op.column_offsets[source + 1]]
+                .iter()
+                .sum();
+            assert!(sum == 0.0 || (sum - 1.0).abs() < 1.0e-12);
+        }
+    }
+
+    fn lorenz_rk4_step(state: [f64; 3], dt: f64, sigma: f64, rho: f64, beta: f64) -> [f64; 3] {
+        fn derivative(state: [f64; 3], sigma: f64, rho: f64, beta: f64) -> [f64; 3] {
+            [
+                sigma * (state[1] - state[0]),
+                state[0] * (rho - state[2]) - state[1],
+                state[0] * state[1] - beta * state[2],
+            ]
+        }
+
+        let k1 = derivative(state, sigma, rho, beta);
+        let at = |scale: f64, increment: [f64; 3]| {
+            [
+                state[0] + scale * increment[0],
+                state[1] + scale * increment[1],
+                state[2] + scale * increment[2],
+            ]
+        };
+        let k2 = derivative(at(dt / 2.0, k1), sigma, rho, beta);
+        let k3 = derivative(at(dt / 2.0, k2), sigma, rho, beta);
+        let k4 = derivative(at(dt, k3), sigma, rho, beta);
+        [
+            state[0] + dt * (k1[0] + 2.0 * k2[0] + 2.0 * k3[0] + k4[0]) / 6.0,
+            state[1] + dt * (k1[1] + 2.0 * k2[1] + 2.0 * k3[1] + k4[1]) / 6.0,
+            state[2] + dt * (k1[2] + 2.0 * k2[2] + 2.0 * k3[2] + k4[2]) / 6.0,
+        ]
     }
 }

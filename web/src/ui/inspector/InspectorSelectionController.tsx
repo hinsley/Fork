@@ -60,6 +60,15 @@ import {
   usesEquationContext,
 } from '../../system/expressionContext'
 import { PlotlyViewport } from '../../viewports/plotly/PlotlyViewport'
+import {
+  adjustArray,
+  applyPointValues,
+  formatPointValues,
+  parsePointValues,
+  readClipboardText,
+  writeClipboardText,
+} from './stateTableValues'
+import { StateTable } from './StateTable'
 import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../../viewports/plotly/plotlyTheme'
 import type {
   BranchContinuationRequest,
@@ -704,71 +713,6 @@ type IsoclineAxisDraft = {
 const FLOW_SOLVERS = ['rk4', 'tsit5']
 const ORBIT_PREVIEW_PAGE_SIZE = 10
 
-function adjustArray<T>(values: T[], targetLength: number, fill: () => T): T[] {
-  if (values.length === targetLength) return values
-  if (values.length > targetLength) return values.slice(0, targetLength)
-  return [...values, ...Array.from({ length: targetLength - values.length }, fill)]
-}
-
-const POINT_NUMBER_REGEX = /[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g
-
-function parsePointValues(text: string): number[] {
-  const matches = text.match(POINT_NUMBER_REGEX)
-  if (!matches) return []
-  return matches
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value))
-}
-
-function formatPointValues(values: Array<number | string | null | undefined>): string {
-  const formatted = values.map((value) => {
-    if (typeof value === 'number') {
-      return Number.isFinite(value) ? value.toString() : 'NaN'
-    }
-    if (typeof value === 'string') {
-      const trimmed = value.trim()
-      return trimmed.length > 0 ? trimmed : 'NaN'
-    }
-    return 'NaN'
-  })
-  return `[${formatted.join(', ')}]`
-}
-
-async function writeClipboardText(value: string): Promise<void> {
-  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return
-  try {
-    await navigator.clipboard.writeText(value)
-  } catch {
-    return
-  }
-}
-
-async function readClipboardText(): Promise<string | null> {
-  if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) return null
-  try {
-    return await navigator.clipboard.readText()
-  } catch {
-    return null
-  }
-}
-
-function applyPointValues(
-  prev: string[],
-  targetLength: number,
-  values: number[]
-): string[] {
-  const next = adjustArray(prev, targetLength, () => '0')
-  if (values.length === 0) return next
-  const trimmed =
-    values.length >= targetLength ? values.slice(values.length - targetLength) : values
-  trimmed.forEach((value, index) => {
-    if (Number.isFinite(value)) {
-      next[index] = value.toString()
-    }
-  })
-  return next
-}
-
 function formatAxisValue(axis: BifurcationAxis | null): string {
   return axis ? `${axis.kind}:${axis.name}` : ''
 }
@@ -800,93 +744,6 @@ function InspectorMetrics({ rows }: { rows: InspectorMetricRow[] }) {
           <span className="inspector-metrics__value">{row.value}</span>
         </div>
       ))}
-    </div>
-  )
-}
-
-type StateTableProps = {
-  title: string
-  varNames: string[]
-  values: string[]
-  onChange: (next: string[]) => void
-  onCopy: () => void
-  onPaste: () => void
-  emptyMessage?: string
-  testIdPrefix?: string
-}
-
-function StateTable({
-  title,
-  varNames,
-  values,
-  onChange,
-  onCopy,
-  onPaste,
-  emptyMessage,
-  testIdPrefix,
-}: StateTableProps) {
-  const resolvedValues = adjustArray(values, varNames.length, () => '0')
-  const hasVars = varNames.length > 0
-  return (
-    <div className="state-table">
-      <div className="state-table__header">
-        <span className="state-table__title">{title}</span>
-        <div className="state-table__actions">
-          <button
-            type="button"
-            className="inspector-inline-button"
-            onClick={onCopy}
-            disabled={!hasVars}
-          >
-            Copy
-          </button>
-          <button
-            type="button"
-            className="inspector-inline-button"
-            onClick={onPaste}
-            disabled={!hasVars}
-          >
-            Paste
-          </button>
-        </div>
-      </div>
-      {hasVars ? (
-        <div className="state-table__wrap" role="region" aria-label={title}>
-          <table className="state-table__grid">
-            <thead>
-              <tr>
-                {varNames.map((name, index) => (
-                  <th key={`state-head-${index}`}>{name || `x${index + 1}`}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                {resolvedValues.map((value, index) => (
-                  <td key={`state-cell-${index}`}>
-                    <input
-                      type="number"
-                      step="any"
-                      className="state-table__input"
-                      value={value ?? ''}
-                      onChange={(event) => {
-                        const next = [...resolvedValues]
-                        next[index] = event.target.value
-                        onChange(next)
-                      }}
-                      data-testid={testIdPrefix ? `${testIdPrefix}-${index}` : undefined}
-                    />
-                  </td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="empty-state">
-          {emptyMessage ?? 'No state variables defined yet.'}
-        </p>
-      )}
     </div>
   )
 }

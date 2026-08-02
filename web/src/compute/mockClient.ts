@@ -553,9 +553,18 @@ export class MockForkCoreClient implements ForkCoreClient {
   ): Promise<TransferOperatorResponse> {
     const job = this.queue.enqueue('computeTransferOperator', async (signal) => {
       if (signal.aborted) { const error = new Error('cancelled'); error.name = 'AbortError'; throw error }
-      const totalBoxes = request.axes.reduce((total, axis) => total * axis.resolution, 1)
-      opts?.onProgress?.({ done: true, current_step: totalBoxes, max_steps: totalBoxes, points_computed: totalBoxes, bifurcations_found: 0, current_param: totalBoxes })
-      return { totalBoxes, columnOffsets: Array.from({ length: totalBoxes + 1 }, (_, i) => i), targetIndices: Array.from({ length: totalBoxes }, (_, i) => i), probabilities: Array.from({ length: totalBoxes }, () => 1), retainedMass: 1, zeroSurvivorSources: 0, stationaryDistribution: Array.from({ length: totalBoxes }, () => 1 / totalBoxes), dominantEigenvalue: 1, residual: 0, stationaryIterations: 1 }
+      const ambientBoxCount = request.axes.reduce((total, axis) => total * axis.resolution, 1)
+      const seedBoxIndex = request.axes.reduce((index, axis, axisIndex) => {
+        const value = request.startingPoint[axisIndex]
+        const coordinate = axis.min === axis.max
+          ? 0
+          : value === axis.max
+            ? axis.resolution - 1
+            : Math.floor((value - axis.min) / (axis.max - axis.min) * axis.resolution)
+        return index * axis.resolution + coordinate
+      }, 0)
+      opts?.onProgress?.({ done: true, current_step: 1, max_steps: 1, points_computed: 1, bifurcations_found: 0, current_param: 1 })
+      return { totalBoxes: 1, ambientBoxCount, coverBoxIndices: [seedBoxIndex], seedBoxIndex, coverGrowthIterations: 1, columnOffsets: [0, 1], targetIndices: [0], probabilities: [1], retainedMass: 1, zeroSurvivorSources: 0, stationaryDistribution: [1], dominantEigenvalue: 1, residual: 0, stationaryIterations: 1 }
     }, opts)
     return await job.promise
   }

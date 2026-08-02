@@ -383,6 +383,7 @@ describe('appState State Grid subsystem configuration', () => {
     expect(captured).not.toBeNull()
     expect(captured!.system.varNames).toEqual(['x'])
     expect(captured!.axes.map((axis) => axis.variableName)).toEqual(['x'])
+    expect(captured!.startingPoint).toEqual([0])
     expect(captured!.system.params[0]).toBe(3)
     expect(captured!.system.params).toContain(7)
 
@@ -401,6 +402,8 @@ describe('appState State Grid subsystem configuration', () => {
     expect(measure.result.parameters).toEqual([3])
     expect(measure.result.subsystemSnapshot?.frozenValuesByVarName).toEqual({ y: 7 })
     expect(measure.result.dominantEigenvalue).toBe(1)
+    expect(measure.result.settings.startingPoint).toEqual({ x: 0 })
+    expect(measure.result.coverBoxIndices).toHaveLength(1)
 
     const grid = system.objects[fixture.nodeId]
     expect(grid.type).toBe('state_grid')
@@ -422,7 +425,10 @@ describe('appState State Grid subsystem configuration', () => {
     const { getContext } = setupApp(fixture.system, client)
 
     await act(async () => {
-      await getContext().actions.computeTransferOperator({ stateGridId: fixture.nodeId })
+      await getContext().actions.computeTransferOperator({
+        stateGridId: fixture.nodeId,
+        startingPoint: { x: 0.25 },
+      })
     })
 
     expect(captured).not.toBeNull()
@@ -430,11 +436,13 @@ describe('appState State Grid subsystem configuration', () => {
     expect(request.system.type).toBe('flow')
     expect(request.system.solver).toBe('rk4')
     expect(request.timeStep).toBe(0.01)
+    expect(request.startingPoint).toEqual([0.25])
     const measure = Object.values(getContext().state.system!.objects).find(
       (object): object is InvariantMeasureObject => object.type === 'invariant_measure'
     )
     expect(measure?.result.dynamicsType).toBe('flow')
     expect(measure?.result.settings.timeStep).toBe(0.01)
+    expect(measure?.result.settings.startingPoint).toEqual({ x: 0.25 })
   })
 
   it('uses unique names for repeated invariant measures and creates none after cancellation', async () => {

@@ -357,11 +357,13 @@ fn validate_grid(bounds: &[(f64, f64)], resolution: &[usize]) -> Result<usize> {
     }
     let mut total = 1usize;
     for ((min, max), count) in bounds.iter().zip(resolution) {
-        if !min.is_finite() || !max.is_finite() || min >= max {
-            bail!("Each grid bound must be finite with min < max.");
-        }
-        if *count == 0 {
-            bail!("Each grid resolution must be at least 1.");
+        if !min.is_finite()
+            || !max.is_finite()
+            || min > max
+            || *count == 0
+            || (min == max && *count != 1)
+        {
+            bail!("Each grid axis requires min < max, or min = max with resolution 1.");
         }
         total = total
             .checked_mul(*count)
@@ -414,8 +416,8 @@ where
         bail!("Initial state dimension does not match the system.");
     }
     for (min, max) in bounds {
-        if !min.is_finite() || !max.is_finite() || min >= max {
-            bail!("Each grid bound must be finite with min < max.");
+        if !min.is_finite() || !max.is_finite() || min > max {
+            bail!("Each grid bound must be finite with min <= max.");
         }
     }
     if steps == 0 {
@@ -658,6 +660,15 @@ mod tests {
             vec![0.5, 13.0]
         );
         assert!(cartesian_cell_center(&bounds, &resolution, 4).is_err());
+    }
+
+    #[test]
+    fn cartesian_sampling_preserves_a_single_point_axis() {
+        assert_eq!(
+            cartesian_cell_center(&[(2.5, 2.5), (-1.0, 1.0)], &[1, 2], 0).unwrap(),
+            vec![2.5, -0.5]
+        );
+        assert!(cartesian_cell_center(&[(2.5, 2.5)], &[2], 0).is_err());
     }
 
     #[test]

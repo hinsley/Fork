@@ -275,39 +275,19 @@ export class WasmPDCurveRunner {
 export class WasmSystem {
   free(): void;
   [Symbol.dispose](): void;
-  set_periods(periods: Float64Array): void;
-  uses_context(): boolean;
-  context_symbol(): string | undefined;
-  compute_isocline(expression: string, level: number, axis_indices: Uint32Array, axis_mins: Float64Array, axis_maxs: Float64Array, axis_samples: Uint32Array, frozen_state: Float64Array, var_names: string[], param_names: string[]): any;
-  compute_jacobian(): Float64Array;
-  constructor(equations: string[], params: Float64Array, param_names: string[], var_names: string[], solver_name: string, system_type: string);
-  step(dt: number): void;
-  get_t(): number;
-  set_t(t: number): void;
-  get_state(): Float64Array;
-  set_state(state: Float64Array): void;
   /**
-   * Produce corrected Hopf-Hopf switches to both orientations of both Hopf
-   * curves and to both periodic-orbit Neimark-Sacker curves.
+   * Blocking entry point retained for the Node CLI.
    */
-  switch_from_hopf_hopf(state: Float64Array, param1_index: number, param2_index: number, param1_value: number, param2_value: number, source_frequency: number, curve_perturbation: number, cycle_amplitude: number, ntst: number, ncol: number, tolerance: number): any;
-  /**
-   * Produce corrected Zero-Hopf switches to both fold/Hopf orientations
-   * and, when the coefficient sign condition permits it, the periodic-orbit
-   * Neimark-Sacker curve.
-   */
-  switch_from_zero_hopf(state: Float64Array, param1_index: number, param2_index: number, param1_value: number, param2_value: number, frequency: number, curve_perturbation: number, cycle_amplitude: number, ntst: number, ncol: number, tolerance: number): any;
-  /**
-   * Compute detailed, serializable nonresonant Hopf-Hopf coefficients and
-   * both NS unfolding predictors.
-   */
-  compute_hopf_hopf_normal_form(state: Float64Array, param1_index: number, param2_index: number, param1_value: number, param2_value: number, source_frequency: number): any;
-  /**
-   * Compute detailed, serializable Zero-Hopf coefficients and numerical
-   * conditioning diagnostics at a refined equilibrium codimension-two
-   * point.
-   */
-  compute_zero_hopf_normal_form(state: Float64Array, param1_index: number, param2_index: number, param1_value: number, param2_value: number, frequency: number): any;
+  compute_heteroclinic_shooting_continuation(setup_val: any, settings_val: any, forward: boolean): any;
+  init_heteroclinic_shooting_from_collocation(setup_val: any, intervals: number, integration_steps_per_segment: number): any;
+  solve_forced_response(period_expression: string, iteration_period: number, phase: number, response_multiple: number, steps_per_forcing_period: number, initial_guess: Float64Array, max_steps: number, damping: number, tolerance: number): any;
+  validate_periodic_forcing(period_expression: string, iteration_period: number): number;
+  advance_forced_response_seed(period_expression: string, iteration_period: number, phase: number, steps_per_forcing_period: number, initial_context: number, initial_state: Float64Array): any;
+  solve_equilibrium(initial_guess: Float64Array, max_steps: number, damping: number, map_iterations: number): any;
+  solve_equilibrium_deflated(initial_guess: Float64Array, max_steps: number, damping: number, map_iterations: number, flattened_roots: Float64Array, exponent: number, shift: number): any;
+  solve_equilibrium_deflated_targets(initial_guess: Float64Array, max_steps: number, damping: number, map_iterations: number, flattened_roots: Float64Array, exponents: Float64Array, shifts: Float64Array): any;
+  compute_lyapunov_exponents(start_state: Float64Array, start_time: number, steps: number, dt: number, qr_stride: number): Float64Array;
+  compute_covariant_lyapunov_vectors(start_state: Float64Array, start_time: number, window_steps: number, dt: number, qr_stride: number, forward_transient: number, backward_transient: number): any;
   /**
    * Initializes a period-doubled limit cycle from a period-doubling bifurcation.
    * Takes the LC state at the PD point and constructs a doubled-period initial guess
@@ -455,16 +435,19 @@ export class WasmSystem {
   compute_limit_cycle_floquet_modes_on_mesh(cycle_state: Float64Array, ncol: number, normalized_mesh: Float64Array, parameter_name: string): any;
   compute_limit_cycle_floquet_modes_with_backend(cycle_state: Float64Array, ntst: number, ncol: number, parameter_name: string, backend: string): any;
   compute_limit_cycle_floquet_modes_on_mesh_with_backend(cycle_state: Float64Array, ncol: number, normalized_mesh: Float64Array, parameter_name: string, backend: string): any;
-  solve_forced_response(period_expression: string, iteration_period: number, phase: number, response_multiple: number, steps_per_forcing_period: number, initial_guess: Float64Array, max_steps: number, damping: number, tolerance: number): any;
-  validate_periodic_forcing(period_expression: string, iteration_period: number): number;
-  advance_forced_response_seed(period_expression: string, iteration_period: number, phase: number, steps_per_forcing_period: number, initial_context: number, initial_state: Float64Array): any;
-  /**
-   * Blocking entry point retained for the Node CLI.
-   */
-  compute_heteroclinic_shooting_continuation(setup_val: any, settings_val: any, forward: boolean): any;
-  init_heteroclinic_shooting_from_collocation(setup_val: any, intervals: number, integration_steps_per_segment: number): any;
   compute_event_series_from_orbit(request_val: any): any;
   compute_event_series_from_samples(request_val: any): any;
+  set_periods(periods: Float64Array): void;
+  uses_context(): boolean;
+  context_symbol(): string | undefined;
+  compute_isocline(expression: string, level: number, axis_indices: Uint32Array, axis_mins: Float64Array, axis_maxs: Float64Array, axis_samples: Uint32Array, frozen_state: Float64Array, var_names: string[], param_names: string[]): any;
+  compute_jacobian(): Float64Array;
+  constructor(equations: string[], params: Float64Array, param_names: string[], var_names: string[], solver_name: string, system_type: string);
+  step(dt: number): void;
+  get_t(): number;
+  set_t(t: number): void;
+  get_state(): Float64Array;
+  set_state(state: Float64Array): void;
   /**
    * Compute local normal-form coefficients at a refined map bifurcation.
    *
@@ -473,6 +456,28 @@ export class WasmSystem {
    * includes coefficient and conditioning diagnostics.
    */
   compute_map_normal_form(state: Float64Array, param_index: number, param_value: number, map_iterations: number, normal_form_type: string): any;
+  /**
+   * Produce corrected Hopf-Hopf switches to both orientations of both Hopf
+   * curves and to both periodic-orbit Neimark-Sacker curves.
+   */
+  switch_from_hopf_hopf(state: Float64Array, param1_index: number, param2_index: number, param1_value: number, param2_value: number, source_frequency: number, curve_perturbation: number, cycle_amplitude: number, ntst: number, ncol: number, tolerance: number): any;
+  /**
+   * Produce corrected Zero-Hopf switches to both fold/Hopf orientations
+   * and, when the coefficient sign condition permits it, the periodic-orbit
+   * Neimark-Sacker curve.
+   */
+  switch_from_zero_hopf(state: Float64Array, param1_index: number, param2_index: number, param1_value: number, param2_value: number, frequency: number, curve_perturbation: number, cycle_amplitude: number, ntst: number, ncol: number, tolerance: number): any;
+  /**
+   * Compute detailed, serializable nonresonant Hopf-Hopf coefficients and
+   * both NS unfolding predictors.
+   */
+  compute_hopf_hopf_normal_form(state: Float64Array, param1_index: number, param2_index: number, param1_value: number, param2_value: number, source_frequency: number): any;
+  /**
+   * Compute detailed, serializable Zero-Hopf coefficients and numerical
+   * conditioning diagnostics at a refined equilibrium codimension-two
+   * point.
+   */
+  compute_zero_hopf_normal_form(state: Float64Array, param1_index: number, param2_index: number, param1_value: number, param2_value: number, frequency: number): any;
   /**
    * Construct a collocation predictor on the periodic branch emanating
    * from a generic periodic branch point.
@@ -508,18 +513,13 @@ export class WasmSystem {
    * phase direction are reconstructed inside Rust.
    */
   compute_periodic_normal_form_from_packed_state(packed_state: Float64Array, param_index: number, param_value: number, collocation_degree: number, normalized_mesh: Float64Array, normal_form_type: string): any;
-  solve_equilibrium(initial_guess: Float64Array, max_steps: number, damping: number, map_iterations: number): any;
-  solve_equilibrium_deflated(initial_guess: Float64Array, max_steps: number, damping: number, map_iterations: number, flattened_roots: Float64Array, exponent: number, shift: number): any;
-  solve_equilibrium_deflated_targets(initial_guess: Float64Array, max_steps: number, damping: number, map_iterations: number, flattened_roots: Float64Array, exponents: Float64Array, shifts: Float64Array): any;
-  compute_lyapunov_exponents(start_state: Float64Array, start_time: number, steps: number, dt: number, qr_stride: number): Float64Array;
-  compute_covariant_lyapunov_vectors(start_state: Float64Array, start_time: number, window_steps: number, dt: number, qr_stride: number, forward_transient: number, backward_transient: number): any;
 }
 export class WasmTransferOperatorRunner {
   free(): void;
   [Symbol.dispose](): void;
   get_result(): any;
   get_progress(): any;
-  constructor(equations: string[], params: Float64Array, param_names: string[], var_names: string[], solver_name: string, system_type: string, minimums: Float64Array, maximums: Float64Array, resolution: Uint32Array, samples_per_cell: number, iterations: number, max_stationary_iterations: number, tolerance: number, time_step: number);
+  constructor(equations: string[], params: Float64Array, param_names: string[], var_names: string[], solver_name: string, system_type: string, minimums: Float64Array, maximums: Float64Array, resolution: Uint32Array, starting_point: Float64Array, samples_per_cell: number, iterations: number, max_stationary_iterations: number, tolerance: number, time_step: number);
   run_steps(_batch_size: number): any;
 }
 
@@ -527,20 +527,92 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
-  readonly __wbg_wasmsystem_free: (a: number, b: number) => void;
-  readonly wasmsystem_compute_isocline: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number) => [number, number, number];
-  readonly wasmsystem_compute_jacobian: (a: number) => [number, number];
-  readonly wasmsystem_context_symbol: (a: number) => [number, number];
-  readonly wasmsystem_get_state: (a: number) => [number, number];
-  readonly wasmsystem_get_t: (a: number) => number;
-  readonly wasmsystem_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number];
-  readonly wasmsystem_set_periods: (a: number, b: number, c: number) => void;
-  readonly wasmsystem_set_state: (a: number, b: number, c: number) => void;
-  readonly wasmsystem_set_t: (a: number, b: number) => void;
-  readonly wasmsystem_step: (a: number, b: number) => void;
-  readonly wasmsystem_uses_context: (a: number) => number;
-  readonly __wbg_wasmcyclemanifold2drunner_free: (a: number, b: number) => void;
+  readonly __wbg_wasmeqmanifold1dextensionrunner_free: (a: number, b: number) => void;
+  readonly __wbg_wasmequilibriumrunner_free: (a: number, b: number) => void;
+  readonly __wbg_wasmforcedresponserunner_free: (a: number, b: number) => void;
+  readonly __wbg_wasmhomoclinicshootingrunner_free: (a: number, b: number) => void;
+  readonly __wbg_wasmlimitcyclerunner_free: (a: number, b: number) => void;
+  readonly __wbg_wasmmanifold2dextensionrunner_free: (a: number, b: number) => void;
+  readonly __wbg_wasmtransferoperatorrunner_free: (a: number, b: number) => void;
+  readonly wasmeqmanifold1dextensionrunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmeqmanifold1dextensionrunner_get_result: (a: number) => [number, number, number];
+  readonly wasmeqmanifold1dextensionrunner_is_done: (a: number) => number;
+  readonly wasmeqmanifold1dextensionrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: any, m: any, n: number, o: number) => [number, number, number];
+  readonly wasmeqmanifold1dextensionrunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly wasmequilibriumrunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmequilibriumrunner_get_result: (a: number) => [number, number, number];
+  readonly wasmequilibriumrunner_is_done: (a: number) => number;
+  readonly wasmequilibriumrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: any, q: number, r: number, s: number) => [number, number, number];
+  readonly wasmequilibriumrunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly wasmforcedresponserunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmforcedresponserunner_get_result: (a: number) => [number, number, number];
+  readonly wasmforcedresponserunner_is_done: (a: number) => number;
+  readonly wasmforcedresponserunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: any, x: number, y: number, z: number) => [number, number, number];
+  readonly wasmforcedresponserunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly wasmhomoclinicshootingrunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmhomoclinicshootingrunner_get_result: (a: number) => [number, number, number];
+  readonly wasmhomoclinicshootingrunner_is_done: (a: number) => number;
+  readonly wasmhomoclinicshootingrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: any, j: any, k: number) => [number, number, number];
+  readonly wasmhomoclinicshootingrunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly wasmlimitcyclerunner_get_adaptation_report: (a: number) => [number, number, number];
+  readonly wasmlimitcyclerunner_get_linear_solver_stats: (a: number) => [number, number, number];
+  readonly wasmlimitcyclerunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmlimitcyclerunner_get_result: (a: number) => [number, number, number];
+  readonly wasmlimitcyclerunner_get_result_with_report: (a: number) => [number, number, number];
+  readonly wasmlimitcyclerunner_is_done: (a: number) => number;
+  readonly wasmlimitcyclerunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: any, l: number, m: number, n: any, o: number) => [number, number, number];
+  readonly wasmlimitcyclerunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly wasmmanifold2dextensionrunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmmanifold2dextensionrunner_get_result: (a: number) => [number, number, number];
+  readonly wasmmanifold2dextensionrunner_is_done: (a: number) => number;
+  readonly wasmmanifold2dextensionrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: any, l: any) => [number, number, number];
+  readonly wasmmanifold2dextensionrunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly wasmsystem_advance_forced_response_seed: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
+  readonly wasmsystem_compute_heteroclinic_shooting_continuation: (a: number, b: any, c: any, d: number) => [number, number, number];
+  readonly wasmsystem_init_heteroclinic_shooting_from_collocation: (a: number, b: any, c: number, d: number) => [number, number, number];
+  readonly wasmsystem_solve_forced_response: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number];
+  readonly wasmsystem_validate_periodic_forcing: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly wasmtransferoperatorrunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmtransferoperatorrunner_get_result: (a: number) => [number, number, number];
+  readonly wasmtransferoperatorrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number) => [number, number, number];
+  readonly wasmtransferoperatorrunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly __wbg_wasmcontinuationextensionrunner_free: (a: number, b: number) => void;
+  readonly wasmcontinuationextensionrunner_get_adaptation_report: (a: number) => [number, number, number];
+  readonly wasmcontinuationextensionrunner_get_linear_solver_stats: (a: number) => [number, number, number];
+  readonly wasmcontinuationextensionrunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmcontinuationextensionrunner_get_result: (a: number) => [number, number, number];
+  readonly wasmcontinuationextensionrunner_get_result_with_report: (a: number) => [number, number, number];
+  readonly wasmcontinuationextensionrunner_is_done: (a: number) => number;
+  readonly wasmcontinuationextensionrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: any, m: number, n: number, o: any, p: number) => [number, number, number];
+  readonly wasmcontinuationextensionrunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly __wbg_wasmcovariantlyapunovrunner_free: (a: number, b: number) => void;
+  readonly __wbg_wasmequilibriumsolverrunner_free: (a: number, b: number) => void;
+  readonly __wbg_wasmlyapunovrunner_free: (a: number, b: number) => void;
+  readonly wasmcovariantlyapunovrunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmcovariantlyapunovrunner_get_result: (a: number) => [number, number, number];
+  readonly wasmcovariantlyapunovrunner_is_done: (a: number) => number;
+  readonly wasmcovariantlyapunovrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number) => [number, number, number];
+  readonly wasmcovariantlyapunovrunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly wasmequilibriumsolverrunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmequilibriumsolverrunner_get_result: (a: number) => [number, number, number];
+  readonly wasmequilibriumsolverrunner_is_done: (a: number) => number;
+  readonly wasmequilibriumsolverrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number) => [number, number, number];
+  readonly wasmequilibriumsolverrunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly wasmequilibriumsolverrunner_set_deflation: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+  readonly wasmequilibriumsolverrunner_set_deflation_targets: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+  readonly wasmlyapunovrunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmlyapunovrunner_get_result: (a: number) => [number, number, number];
+  readonly wasmlyapunovrunner_is_done: (a: number) => number;
+  readonly wasmlyapunovrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => [number, number, number];
+  readonly wasmlyapunovrunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly wasmsystem_compute_covariant_lyapunov_vectors: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
+  readonly wasmsystem_compute_lyapunov_exponents: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
+  readonly wasmsystem_solve_equilibrium: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+  readonly wasmsystem_solve_equilibrium_deflated: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number];
+  readonly wasmsystem_solve_equilibrium_deflated_targets: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number];
+  readonly __wbg_wasmeqmanifold2drunner_free: (a: number, b: number) => void;
   readonly __wbg_wasmfoldcurverunner_free: (a: number, b: number) => void;
+  readonly __wbg_wasmheteroclinicrunner_free: (a: number, b: number) => void;
   readonly __wbg_wasmhomoclinicrunner_free: (a: number, b: number) => void;
   readonly __wbg_wasmhomotopysaddlerunner_free: (a: number, b: number) => void;
   readonly __wbg_wasmhopfcurverunner_free: (a: number, b: number) => void;
@@ -548,16 +620,21 @@ export interface InitOutput {
   readonly __wbg_wasmlpccurverunner_free: (a: number, b: number) => void;
   readonly __wbg_wasmnscurverunner_free: (a: number, b: number) => void;
   readonly __wbg_wasmpdcurverunner_free: (a: number, b: number) => void;
-  readonly wasmcyclemanifold2drunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmcyclemanifold2drunner_get_result: (a: number) => [number, number, number];
-  readonly wasmcyclemanifold2drunner_is_done: (a: number) => number;
-  readonly wasmcyclemanifold2drunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: any, p: any) => [number, number, number];
-  readonly wasmcyclemanifold2drunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly wasmeqmanifold2drunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmeqmanifold2drunner_get_result: (a: number) => [number, number, number];
+  readonly wasmeqmanifold2drunner_is_done: (a: number) => number;
+  readonly wasmeqmanifold2drunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: any) => [number, number, number];
+  readonly wasmeqmanifold2drunner_run_steps: (a: number, b: number) => [number, number, number];
   readonly wasmfoldcurverunner_get_progress: (a: number) => [number, number, number];
   readonly wasmfoldcurverunner_get_result: (a: number) => [number, number, number];
   readonly wasmfoldcurverunner_is_done: (a: number) => number;
   readonly wasmfoldcurverunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: any, u: number) => [number, number, number];
   readonly wasmfoldcurverunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly wasmheteroclinicrunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmheteroclinicrunner_get_result: (a: number) => [number, number, number];
+  readonly wasmheteroclinicrunner_is_done: (a: number) => number;
+  readonly wasmheteroclinicrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: any, j: any, k: number) => [number, number, number];
+  readonly wasmheteroclinicrunner_run_steps: (a: number, b: number) => [number, number, number];
   readonly wasmhomoclinicrunner_get_progress: (a: number) => [number, number, number];
   readonly wasmhomoclinicrunner_get_result: (a: number) => [number, number, number];
   readonly wasmhomoclinicrunner_is_done: (a: number) => number;
@@ -601,69 +678,6 @@ export interface InitOutput {
   readonly wasmpdcurverunner_is_done: (a: number) => number;
   readonly wasmpdcurverunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: any, w: number) => [number, number, number];
   readonly wasmpdcurverunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly __wbg_wasmexpansionentropyrunner_free: (a: number, b: number) => void;
-  readonly __wbg_wasmheteroclinicrunner_free: (a: number, b: number) => void;
-  readonly __wbg_wasmheteroclinicshootingrunner_free: (a: number, b: number) => void;
-  readonly __wbg_wasmhomoclinicshootingrunner_free: (a: number, b: number) => void;
-  readonly wasmexpansionentropyrunner_advance: (a: number) => [number, number, number];
-  readonly wasmexpansionentropyrunner_cancel: (a: number) => [number, number];
-  readonly wasmexpansionentropyrunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmexpansionentropyrunner_get_result: (a: number) => [number, number, number];
-  readonly wasmexpansionentropyrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number) => [number, number, number];
-  readonly wasmexpansionentropyrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmheteroclinicrunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmheteroclinicrunner_get_result: (a: number) => [number, number, number];
-  readonly wasmheteroclinicrunner_is_done: (a: number) => number;
-  readonly wasmheteroclinicrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: any, j: any, k: number) => [number, number, number];
-  readonly wasmheteroclinicrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmheteroclinicshootingrunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmheteroclinicshootingrunner_get_result: (a: number) => [number, number, number];
-  readonly wasmheteroclinicshootingrunner_is_done: (a: number) => number;
-  readonly wasmheteroclinicshootingrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: any, j: any, k: number) => [number, number, number];
-  readonly wasmheteroclinicshootingrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmhomoclinicshootingrunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmhomoclinicshootingrunner_get_result: (a: number) => [number, number, number];
-  readonly wasmhomoclinicshootingrunner_is_done: (a: number) => number;
-  readonly wasmhomoclinicshootingrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: any, j: any, k: number) => [number, number, number];
-  readonly wasmhomoclinicshootingrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmsystem_compute_hopf_hopf_normal_form: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
-  readonly wasmsystem_compute_zero_hopf_normal_form: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
-  readonly wasmsystem_switch_from_hopf_hopf: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => [number, number, number];
-  readonly wasmsystem_switch_from_zero_hopf: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => [number, number, number];
-  readonly __wbg_wasmeqmanifold1dextensionrunner_free: (a: number, b: number) => void;
-  readonly __wbg_wasmequilibriumrunner_free: (a: number, b: number) => void;
-  readonly __wbg_wasmforcedresponserunner_free: (a: number, b: number) => void;
-  readonly __wbg_wasmlimitcyclerunner_free: (a: number, b: number) => void;
-  readonly __wbg_wasmmanifold2dextensionrunner_free: (a: number, b: number) => void;
-  readonly wasmeqmanifold1dextensionrunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmeqmanifold1dextensionrunner_get_result: (a: number) => [number, number, number];
-  readonly wasmeqmanifold1dextensionrunner_is_done: (a: number) => number;
-  readonly wasmeqmanifold1dextensionrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: any, m: any, n: number, o: number) => [number, number, number];
-  readonly wasmeqmanifold1dextensionrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmequilibriumrunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmequilibriumrunner_get_result: (a: number) => [number, number, number];
-  readonly wasmequilibriumrunner_is_done: (a: number) => number;
-  readonly wasmequilibriumrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: any, q: number, r: number, s: number) => [number, number, number];
-  readonly wasmequilibriumrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmforcedresponserunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmforcedresponserunner_get_result: (a: number) => [number, number, number];
-  readonly wasmforcedresponserunner_is_done: (a: number) => number;
-  readonly wasmforcedresponserunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: any, x: number, y: number, z: number) => [number, number, number];
-  readonly wasmforcedresponserunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmlimitcyclerunner_get_adaptation_report: (a: number) => [number, number, number];
-  readonly wasmlimitcyclerunner_get_linear_solver_stats: (a: number) => [number, number, number];
-  readonly wasmlimitcyclerunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmlimitcyclerunner_get_result: (a: number) => [number, number, number];
-  readonly wasmlimitcyclerunner_get_result_with_report: (a: number) => [number, number, number];
-  readonly wasmlimitcyclerunner_is_done: (a: number) => number;
-  readonly wasmlimitcyclerunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: any, l: number, m: number, n: any, o: number) => [number, number, number];
-  readonly wasmlimitcyclerunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmmanifold2dextensionrunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmmanifold2dextensionrunner_get_result: (a: number) => [number, number, number];
-  readonly wasmmanifold2dextensionrunner_is_done: (a: number) => number;
-  readonly wasmmanifold2dextensionrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: any, l: any) => [number, number, number];
-  readonly wasmmanifold2dextensionrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmsystem_advance_forced_response_seed: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
   readonly wasmsystem_compute_continuation: (a: number, b: number, c: number, d: number, e: number, f: number, g: any, h: number) => [number, number, number];
   readonly wasmsystem_compute_continuation_stepped: (a: number, b: number, c: number, d: number, e: number, f: number, g: any, h: number, i: number) => [number, number, number];
   readonly wasmsystem_compute_cycle_manifold_2d: (a: number, b: number, c: number, d: number, e: number, f: any, g: any) => [number, number, number];
@@ -704,11 +718,14 @@ export interface InitOutput {
   readonly wasmsystem_init_lc_from_pd_on_mesh: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number];
   readonly wasmsystem_init_lpc_from_generalized_hopf: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number) => [number, number, number];
   readonly wasmsystem_init_map_cycle_from_pd: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
-  readonly wasmsystem_solve_forced_response: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number];
-  readonly wasmsystem_validate_periodic_forcing: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly __wbg_wasmcyclemanifold2drunner_free: (a: number, b: number) => void;
   readonly __wbg_wasmeqmanifold1dgroupextensionrunner_free: (a: number, b: number) => void;
   readonly __wbg_wasmeqmanifold1drunner_free: (a: number, b: number) => void;
-  readonly __wbg_wasmeqmanifold2drunner_free: (a: number, b: number) => void;
+  readonly wasmcyclemanifold2drunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmcyclemanifold2drunner_get_result: (a: number) => [number, number, number];
+  readonly wasmcyclemanifold2drunner_is_done: (a: number) => number;
+  readonly wasmcyclemanifold2drunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: any, p: any) => [number, number, number];
+  readonly wasmcyclemanifold2drunner_run_steps: (a: number, b: number) => [number, number, number];
   readonly wasmeqmanifold1dgroupextensionrunner_get_progress: (a: number) => [number, number, number];
   readonly wasmeqmanifold1dgroupextensionrunner_get_result: (a: number) => [number, number, number];
   readonly wasmeqmanifold1dgroupextensionrunner_is_done: (a: number) => number;
@@ -718,15 +735,8 @@ export interface InitOutput {
   readonly wasmeqmanifold1drunner_get_result: (a: number) => [number, number, number];
   readonly wasmeqmanifold1drunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: any, o: number, p: number) => [number, number, number];
   readonly wasmeqmanifold1drunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmeqmanifold2drunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmeqmanifold2drunner_get_result: (a: number) => [number, number, number];
-  readonly wasmeqmanifold2drunner_is_done: (a: number) => number;
-  readonly wasmeqmanifold2drunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: any) => [number, number, number];
-  readonly wasmeqmanifold2drunner_run_steps: (a: number, b: number) => [number, number, number];
   readonly wasmsystem_compute_event_series_from_orbit: (a: number, b: any) => [number, number, number];
   readonly wasmsystem_compute_event_series_from_samples: (a: number, b: any) => [number, number, number];
-  readonly wasmsystem_compute_heteroclinic_shooting_continuation: (a: number, b: any, c: any, d: number) => [number, number, number];
-  readonly wasmsystem_init_heteroclinic_shooting_from_collocation: (a: number, b: any, c: number, d: number) => [number, number, number];
   readonly wasmeqmanifold1drunner_is_done: (a: number) => number;
   readonly __wbg_wasmcodim1curveextensionrunner_free: (a: number, b: number) => void;
   readonly wasmcodim1curveextensionrunner_get_adaptation_report: (a: number) => [number, number, number];
@@ -736,53 +746,43 @@ export interface InitOutput {
   readonly wasmcodim1curveextensionrunner_is_done: (a: number) => number;
   readonly wasmcodim1curveextensionrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: any, m: number, n: number, o: any, p: number) => [number, number, number];
   readonly wasmcodim1curveextensionrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly __wbg_wasmcontinuationextensionrunner_free: (a: number, b: number) => void;
-  readonly wasmcontinuationextensionrunner_get_adaptation_report: (a: number) => [number, number, number];
-  readonly wasmcontinuationextensionrunner_get_linear_solver_stats: (a: number) => [number, number, number];
-  readonly wasmcontinuationextensionrunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmcontinuationextensionrunner_get_result: (a: number) => [number, number, number];
-  readonly wasmcontinuationextensionrunner_get_result_with_report: (a: number) => [number, number, number];
-  readonly wasmcontinuationextensionrunner_is_done: (a: number) => number;
-  readonly wasmcontinuationextensionrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: any, m: number, n: number, o: any, p: number) => [number, number, number];
-  readonly wasmcontinuationextensionrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly __wbg_wasmtransferoperatorrunner_free: (a: number, b: number) => void;
+  readonly __wbg_wasmsystem_free: (a: number, b: number) => void;
+  readonly wasmsystem_compute_isocline: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number) => [number, number, number];
+  readonly wasmsystem_compute_jacobian: (a: number) => [number, number];
+  readonly wasmsystem_context_symbol: (a: number) => [number, number];
+  readonly wasmsystem_get_state: (a: number) => [number, number];
+  readonly wasmsystem_get_t: (a: number) => number;
+  readonly wasmsystem_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number];
+  readonly wasmsystem_set_periods: (a: number, b: number, c: number) => void;
+  readonly wasmsystem_set_state: (a: number, b: number, c: number) => void;
+  readonly wasmsystem_set_t: (a: number, b: number) => void;
+  readonly wasmsystem_step: (a: number, b: number) => void;
+  readonly wasmsystem_uses_context: (a: number) => number;
+  readonly __wbg_wasmexpansionentropyrunner_free: (a: number, b: number) => void;
+  readonly __wbg_wasmheteroclinicshootingrunner_free: (a: number, b: number) => void;
+  readonly wasmexpansionentropyrunner_advance: (a: number) => [number, number, number];
+  readonly wasmexpansionentropyrunner_cancel: (a: number) => [number, number];
+  readonly wasmexpansionentropyrunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmexpansionentropyrunner_get_result: (a: number) => [number, number, number];
+  readonly wasmexpansionentropyrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number) => [number, number, number];
+  readonly wasmexpansionentropyrunner_run_steps: (a: number, b: number) => [number, number, number];
+  readonly wasmheteroclinicshootingrunner_get_progress: (a: number) => [number, number, number];
+  readonly wasmheteroclinicshootingrunner_get_result: (a: number) => [number, number, number];
+  readonly wasmheteroclinicshootingrunner_is_done: (a: number) => number;
+  readonly wasmheteroclinicshootingrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: any, j: any, k: number) => [number, number, number];
+  readonly wasmheteroclinicshootingrunner_run_steps: (a: number, b: number) => [number, number, number];
   readonly wasmsystem_compute_homoclinic_shooting_continuation: (a: number, b: any, c: any, d: number) => [number, number, number];
+  readonly wasmsystem_compute_hopf_hopf_normal_form: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
   readonly wasmsystem_compute_map_normal_form: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
   readonly wasmsystem_compute_periodic_normal_form_from_packed_state: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number];
   readonly wasmsystem_compute_periodic_orbit_normal_form: (a: number, b: any, c: number, d: number, e: number) => [number, number, number];
+  readonly wasmsystem_compute_zero_hopf_normal_form: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
   readonly wasmsystem_init_homoclinic_shooting_from_collocation: (a: number, b: any, c: number, d: number) => [number, number, number];
   readonly wasmsystem_init_homoclinic_shooting_from_shooting: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number) => [number, number, number];
+  readonly wasmsystem_switch_from_hopf_hopf: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => [number, number, number];
+  readonly wasmsystem_switch_from_zero_hopf: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => [number, number, number];
   readonly wasmsystem_switch_periodic_branch_from_packed_state: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
   readonly wasmsystem_switch_periodic_orbit_branch: (a: number, b: any, c: number, d: any, e: number) => [number, number, number];
-  readonly wasmtransferoperatorrunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmtransferoperatorrunner_get_result: (a: number) => [number, number, number];
-  readonly wasmtransferoperatorrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number) => [number, number, number];
-  readonly wasmtransferoperatorrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly __wbg_wasmcovariantlyapunovrunner_free: (a: number, b: number) => void;
-  readonly __wbg_wasmequilibriumsolverrunner_free: (a: number, b: number) => void;
-  readonly __wbg_wasmlyapunovrunner_free: (a: number, b: number) => void;
-  readonly wasmcovariantlyapunovrunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmcovariantlyapunovrunner_get_result: (a: number) => [number, number, number];
-  readonly wasmcovariantlyapunovrunner_is_done: (a: number) => number;
-  readonly wasmcovariantlyapunovrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number) => [number, number, number];
-  readonly wasmcovariantlyapunovrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmequilibriumsolverrunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmequilibriumsolverrunner_get_result: (a: number) => [number, number, number];
-  readonly wasmequilibriumsolverrunner_is_done: (a: number) => number;
-  readonly wasmequilibriumsolverrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number) => [number, number, number];
-  readonly wasmequilibriumsolverrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmequilibriumsolverrunner_set_deflation: (a: number, b: number, c: number, d: number, e: number) => [number, number];
-  readonly wasmequilibriumsolverrunner_set_deflation_targets: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
-  readonly wasmlyapunovrunner_get_progress: (a: number) => [number, number, number];
-  readonly wasmlyapunovrunner_get_result: (a: number) => [number, number, number];
-  readonly wasmlyapunovrunner_is_done: (a: number) => number;
-  readonly wasmlyapunovrunner_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => [number, number, number];
-  readonly wasmlyapunovrunner_run_steps: (a: number, b: number) => [number, number, number];
-  readonly wasmsystem_compute_covariant_lyapunov_vectors: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
-  readonly wasmsystem_compute_lyapunov_exponents: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
-  readonly wasmsystem_solve_equilibrium: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
-  readonly wasmsystem_solve_equilibrium_deflated: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number];
-  readonly wasmsystem_solve_equilibrium_deflated_targets: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number];
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;

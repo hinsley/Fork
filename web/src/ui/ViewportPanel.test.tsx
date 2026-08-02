@@ -134,9 +134,9 @@ describe('ViewportPanel view state wiring', () => {
       result: {
         analysisType: 'transfer_operator', dynamicsType: 'map',
         axes: [{ variableName: 'x', min: 0, max: 1, resolution: 2 }, { variableName: 'y', min: 0, max: 1, resolution: 2 }],
-        settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' },
-        parameters: [], totalBoxes: 4, columnOffsets: [0,1,2,3,4], targetIndices: [0,1,2,3], probabilities: [1,1,1,1], retainedMass: 1, zeroSurvivorSources: 0,
-        stationaryDistribution: [0, 3.70926e-36, 0.01, 0.99], residual: 0, stationaryIterations: 1, computedAt: nowIso()
+        settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid', startingPoint: { x: 0.5, y: 0.5 } },
+        parameters: [], totalBoxes: 3, ambientBoxCount: 4, coverBoxIndices: [1,2,3], seedBoxIndex: 3, coverGrowthIterations: 2, columnOffsets: [0,1,2,3], targetIndices: [0,1,2], probabilities: [1,1,1], retainedMass: 1, zeroSurvivorSources: 0,
+        stationaryDistribution: [3.70926e-36, 0.01, 0.99], residual: 0, stationaryIterations: 1, computedAt: nowIso()
       },
       createdAt: nowIso(),
     } as InvariantMeasureObject)

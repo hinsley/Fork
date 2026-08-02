@@ -680,6 +680,14 @@ function defaultStateGridAxes(system: SystemConfig): StateGridObject['axes'] {
   }))
 }
 
+function stateGridMidpointByVariable(
+  axes: StateGridObject['axes']
+): Record<string, number> {
+  return Object.fromEntries(
+    axes.map((axis) => [axis.variableName, (axis.min + axis.max) / 2])
+  )
+}
+
 function normalizeStateGridAxes(
   system: SystemConfig,
   axes: StateGridObject['axes']
@@ -1769,6 +1777,7 @@ export type IsoclineComputeRequest = {
 
 export type StateGridComputeRequest = {
   stateGridId: string
+  startingPoint?: Record<string, number>
 }
 
 export type LimitCycleHopfContinuationRequest = {
@@ -3183,8 +3192,15 @@ export function AppProvider({
         }
         const axes = normalizeStateGridAxes(config, object.axes)
         for (const axis of axes) {
-          if (!Number.isFinite(axis.min) || !Number.isFinite(axis.max) || axis.min >= axis.max) {
-            throw new Error(`State Grid bounds for "${axis.variableName}" require min < max.`)
+          if (
+            !Number.isFinite(axis.min) ||
+            !Number.isFinite(axis.max) ||
+            axis.min > axis.max ||
+            (axis.min === axis.max && axis.resolution !== 1)
+          ) {
+            throw new Error(
+              `State Grid bounds for "${axis.variableName}" require min < max, or min = max with resolution 1.`
+            )
           }
           if (!Number.isInteger(axis.resolution) || axis.resolution < 1) {
             throw new Error(
@@ -3307,14 +3323,22 @@ export function AppProvider({
           maxStationaryIterations: 2000,
           tolerance: 1e-10,
           outsidePolicy: 'conditional_in_grid' as const,
+          startingPoint: stateGridMidpointByVariable(axes),
         }
         const settings = {
           ...storedSettings,
           timeStep: storedSettings.timeStep ?? (config.type === 'map' ? 1 : object.analysis.dt),
         }
         for (const axis of axes) {
-          if (!Number.isFinite(axis.min) || !Number.isFinite(axis.max) || axis.min >= axis.max) {
-            throw new Error(`State Grid bounds for "${axis.variableName}" require min < max.`)
+          if (
+            !Number.isFinite(axis.min) ||
+            !Number.isFinite(axis.max) ||
+            axis.min > axis.max ||
+            (axis.min === axis.max && axis.resolution !== 1)
+          ) {
+            throw new Error(
+              `State Grid bounds for "${axis.variableName}" require min < max, or min = max with resolution 1.`
+            )
           }
           if (!Number.isInteger(axis.resolution) || axis.resolution < 1) {
             throw new Error(
@@ -3353,15 +3377,41 @@ export function AppProvider({
           }
           return axis
         })
+        const configuredStartingPoint =
+          request.startingPoint ??
+          settings.startingPoint ??
+          stateGridMidpointByVariable(freeAxes)
+        const startingPoint = freeAxes.map((axis) => {
+          const value = configuredStartingPoint[axis.variableName]
+          if (!Number.isFinite(value)) {
+            throw new Error(
+              `Starting point for "${axis.variableName}" must be a finite number.`
+            )
+          }
+          if (value < axis.min || value > axis.max) {
+            throw new Error(
+              `Starting point for "${axis.variableName}" must be within the State Grid bounds.`
+            )
+          }
+          return value
+        })
+        const resolvedStartingPoint = Object.fromEntries(
+          freeAxes.map((axis, index) => [axis.variableName, startingPoint[index]])
+        )
+        const resolvedSettings = {
+          ...settings,
+          startingPoint: resolvedStartingPoint,
+        }
         const result = await client.computeTransferOperator(
           {
             system: runConfig,
             axes: freeAxes,
-            samplesPerCell: settings.samplesPerCell,
-            iterations: settings.iterations,
-            timeStep: settings.timeStep,
-            maxStationaryIterations: settings.maxStationaryIterations,
-            tolerance: settings.tolerance,
+            startingPoint,
+            samplesPerCell: resolvedSettings.samplesPerCell,
+            iterations: resolvedSettings.iterations,
+            timeStep: resolvedSettings.timeStep,
+            maxStationaryIterations: resolvedSettings.maxStationaryIterations,
+            tolerance: resolvedSettings.tolerance,
           },
           {
             signal: opts?.signal,
@@ -3377,7 +3427,7 @@ export function AppProvider({
           analysisType: 'transfer_operator',
           dynamicsType: config.type,
           axes: structuredClone(freeAxes),
-          settings: structuredClone(settings),
+          settings: structuredClone(resolvedSettings),
           parameters: [...baseParams],
           subsystemSnapshot: snapshot,
           ...result,
@@ -3401,9 +3451,16 @@ export function AppProvider({
         const currentGrid = current.objects[request.stateGridId]
         if (!currentGrid || currentGrid.type !== 'state_grid') return null
         const existingNames = Object.values(current.index.objects).map((entry) => entry.name)
+        const currentTransferSettings = currentGrid.transferOperator?.settings
+        const persistedSettings = currentTransferSettings?.startingPoint
+          ? currentTransferSettings
+          : {
+              ...(currentTransferSettings ?? resolvedSettings),
+              startingPoint: resolvedStartingPoint,
+            }
         const updatedCurrent = updateObject(current, request.stateGridId, {
           transferOperator: {
-            settings: structuredClone(currentGrid.transferOperator?.settings ?? settings),
+            settings: structuredClone(persistedSettings),
           },
         } as Partial<StateGridObject>)
         const measureObject: InvariantMeasureObject = {
