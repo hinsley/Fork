@@ -410,6 +410,33 @@ describe('appState State Grid subsystem configuration', () => {
     }
   })
 
+  it('creates a sampled flow-map measure with its persisted time-step', async () => {
+    const fixture = createConfiguredStateGridSystem('flow')
+    const client = new MockForkCoreClient(0)
+    let captured: TransferOperatorRequest | null = null
+    const original = client.computeTransferOperator.bind(client)
+    client.computeTransferOperator = async (request, opts) => {
+      captured = request
+      return await original(request, opts)
+    }
+    const { getContext } = setupApp(fixture.system, client)
+
+    await act(async () => {
+      await getContext().actions.computeTransferOperator({ stateGridId: fixture.nodeId })
+    })
+
+    expect(captured).not.toBeNull()
+    const request = captured as unknown as TransferOperatorRequest
+    expect(request.system.type).toBe('flow')
+    expect(request.system.solver).toBe('rk4')
+    expect(request.timeStep).toBe(0.01)
+    const measure = Object.values(getContext().state.system!.objects).find(
+      (object): object is InvariantMeasureObject => object.type === 'invariant_measure'
+    )
+    expect(measure?.result.dynamicsType).toBe('flow')
+    expect(measure?.result.settings.timeStep).toBe(0.01)
+  })
+
   it('uses unique names for repeated invariant measures and creates none after cancellation', async () => {
     const fixture = createConfiguredStateGridSystem('map')
     const { getContext } = setupApp(fixture.system)

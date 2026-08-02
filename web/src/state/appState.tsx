@@ -123,7 +123,10 @@ import {
   stateVectorToDisplay,
 } from '../system/subsystemGateway'
 import { formatEquilibriumLabel } from '../system/labels'
-import { normalizeFrozenEquationContext } from '../system/expressionContext'
+import {
+  autonomousContextError,
+  normalizeFrozenEquationContext,
+} from '../system/expressionContext'
 import { AppContext } from './appContext'
 import { createSystemStorageCommands } from './systemStorageCommands'
 import {
@@ -3276,20 +3279,38 @@ export function AppProvider({
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
         const config = launchSystem.config
-        if (config.type !== 'map' || config.solver !== 'discrete') {
-          throw new Error('Transfer operator currently supports discrete maps only.')
-        }
         const object = launchSystem.objects[request.stateGridId]
         if (!object || object.type !== 'state_grid') {
           throw new Error('Select a valid State Grid object.')
         }
+        const solverSupported = config.type === 'map'
+          ? config.solver === 'discrete'
+          : config.solver === 'rk4' || config.solver === 'tsit5'
+        if (!solverSupported) {
+          throw new Error(
+            config.type === 'flow'
+              ? 'Invariant measures require the RK4 or Tsit5 flow solver.'
+              : 'Invariant measures require the discrete map solver.'
+          )
+        }
+        const contextError = config.type === 'flow'
+          ? autonomousContextError(config, object.frozenVariables?.frozenEquationContext)
+          : null
+        if (contextError) {
+          throw new Error('Invariant measures are not implemented for non-autonomous flows yet.')
+        }
         const axes = normalizeStateGridAxes(config, object.axes)
-        const settings = object.transferOperator?.settings ?? {
+        const storedSettings = object.transferOperator?.settings ?? {
           samplesPerCell: 4,
           iterations: 1,
+          timeStep: config.type === 'map' ? 1 : object.analysis.dt,
           maxStationaryIterations: 2000,
           tolerance: 1e-10,
           outsidePolicy: 'conditional_in_grid' as const,
+        }
+        const settings = {
+          ...storedSettings,
+          timeStep: storedSettings.timeStep ?? (config.type === 'map' ? 1 : object.analysis.dt),
         }
         for (const axis of axes) {
           if (!Number.isFinite(axis.min) || !Number.isFinite(axis.max) || axis.min >= axis.max) {
@@ -3304,8 +3325,11 @@ export function AppProvider({
         if (!Number.isInteger(settings.samplesPerCell) || settings.samplesPerCell < 1) {
           throw new Error('Samples per cell must be a positive integer.')
         }
-        if (!Number.isInteger(settings.iterations) || settings.iterations < 1) {
+        if (config.type === 'map' && (!Number.isInteger(settings.iterations) || settings.iterations < 1)) {
           throw new Error('Map iterations per transition must be a positive integer.')
+        }
+        if (config.type === 'flow' && (!Number.isFinite(settings.timeStep) || settings.timeStep <= 0)) {
+          throw new Error('Flow time-step per transition must be positive.')
         }
         if (
           !Number.isInteger(settings.maxStationaryIterations) ||
@@ -3335,6 +3359,7 @@ export function AppProvider({
             axes: freeAxes,
             samplesPerCell: settings.samplesPerCell,
             iterations: settings.iterations,
+            timeStep: settings.timeStep,
             maxStationaryIterations: settings.maxStationaryIterations,
             tolerance: settings.tolerance,
           },
@@ -3350,7 +3375,7 @@ export function AppProvider({
         const computedAt = new Date().toISOString()
         const measureResult: InvariantMeasureObject['result'] = {
           analysisType: 'transfer_operator',
-          dynamicsType: 'map',
+          dynamicsType: config.type,
           axes: structuredClone(freeAxes),
           settings: structuredClone(settings),
           parameters: [...baseParams],
@@ -4171,7 +4196,7 @@ export function AppProvider({
             checkpointStride: 25,
             stabilizationStride: 10,
           },
-          transferOperator: { settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 2000, tolerance: 1e-10, outsidePolicy: 'conditional_in_grid' } },
+          transferOperator: { settings: { samplesPerCell: 4, iterations: 1, timeStep: config.type === 'map' ? 1 : 0.01, maxStationaryIterations: 2000, tolerance: 1e-10, outsidePolicy: 'conditional_in_grid' } },
           parameters: [...config.params],
           createdAt: new Date().toISOString(),
         }

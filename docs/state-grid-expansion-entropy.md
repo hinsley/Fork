@@ -4,8 +4,9 @@
 
 A State Grid is a bounded regular Cartesian grid in the full state space. Each state variable has
 a minimum, maximum, and resolution. The first analysis on this object is Hunt–Ott expansion
-entropy for autonomous flows and discrete maps. Adaptive subdivision, box maps, transfer
-operators, invariant sets, and invariant measures are not part of this slice.
+entropy for autonomous flows and discrete maps. Adaptive subdivision, box maps, and invariant sets
+are not part of this slice. See `state-grid-transfer-operator.md` for the separate transfer
+operator and invariant-measure analysis.
 
 The object is general on purpose. Its stable type is `state_grid`. The stored `analysis` field is a
 tagged choice. Later analyses can use the same bounds and resolution without changing the object

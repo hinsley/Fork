@@ -21,7 +21,7 @@ async function readMeasureTrace(plot: Locator, name: string) {
         x?: unknown[]
         customdata?: Array<[number, number]>
         hovertemplate?: string
-        marker?: { color?: string[]; size?: number }
+        marker?: { color?: string | string[]; opacity?: number[]; size?: number }
       }>
     }
     const plotElement = ownPlotElement.data
@@ -30,6 +30,7 @@ async function readMeasureTrace(plot: Locator, name: string) {
     const trace = plotElement?.data?.find((entry) => entry.name === traceName)
     if (!trace) return null
     const colors = Array.isArray(trace.marker?.color) ? trace.marker.color : []
+    const opacities = Array.isArray(trace.marker?.opacity) ? trace.marker.opacity : []
     const masses = Array.isArray(trace.customdata)
       ? trace.customdata.map((entry) => entry[1])
       : []
@@ -38,6 +39,7 @@ async function readMeasureTrace(plot: Locator, name: string) {
       massCount: masses.length,
       massSum: masses.reduce((sum, mass) => sum + mass, 0),
       uniqueColors: new Set(colors).size,
+      uniqueOpacities: new Set(opacities).size,
       markerSize: trace.marker?.size ?? null,
       hoverTemplate: trace.hovertemplate ?? '',
     }
@@ -96,7 +98,7 @@ test('State Grid creates a separately rendered and persisted invariant-measure o
     massCount: 94,
     markerSize: 4,
   })
-  expect(trace?.uniqueColors).toBeGreaterThan(1)
+  expect(trace?.uniqueOpacities).toBeGreaterThan(1)
   expect(trace?.massSum).toBeCloseTo(1, 10)
   expect(trace?.hoverTemplate).toContain('mass=')
 
@@ -115,4 +117,30 @@ test('State Grid creates a separately rendered and persisted invariant-measure o
   }
   await expect(page.getByTestId('inspector-name')).toHaveValue(measureName)
   await expect.poll(() => plotHasTrace(plot, measureName)).toBe(true)
+})
+
+test('State Grid creates a sampled flow-map measure for an autonomous flow', async ({ page }) => {
+  test.setTimeout(120_000)
+  const harness = createHarness(page)
+  await harness.goto({ deterministic: true, mock: false })
+  await harness.openSystem('Lorenz')
+  await harness.createScene()
+
+  await page.getByTestId('create-object-button').click()
+  await page.getByTestId('create-object-menu').waitFor()
+  await page.getByTestId('create-state-grid').click()
+  await openStateGridWorkflow(page, 'state-grid-transfer-toggle')
+  await expect(page.getByTestId('state-grid-transfer-time-step')).toHaveValue('0.01')
+  await expect(page.getByText(/sampled flow map/)).toBeVisible()
+  await page.getByTestId('state-grid-create-invariant-measure').click()
+
+  const measureName = 'Invariant_Measure_State_Grid_1'
+  await expect(page.getByTestId('inspector-name')).toHaveValue(measureName, {
+    timeout: 30_000,
+  })
+  await page.getByTestId('action-invariant-measure-data-toggle').click()
+  await expect(page.getByTestId('invariant-measure-data-section')).toContainText(
+    'fixed-time sampled flow map'
+  )
+  await expect(page.getByTestId('invariant-measure-residual')).not.toHaveText('NaN')
 })

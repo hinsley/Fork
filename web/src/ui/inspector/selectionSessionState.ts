@@ -46,6 +46,7 @@ export type WorkflowActionEntry = {
   label: string
   description: string
   tag?: string
+  disabled?: boolean
 }
 
 export type WorkflowNavigationDirection = 'forward' | 'backward'

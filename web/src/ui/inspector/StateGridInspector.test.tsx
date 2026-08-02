@@ -66,7 +66,7 @@ describe('StateGridInspector', () => {
     expect(onUpdateObjectFrozenVariables).toHaveBeenCalledWith(initial.nodeId, { x: 0 })
   })
 
-  it('keeps State Grid setup in Configure and only offers invariant measure for maps', () => {
+  it('keeps State Grid setup in Configure and gates invariant measure by dynamics support', () => {
     const initial = fixture()
     const mapSystem = {
       ...initial.system,
@@ -110,7 +110,7 @@ describe('StateGridInspector', () => {
         solver: 'rk4' as const,
       },
     }
-    render(
+    const { unmount: flowUnmount } = render(
       <WorkflowFocusProvider>
         <StateGridInspector
           system={flowSystem}
@@ -122,7 +122,37 @@ describe('StateGridInspector', () => {
         />
       </WorkflowFocusProvider>
     )
-    expect(screen.queryByTestId('action-state-grid-transfer-toggle')).not.toBeInTheDocument()
+    expect(screen.getByTestId('action-state-grid-transfer-toggle')).not.toBeDisabled()
+    flowUnmount()
+
+    const nonAutonomousFlowSystem = {
+      ...initial.system,
+      config: {
+        ...initial.system.config,
+        equations: ['t', '-x'],
+        type: 'flow' as const,
+        solver: 'rk4' as const,
+      },
+    }
+    render(
+      <WorkflowFocusProvider>
+        <StateGridInspector
+          system={nonAutonomousFlowSystem}
+          nodeId={initial.nodeId}
+          object={initial.object}
+          onRename={() => {}}
+          onUpdate={() => {}}
+          onCompute={async () => null}
+        />
+      </WorkflowFocusProvider>
+    )
+    const disabledAction = screen.getByTestId('action-state-grid-transfer-toggle')
+    expect(disabledAction).toBeDisabled()
+    expect(disabledAction).toHaveTextContent(
+      'Invariant measures are not implemented for non-autonomous flows yet.'
+    )
+    fireEvent.click(disabledAction)
+    expect(screen.queryByTestId('state-grid-invariant-measure-workflow')).not.toBeInTheDocument()
   })
 
   it('updates the Cartesian product count live as a resolution changes', () => {
@@ -385,6 +415,55 @@ describe('StateGridInspector', () => {
     resolveRun()
     await waitFor(() =>
       expect(screen.queryByTestId('state-grid-cancel-invariant-measure')).not.toBeInTheDocument()
+    )
+  })
+
+  it('configures and creates a sampled flow-map measure for autonomous flows', async () => {
+    const initial = fixture()
+    const onUpdate = vi.fn()
+    let resolveRun: () => void = () => {}
+    const onComputeTransferOperator = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRun = resolve
+        })
+    )
+
+    render(
+      <WorkflowFocusProvider>
+        <StateGridInspector
+          system={initial.system}
+          nodeId={initial.nodeId}
+          object={initial.object}
+          onRename={() => {}}
+          onUpdate={onUpdate}
+          onCompute={async () => null}
+          onComputeTransferOperator={onComputeTransferOperator}
+        />
+      </WorkflowFocusProvider>
+    )
+
+    fireEvent.click(screen.getByTestId('action-state-grid-transfer-toggle'))
+    expect(screen.getByTestId('state-grid-invariant-measure-workflow')).toHaveTextContent(
+      'sampled flow map'
+    )
+    expect(screen.getByTestId('state-grid-transfer-time-step')).toHaveValue(0.01)
+    fireEvent.change(screen.getByTestId('state-grid-transfer-time-step'), {
+      target: { value: '0.02' },
+    })
+    expect(onUpdate).toHaveBeenCalledWith(initial.nodeId, {
+      transferOperator: {
+        settings: expect.objectContaining({ timeStep: 0.02 }),
+      },
+    })
+    fireEvent.click(screen.getByTestId('state-grid-create-invariant-measure'))
+    expect(onComputeTransferOperator).toHaveBeenCalledWith(
+      { stateGridId: initial.nodeId },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+    resolveRun()
+    await waitFor(() =>
+      expect(screen.queryByTestId('state-grid-create-invariant-measure')).not.toBeDisabled()
     )
   })
 

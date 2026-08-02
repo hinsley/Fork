@@ -108,6 +108,7 @@ export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[]
                 type="button"
                 className="inspector-action-row"
                 onClick={() => focus.openWorkflow(entry.id)}
+                disabled={entry.disabled}
                 data-testid={`action-${entry.id}`}
                 key={entry.id}
               >

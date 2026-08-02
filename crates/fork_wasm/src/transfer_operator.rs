@@ -1,7 +1,7 @@
-use crate::system::build_system_with_context;
-use fork_core::{
-    equation_engine::{EquationSystem, ExpressionContext},
-    transfer_operator::{sampled_box_transition_operator_with_axis_names, stationary_distribution},
+use crate::system::WasmSystem;
+use fork_core::traits::DynamicalSystem;
+use fork_core::transfer_operator::{
+    sampled_box_transition_operator_with_axis_names_and_step, stationary_distribution,
 };
 use serde::Serialize;
 use serde_wasm_bindgen::to_value;
@@ -32,12 +32,14 @@ struct ResultData {
     stationary_iterations: usize,
 }
 struct State {
-    system: EquationSystem,
+    system: WasmSystem,
     axis_names: Vec<String>,
     bounds: Vec<(f64, f64)>,
     resolution: Vec<usize>,
     samples_per_cell: usize,
     iterations: usize,
+    is_flow: bool,
+    time_step: f64,
     max_stationary_iterations: usize,
     tolerance: f64,
     done: bool,
@@ -55,6 +57,8 @@ impl WasmTransferOperatorRunner {
         params: Vec<f64>,
         param_names: Vec<String>,
         var_names: Vec<String>,
+        solver_name: String,
+        system_type: String,
         minimums: Vec<f64>,
         maximums: Vec<f64>,
         resolution: Vec<u32>,
@@ -62,6 +66,7 @@ impl WasmTransferOperatorRunner {
         iterations: u32,
         max_stationary_iterations: u32,
         tolerance: f64,
+        time_step: f64,
     ) -> Result<Self, JsValue> {
         if var_names.is_empty()
             || minimums.len() != var_names.len()
@@ -72,8 +77,25 @@ impl WasmTransferOperatorRunner {
             || max_stationary_iterations == 0
             || !tolerance.is_finite()
             || tolerance <= 0.
+            || !time_step.is_finite()
+            || time_step <= 0.
         {
             return Err(JsValue::from_str("Transfer-operator settings are invalid."));
+        }
+        let is_flow = match system_type.as_str() {
+            "flow" => true,
+            "map" => false,
+            _ => return Err(JsValue::from_str("Unknown dynamical-system type.")),
+        };
+        let solver_supported = if is_flow {
+            matches!(solver_name.as_str(), "rk4" | "tsit5")
+        } else {
+            solver_name == "discrete"
+        };
+        if !solver_supported {
+            return Err(JsValue::from_str(
+                "Transfer operator requires RK4 or Tsit5 for flows and the discrete solver for maps.",
+            ));
         }
         let bounds: Vec<_> = minimums.into_iter().zip(maximums).collect();
         if bounds
@@ -85,13 +107,17 @@ impl WasmTransferOperatorRunner {
                 "State Grid bounds and resolution are invalid.",
             ));
         }
-        let system = build_system_with_context(
+        let system = WasmSystem::new(
             equations,
             params,
-            &param_names,
-            &var_names,
-            ExpressionContext::MapIteration,
+            param_names,
+            var_names.clone(),
+            &solver_name,
+            &system_type,
         )?;
+        if is_flow {
+            system.require_autonomous("State Grid invariant-measure calculation")?;
+        }
         Ok(Self {
             state: Some(State {
                 system,
@@ -100,6 +126,8 @@ impl WasmTransferOperatorRunner {
                 resolution: resolution.into_iter().map(|x| x as usize).collect(),
                 samples_per_cell: samples_per_cell as usize,
                 iterations: iterations as usize,
+                is_flow,
+                time_step,
                 max_stationary_iterations: max_stationary_iterations as usize,
                 tolerance,
                 done: false,
@@ -137,23 +165,38 @@ impl WasmTransferOperatorRunner {
         })
         .map_err(|e| JsValue::from_str(&e.to_string()))
     }
-    pub fn get_result(&self) -> Result<JsValue, JsValue> {
+    pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
         let state = self
             .state
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| JsValue::from_str("Runner not initialized."))?;
         if !state.done {
             return Err(JsValue::from_str(
                 "Transfer-operator calculation is not complete.",
             ));
         }
-        let op = sampled_box_transition_operator_with_axis_names(
-            &state.system,
+        let mut flow_time = 0.0;
+        let op = sampled_box_transition_operator_with_axis_names_and_step(
+            state.axis_names.len(),
             &state.bounds,
             &state.resolution,
             state.samples_per_cell,
             state.iterations,
             &state.axis_names,
+            |_, _, iteration, sample, out| {
+                if state.is_flow {
+                    if iteration == 0 {
+                        flow_time = 0.0;
+                    }
+                    state
+                        .system
+                        .step_state(&mut flow_time, sample, state.time_step);
+                    out.copy_from_slice(sample);
+                } else {
+                    state.system.system.apply(0.0, sample, out);
+                }
+                Ok(())
+            },
         )
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let (p, dominant_eigenvalue, residual, stationary_iterations) =

@@ -188,6 +188,15 @@ impl WasmSystem {
         Ok(())
     }
 
+    pub(crate) fn step_state(&mut self, t: &mut f64, state: &mut [f64], dt: f64) {
+        match &mut self.solver {
+            SolverType::RK4(s) => s.step(&self.system, t, state, dt),
+            SolverType::Tsit5(s) => s.step(&self.system, t, state, dt),
+            SolverType::Discrete(s) => s.step(&self.system, t, state, dt),
+        }
+        self.periodicity.wrap_state(state);
+    }
+
     pub fn step(&mut self, dt: f64) {
         match &mut self.solver {
             SolverType::RK4(s) => s.step(&self.system, &mut self.t, &mut self.state, dt),

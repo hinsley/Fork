@@ -5,6 +5,7 @@ import type { StateGridComputeRequest } from '../../state/appState'
 import { PlotlyViewport } from '../../viewports/plotly/PlotlyViewport'
 import { resolveObjectParams } from '../../system/parameters'
 import { buildSubsystemSnapshot } from '../../system/subsystemGateway'
+import { autonomousContextError } from '../../system/expressionContext'
 import {
   InspectorDisclosure,
   WorkflowActionList,
@@ -110,6 +111,14 @@ export function StateGridInspector({
     })
   }, [object.axes])
   const isMap = system.config.type === 'map'
+  const isFlow = system.config.type === 'flow'
+  const transferSolverSupported = isMap
+    ? system.config.solver === 'discrete'
+    : system.config.solver === 'rk4' || system.config.solver === 'tsit5'
+  const transferContextError = isFlow
+    ? autonomousContextError(system.config, object.frozenVariables?.frozenEquationContext)
+    : null
+  const transferEnabled = transferSolverSupported && !transferContextError
   const frozenValues = object.frozenVariables?.frozenValuesByVarName ?? {}
   const resolvedParameters = resolveObjectParams(system.config, object.customParameters)
   const subsystemSnapshot = buildSubsystemSnapshot(system.config, object.frozenVariables)
@@ -161,12 +170,21 @@ export function StateGridInspector({
       label: 'State Grid setup',
       description: 'Set bounds and resolution for the free state variables.',
     },
-    ...(isMap
+    ...((isMap || isFlow)
       ? [{
           id: 'state-grid-transfer-toggle' as const,
           group: 'Compute' as const,
           label: 'Invariant measure',
-          description: 'Compute the conditional State Grid transfer operator.',
+          description: transferContextError
+            ? 'Invariant measures are not implemented for non-autonomous flows yet.'
+            : transferSolverSupported
+              ? isFlow
+                ? 'Compute the conditional operator of a fixed sampled flow map.'
+                : 'Compute the conditional State Grid transfer operator.'
+              : isFlow
+                ? 'Invariant measures require the RK4 or Tsit5 flow solver.'
+                : 'Invariant measures require the discrete map solver.',
+          disabled: !transferEnabled,
         }]
       : []),
     {
@@ -179,17 +197,19 @@ export function StateGridInspector({
   const transferSettings = object.transferOperator?.settings ?? {
     samplesPerCell: 4,
     iterations: 1,
+    timeStep: isMap ? 1 : object.analysis.dt,
     maxStationaryIterations: 2000,
     tolerance: 1e-10,
     outsidePolicy: 'conditional_in_grid' as const,
   }
+  const transferTimeStep = transferSettings.timeStep ?? (isMap ? 1 : object.analysis.dt)
   const updateTransferSettings = (
-    field: 'samplesPerCell' | 'iterations' | 'maxStationaryIterations' | 'tolerance',
+    field: 'samplesPerCell' | 'iterations' | 'timeStep' | 'maxStationaryIterations' | 'tolerance',
     rawValue: string
   ) => {
     const value = Number(rawValue)
     if (!Number.isFinite(value) || value <= 0) return
-    if (field !== 'tolerance' && !Number.isInteger(value)) return
+    if (field !== 'tolerance' && field !== 'timeStep' && !Number.isInteger(value)) return
     onUpdate(nodeId, {
       transferOperator: {
         settings: { ...transferSettings, [field]: value },
@@ -732,7 +752,7 @@ export function StateGridInspector({
           </section>
         </InspectorDisclosure>
 
-        {isMap ? (
+        {transferEnabled ? (
         <InspectorDisclosure
           title="Invariant measure"
           testId="state-grid-transfer-toggle"
@@ -759,17 +779,31 @@ export function StateGridInspector({
               data-testid="state-grid-transfer-samples-per-cell"
             />
           </label>
-          <label>
-            Map iterations per transition
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={transferSettings.iterations}
-              onChange={(event) => updateTransferSettings('iterations', event.target.value)}
-              data-testid="state-grid-transfer-iterations"
-            />
-          </label>
+          {isMap ? (
+            <label>
+              Map iterations per transition
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={transferSettings.iterations}
+                onChange={(event) => updateTransferSettings('iterations', event.target.value)}
+                data-testid="state-grid-transfer-iterations"
+              />
+            </label>
+          ) : (
+            <label>
+              Flow time-step per transition
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={transferTimeStep}
+                onChange={(event) => updateTransferSettings('timeStep', event.target.value)}
+                data-testid="state-grid-transfer-time-step"
+              />
+            </label>
+          )}
           <label>
             Stationary iteration limit
             <input
@@ -794,8 +828,9 @@ export function StateGridInspector({
             />
           </label>
           <p className="inspector-help">
-            Endpoints outside the closed grid are discarded. Each surviving source column is
-            normalized by its own in-grid sample count.
+            {isFlow
+              ? 'Each transition advances the autonomous flow by this fixed time-step. This is a sampled flow map, not a return map.'
+              : 'Endpoints outside the closed grid are discarded. Each surviving source column is normalized by its own in-grid sample count.'}
           </p>
           <div className="inspector-inline-actions">
             <button

@@ -139,6 +139,16 @@
   background: var(--button-bg-hover);
 }
 
+.inspector-action-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.inspector-action-row:disabled:hover {
+  border-color: var(--panel-border);
+  background: var(--button-bg);
+}
+
 .inspector-action-row > span:first-child {
   display: grid;
   gap: 2px;

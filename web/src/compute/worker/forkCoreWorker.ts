@@ -500,11 +500,20 @@ async function runExpansionEntropy(
 }
 
 async function runTransferOperator(request: TransferOperatorRequest, signal: AbortSignal, onProgress: (progress: ContinuationProgress) => void): Promise<TransferOperatorResponse> {
-  if (request.system.type !== 'map' || request.system.solver !== 'discrete') throw new Error('Transfer operator currently supports discrete maps only.')
+  const solverSupported = request.system.type === 'map'
+    ? request.system.solver === 'discrete'
+    : request.system.solver === 'rk4' || request.system.solver === 'tsit5'
+  if (!solverSupported) {
+    throw new Error(
+      request.system.type === 'flow'
+        ? 'Invariant measures require the RK4 or Tsit5 flow solver.'
+        : 'Invariant measures require the discrete map solver.'
+    )
+  }
   const wasm = await loadWasm()
   const axesByName = new Map(request.axes.map((axis) => [axis.variableName, axis]))
   const axes = request.system.varNames.map((name) => { const axis = axesByName.get(name); if (!axis) throw new Error(`State Grid is missing bounds for "${name}".`); return axis })
-  const runner = new wasm.WasmTransferOperatorRunner(request.system.equations, new Float64Array(request.system.params), request.system.paramNames, request.system.varNames, new Float64Array(axes.map((x) => x.min)), new Float64Array(axes.map((x) => x.max)), new Uint32Array(axes.map((x) => x.resolution)), request.samplesPerCell, request.iterations, request.maxStationaryIterations, request.tolerance)
+  const runner = new wasm.WasmTransferOperatorRunner(request.system.equations, new Float64Array(request.system.params), request.system.paramNames, request.system.varNames, request.system.solver, request.system.type, new Float64Array(axes.map((x) => x.min)), new Float64Array(axes.map((x) => x.max)), new Uint32Array(axes.map((x) => x.resolution)), request.samplesPerCell, request.iterations, request.maxStationaryIterations, request.tolerance, request.timeStep)
   return await runSteppedRunnerToCompletionAsync(runner, signal, onProgress)
 }
 

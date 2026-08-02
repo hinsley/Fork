@@ -108,8 +108,38 @@ pub fn sampled_box_transition_operator_with_axis_names<S: DynamicalSystem<f64>>(
     iterations: usize,
     axis_names: &[String],
 ) -> Result<BoxTransitionOperator> {
-    if iterations == 0 || system.dimension() != bounds.len() {
-        bail!("Map iterations and grid dimension must be positive and match the system.");
+    sampled_box_transition_operator_with_axis_names_and_step(
+        system.dimension(),
+        bounds,
+        resolution,
+        samples_per_cell,
+        iterations,
+        axis_names,
+        |_, _, _, state, out| {
+            system.apply(0.0, state, out);
+            Ok(())
+        },
+    )
+}
+
+/// Sample a fixed number of transitions from each cell using a caller-provided step.
+///
+/// The callback receives the source cell, sample, and transition indices so callers can
+/// reset per-sample transition state such as a flow time before advancing the sample.
+pub fn sampled_box_transition_operator_with_axis_names_and_step<F>(
+    dimension: usize,
+    bounds: &[(f64, f64)],
+    resolution: &[usize],
+    samples_per_cell: usize,
+    iterations: usize,
+    axis_names: &[String],
+    mut step: F,
+) -> Result<BoxTransitionOperator>
+where
+    F: FnMut(usize, usize, usize, &mut [f64], &mut [f64]) -> Result<()>,
+{
+    if iterations == 0 || dimension != bounds.len() {
+        bail!("Transition iterations and grid dimension must be positive and match the system.");
     }
     let total = resolution
         .iter()
@@ -127,8 +157,8 @@ pub fn sampled_box_transition_operator_with_axis_names<S: DynamicalSystem<f64>>(
             let mut state =
                 stratified_cell_sample(bounds, resolution, source, sample, samples_per_cell)?;
             let mut out = vec![0.0; state.len()];
-            for _ in 0..iterations {
-                system.apply(0.0, &state, &mut out);
+            for iteration in 0..iterations {
+                step(source, sample, iteration, &mut state, &mut out)?;
                 state.copy_from_slice(&out);
             }
             if let Some(target) = box_index(&state, bounds, resolution) {
@@ -251,6 +281,26 @@ mod tests {
         assert!(p.iter().all(|x| *x >= 0.));
         assert!((eigenvalue - 1.).abs() < 1e-12);
         assert!(residual < 1e-12);
+    }
+
+    #[test]
+    fn caller_provided_step_samples_a_fixed_transition() {
+        let op = sampled_box_transition_operator_with_axis_names_and_step(
+            1,
+            &[(0., 1.)],
+            &[2],
+            2,
+            1,
+            &["x".to_string()],
+            |_, _, _, state, out| {
+                out[0] = state[0] + 0.01;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(op.target_indices, vec![0, 1]);
+        assert_eq!(op.zero_survivor_sources, 0);
+        assert!((op.retained_mass - 1.).abs() < 1e-12);
     }
     #[test]
     fn upper_boundary_belongs_to_last_box() {

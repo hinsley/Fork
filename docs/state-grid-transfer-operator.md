@@ -1,9 +1,14 @@
 # State Grid transfer operator
 
-The transfer-operator analysis currently supports discrete maps on a fixed regular State Grid.
-For each source cell, Fork evaluates a deterministic low-discrepancy sample set and routes every
-sample through the configured number of map iterates. A target endpoint on the upper grid boundary
-belongs to the last cell. An endpoint outside the closed grid is dropped.
+The transfer-operator analysis supports discrete maps and autonomous flows on a fixed regular State
+Grid. For each source cell, Fork evaluates a deterministic low-discrepancy sample set. Maps route
+each sample through the configured number of map iterates. Flows route each sample through the
+configured fixed time-step of the sampled flow map Φτ using the system's RK4 or Tsit5 solver. This
+is a fixed-time sampling map, not a Poincaré return map. A target endpoint on the upper grid
+boundary belongs to the last cell. An endpoint outside the closed grid is dropped.
+
+Explicitly time-dependent flows are shown in the State Grid workflow but their invariant-measure
+action is disabled until a phase-locked or otherwise non-autonomous construction is implemented.
 
 Running the analysis creates a separate Invariant Measure object. The State Grid retains the
 bounds, resolution, subsystem configuration, and method settings for later analyses. The new object
@@ -44,3 +49,10 @@ Fork creates and selects `Invariant_Measure_State_Grid_1`. In a Scene, the separ
 as fixed-size points along the state axis; more opaque points have larger mode mass. With the
 settings above, the closed region retains all sampled endpoints and the distribution is visibly
 nonuniform.
+
+## Flow interpretation
+
+For an autonomous flow, the fixed-time map Φτ supplies the same finite-box transition operator
+used for maps. A result with leading eigenvalue approximately one is mass-preserving on the retained
+grid. A result below one remains a leaky finite-box mode; conditional column normalization does not
+turn it into a globally mass-preserving invariant measure.

@@ -102,10 +102,17 @@ export function InvariantMeasureInspectorSections({
         </p>
         <p className="inspector-help">
           {result.settings.samplesPerCell} deterministic samples per cell,{' '}
-          {result.settings.iterations} map iteration
-          {result.settings.iterations === 1 ? '' : 's'} per transition, tolerance{' '}
+          {result.dynamicsType === 'flow'
+            ? `${result.settings.timeStep ?? 0} flow time-step per transition`
+            : `${result.settings.iterations} map iteration${result.settings.iterations === 1 ? '' : 's'} per transition`}, tolerance{' '}
           {formatScientific(result.settings.tolerance)}. Computed {result.computedAt}.
         </p>
+        {result.dynamicsType === 'flow' ? (
+          <p className="inspector-help">
+            This result uses the fixed-time sampled flow map for the autonomous system; it is not a
+            Poincaré return-map measure.
+          </p>
+        ) : null}
         <p className="inspector-help">
           Marker opacity encodes positive mode mass logarithmically. Zero-mass cells are omitted.
           The stored result is a snapshot and does not change when its source grid is edited.
