@@ -40,8 +40,10 @@ export function InspectorPanel({
           onUpdateIsoclineObject={actions.updateIsoclineObject}
           onComputeIsocline={actions.computeIsocline}
           onUpdateStateGridObject={actions.updateStateGridObject}
+          onUpdateInvariantMeasureObject={actions.updateInvariantMeasureObject}
           onComputeExpansionEntropy={actions.computeExpansionEntropy}
           onComputeTransferOperator={actions.computeTransferOperator}
+          onComputeInvariantMeasureEigenmodes={actions.computeInvariantMeasureEigenmodes}
           onUpdateScene={actions.updateScene}
           onUpdateAnalysisViewport={actions.updateAnalysisViewport}
           onValidateAnalysisExpression={actions.validateAnalysisExpression}

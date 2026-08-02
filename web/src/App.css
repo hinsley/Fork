@@ -890,6 +890,68 @@
   text-align: right;
 }
 
+.invariant-eigenmodes {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--panel-border);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.invariant-eigenmodes__summary {
+  margin-top: 4px;
+}
+
+.invariant-eigenmodes__list {
+  display: grid;
+  gap: 6px;
+}
+
+.invariant-eigenmodes__list > button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  padding: 7px 8px;
+  text-align: left;
+  color: var(--text-muted);
+  background: var(--input-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+}
+
+.invariant-eigenmodes__list > button strong {
+  color: var(--text);
+  text-align: right;
+}
+
+.invariant-eigenmodes__list > button.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.invariant-eigenmodes__view {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--input-bg);
+}
+
+.segmented-control {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+}
+
+.segmented-control button.is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 .state-grid-axis-table {
   display: grid;
   gap: 6px;

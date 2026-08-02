@@ -73,4 +73,40 @@ describe('Toolbar invariant-measure progress', () => {
       '640'
     )
   })
+
+  it('shows bounded sparse-product, basis, restart, and convergence progress', () => {
+    render(
+      <Toolbar
+        systemName="Flow"
+        busy
+        theme="dark"
+        {...handlers}
+        progress={{
+          label: 'Eigenmodes',
+          currentStep: 41,
+          maxSteps: 312,
+          points: 41,
+          bifurcations: 0,
+          phase: 'restarting_krylov',
+          restartCount: 2,
+          maxRestarts: 12,
+          subspaceDimension: 24,
+          maxSubspaceDimension: 24,
+          convergedModes: 4,
+          requestedModes: 6,
+          residual: 3e-7,
+          tolerance: 1e-8,
+        }}
+      />
+    )
+
+    expect(screen.getByText('Eigenmodes · Restarting Arnoldi solve')).toBeInTheDocument()
+    expect(screen.getByText('41 / 312 sparse products')).toBeInTheDocument()
+    expect(screen.getByText('4 / 6 modes converged')).toBeInTheDocument()
+    expect(screen.getByText('basis 24 / 24 · restart 2 / 12')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: 'Restarting Arnoldi solve' })).toHaveAttribute(
+      'aria-valuenow',
+      '41'
+    )
+  })
 })

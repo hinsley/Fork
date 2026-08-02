@@ -50,6 +50,7 @@ export const computeOperationMetadata = {
   computeCovariantLyapunovVectors: { reportsProgress: false },
   computeExpansionEntropy: { reportsProgress: true },
   computeTransferOperator: { reportsProgress: true },
+  computeTransferEigenmodes: { reportsProgress: true },
   solveEquilibrium: { reportsProgress: false },
   solveForcedPeriodicResponse: { reportsProgress: false },
   runForcedPeriodicResponseContinuation: { reportsProgress: true },

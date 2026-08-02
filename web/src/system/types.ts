@@ -1088,6 +1088,77 @@ export interface TransferOperatorResult {
   computedAt: string
 }
 
+export type InvariantMeasureEigenmodeInterpretation =
+  | 'density_relaxation'
+  | 'alternating_density_relaxation'
+  | 'oscillatory_density_relaxation'
+  | 'approximate_unconverged'
+
+export type InvariantMeasureSpectralGapStatus =
+  | 'available'
+  | 'operator_not_mass_preserving'
+  | 'reducible_operator'
+  | 'non_unique_stationary_mode'
+  | 'periodic_operator'
+  | 'stationary_mode_not_converged'
+  | 'subdominant_mode_unavailable'
+  | 'subdominant_mode_not_converged'
+
+export type InvariantMeasureEigenmodeReuseBehavior =
+  | 'cached_operator_fresh_restart'
+  | 'cached_operator_saved_mode_warm_start'
+
+export interface InvariantMeasureMarkovStructure {
+  massPreserving: boolean
+  reducible: boolean
+  componentCount: number
+  closedComponentCount: number
+  stationarySimple: boolean
+  period?: number
+}
+
+export interface InvariantMeasureEigenmode {
+  rank: number
+  eigenvalueRe: number
+  eigenvalueIm: number
+  modulus: number
+  ritzResidual: number
+  converged: boolean
+  conjugatePair: boolean
+  interpretation: InvariantMeasureEigenmodeInterpretation
+  vectorReal: number[]
+  vectorImaginary: number[]
+}
+
+export interface InvariantMeasureEigenmodeAnalysis {
+  analysisType: 'transfer_eigenmodes'
+  sourceComputedAt: string
+  method: 'implicitly_restarted_arnoldi'
+  requestedModes: number
+  computedModes: number
+  representedEigenpairs: number
+  operatorDimension: number
+  operatorNonzeros: number
+  tolerance: number
+  maxRestarts: number
+  restartCount: number
+  maxSubspaceDimension: number
+  matrixVectorProducts: number
+  basisPersisted: false
+  reuseBehavior: InvariantMeasureEigenmodeReuseBehavior
+  structure: InvariantMeasureMarkovStructure
+  spectralGap?: number
+  spectralGapStatus: InvariantMeasureSpectralGapStatus
+  modes: InvariantMeasureEigenmode[]
+  computedAt: string
+}
+
+export interface InvariantMeasureEigenmodeView {
+  modeRank: number | null
+  component: 'real' | 'imaginary' | 'phase'
+  phase: number
+}
+
 export interface InvariantMeasureObject {
   type: 'invariant_measure'
   id?: string
@@ -1096,6 +1167,8 @@ export interface InvariantMeasureObject {
   sourceStateGridId: string
   sourceStateGridName: string
   result: TransferOperatorResult
+  eigenmodeAnalysis?: InvariantMeasureEigenmodeAnalysis
+  eigenmodeView?: InvariantMeasureEigenmodeView
   createdAt: string
 }
 

@@ -39,6 +39,8 @@ const wasmState = {
   disableIsoperiodicRunner: false,
   isoperiodicFallbackCalls: 0,
   lastRunStepsArg: null as number | null,
+  lastEigenmodeColumnOffsets: null as number[] | null,
+  lastEigenmodeRequestedModes: null as number | null,
   lastSystemType: null as string | null,
   lastLimitCycleRunnerSystemType: null as string | null,
   lastCycleCurveRunner: null as string | null,
@@ -539,6 +541,93 @@ beforeAll(async () => {
       }
     }
 
+    class MockWasmTransferEigenmodeRunner {
+      private progress = {
+        done: false,
+        current_step: 0,
+        max_steps: 12,
+        points_computed: 0,
+        bifurcations_found: 0,
+        current_param: 0,
+        phase: 'building_krylov',
+        batch_size_hint: 1,
+        requested_modes: 3,
+        converged_modes: 0,
+      }
+
+      constructor(...args: unknown[]) {
+        wasmState.lastEigenmodeColumnOffsets = Array.from(args[0] as Uint32Array)
+        wasmState.lastEigenmodeRequestedModes = args[6] as number
+        this.progress.requested_modes = args[6] as number
+      }
+
+      run_steps(batchSize: number) {
+        wasmState.lastRunStepsArg = batchSize
+        if (this.progress.phase === 'building_krylov') {
+          this.progress = {
+            ...this.progress,
+            current_step: 8,
+            points_computed: 8,
+            phase: 'finalizing_eigenmodes',
+            converged_modes: this.progress.requested_modes,
+          }
+        } else {
+          this.progress = {
+            ...this.progress,
+            done: true,
+            current_step: 9,
+            points_computed: 9,
+            phase: 'complete',
+          }
+        }
+        return this.progress
+      }
+
+      get_progress() {
+        return this.progress
+      }
+
+      get_result() {
+        return {
+          method: 'implicitly_restarted_arnoldi',
+          requestedModes: this.progress.requested_modes,
+          computedModes: 1,
+          representedEigenpairs: 2,
+          operatorDimension: 3,
+          operatorNonzeros: 6,
+          tolerance: 1e-8,
+          maxRestarts: 12,
+          restartCount: 0,
+          maxSubspaceDimension: 3,
+          matrixVectorProducts: 9,
+          basisPersisted: false,
+          reuseBehavior: 'cached_operator_fresh_restart',
+          structure: {
+            massPreserving: true,
+            reducible: false,
+            componentCount: 1,
+            closedComponentCount: 1,
+            stationarySimple: true,
+            period: 1,
+          },
+          spectralGap: 0.2,
+          spectralGapStatus: 'available',
+          modes: [{
+            rank: 1,
+            eigenvalueRe: 0.4,
+            eigenvalueIm: 0.692820323,
+            modulus: 0.8,
+            ritzResidual: 1e-12,
+            converged: true,
+            conjugatePair: true,
+            interpretation: 'oscillatory_density_relaxation',
+            vectorReal: [1, -0.5, -0.5],
+            vectorImaginary: [0, 0.8660254, -0.8660254],
+          }],
+        }
+      }
+    }
+
     class MockContinuationRunner {
       private progress = {
         done: true,
@@ -865,6 +954,7 @@ beforeAll(async () => {
       WasmSystem: MockWasmSystem,
       WasmEquilibriumRunner: MockWasmEquilibriumRunner,
       WasmTransferOperatorRunner: MockWasmTransferOperatorRunner,
+      WasmTransferEigenmodeRunner: MockWasmTransferEigenmodeRunner,
       WasmForcedResponseRunner: MockContinuationRunner,
       WasmEqManifold1DRunner: MockEqManifold1DRunner,
       WasmEqManifold1DExtensionRunner: MockEqManifold1DExtensionRunner,
@@ -920,6 +1010,8 @@ beforeEach(() => {
   wasmState.disableIsoperiodicRunner = false
   wasmState.isoperiodicFallbackCalls = 0
   wasmState.lastRunStepsArg = null
+  wasmState.lastEigenmodeColumnOffsets = null
+  wasmState.lastEigenmodeRequestedModes = null
   wasmState.lastSystemType = null
   wasmState.lastLimitCycleRunnerSystemType = null
   wasmState.lastCycleCurveRunner = null
@@ -1026,6 +1118,85 @@ describe('forkCoreWorker', () => {
       result: { totalBoxes: 4, stationaryIterations: 8 },
     })
     expect(wasmState.lastRunStepsArg).toBe(128)
+  })
+
+  it('analyzes stored sparse transfer data without reconstructing dynamics', async () => {
+    const handler = requireHandler()
+    await handler({
+      data: {
+        id: 'job-transfer-eigenmodes',
+        kind: 'computeTransferEigenmodes',
+        payload: {
+          columnOffsets: [0, 2, 4, 6],
+          targetIndices: [0, 1, 1, 2, 0, 2],
+          probabilities: [0.2, 0.8, 0.2, 0.8, 0.8, 0.2],
+          stationaryDistribution: [1 / 3, 1 / 3, 1 / 3],
+          stationaryEigenvalue: 1,
+          stationaryResidual: 0,
+          requestedModes: 3,
+          tolerance: 1e-8,
+          maxRestarts: 12,
+          warmStartReal: [],
+          warmStartImaginary: [],
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    const messages = workerScope.postMessage.mock.calls.map(([payload]) => payload)
+    expect(
+      messages
+        .filter((message) => message.kind === 'progress')
+        .map((message) => message.progress.phase)
+    ).toEqual(['building_krylov', 'finalizing_eigenmodes', 'complete'])
+    expect(wasmState.lastEigenmodeColumnOffsets).toEqual([0, 2, 4, 6])
+    expect(wasmState.lastEigenmodeRequestedModes).toBe(3)
+    expect(wasmState.lastSystemType).toBeNull()
+    expect(messages.at(-1)).toMatchObject({
+      id: 'job-transfer-eigenmodes',
+      ok: true,
+      result: { method: 'implicitly_restarted_arnoldi', computedModes: 1 },
+    })
+    expect(wasmState.lastRunStepsArg).toBe(1)
+  })
+
+  it('does not publish a late eigenmode result after worker cancellation', async () => {
+    const handler = requireHandler()
+    const runPromise = handler({
+      data: {
+        id: 'job-transfer-eigenmodes-cancel',
+        kind: 'computeTransferEigenmodes',
+        payload: {
+          columnOffsets: [0, 2, 4],
+          targetIndices: [0, 1, 0, 1],
+          probabilities: [0.9, 0.1, 0.2, 0.8],
+          stationaryDistribution: [2 / 3, 1 / 3],
+          stationaryEigenvalue: 1,
+          stationaryResidual: 0,
+          requestedModes: 1,
+          tolerance: 1e-8,
+          maxRestarts: 12,
+          warmStartReal: [],
+          warmStartImaginary: [],
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    await Promise.resolve()
+    await handler({
+      data: { id: 'job-transfer-eigenmodes-cancel', kind: 'cancel' },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+    await runPromise
+
+    const terminal = workerScope.postMessage.mock.calls
+      .map(([payload]) => payload)
+      .filter((message) => 'ok' in message)
+    expect(terminal).toEqual([
+      expect.objectContaining({
+        id: 'job-transfer-eigenmodes-cancel',
+        ok: false,
+        aborted: true,
+      }),
+    ])
   })
 
   it('solves and continues a declared forced periodic response', async () => {

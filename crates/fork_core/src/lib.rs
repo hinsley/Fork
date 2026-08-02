@@ -19,4 +19,5 @@ pub mod state_periodicity;
 /// - **Solvers**: Numerical integrators (RK4, Tsit5) and iterators (DiscreteMap).
 /// - **Autodiff**: Dual number implementation and `TangentSystem` wrapper for Jacobian-based dynamics.
 pub mod traits;
+pub mod transfer_eigenmodes;
 pub mod transfer_operator;

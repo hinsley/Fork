@@ -74,3 +74,39 @@ resolution of each application of Φτ. A result with leading eigenvalue approxi
 mass-preserving on the retained cover. A result below one remains a leaky finite-box mode;
 conditional column normalization does not turn it into a globally mass-preserving invariant
 measure.
+
+## On-demand sparse eigenmodes
+
+A completed Invariant Measure object can analyze a requested leading subset of nontrivial right
+eigenmodes without rebuilding the State Grid, grown cover, sparse transfer operator, or stationary
+measure. The preset count is the number of selectable nontrivial modes beyond the stationary mode.
+A complex conjugate pair is kept together as one oscillatory mode. The presets are Off, 3,
+6 Recommended, 12, and 24 Deep; requests are capped by the active-cover size, a 48-mode product
+limit, a 64 MiB temporary Krylov-basis limit, and a 2,000,000-component persisted-result limit.
+
+The core uses complex implicitly restarted Arnoldi iteration with sparse operator-vector products
+and double modified Gram-Schmidt reorthogonalization. Only the projected Hessenberg problem is
+solved densely. The default residual target is `1e-8`, with at most 12 implicit restarts and a
+Krylov subspace no larger than 96 vectors. Every returned mode records the directly checked
+residual `||Pv - λv||₂` and whether it met the target. Progress reports sparse products, subspace
+size, restart count, and converged mode count, and yields after one sparse product so cancellation
+can suppress later progress and results.
+
+Increasing the requested count reuses the sparse operator stored on the Invariant Measure object.
+Saved mode vectors are mixed into the deterministic starting vector as a warm start, but Fork
+restarts and reorthogonalizes the eigenanalysis. The temporary Krylov basis is never persisted, so
+the interface does not claim to resume or extend a saved Arnoldi factorization.
+
+The inspector lists the computed subset by decreasing eigenvalue modulus and shows each
+eigenvalue, modulus, residual, convergence status, and density-relaxation interpretation. The
+stationary mode is displayed separately. A spectral gap is reported as `1 - |λ₂|` only when the
+stored operator is mass-preserving, its positive-transition graph is irreducible and aperiodic,
+the stationary eigenvalue is simple, and both the stationary and selected subdominant modes have
+converged. Reducible, periodic, leaky, non-unique, or unconverged cases state that the gap is
+unavailable rather than assigning a mixing time.
+
+Selecting a nontrivial mode overlays its signed right eigenvector on the state-space Scene while
+leaving the stationary measure visible. Red and blue encode opposite signs and marker alpha
+encodes relative magnitude. A complex pair supports real, imaginary, and phase-rotated slices.
+These right modes describe density relaxation under the column-oriented operator; left modes for
+observables are not computed in this version.

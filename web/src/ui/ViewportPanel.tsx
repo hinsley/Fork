@@ -68,6 +68,10 @@ import {
 } from '../system/subsystemGateway'
 import { usesEquationContext } from '../system/expressionContext'
 import { normalizeFloquetMultipliersForRendering } from '../system/floquetModes'
+import {
+  eigenmodeScalarValues,
+  hasCurrentEigenmodeAnalysis,
+} from '../system/invariantMeasureEigenmodes'
 import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
 import type { PlotlyFigureCaptureState } from '../viewports/plotly/figureCapture'
 import { applyBranchPieceAppearances } from '../viewports/plotly/branchPieceAppearance'
@@ -3315,6 +3319,91 @@ function buildSceneTraces(
               ? 'x=%{x}<br>cell=%{customdata[0]}<br>mass=%{customdata[1]:.6g}<extra></extra>'
               : 'x=%{x}<br>y=%{y}<br>cell=%{customdata[0]}<br>mass=%{customdata[1]:.6g}<extra></extra>',
         })
+      }
+      if (
+        object.type === 'invariant_measure' &&
+        object.eigenmodeAnalysis &&
+        object.eigenmodeView &&
+        object.eigenmodeView.modeRank !== null &&
+        hasCurrentEigenmodeAnalysis(
+          object.result,
+          object.eigenmodeAnalysis.sourceComputedAt
+        )
+      ) {
+        const mode = object.eigenmodeAnalysis.modes.find(
+          (candidate) => candidate.rank === object.eigenmodeView?.modeRank
+        )
+        if (mode && mode.vectorReal.length === measure.stationaryDistribution.length) {
+          const values = eigenmodeScalarValues(mode, object.eigenmodeView)
+          const maxMagnitude = values.reduce(
+            (maximum, value) => Math.max(maximum, Math.abs(value)),
+            0
+          )
+          if (maxMagnitude > 0) {
+            const modeXs: number[] = []
+            const modeYs: number[] = []
+            const modeZs: number[] = []
+            const modeColors: string[] = []
+            const modeHoverData: Array<[number, number]> = []
+            values.forEach((value, compactCell) => {
+              if (!Number.isFinite(value) || Math.abs(value) <= maxMagnitude * 1e-12) return
+              const cell = coverBoxIndices?.[compactCell] ?? compactCell
+              const point = centers(cell)
+              const projectedPoint = projectedAxisIndices.map((index) => point[index])
+              if (projectedPoint.some((coordinate) => !Number.isFinite(coordinate))) return
+              const opacity = Math.abs(value) / maxMagnitude
+              modeXs.push(projectedPoint[0] ?? 0)
+              modeYs.push(projectedPoint[1] ?? 0)
+              modeZs.push(projectedPoint[2] ?? 0)
+              modeColors.push(
+                colorWithOpacity(value >= 0 ? '#ef4444' : '#3b82f6', opacity)
+              )
+              modeHoverData.push([cell, value])
+            })
+            if (modeXs.length > 0) {
+              const componentLabel =
+                object.eigenmodeView.component === 'phase'
+                  ? `phase ${(object.eigenmodeView.phase / Math.PI).toFixed(2)}π`
+                  : object.eigenmodeView.component
+              const common = {
+                mode: 'markers' as const,
+                name: `${object.name} mode ${mode.rank} ${componentLabel}`,
+                uid: `${nodeId}:eigenmode`,
+                legendgroup: INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP,
+                opacity: normalizeColorOpacity(node.render.opacity),
+                customdata: modeHoverData,
+                hovertemplate:
+                  'cell=%{customdata[0]}<br>signed mode=%{customdata[1]:.6g}<extra></extra>',
+              }
+              if (projectionPlotDim === 3) {
+                traces.push({
+                  ...common,
+                  type: 'scatter3d',
+                  x: modeXs,
+                  y: modeYs,
+                  z: modeZs,
+                  marker: {
+                    color: modeColors,
+                    size: node.render.pointSize * 1.2,
+                    symbol: 'diamond',
+                  },
+                })
+              } else {
+                traces.push({
+                  ...common,
+                  type: 'scatter',
+                  x: modeXs,
+                  y: projectionPlotDim === 1 ? modeXs.map(() => 0) : modeYs,
+                  marker: {
+                    color: modeColors,
+                    size: node.render.pointSize * 1.2,
+                    symbol: 'diamond',
+                  },
+                })
+              }
+            }
+          }
+        }
       }
       continue
     }

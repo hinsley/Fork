@@ -275,6 +275,12 @@ function App() {
                 edgesBuilt: continuationProgress.progress.edges_built,
                 residual: continuationProgress.progress.residual,
                 tolerance: continuationProgress.progress.tolerance,
+                restartCount: continuationProgress.progress.restart_count,
+                maxRestarts: continuationProgress.progress.max_restarts,
+                subspaceDimension: continuationProgress.progress.subspace_dimension,
+                maxSubspaceDimension: continuationProgress.progress.max_subspace_dimension,
+                convergedModes: continuationProgress.progress.converged_modes,
+                requestedModes: continuationProgress.progress.requested_modes,
               }
             : null
         }

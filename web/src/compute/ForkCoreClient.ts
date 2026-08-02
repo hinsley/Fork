@@ -11,6 +11,10 @@ import type {
   EventSeriesMode,
   ForcedPeriodicResponseSolution,
   HeteroclinicEventDiagnostics,
+  InvariantMeasureEigenmode,
+  InvariantMeasureEigenmodeReuseBehavior,
+  InvariantMeasureMarkovStructure,
+  InvariantMeasureSpectralGapStatus,
   SystemConfig,
 } from '../system/types'
 import type {
@@ -41,13 +45,26 @@ export type ContinuationProgress = {
   bifurcations_found: number
   current_param: number
   rings_computed?: number
-  phase?: 'exploring_cover' | 'building_transitions' | 'solving_stationary' | 'complete'
+  phase?:
+    | 'exploring_cover'
+    | 'building_transitions'
+    | 'solving_stationary'
+    | 'building_krylov'
+    | 'restarting_krylov'
+    | 'finalizing_eigenmodes'
+    | 'complete'
   batch_size_hint?: number
   discovered_boxes?: number
   frontier_boxes?: number
   edges_built?: number
   residual?: number
   tolerance?: number
+  restart_count?: number
+  max_restarts?: number
+  subspace_dimension?: number
+  max_subspace_dimension?: number
+  converged_modes?: number
+  requested_modes?: number
 }
 
 export type SimulateOrbitRequest = {
@@ -208,6 +225,40 @@ export type ExpansionEntropyResponse = {
 }
 export type TransferOperatorRequest = { system: SystemConfig; axes: StateGridAxisRequest[]; startingPoint: number[]; samplesPerCell: number; iterations: number; timeStep: number; integrationStep: number; maxStationaryIterations: number; tolerance: number }
 export type TransferOperatorResponse = { totalBoxes: number; ambientBoxCount: number; coverBoxIndices: number[]; seedBoxIndex: number; coverGrowthIterations: number; columnOffsets: number[]; targetIndices: number[]; probabilities: number[]; retainedMass: number; zeroSurvivorSources: number; stationaryDistribution: number[]; dominantEigenvalue: number; residual: number; stationaryIterations: number }
+
+export type TransferEigenmodeRequest = {
+  columnOffsets: number[]
+  targetIndices: number[]
+  probabilities: number[]
+  stationaryDistribution: number[]
+  stationaryEigenvalue: number
+  stationaryResidual: number
+  requestedModes: number
+  tolerance: number
+  maxRestarts: number
+  warmStartReal: number[]
+  warmStartImaginary: number[]
+}
+
+export type TransferEigenmodeResponse = {
+  method: 'implicitly_restarted_arnoldi'
+  requestedModes: number
+  computedModes: number
+  representedEigenpairs: number
+  operatorDimension: number
+  operatorNonzeros: number
+  tolerance: number
+  maxRestarts: number
+  restartCount: number
+  maxSubspaceDimension: number
+  matrixVectorProducts: number
+  basisPersisted: false
+  reuseBehavior: InvariantMeasureEigenmodeReuseBehavior
+  structure: InvariantMeasureMarkovStructure
+  spectralGap?: number
+  spectralGapStatus: InvariantMeasureSpectralGapStatus
+  modes: InvariantMeasureEigenmode[]
+}
 
 export type ValidateSystemRequest = {
   system: SystemConfig
@@ -845,6 +896,7 @@ export interface ForkCoreClient {
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<ExpansionEntropyResponse>
   computeTransferOperator(request: TransferOperatorRequest, opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }): Promise<TransferOperatorResponse>
+  computeTransferEigenmodes(request: TransferEigenmodeRequest, opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }): Promise<TransferEigenmodeResponse>
   solveEquilibrium(
     request: SolveEquilibriumRequest,
     opts?: { signal?: AbortSignal }

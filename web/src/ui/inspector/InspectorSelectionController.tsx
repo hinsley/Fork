@@ -15,6 +15,7 @@ import type {
   ForcedPeriodicResponseObject,
   FrozenEquationContext,
   IsoclineObject,
+  InvariantMeasureObject,
   LimitCycleObject,
   LimitCycleOrigin,
   LimitCycleRenderTarget,
@@ -91,6 +92,7 @@ import type {
   HomotopySaddleFromEquilibriumRequest,
   IsoperiodicCurveContinuationRequest,
   IsoclineComputeRequest,
+  InvariantMeasureEigenmodeRequest,
   StateGridComputeRequest,
   LimitCycleFloquetModesRequest,
   LimitCycleCodim1CurveCreationRequest,
@@ -216,11 +218,19 @@ type InspectorDetailsPanelProps = {
     id: string,
     update: Partial<Omit<StateGridObject, 'type' | 'name' | 'systemName'>>
   ) => void
+  onUpdateInvariantMeasureObject?: (
+    id: string,
+    update: Partial<Omit<InvariantMeasureObject, 'type' | 'name' | 'systemName'>>
+  ) => void
   onComputeExpansionEntropy?: (
     request: StateGridComputeRequest,
     opts?: { signal?: AbortSignal }
   ) => Promise<unknown>
   onComputeTransferOperator?: (request: StateGridComputeRequest, opts?: { signal?: AbortSignal }) => Promise<unknown>
+  onComputeInvariantMeasureEigenmodes?: (
+    request: InvariantMeasureEigenmodeRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<unknown>
   onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   onUpdateAnalysisViewport?: (
     id: string,
@@ -2057,6 +2067,8 @@ function useInspectorSelectionController({
   onUpdateObjectFrozenEquationContext = () => {},
   onUpdateIsoclineObject = () => {},
   onComputeIsocline = async () => null,
+  onUpdateInvariantMeasureObject = () => {},
+  onComputeInvariantMeasureEigenmodes = async () => null,
   onUpdateScene,
   onUpdateAnalysisViewport,
   onValidateAnalysisExpression,
@@ -8760,6 +8772,8 @@ function useInspectorSelectionController({
     isoperiodicParam2Options,
     isocline,
     invariantMeasure,
+    onComputeInvariantMeasureEigenmodes,
+    onUpdateInvariantMeasureObject,
     isoclineActiveAxes,
     isoclineActiveSet,
     isoclineAxisDrafts,
@@ -8872,6 +8886,7 @@ function useInspectorSelectionController({
     parseDraftNumber,
     parseInteger,
     parseNumber,
+    plotlyTheme,
     pdObjectLabel,
     pdObjectLabelName,
     runDisabled,

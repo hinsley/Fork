@@ -13,6 +13,7 @@ mod event_series;
 mod expansion_entropy;
 mod forced_response;
 mod system;
+mod transfer_eigenmodes;
 mod transfer_operator;
 
 #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
@@ -31,6 +32,7 @@ pub use equilibrium::WasmEquilibriumSolverRunner;
 pub use expansion_entropy::WasmExpansionEntropyRunner;
 pub use forced_response::WasmForcedResponseRunner;
 pub use system::WasmSystem;
+pub use transfer_eigenmodes::WasmTransferEigenmodeRunner;
 pub use transfer_operator::WasmTransferOperatorRunner;
 
 #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]

@@ -1,5 +1,15 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Data, Layout } from 'plotly.js'
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
 import { isSubsystemSnapshotCompatible } from '../../../system/subsystemGateway'
+import type { InvariantMeasureObject } from '../../../system/types'
+import {
+  DEFAULT_EIGENMODE_COUNT,
+  eigenmodeInterpretationLabel,
+  hasCurrentEigenmodeAnalysis,
+  maxSupportedEigenmodeCount,
+  spectralGapStatusLabel,
+} from '../../../system/invariantMeasureEigenmodes'
 
 export function InvariantMeasureInspectorSections({
   scope,
@@ -153,6 +163,12 @@ export function InvariantMeasureInspectorSections({
           </div>
         </div>
 
+        <InvariantMeasureEigenmodeAnalysis
+          scope={scope}
+          invariantMeasure={invariantMeasure}
+          stationaryConverged={stationaryConverged}
+        />
+
         <h4 className="inspector-subheading">Grid snapshot</h4>
         <p className="inspector-help">
           {result.axes.map((axis) => `${axis.variableName} ∈ [${axis.min}, ${axis.max}]`).join('; ')}
@@ -219,5 +235,415 @@ export function InvariantMeasureInspectorSections({
         ) : null}
       </div>
     </InspectorDisclosure>
+  )
+}
+
+type EigenmodePreset = 'off' | '3' | '6' | '12' | '24' | 'custom'
+
+const EIGENMODE_PRESETS: Array<{
+  value: EigenmodePreset
+  label: string
+  count: number
+}> = [
+  { value: 'off', label: 'Off', count: 0 },
+  { value: '3', label: '3', count: 3 },
+  { value: '6', label: '6 Recommended', count: 6 },
+  { value: '12', label: '12', count: 12 },
+  { value: '24', label: '24 Deep', count: 24 },
+  { value: 'custom', label: 'Custom', count: 0 },
+]
+
+function presetForCount(count: number | undefined): EigenmodePreset {
+  if (count === 3 || count === 6 || count === 12 || count === 24) {
+    return String(count) as EigenmodePreset
+  }
+  return count === 0 ? 'off' : count === undefined ? '6' : 'custom'
+}
+
+function InvariantMeasureEigenmodeAnalysis({
+  scope,
+  invariantMeasure,
+  stationaryConverged,
+}: {
+  scope: InspectorSelectionController
+  invariantMeasure: InvariantMeasureObject
+  stationaryConverged: boolean
+}) {
+  const {
+    PlotlyViewport,
+    formatComplexValue,
+    formatScientific,
+    onComputeInvariantMeasureEigenmodes,
+    onUpdateInvariantMeasureObject,
+    plotlyTheme,
+    selectedNodeId,
+    selectionKey,
+  } = scope
+  const result = invariantMeasure.result
+  const storedAnalysis = invariantMeasure.eigenmodeAnalysis
+  const analysis =
+    storedAnalysis &&
+    hasCurrentEigenmodeAnalysis(result, storedAnalysis.sourceComputedAt)
+      ? storedAnalysis
+      : null
+  const maxSupported = maxSupportedEigenmodeCount(
+    result.stationaryDistribution.length
+  )
+  const initialCount = analysis?.requestedModes ?? DEFAULT_EIGENMODE_COUNT
+  const [preset, setPreset] = useState<EigenmodePreset>(
+    presetForCount(initialCount)
+  )
+  const [customCount, setCustomCount] = useState(initialCount)
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const controllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    const nextCount = analysis?.requestedModes ?? DEFAULT_EIGENMODE_COUNT
+    setPreset(presetForCount(nextCount))
+    setCustomCount(nextCount)
+    setError(null)
+    return () => {
+      controllerRef.current?.abort()
+      controllerRef.current = null
+    }
+  }, [analysis?.requestedModes, selectionKey])
+
+  const requestedCount =
+    preset === 'custom'
+      ? Math.trunc(customCount)
+      : EIGENMODE_PRESETS.find((entry) => entry.value === preset)?.count ?? 0
+  const requestValid =
+    requestedCount >= 1 && requestedCount <= maxSupported
+  const selectedMode = analysis?.modes.find(
+    (mode) => mode.rank === invariantMeasure.eigenmodeView?.modeRank
+  ) ?? null
+
+  const spectrum = useMemo(() => {
+    if (!analysis || analysis.modes.length === 0) return null
+    const x: number[] = []
+    const y: number[] = []
+    const labels: string[] = []
+    const ranks: number[] = []
+    const colors: string[] = []
+    for (const mode of analysis.modes) {
+      x.push(mode.eigenvalueRe)
+      y.push(mode.eigenvalueIm)
+      labels.push(`Mode ${mode.rank}`)
+      ranks.push(mode.rank)
+      colors.push(mode.rank === selectedMode?.rank ? '#f59e0b' : '#3b82f6')
+      if (mode.conjugatePair && Math.abs(mode.eigenvalueIm) > 0) {
+        x.push(mode.eigenvalueRe)
+        y.push(-mode.eigenvalueIm)
+        labels.push(`Mode ${mode.rank} conjugate`)
+        ranks.push(mode.rank)
+        colors.push(mode.rank === selectedMode?.rank ? '#f59e0b' : '#3b82f6')
+      }
+    }
+    const data: Data[] = [
+      {
+        type: 'scatter',
+        mode: 'markers',
+        name: 'Stationary mode',
+        x: [result.dominantEigenvalue ?? 1],
+        y: [0],
+        marker: { color: '#22c55e', size: 10, symbol: 'diamond' },
+        hovertemplate: 'Stationary mode<br>λ=%{x:.6g}<extra></extra>',
+      },
+      {
+        type: 'scatter',
+        mode: 'markers',
+        name: 'Nontrivial modes',
+        uid: 'invariant-measure-eigenmodes',
+        x,
+        y,
+        text: labels,
+        customdata: ranks,
+        marker: { color: colors, size: 9 },
+        hovertemplate: '%{text}<br>λ=%{x:.6g}%{y:+.6g}i<extra></extra>',
+      },
+    ]
+    const layout: Partial<Layout> = {
+      autosize: true,
+      height: 220,
+      margin: { l: 42, r: 14, t: 16, b: 38 },
+      paper_bgcolor: plotlyTheme.background,
+      plot_bgcolor: plotlyTheme.background,
+      font: { color: plotlyTheme.text, size: 11 },
+      showlegend: false,
+      xaxis: {
+        title: { text: 'Re λ' },
+        zerolinecolor: plotlyTheme.muted,
+        gridcolor: `${plotlyTheme.muted}33`,
+      },
+      yaxis: {
+        title: { text: 'Im λ' },
+        scaleanchor: 'x',
+        scaleratio: 1,
+        zerolinecolor: plotlyTheme.muted,
+        gridcolor: `${plotlyTheme.muted}33`,
+      },
+      shapes: [
+        {
+          type: 'circle',
+          xref: 'x',
+          yref: 'y',
+          x0: -1,
+          x1: 1,
+          y0: -1,
+          y1: 1,
+          line: { color: `${plotlyTheme.muted}88`, width: 1, dash: 'dot' },
+        },
+      ],
+    }
+    return { data, layout }
+  }, [analysis, plotlyTheme, result.dominantEigenvalue, selectedMode?.rank])
+
+  const updateView = (
+    update: Partial<NonNullable<InvariantMeasureObject['eigenmodeView']>>
+  ) => {
+    if (!selectedNodeId) return
+    onUpdateInvariantMeasureObject(selectedNodeId, {
+      eigenmodeView: {
+        modeRank: invariantMeasure.eigenmodeView?.modeRank ?? null,
+        component: invariantMeasure.eigenmodeView?.component ?? 'real',
+        phase: invariantMeasure.eigenmodeView?.phase ?? 0,
+        ...update,
+      },
+    })
+  }
+
+  const choosePreset = (value: EigenmodePreset) => {
+    setPreset(value)
+    setError(null)
+    if (value === 'off') {
+      updateView({ modeRank: null })
+    } else if (analysis && invariantMeasure.eigenmodeView?.modeRank === null) {
+      updateView({ modeRank: analysis.modes[0]?.rank ?? null })
+    }
+  }
+
+  const runAnalysis = async () => {
+    if (!selectedNodeId || !requestValid) return
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
+    setRunning(true)
+    setError(null)
+    try {
+      await onComputeInvariantMeasureEigenmodes(
+        { invariantMeasureId: selectedNodeId, requestedModes: requestedCount },
+        { signal: controller.signal }
+      )
+    } catch (reason) {
+      if (!(reason instanceof Error && reason.name === 'AbortError')) {
+        setError(reason instanceof Error ? reason.message : String(reason))
+      }
+    } finally {
+      if (controllerRef.current === controller) controllerRef.current = null
+      setRunning(false)
+    }
+  }
+
+  return (
+    <section
+      className="invariant-eigenmodes"
+      data-testid="invariant-measure-eigenmodes"
+    >
+      <h4 className="inspector-subheading">Sparse eigenmodes</h4>
+      <p className="inspector-help">
+        Analyze the stored sparse operator after the stationary solve. The count is the number of
+        selectable nontrivial modes; a complex conjugate pair is kept together as one oscillatory
+        mode. The stationary mode remains separate.
+      </p>
+      <label>
+        Nontrivial modes
+        <select
+          value={preset}
+          onChange={(event) => choosePreset(event.target.value as EigenmodePreset)}
+          data-testid="invariant-eigenmode-count-preset"
+        >
+          {EIGENMODE_PRESETS.map((entry) => (
+            <option
+              key={entry.value}
+              value={entry.value}
+              disabled={entry.count > 0 && entry.count > maxSupported}
+            >
+              {entry.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {preset === 'custom' ? (
+        <label>
+          Custom count
+          <input
+            type="number"
+            min={1}
+            max={Math.max(1, maxSupported)}
+            step={1}
+            value={customCount}
+            onChange={(event) => setCustomCount(Number(event.target.value))}
+            data-testid="invariant-eigenmode-custom-count"
+          />
+        </label>
+      ) : null}
+      {preset === '24' || (preset === 'custom' && requestedCount > 12) ? (
+        <p className="inspector-help" data-testid="invariant-eigenmode-deep-warning">
+          Deep requests use more sparse products and can persist large mode vectors. Fork caps the
+          request at {maxSupported.toLocaleString()} modes for this cover.
+        </p>
+      ) : null}
+      {preset === 'off' ? (
+        <p className="inspector-help">
+          State-space mode rendering is off. Any completed analysis remains cached on this object.
+        </p>
+      ) : (
+        <button
+          type="button"
+          className="primary"
+          onClick={() => void runAnalysis()}
+          disabled={running || !stationaryConverged || !requestValid}
+          data-testid="invariant-eigenmode-compute"
+        >
+          {running
+            ? 'Computing modes…'
+            : analysis
+              ? `Compute ${requestedCount} modes`
+              : `Compute ${requestedCount} modes`}
+        </button>
+      )}
+      {!stationaryConverged ? (
+        <p className="inspector-error">
+          Eigenmodes require a converged stationary measure.
+        </p>
+      ) : null}
+      {maxSupported === 0 ? (
+        <p className="inspector-error">
+          This cover has no nontrivial mode.
+        </p>
+      ) : null}
+      {error ? <p className="inspector-error">{error}</p> : null}
+      {storedAnalysis && !analysis ? (
+        <p className="inspector-error">
+          The cached modes refer to an older transfer-operator snapshot and are not displayed.
+        </p>
+      ) : null}
+
+      {analysis ? (
+        <>
+          <div className="inspector-metrics invariant-eigenmodes__summary">
+            <div className="inspector-metrics__row">
+              <span className="inspector-metrics__label">Stationary mode</span>
+              <span className="inspector-metrics__value">
+                λ = {formatScientific(result.dominantEigenvalue ?? 1)}
+              </span>
+            </div>
+            <div className="inspector-metrics__row">
+              <span className="inspector-metrics__label">Computed subset</span>
+              <span className="inspector-metrics__value" data-testid="invariant-eigenmode-subset">
+                {analysis.computedModes} modes ({analysis.representedEigenpairs} eigenpairs)
+              </span>
+            </div>
+            <div className="inspector-metrics__row">
+              <span className="inspector-metrics__label">Spectral gap</span>
+              <span className="inspector-metrics__value" data-testid="invariant-spectral-gap">
+                {analysis.spectralGapStatus === 'available' && analysis.spectralGap !== undefined
+                  ? formatScientific(analysis.spectralGap)
+                  : spectralGapStatusLabel(analysis.spectralGapStatus)}
+              </span>
+            </div>
+          </div>
+          <p className="inspector-help">
+            Modes are sorted by |λ|. Residuals are ‖Pv − λv‖₂. The gap is 1 − |λ₂| only when the
+            stored Markov operator has a simple stationary mode, is irreducible and aperiodic, and
+            both required modes converged.
+          </p>
+          {spectrum ? (
+            <div className="inspector-plot">
+              <PlotlyViewport
+                plotId={`invariant-measure-spectrum-${selectedNodeId}`}
+                data={spectrum.data}
+                layout={spectrum.layout}
+                testId="invariant-measure-spectrum-plot"
+                onPointClick={(point) => {
+                  const rank = Number(point.customdata)
+                  if (Number.isInteger(rank)) updateView({ modeRank: rank })
+                }}
+              />
+            </div>
+          ) : null}
+          <div className="invariant-eigenmodes__list" role="list">
+            {analysis.modes.map((mode) => (
+              <button
+                key={mode.rank}
+                type="button"
+                className={mode.rank === selectedMode?.rank ? 'is-selected' : ''}
+                onClick={() => updateView({ modeRank: mode.rank })}
+                data-testid={`invariant-eigenmode-${mode.rank}`}
+              >
+                <span>Mode {mode.rank}{mode.conjugatePair ? ' pair' : ''}</span>
+                <strong>{formatComplexValue({ re: mode.eigenvalueRe, im: mode.eigenvalueIm })}</strong>
+                <span>|λ| {formatScientific(mode.modulus)}</span>
+                <span>residual {formatScientific(mode.ritzResidual)}</span>
+                <span>{mode.converged ? 'Converged' : 'Not converged'}</span>
+                <span>{eigenmodeInterpretationLabel(mode.interpretation)}</span>
+              </button>
+            ))}
+          </div>
+          {selectedMode ? (
+            <div className="invariant-eigenmodes__view" data-testid="invariant-eigenmode-view-controls">
+              <h4 className="inspector-subheading">State-space mode {selectedMode.rank}</h4>
+              <p className="inspector-help">
+                This right eigenvector describes density relaxation under the column-stochastic
+                operator. It is signed and is not a probability density. Left observable modes are
+                not computed in this analysis.
+              </p>
+              {selectedMode.conjugatePair ? (
+                <>
+                  <div className="segmented-control" role="group" aria-label="Complex mode component">
+                    {(['real', 'imaginary', 'phase'] as const).map((component) => (
+                      <button
+                        key={component}
+                        type="button"
+                        className={invariantMeasure.eigenmodeView?.component === component ? 'is-active' : ''}
+                        onClick={() => updateView({ component })}
+                        data-testid={`invariant-eigenmode-component-${component}`}
+                      >
+                        {component === 'real' ? 'Real' : component === 'imaginary' ? 'Imaginary' : 'Phase'}
+                      </button>
+                    ))}
+                  </div>
+                  {invariantMeasure.eigenmodeView?.component === 'phase' ? (
+                    <label>
+                      Phase {((invariantMeasure.eigenmodeView?.phase ?? 0) / Math.PI).toFixed(2)}π
+                      <input
+                        type="range"
+                        min={0}
+                        max={2 * Math.PI}
+                        step={Math.PI / 36}
+                        value={invariantMeasure.eigenmodeView?.phase ?? 0}
+                        onChange={(event) => updateView({ phase: Number(event.target.value) })}
+                        data-testid="invariant-eigenmode-phase"
+                      />
+                    </label>
+                  ) : null}
+                </>
+              ) : null}
+              <button type="button" onClick={() => updateView({ modeRank: null })}>
+                Hide mode overlay
+              </button>
+            </div>
+          ) : null}
+          <p className="inspector-help">
+            Increasing the count reuses this stored sparse operator and saved modes as a warm
+            start, but restarts and reorthogonalizes the Arnoldi solve. The Krylov basis is bounded
+            to {analysis.maxSubspaceDimension} vectors and is not persisted.
+          </p>
+        </>
+      ) : (
+        <p className="empty-state">No sparse eigenmode analysis stored yet.</p>
+      )}
+    </section>
   )
 }

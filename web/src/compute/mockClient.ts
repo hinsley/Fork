@@ -26,6 +26,8 @@ import type {
   ExpansionEntropyResponse,
   TransferOperatorRequest,
   TransferOperatorResponse,
+  TransferEigenmodeRequest,
+  TransferEigenmodeResponse,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   FoldCurveContinuationRequest,
@@ -565,6 +567,97 @@ export class MockForkCoreClient implements ForkCoreClient {
       }, 0)
       opts?.onProgress?.({ done: true, current_step: 1, max_steps: 1, points_computed: 1, bifurcations_found: 0, current_param: 1 })
       return { totalBoxes: 1, ambientBoxCount, coverBoxIndices: [seedBoxIndex], seedBoxIndex, coverGrowthIterations: 1, columnOffsets: [0, 1], targetIndices: [0], probabilities: [1], retainedMass: 1, zeroSurvivorSources: 0, stationaryDistribution: [1], dominantEigenvalue: 1, residual: 0, stationaryIterations: 1 }
+    }, opts)
+    return await job.promise
+  }
+
+  async computeTransferEigenmodes(
+    request: TransferEigenmodeRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<TransferEigenmodeResponse> {
+    const job = this.queue.enqueue('computeTransferEigenmodes', async (signal) => {
+      if (signal.aborted) {
+        const error = new Error('cancelled')
+        error.name = 'AbortError'
+        throw error
+      }
+      const dimension = request.stationaryDistribution.length
+      opts?.onProgress?.({
+        done: false,
+        current_step: 0,
+        max_steps: Math.max(1, dimension),
+        points_computed: 0,
+        bifurcations_found: 0,
+        current_param: 0,
+        phase: 'building_krylov',
+        requested_modes: request.requestedModes,
+        converged_modes: 0,
+      })
+      await Promise.resolve()
+      if (signal.aborted) {
+        const error = new Error('cancelled')
+        error.name = 'AbortError'
+        throw error
+      }
+      const computedModes = Math.min(request.requestedModes, Math.max(0, dimension - 1))
+      const modes = Array.from({ length: computedModes }, (_, index) => {
+        const vectorReal = Array.from(
+          { length: dimension },
+          (_value, row) => (row === index % dimension ? 1 : -1 / Math.max(1, dimension - 1))
+        )
+        return {
+          rank: index + 1,
+          eigenvalueRe: Math.max(0, 0.75 - 0.1 * index),
+          eigenvalueIm: 0,
+          modulus: Math.max(0, 0.75 - 0.1 * index),
+          ritzResidual: 1e-12,
+          converged: true,
+          conjugatePair: false,
+          interpretation: 'density_relaxation' as const,
+          vectorReal,
+          vectorImaginary: [],
+        }
+      })
+      opts?.onProgress?.({
+        done: true,
+        current_step: Math.max(1, dimension),
+        max_steps: Math.max(1, dimension),
+        points_computed: Math.max(1, dimension),
+        bifurcations_found: 0,
+        current_param: 1e-12,
+        phase: 'complete',
+        requested_modes: request.requestedModes,
+        converged_modes: computedModes,
+      })
+      return {
+        method: 'implicitly_restarted_arnoldi',
+        requestedModes: request.requestedModes,
+        computedModes,
+        representedEigenpairs: computedModes,
+        operatorDimension: dimension,
+        operatorNonzeros: request.probabilities.length,
+        tolerance: request.tolerance,
+        maxRestarts: request.maxRestarts,
+        restartCount: 0,
+        maxSubspaceDimension: dimension,
+        matrixVectorProducts: Math.max(1, dimension),
+        basisPersisted: false,
+        reuseBehavior:
+          request.warmStartReal.length > 0
+            ? 'cached_operator_saved_mode_warm_start'
+            : 'cached_operator_fresh_restart',
+        structure: {
+          massPreserving: true,
+          reducible: false,
+          componentCount: 1,
+          closedComponentCount: 1,
+          stationarySimple: true,
+          period: 1,
+        },
+        spectralGap: modes[0] ? 1 - modes[0].modulus : undefined,
+        spectralGapStatus: modes[0] ? 'available' : 'subdominant_mode_unavailable',
+        modes,
+      } satisfies TransferEigenmodeResponse
     }, opts)
     return await job.promise
   }

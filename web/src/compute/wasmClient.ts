@@ -24,6 +24,8 @@ import type {
   ExpansionEntropyResponse,
   TransferOperatorRequest,
   TransferOperatorResponse,
+  TransferEigenmodeRequest,
+  TransferEigenmodeResponse,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   FoldCurveContinuationRequest,
@@ -221,6 +223,19 @@ export class WasmForkCoreClient implements ForkCoreClient {
     const job = this.queue.enqueue(
       'computeTransferOperator',
       (signal) => this.runWorker('computeTransferOperator', request, signal, opts?.onProgress),
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeTransferEigenmodes(
+    request: TransferEigenmodeRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<TransferEigenmodeResponse> {
+    const job = this.queue.enqueue(
+      'computeTransferEigenmodes',
+      (signal) =>
+        this.runWorker('computeTransferEigenmodes', request, signal, opts?.onProgress),
       opts
     )
     return await job.promise

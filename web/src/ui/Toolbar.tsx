@@ -14,12 +14,25 @@ type ToolbarProps = {
     arclength?: number
     arclengthTarget?: number
     radius?: number
-    phase?: 'exploring_cover' | 'building_transitions' | 'solving_stationary' | 'complete'
+    phase?:
+      | 'exploring_cover'
+      | 'building_transitions'
+      | 'solving_stationary'
+      | 'building_krylov'
+      | 'restarting_krylov'
+      | 'finalizing_eigenmodes'
+      | 'complete'
     discoveredBoxes?: number
     frontierBoxes?: number
     edgesBuilt?: number
     residual?: number
     tolerance?: number
+    restartCount?: number
+    maxRestarts?: number
+    subspaceDimension?: number
+    maxSubspaceDimension?: number
+    convergedModes?: number
+    requestedModes?: number
   } | null
   onHome: () => void
   onOpenSystems: () => void
@@ -52,6 +65,7 @@ export function Toolbar({
   const formatResidual = (value: number | undefined) =>
     typeof value === 'number' && Number.isFinite(value) ? value.toExponential(2) : 'pending'
   const transferPhase = progress?.phase
+  const eigenmodeProgress = progress?.label === 'Eigenmodes'
   const transferPhaseLabel =
     transferPhase === 'exploring_cover'
       ? 'Exploring cover'
@@ -59,6 +73,12 @@ export function Toolbar({
         ? 'Building transitions'
         : transferPhase === 'solving_stationary'
           ? 'Solving stationary mode'
+          : transferPhase === 'building_krylov'
+            ? 'Building Krylov basis'
+            : transferPhase === 'restarting_krylov'
+              ? 'Restarting Arnoldi solve'
+              : transferPhase === 'finalizing_eigenmodes'
+                ? 'Finalizing eigenmodes'
           : transferPhase === 'complete'
             ? 'Complete'
             : null
@@ -191,6 +211,13 @@ export function Toolbar({
                   <span>
                     {formatCount(progress.currentStep)} / {formatCount(progress.maxSteps)} cells
                   </span>
+                ) : transferPhase === 'building_krylov' ||
+                  transferPhase === 'restarting_krylov' ||
+                  transferPhase === 'finalizing_eigenmodes' ||
+                  (transferPhase === 'complete' && eigenmodeProgress) ? (
+                  <span>
+                    {formatCount(progress.currentStep)} / {formatCount(progress.maxSteps)} sparse products
+                  </span>
                 ) : transferPhase === 'solving_stationary' || transferPhase === 'complete' ? (
                   <span>
                     {formatCount(progress.currentStep)} / {formatCount(progress.maxSteps)} iterations
@@ -251,6 +278,22 @@ export function Toolbar({
                 <>
                   <span>{formatCount(progress.points)} dynamics steps</span>
                   <span>{formatCount(progress.edgesBuilt ?? 0)} edges</span>
+                </>
+              ) : transferPhase === 'building_krylov' ||
+                transferPhase === 'restarting_krylov' ||
+                transferPhase === 'finalizing_eigenmodes' ||
+                (transferPhase === 'complete' && eigenmodeProgress) ? (
+                <>
+                  <span>
+                    {formatCount(progress.convergedModes ?? 0)} /{' '}
+                    {formatCount(progress.requestedModes ?? 0)} modes converged
+                  </span>
+                  <span>
+                    basis {formatCount(progress.subspaceDimension ?? 0)} /{' '}
+                    {formatCount(progress.maxSubspaceDimension ?? 0)} · restart{' '}
+                    {formatCount(progress.restartCount ?? 0)} /{' '}
+                    {formatCount(progress.maxRestarts ?? 0)}
+                  </span>
                 </>
               ) : transferPhase === 'solving_stationary' || transferPhase === 'complete' ? (
                 <>

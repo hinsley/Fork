@@ -19,6 +19,7 @@ import type {
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
   ExpansionEntropyResponse,
+  TransferEigenmodeResponse,
   TransferOperatorResponse,
   ValidateSystemResult,
 } from '../compute/ForkCoreClient'
@@ -136,6 +137,13 @@ import {
 import { validateSystemConfig } from './systemValidation'
 import { isValidDisplayName, suggestDefaultName } from '../utils/naming'
 import { makeStableId } from '../utils/determinism'
+import {
+  DEFAULT_EIGENMODE_MAX_RESTARTS,
+  DEFAULT_EIGENMODE_TOLERANCE,
+  flattenEigenmodeWarmStart,
+  hasCurrentEigenmodeAnalysis,
+  maxSupportedEigenmodeCount,
+} from '../system/invariantMeasureEigenmodes'
 import {
   DEFAULT_HOMOCLINIC_INTEGRATION_STEPS_PER_SEGMENT,
   DEFAULT_HOMOCLINIC_SHOOTING_INTERVALS,
@@ -1780,6 +1788,11 @@ export type StateGridComputeRequest = {
   startingPoint?: Record<string, number>
 }
 
+export type InvariantMeasureEigenmodeRequest = {
+  invariantMeasureId: string
+  requestedModes: number
+}
+
 export type LimitCycleHopfContinuationRequest = {
   branchId: string
   pointIndex: number
@@ -2067,6 +2080,10 @@ export type AppActions = {
     nodeId: string,
     update: Partial<Omit<StateGridObject, 'type' | 'name' | 'systemName'>>
   ) => void
+  updateInvariantMeasureObject: (
+    nodeId: string,
+    update: Partial<Omit<InvariantMeasureObject, 'type' | 'name' | 'systemName'>>
+  ) => void
   updateScene: (sceneId: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   updateAnalysisViewport: (
     viewportId: string,
@@ -2122,6 +2139,10 @@ export type AppActions = {
     opts?: { signal?: AbortSignal }
   ) => Promise<ExpansionEntropyResponse | null>
   computeTransferOperator: (request: StateGridComputeRequest, opts?: { signal?: AbortSignal }) => Promise<TransferOperatorResponse | null>
+  computeInvariantMeasureEigenmodes: (
+    request: InvariantMeasureEigenmodeRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<TransferEigenmodeResponse | null>
   computeLimitCycleFloquetModes: (request: LimitCycleFloquetModesRequest) => Promise<void>
   computeNormalFormAtPoint: (request: NormalFormAtPointRequest) => Promise<void>
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
@@ -2676,6 +2697,22 @@ export function AppProvider({
         axes,
         analysis,
       })
+      dispatch({ type: 'SET_SYSTEM', system })
+      scheduleSystemSave(system)
+    },
+    [scheduleSystemSave, state.system]
+  )
+
+  const updateInvariantMeasureObjectAction = useCallback(
+    (
+      nodeId: string,
+      update: Partial<Omit<InvariantMeasureObject, 'type' | 'name' | 'systemName'>>
+    ) => {
+      if (!state.system) return
+      const object = state.system.objects[nodeId]
+      if (!object || object.type !== 'invariant_measure') return
+      const system = updateObject(state.system, nodeId, update)
+      latestSystemRef.current = system
       dispatch({ type: 'SET_SYSTEM', system })
       scheduleSystemSave(system)
     },
@@ -3514,6 +3551,169 @@ export function AppProvider({
         latestSystemRef.current = selected
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
+        return result
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') return null
+        const message = error instanceof Error ? error.message : String(error)
+        dispatch({ type: 'SET_ERROR', error: message })
+        throw error instanceof Error ? error : new Error(message)
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const computeInvariantMeasureEigenmodes = useCallback(
+    async (
+      request: InvariantMeasureEigenmodeRequest,
+      opts?: { signal?: AbortSignal }
+    ): Promise<TransferEigenmodeResponse | null> => {
+      const launchSystem = latestSystemRef.current ?? state.system
+      if (!launchSystem) return null
+      const launchSystemId = launchSystem.id
+      const object = launchSystem.objects[request.invariantMeasureId]
+      if (!object || object.type !== 'invariant_measure') {
+        throw new Error('Select a completed Invariant Measure object.')
+      }
+      const sourceResult = object.result
+      const dimension = sourceResult.stationaryDistribution.length
+      const maxSupported = maxSupportedEigenmodeCount(dimension)
+      if (
+        !Number.isInteger(request.requestedModes) ||
+        request.requestedModes < 1 ||
+        request.requestedModes > maxSupported
+      ) {
+        throw new Error(
+          maxSupported > 0
+            ? `Request between 1 and ${maxSupported} nontrivial modes for this cover.`
+            : 'This cover is too small for a nontrivial eigenmode.'
+        )
+      }
+      if (
+        sourceResult.columnOffsets.length !== dimension + 1 ||
+        sourceResult.columnOffsets[0] !== 0 ||
+        sourceResult.columnOffsets.at(-1) !== sourceResult.probabilities.length ||
+        sourceResult.targetIndices.length !== sourceResult.probabilities.length
+      ) {
+        throw new Error('The stored sparse transfer operator is malformed.')
+      }
+      const stationaryMass = sourceResult.stationaryDistribution.reduce(
+        (sum, value) => sum + value,
+        0
+      )
+      if (
+        !(stationaryMass > 0) ||
+        !Number.isFinite(sourceResult.residual) ||
+        sourceResult.residual > sourceResult.settings.tolerance
+      ) {
+        throw new Error('Eigenmodes require a converged stationary measure.')
+      }
+      const previousAnalysis =
+        object.eigenmodeAnalysis &&
+        hasCurrentEigenmodeAnalysis(
+          sourceResult,
+          object.eigenmodeAnalysis.sourceComputedAt
+        ) &&
+        object.eigenmodeAnalysis.operatorDimension === dimension
+          ? object.eigenmodeAnalysis
+          : null
+      const warmStart = flattenEigenmodeWarmStart(
+        previousAnalysis?.modes ?? [],
+        dimension
+      )
+
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const result = await client.computeTransferEigenmodes(
+          {
+            columnOffsets: sourceResult.columnOffsets,
+            targetIndices: sourceResult.targetIndices,
+            probabilities: sourceResult.probabilities,
+            stationaryDistribution: sourceResult.stationaryDistribution,
+            stationaryEigenvalue: sourceResult.dominantEigenvalue ?? 1,
+            stationaryResidual: sourceResult.residual,
+            requestedModes: request.requestedModes,
+            tolerance: DEFAULT_EIGENMODE_TOLERANCE,
+            maxRestarts: DEFAULT_EIGENMODE_MAX_RESTARTS,
+            warmStartReal: warmStart.real,
+            warmStartImaginary: warmStart.imaginary,
+          },
+          {
+            signal: opts?.signal,
+            onProgress: (progress) => {
+              if (opts?.signal?.aborted) return
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Eigenmodes', progress },
+              })
+            },
+          }
+        )
+        if (opts?.signal?.aborted) return null
+        if (
+          result.operatorDimension !== dimension ||
+          result.modes.some(
+            (mode) =>
+              mode.vectorReal.length !== dimension ||
+              (mode.conjugatePair && mode.vectorImaginary.length !== dimension)
+          )
+        ) {
+          throw new Error('Eigenmode result does not match the stored transfer operator.')
+        }
+        if (uiSaveTimer.current) {
+          clearTimeout(uiSaveTimer.current)
+          uiSaveTimer.current = null
+        }
+        if (systemSaveTimer.current) {
+          clearTimeout(systemSaveTimer.current)
+          systemSaveTimer.current = null
+        }
+        while (inFlightDebouncedWritesRef.current.size > 0) {
+          await Promise.allSettled([...inFlightDebouncedWritesRef.current])
+        }
+        if (opts?.signal?.aborted) return null
+        const current = latestSystemRef.current
+        if (!current || current.id !== launchSystemId) return null
+        const currentObject = current.objects[request.invariantMeasureId]
+        if (
+          !currentObject ||
+          currentObject.type !== 'invariant_measure' ||
+          currentObject.result.computedAt !== sourceResult.computedAt
+        ) {
+          return null
+        }
+        const computedAt = new Date().toISOString()
+        const selectedRank =
+          currentObject.eigenmodeView?.modeRank !== null &&
+          result.modes.some(
+            (mode) => mode.rank === currentObject.eigenmodeView?.modeRank
+          )
+            ? currentObject.eigenmodeView?.modeRank ?? null
+            : result.modes[0]?.rank ?? null
+        const selectedMode = result.modes.find((mode) => mode.rank === selectedRank)
+        const previousView = currentObject.eigenmodeView
+        const component =
+          selectedMode?.conjugatePair && previousView
+            ? previousView.component
+            : 'real'
+        const updated = updateObject(current, request.invariantMeasureId, {
+          eigenmodeAnalysis: {
+            analysisType: 'transfer_eigenmodes',
+            sourceComputedAt: sourceResult.computedAt,
+            ...structuredClone(result),
+            computedAt,
+          },
+          eigenmodeView: {
+            modeRank: selectedRank,
+            component,
+            phase: Number.isFinite(previousView?.phase) ? previousView?.phase ?? 0 : 0,
+          },
+        } as Partial<InvariantMeasureObject>)
+        latestSystemRef.current = updated
+        dispatch({ type: 'SET_SYSTEM', system: updated })
+        await store.save(updated)
         return result
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') return null
@@ -10005,6 +10205,7 @@ export function AppProvider({
       updateObjectFrozenEquationContext: updateObjectFrozenEquationContextAction,
       updateIsoclineObject: updateIsoclineObjectAction,
       updateStateGridObject: updateStateGridObjectAction,
+      updateInvariantMeasureObject: updateInvariantMeasureObjectAction,
       updateScene: updateSceneAction,
       updateAnalysisViewport: updateAnalysisViewportAction,
       updateBifurcationDiagram: updateBifurcationDiagramAction,
@@ -10026,6 +10227,7 @@ export function AppProvider({
       computeCovariantLyapunovVectors,
       computeExpansionEntropy,
       computeTransferOperator,
+      computeInvariantMeasureEigenmodes,
       computeLimitCycleFloquetModes,
       solveEquilibrium,
       solveForcedPeriodicResponse,
@@ -10080,6 +10282,7 @@ export function AppProvider({
       computeCovariantLyapunovVectors,
       computeExpansionEntropy,
       computeTransferOperator,
+      computeInvariantMeasureEigenmodes,
       computeLimitCycleFloquetModes,
       solveEquilibrium,
       solveForcedPeriodicResponse,
@@ -10136,6 +10339,7 @@ export function AppProvider({
       updateObjectFrozenEquationContextAction,
       updateIsoclineObjectAction,
       updateStateGridObjectAction,
+      updateInvariantMeasureObjectAction,
       updateSceneAction,
       updateAnalysisViewportAction,
       updateBifurcationDiagramAction,

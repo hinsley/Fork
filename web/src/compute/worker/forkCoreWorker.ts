@@ -28,6 +28,8 @@ import type {
   ExpansionEntropyResponse,
   TransferOperatorRequest,
   TransferOperatorResponse,
+  TransferEigenmodeRequest,
+  TransferEigenmodeResponse,
   EventSeriesResult,
   FoldCurveContinuationRequest,
   ForcedPeriodicResponseContinuationRequest,
@@ -99,6 +101,23 @@ type ThreadedWasmModule = GeneratedWasmModule & {
 }
 type GeneratedHomoclinicRunner = InstanceType<GeneratedWasmModule['WasmHomoclinicRunner']>
 type WasmModule = GeneratedWasmModule & {
+  WasmTransferEigenmodeRunner: new (
+    columnOffsets: Uint32Array,
+    targetIndices: Uint32Array,
+    probabilities: Float64Array,
+    stationaryDistribution: Float64Array,
+    stationaryEigenvalue: number,
+    stationaryResidual: number,
+    requestedModes: number,
+    tolerance: number,
+    maxRestarts: number,
+    warmStartReal: Float64Array,
+    warmStartImaginary: Float64Array
+  ) => {
+    get_progress: () => ContinuationProgress
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_result: () => TransferEigenmodeResponse
+  }
   WasmHomoclinicShootingRunner?: new (
     equations: string[],
     params: Float64Array,
@@ -514,6 +533,39 @@ async function runTransferOperator(request: TransferOperatorRequest, signal: Abo
   const axesByName = new Map(request.axes.map((axis) => [axis.variableName, axis]))
   const axes = request.system.varNames.map((name) => { const axis = axesByName.get(name); if (!axis) throw new Error(`State Grid is missing bounds for "${name}".`); return axis })
   const runner = new wasm.WasmTransferOperatorRunner(request.system.equations, new Float64Array(request.system.params), request.system.paramNames, request.system.varNames, request.system.solver, request.system.type, new Float64Array(axes.map((x) => x.min)), new Float64Array(axes.map((x) => x.max)), new Uint32Array(axes.map((x) => x.resolution)), new Float64Array(request.startingPoint), request.samplesPerCell, request.iterations, request.maxStationaryIterations, request.tolerance, request.timeStep, request.integrationStep)
+  return await runSteppedRunnerToCompletionAsync(runner, signal, onProgress)
+}
+
+async function runTransferEigenmodes(
+  request: TransferEigenmodeRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<TransferEigenmodeResponse> {
+  const unsignedValues = [...request.columnOffsets, ...request.targetIndices]
+  if (
+    unsignedValues.some(
+      (value) =>
+        !Number.isSafeInteger(value) || value < 0 || value > 0xffff_ffff
+    )
+  ) {
+    throw new Error('Sparse transfer-operator indices exceed the WASM index range.')
+  }
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  abortIfNeeded(signal)
+  const runner = new wasm.WasmTransferEigenmodeRunner(
+    new Uint32Array(request.columnOffsets),
+    new Uint32Array(request.targetIndices),
+    new Float64Array(request.probabilities),
+    new Float64Array(request.stationaryDistribution),
+    request.stationaryEigenvalue,
+    request.stationaryResidual,
+    request.requestedModes,
+    request.tolerance,
+    request.maxRestarts,
+    new Float64Array(request.warmStartReal),
+    new Float64Array(request.warmStartImaginary)
+  )
   return await runSteppedRunnerToCompletionAsync(runner, signal, onProgress)
 }
 
@@ -2368,6 +2420,7 @@ const handlers = {
   computeCovariantLyapunovVectors: runCovariantLyapunovVectors,
   computeExpansionEntropy: runExpansionEntropy,
   computeTransferOperator: runTransferOperator,
+  computeTransferEigenmodes: runTransferEigenmodes,
   solveEquilibrium: runSolveEquilibrium,
   solveForcedPeriodicResponse: runSolveForcedPeriodicResponse,
   runForcedPeriodicResponseContinuation,

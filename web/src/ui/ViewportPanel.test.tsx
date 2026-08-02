@@ -164,6 +164,97 @@ describe('ViewportPanel view state wiring', () => {
     expect(trace.customdata).toEqual([[1, 3.70926e-36], [2, 0.01], [3, 0.99]])
   })
 
+  it('overlays a signed right eigenmode without replacing the stationary measure', () => {
+    const config: SystemConfig = { name: 'Eigenmode map', equations: ['x', 'y'], params: [], paramNames: [], varNames: ['x', 'y'], solver: 'discrete', type: 'map' }
+    const computedAt = '2026-08-02T12:00:00.000Z'
+    const added = addObject(createSystem({ name: config.name, config }), {
+      type: 'invariant_measure',
+      name: 'Map_Eigenmode',
+      systemName: config.name,
+      sourceStateGridId: 'grid-source',
+      sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator', dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: 0, max: 2, resolution: 2 }, { variableName: 'y', min: 0, max: 2, resolution: 2 }],
+        settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' },
+        parameters: [], totalBoxes: 4, coverBoxIndices: [0, 1, 2, 3],
+        columnOffsets: [0, 1, 2, 3, 4], targetIndices: [0, 1, 2, 3], probabilities: [1, 1, 1, 1], retainedMass: 1, zeroSurvivorSources: 0,
+        stationaryDistribution: [0.25, 0.25, 0.25, 0.25], dominantEigenvalue: 1, residual: 0, stationaryIterations: 1, computedAt,
+      },
+      eigenmodeAnalysis: {
+        analysisType: 'transfer_eigenmodes', sourceComputedAt: computedAt, method: 'implicitly_restarted_arnoldi', requestedModes: 1, computedModes: 1, representedEigenpairs: 1,
+        operatorDimension: 4, operatorNonzeros: 4, tolerance: 1e-8, maxRestarts: 12, restartCount: 0, maxSubspaceDimension: 4, matrixVectorProducts: 5, basisPersisted: false,
+        reuseBehavior: 'cached_operator_fresh_restart', structure: { massPreserving: true, reducible: false, componentCount: 1, closedComponentCount: 1, stationarySimple: true, period: 1 },
+        spectralGap: 0.25, spectralGapStatus: 'available',
+        modes: [{ rank: 1, eigenvalueRe: 0.75, eigenvalueIm: 0, modulus: 0.75, ritzResidual: 1e-12, converged: true, conjugatePair: false, interpretation: 'density_relaxation', vectorReal: [1, -0.5, 0.25, -1], vectorImaginary: [] }],
+        computedAt: '2026-08-02T12:01:00.000Z',
+      },
+      eigenmodeView: { modeRank: 1, component: 'real', phase: 0 },
+      createdAt: computedAt,
+    } as InvariantMeasureObject)
+    const scene = addScene(added.system, 'Eigenmode scene')
+    const system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
+
+    renderPanel(system)
+
+    const traces = plotlyCalls.flatMap((call) => call.data)
+    expect(traces.find((trace) => trace.name === 'Map_Eigenmode')).toBeDefined()
+    const mode = traces.find((trace) => trace.name === 'Map_Eigenmode mode 1 real') as {
+      type: string
+      x: number[]
+      marker: { color: string[]; symbol: string }
+      customdata: Array<[number, number]>
+    }
+    expect(mode.type).toBe('scatter')
+    expect(mode.x).toHaveLength(4)
+    expect(mode.marker.symbol).toBe('diamond')
+    expect(mode.marker.color[0]).toBe('#ef4444')
+    expect(mode.marker.color[1]).toContain('rgba(59, 130, 246')
+    expect(mode.customdata).toEqual([[0, 1], [1, -0.5], [2, 0.25], [3, -1]])
+  })
+
+  it('renders a complex phase slice for a three-dimensional sampled-flow mode', () => {
+    const config: SystemConfig = { name: 'Eigenmode flow', equations: ['y', '-x', '-z'], params: [], paramNames: [], varNames: ['x', 'y', 'z'], solver: 'rk4', type: 'flow' }
+    const computedAt = '2026-08-02T13:00:00.000Z'
+    const added = addObject(createSystem({ name: config.name, config }), {
+      type: 'invariant_measure', name: 'Flow_Eigenmode', systemName: config.name,
+      sourceStateGridId: 'grid-source', sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator', dynamicsType: 'flow', axes: [
+          { variableName: 'x', min: -1, max: 1, resolution: 2 },
+          { variableName: 'y', min: -1, max: 1, resolution: 2 },
+          { variableName: 'z', min: -1, max: 1, resolution: 2 },
+        ],
+        settings: { samplesPerCell: 4, iterations: 1, timeStep: 1, integrationStep: 0.01, maxStationaryIterations: 20, tolerance: 1e-8, outsidePolicy: 'conditional_in_grid' },
+        parameters: [], totalBoxes: 8, coverBoxIndices: [0, 1, 2, 3, 4, 5, 6, 7],
+        columnOffsets: [0, 1, 2, 3, 4, 5, 6, 7, 8], targetIndices: [0, 1, 2, 3, 4, 5, 6, 7], probabilities: Array(8).fill(1), retainedMass: 1, zeroSurvivorSources: 0,
+        stationaryDistribution: Array(8).fill(1 / 8), dominantEigenvalue: 1, residual: 0, stationaryIterations: 1, computedAt,
+      },
+      eigenmodeAnalysis: {
+        analysisType: 'transfer_eigenmodes', sourceComputedAt: computedAt, method: 'implicitly_restarted_arnoldi', requestedModes: 1, computedModes: 1, representedEigenpairs: 2,
+        operatorDimension: 8, operatorNonzeros: 8, tolerance: 1e-8, maxRestarts: 12, restartCount: 0, maxSubspaceDimension: 8, matrixVectorProducts: 9, basisPersisted: false,
+        reuseBehavior: 'cached_operator_fresh_restart', structure: { massPreserving: true, reducible: false, componentCount: 1, closedComponentCount: 1, stationarySimple: true, period: 1 },
+        spectralGap: 0.1, spectralGapStatus: 'available',
+        modes: [{ rank: 1, eigenvalueRe: 0.45, eigenvalueIm: 0.779422863, modulus: 0.9, ritzResidual: 1e-12, converged: true, conjugatePair: true, interpretation: 'oscillatory_density_relaxation', vectorReal: [1, 0.5, 0, -0.5, -1, -0.5, 0, 0.5], vectorImaginary: [0, 0.5, 1, 0.5, 0, -0.5, -1, -0.5] }],
+        computedAt: '2026-08-02T13:01:00.000Z',
+      },
+      eigenmodeView: { modeRank: 1, component: 'phase', phase: Math.PI / 2 },
+      createdAt: computedAt,
+    } as InvariantMeasureObject)
+    const scene = addScene(added.system, 'Flow eigenmode scene')
+    const system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
+
+    renderPanel(system)
+
+    const mode = plotlyCalls.flatMap((call) => call.data).find(
+      (trace) => trace.name === 'Flow_Eigenmode mode 1 phase 0.50π'
+    ) as { type: string; z: number[]; customdata: Array<[number, number]> }
+    expect(mode.type).toBe('scatter3d')
+    expect(mode.z.length).toBeGreaterThan(0)
+    expect(mode.customdata.some((entry) => entry[1] > 0)).toBe(true)
+    expect(mode.customdata.some((entry) => entry[1] < 0)).toBe(true)
+  })
+
   it('serializes tiny three-dimensional invariant measure opacity as bounded decimals', () => {
     const config: SystemConfig = { name: 'Three-dimensional measure map', equations: ['x', 'y', 'z'], params: [], paramNames: [], varNames: ['x', 'y', 'z'], solver: 'discrete', type: 'map' }
     let system = createSystem({ name: config.name, config })

@@ -29,6 +29,7 @@ import type {
 } from '../system/types'
 import type {
   ExpansionEntropyRequest,
+  TransferEigenmodeRequest,
   TransferOperatorRequest,
 } from '../compute/ForkCoreClient'
 
@@ -451,6 +452,144 @@ describe('appState State Grid subsystem configuration', () => {
       expect(sourceGrid.transferOperator?.settings.timeStep).toBe(1)
       expect(sourceGrid.transferOperator?.settings.integrationStep).toBe(0.01)
     }
+  })
+
+  it('computes and extends eigenmodes from the stored operator without rebuilding the measure', async () => {
+    const fixture = createConfiguredStateGridSystem('map')
+    const sourceComputedAt = '2026-08-02T12:00:00.000Z'
+    const added = addObject(fixture.system, {
+      type: 'invariant_measure',
+      name: 'Invariant_Measure_Test',
+      systemName: fixture.system.config.name,
+      sourceStateGridId: fixture.nodeId,
+      sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator',
+        dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: -1, max: 1, resolution: 3 }],
+        settings: {
+          samplesPerCell: 4,
+          iterations: 1,
+          maxStationaryIterations: 2000,
+          tolerance: 1e-10,
+          outsidePolicy: 'conditional_in_grid',
+        },
+        parameters: [],
+        totalBoxes: 3,
+        columnOffsets: [0, 2, 4, 6],
+        targetIndices: [0, 1, 1, 2, 0, 2],
+        probabilities: [0.2, 0.8, 0.2, 0.8, 0.8, 0.2],
+        retainedMass: 1,
+        zeroSurvivorSources: 0,
+        stationaryDistribution: [1 / 3, 1 / 3, 1 / 3],
+        dominantEigenvalue: 1,
+        residual: 0,
+        stationaryIterations: 10,
+        computedAt: sourceComputedAt,
+      },
+      createdAt: sourceComputedAt,
+    } as InvariantMeasureObject)
+    const client = new MockForkCoreClient(0)
+    const transferSpy = vi.spyOn(client, 'computeTransferOperator')
+    const original = client.computeTransferEigenmodes.bind(client)
+    const captured: TransferEigenmodeRequest[] = []
+    client.computeTransferEigenmodes = async (request, opts) => {
+      captured.push(structuredClone(request))
+      return await original(request, opts)
+    }
+    const { getContext } = setupApp(added.system, client)
+
+    await act(async () => {
+      await getContext().actions.computeInvariantMeasureEigenmodes({
+        invariantMeasureId: added.nodeId,
+        requestedModes: 1,
+      })
+    })
+    await act(async () => {
+      await getContext().actions.computeInvariantMeasureEigenmodes({
+        invariantMeasureId: added.nodeId,
+        requestedModes: 2,
+      })
+    })
+
+    expect(transferSpy).not.toHaveBeenCalled()
+    expect(captured).toHaveLength(2)
+    expect(captured[0].columnOffsets).toEqual([0, 2, 4, 6])
+    expect(captured[0].warmStartReal).toEqual([])
+    expect(captured[1].warmStartReal).toHaveLength(3)
+    const measure = getContext().state.system!.objects[added.nodeId]
+    expect(measure.type).toBe('invariant_measure')
+    if (measure.type === 'invariant_measure') {
+      expect(measure.result.computedAt).toBe(sourceComputedAt)
+      expect(measure.eigenmodeAnalysis?.sourceComputedAt).toBe(sourceComputedAt)
+      expect(measure.eigenmodeAnalysis?.requestedModes).toBe(2)
+      expect(measure.eigenmodeAnalysis?.basisPersisted).toBe(false)
+      expect(measure.eigenmodeAnalysis?.reuseBehavior).toBe(
+        'cached_operator_saved_mode_warm_start'
+      )
+      expect(measure.eigenmodeView?.modeRank).toBe(1)
+    }
+  })
+
+  it('does not publish eigenmodes when cancellation precedes a late client result', async () => {
+    const fixture = createConfiguredStateGridSystem('map')
+    const added = addObject(fixture.system, {
+      type: 'invariant_measure',
+      name: 'Invariant_Measure_Cancel',
+      systemName: fixture.system.config.name,
+      sourceStateGridId: fixture.nodeId,
+      sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator',
+        dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: 0, max: 1, resolution: 2 }],
+        settings: { samplesPerCell: 1, iterations: 1, maxStationaryIterations: 20, tolerance: 1e-10, outsidePolicy: 'conditional_in_grid' },
+        parameters: [],
+        totalBoxes: 2,
+        columnOffsets: [0, 2, 4],
+        targetIndices: [0, 1, 0, 1],
+        probabilities: [0.9, 0.1, 0.2, 0.8],
+        retainedMass: 1,
+        zeroSurvivorSources: 0,
+        stationaryDistribution: [2 / 3, 1 / 3],
+        dominantEigenvalue: 1,
+        residual: 0,
+        stationaryIterations: 8,
+        computedAt: '2026-08-02T12:00:00.000Z',
+      },
+      createdAt: '2026-08-02T12:00:00.000Z',
+    } as InvariantMeasureObject)
+    const client = new MockForkCoreClient(0)
+    const original = client.computeTransferEigenmodes.bind(client)
+    let release: (() => void) | null = null
+    client.computeTransferEigenmodes = (request) =>
+      new Promise((resolve, reject) => {
+        release = () => {
+          void original(request).then(resolve, reject)
+        }
+      })
+    const { getContext } = setupApp(added.system, client)
+    const controller = new AbortController()
+    let computation: Promise<unknown> | null = null
+
+    act(() => {
+      computation = getContext().actions.computeInvariantMeasureEigenmodes(
+        { invariantMeasureId: added.nodeId, requestedModes: 1 },
+        { signal: controller.signal }
+      )
+    })
+    controller.abort()
+    await act(async () => {
+      release?.()
+      await computation
+    })
+
+    const measure = getContext().state.system!.objects[added.nodeId]
+    expect(measure.type).toBe('invariant_measure')
+    if (measure.type === 'invariant_measure') {
+      expect(measure.eigenmodeAnalysis).toBeUndefined()
+    }
+    expect(getContext().state.continuationProgress).toBeNull()
   })
 
   it('migrates the original flow time setting to the numerical integration step', async () => {

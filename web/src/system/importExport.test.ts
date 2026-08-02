@@ -611,6 +611,47 @@ describe('system import/export (zip)', () => {
         stationaryIterations: 12,
         computedAt: '2026-08-01T00:01:00.000Z',
       },
+      eigenmodeAnalysis: {
+        analysisType: 'transfer_eigenmodes',
+        sourceComputedAt: '2026-08-01T00:01:00.000Z',
+        method: 'implicitly_restarted_arnoldi',
+        requestedModes: 1,
+        computedModes: 1,
+        representedEigenpairs: 1,
+        operatorDimension: 3,
+        operatorNonzeros: 3,
+        tolerance: 1e-8,
+        maxRestarts: 12,
+        restartCount: 0,
+        maxSubspaceDimension: 3,
+        matrixVectorProducts: 4,
+        basisPersisted: false,
+        reuseBehavior: 'cached_operator_fresh_restart',
+        structure: {
+          massPreserving: true,
+          reducible: false,
+          componentCount: 1,
+          closedComponentCount: 1,
+          stationarySimple: true,
+          period: 1,
+        },
+        spectralGap: 0.25,
+        spectralGapStatus: 'available',
+        modes: [{
+          rank: 1,
+          eigenvalueRe: 0.75,
+          eigenvalueIm: 0,
+          modulus: 0.75,
+          ritzResidual: 1e-12,
+          converged: true,
+          conjugatePair: false,
+          interpretation: 'density_relaxation',
+          vectorReal: [0.8, -0.4, -0.4],
+          vectorImaginary: [],
+        }],
+        computedAt: '2026-08-01T00:02:00.000Z',
+      },
+      eigenmodeView: { modeRank: 1, component: 'real', phase: 0 },
       createdAt: '2026-08-01T00:01:00.000Z',
     }
     const added = addObject(grid.system, measure)
@@ -630,6 +671,16 @@ describe('system import/export (zip)', () => {
     if (restoredMeasure.type === 'invariant_measure') {
       expect(restoredMeasure.sourceStateGridId).toBe(grid.nodeId)
       expect(restoredMeasure.result.dominantEigenvalue).toBe(1)
+      expect(restoredMeasure.eigenmodeAnalysis?.modes[0].vectorReal).toEqual([
+        0.8,
+        -0.4,
+        -0.4,
+      ])
+      expect(restoredMeasure.eigenmodeView).toEqual({
+        modeRank: 1,
+        component: 'real',
+        phase: 0,
+      })
     }
     expect(restored.nodes[added.nodeId].render).toMatchObject({
       color: '#123456',

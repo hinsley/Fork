@@ -177,7 +177,11 @@ function renderInspectorForStateSpaceStride(
   onExtendManifold2D: ReturnType<typeof vi.fn> = vi.fn(),
   onCreateLimitCycleCodim1CurveFromPoint: ReturnType<typeof vi.fn> = vi.fn(),
   onCreateCodim2BranchFromPoint: ReturnType<typeof vi.fn> = vi.fn(),
-  onSolveEquilibrium: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue(undefined)
+  onSolveEquilibrium: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue(undefined),
+  eigenmodeActions: {
+    onCompute?: ReturnType<typeof vi.fn>
+    onUpdate?: ReturnType<typeof vi.fn>
+  } = {}
 ) {
   render(
     <InspectorDetailsPanel
@@ -210,6 +214,10 @@ function renderInspectorForStateSpaceStride(
       onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
       onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      onComputeInvariantMeasureEigenmodes={
+        eigenmodeActions.onCompute ?? vi.fn().mockResolvedValue(undefined)
+      }
+      onUpdateInvariantMeasureObject={eigenmodeActions.onUpdate ?? vi.fn()}
     />
   )
 }
@@ -317,6 +325,140 @@ describe('InspectorDetailsPanel', () => {
     )
     expect(screen.getByTestId('invariant-measure-leakage-warning')).toHaveTextContent(
       'not mass-preserving'
+    )
+  })
+
+  it('configures a leading subset and selects a complex right density mode', async () => {
+    const config: SystemConfig = {
+      name: 'Eigenmode_Map',
+      equations: ['x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    const sourceComputedAt = '2026-08-02T12:00:00.000Z'
+    const vectorReal = [1, 0.7, 0.2, -0.2, -0.6, -1, -0.6, 0]
+    const vectorImaginary = [0, 0.5, 1, 0.5, 0, -0.5, -1, -0.5]
+    const added = addObject(createSystem({ name: config.name, config }), {
+      type: 'invariant_measure',
+      name: 'Invariant_Measure_Eigenmodes',
+      systemName: config.name,
+      sourceStateGridId: 'grid-source',
+      sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator',
+        dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: 0, max: 1, resolution: 8 }],
+        settings: { samplesPerCell: 4, iterations: 1, maxStationaryIterations: 2000, tolerance: 1e-10, outsidePolicy: 'conditional_in_grid' },
+        parameters: [],
+        totalBoxes: 8,
+        columnOffsets: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+        targetIndices: [0, 1, 2, 3, 4, 5, 6, 7],
+        probabilities: [1, 1, 1, 1, 1, 1, 1, 1],
+        retainedMass: 1,
+        zeroSurvivorSources: 0,
+        stationaryDistribution: Array(8).fill(1 / 8),
+        dominantEigenvalue: 1,
+        residual: 0,
+        stationaryIterations: 1,
+        computedAt: sourceComputedAt,
+      },
+      eigenmodeAnalysis: {
+        analysisType: 'transfer_eigenmodes',
+        sourceComputedAt,
+        method: 'implicitly_restarted_arnoldi',
+        requestedModes: 6,
+        computedModes: 2,
+        representedEigenpairs: 3,
+        operatorDimension: 8,
+        operatorNonzeros: 8,
+        tolerance: 1e-8,
+        maxRestarts: 12,
+        restartCount: 1,
+        maxSubspaceDimension: 8,
+        matrixVectorProducts: 12,
+        basisPersisted: false,
+        reuseBehavior: 'cached_operator_fresh_restart',
+        structure: { massPreserving: true, reducible: false, componentCount: 1, closedComponentCount: 1, stationarySimple: true, period: 1 },
+        spectralGap: 0.1,
+        spectralGapStatus: 'available',
+        modes: [
+          {
+            rank: 1,
+            eigenvalueRe: 0.45,
+            eigenvalueIm: 0.779422863,
+            modulus: 0.9,
+            ritzResidual: 2e-10,
+            converged: true,
+            conjugatePair: true,
+            interpretation: 'oscillatory_density_relaxation',
+            vectorReal,
+            vectorImaginary,
+          },
+          {
+            rank: 2,
+            eigenvalueRe: 0.7,
+            eigenvalueIm: 0,
+            modulus: 0.7,
+            ritzResidual: 4e-10,
+            converged: true,
+            conjugatePair: false,
+            interpretation: 'density_relaxation',
+            vectorReal: vectorReal.map((value) => -value),
+            vectorImaginary: [],
+          },
+        ],
+        computedAt: '2026-08-02T12:01:00.000Z',
+      },
+      eigenmodeView: { modeRank: 1, component: 'real', phase: 0 },
+      createdAt: sourceComputedAt,
+    } as InvariantMeasureObject)
+    const onCompute = vi.fn().mockResolvedValue(undefined)
+    const onUpdate = vi.fn()
+
+    renderInspectorForStateSpaceStride(
+      added.system,
+      added.nodeId,
+      vi.fn(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { onCompute, onUpdate }
+    )
+    fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
+
+    expect(screen.getByTestId('invariant-eigenmode-count-preset')).toHaveValue('6')
+    expect(screen.getByTestId('invariant-measure-spectrum-plot')).toBeInTheDocument()
+    expect(screen.getByTestId('invariant-spectral-gap')).toHaveTextContent('1.000000e-1')
+    expect(screen.getByTestId('invariant-eigenmode-1')).toHaveTextContent('Mode 1 pair')
+    expect(screen.getByTestId('invariant-eigenmode-view-controls')).toHaveTextContent(
+      'right eigenvector describes density relaxation'
+    )
+
+    fireEvent.click(screen.getByTestId('invariant-eigenmode-compute'))
+    await waitFor(() => {
+      expect(onCompute).toHaveBeenCalledWith(
+        { invariantMeasureId: added.nodeId, requestedModes: 6 },
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      )
+    })
+    fireEvent.click(screen.getByTestId('invariant-eigenmode-component-imaginary'))
+    expect(onUpdate).toHaveBeenCalledWith(
+      added.nodeId,
+      expect.objectContaining({
+        eigenmodeView: expect.objectContaining({ component: 'imaginary', modeRank: 1 }),
+      })
+    )
+    fireEvent.click(screen.getByTestId('invariant-eigenmode-2'))
+    expect(onUpdate).toHaveBeenCalledWith(
+      added.nodeId,
+      expect.objectContaining({
+        eigenmodeView: expect.objectContaining({ modeRank: 2 }),
+      })
     )
   })
 
