@@ -530,9 +530,10 @@ function InvariantMeasureEigenmodeAnalysis({
               <h4 className="inspector-subheading">State-space mode {selectedMode.rank}</h4>
               <p className="inspector-help">
                 This right eigenvector describes density relaxation under the column-stochastic
-                operator. It is signed and is not a probability density. Marker size shows
-                magnitude, hover values retain sign, and every marker uses this object's Appearance
-                color. Left observable modes are not computed in this analysis.
+                operator. It is signed and is not a probability density. The overlay uses the same
+                marker shape, size, and Appearance color as the invariant measure. Opacity shows
+                mode magnitude, and hover values retain sign. Left observable modes are not
+                computed in this analysis.
               </p>
               {selectedMode.conjugatePair ? (
                 <>
@@ -565,7 +566,11 @@ function InvariantMeasureEigenmodeAnalysis({
                   ) : null}
                 </>
               ) : null}
-              <button type="button" onClick={() => updateView({ modeRank: null })}>
+              <button
+                type="button"
+                onClick={() => updateView({ modeRank: null })}
+                data-testid="invariant-eigenmode-hide"
+              >
                 Hide mode overlay
               </button>
             </div>

@@ -447,7 +447,7 @@ describe('InspectorDetailsPanel', () => {
       'right eigenvector describes density relaxation'
     )
     expect(screen.getByTestId('invariant-eigenmode-view-controls')).toHaveTextContent(
-      "every marker uses this object's Appearance color"
+      'same marker shape, size, and Appearance color'
     )
 
     fireEvent.change(modeCount, { target: { value: '8' } })
@@ -476,6 +476,13 @@ describe('InspectorDetailsPanel', () => {
       added.nodeId,
       expect.objectContaining({
         eigenmodeView: expect.objectContaining({ modeRank: 2 }),
+      })
+    )
+    fireEvent.click(screen.getByTestId('invariant-eigenmode-hide'))
+    expect(onUpdate).toHaveBeenCalledWith(
+      added.nodeId,
+      expect.objectContaining({
+        eigenmodeView: expect.objectContaining({ modeRank: null }),
       })
     )
   })

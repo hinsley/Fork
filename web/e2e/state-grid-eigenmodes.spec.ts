@@ -47,7 +47,11 @@ async function readTraceMarkerAppearance(
   name: string
 ): Promise<{
   colors: string[]
+  markerOpacities: number[]
+  sizes: number[]
   symbols: string[]
+  traceOpacity: number
+  traceType: string
   uid: string
   selectorValid: boolean
 } | null> {
@@ -55,8 +59,12 @@ async function readTraceMarkerAppearance(
     type PlotTrace = {
       name?: string
       uid?: string
+      opacity?: number
+      type?: string
       marker?: {
         color?: string | string[]
+        opacity?: number | number[]
+        size?: number | number[]
         symbol?: string | string[]
       }
     }
@@ -79,15 +87,51 @@ async function readTraceMarkerAppearance(
         : trace.marker.color
           ? [trace.marker.color]
           : [],
+      markerOpacities: Array.isArray(trace.marker.opacity)
+        ? trace.marker.opacity
+        : typeof trace.marker.opacity === 'number'
+          ? [trace.marker.opacity]
+          : [],
+      sizes: Array.isArray(trace.marker.size)
+        ? trace.marker.size
+        : typeof trace.marker.size === 'number'
+          ? [trace.marker.size]
+          : [],
       symbols: Array.isArray(trace.marker.symbol)
         ? trace.marker.symbol
         : trace.marker.symbol
           ? [trace.marker.symbol]
           : [],
+      traceOpacity: trace.opacity ?? 1,
+      traceType: trace.type ?? '',
       uid,
       selectorValid,
     }
   }, name)
+}
+
+function markerOpacitySignature(appearance: {
+  colors: string[]
+  markerOpacities: number[]
+}): number[] {
+  if (appearance.markerOpacities.length > 0) return appearance.markerOpacities
+  return appearance.colors.map((color) => {
+    if (color === '#000000') return 1
+    const match = color.match(/rgba\(0, 0, 0, ([\d.]+)\)/)
+    return Number(match?.[1] ?? 1)
+  })
+}
+
+async function createAdditionalStateSpaceScene(page: Page) {
+  const plots = page.locator('[data-testid^="plotly-viewport-"]')
+  await expect(plots).toHaveCount(1)
+  const firstPlot = plots.first()
+  const testId = await firstPlot.getAttribute('data-testid')
+  const sceneId = testId?.replace('plotly-viewport-', '')
+  if (!sceneId) throw new Error('The first State Space scene has no test identifier.')
+  await page.getByTestId(`viewport-insert-${sceneId}`).click()
+  await page.getByTestId('viewport-create-scene').click()
+  await expect(plots).toHaveCount(2)
 }
 
 async function runEigenmodeCase(
@@ -99,8 +143,11 @@ async function runEigenmodeCase(
     samplesPerCell?: number
   }
 ) {
+  const pageErrors: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
   const harness = createHarness(page)
   await harness.createScene()
+  await createAdditionalStateSpaceScene(page)
   await page.getByTestId('create-object-button').click()
   await page.getByTestId('create-object-menu').waitFor()
   await page.getByTestId('create-state-grid').click()
@@ -139,6 +186,8 @@ async function runEigenmodeCase(
   const appearanceColor = '#000000'
   await page.getByTestId('action-appearance-toggle').click()
   await page.getByTestId('inspector-color').fill(appearanceColor)
+  await page.getByTestId('inspector-color-opacity').fill('80')
+  await page.getByTestId('inspector-point-size').fill('7')
   await page.getByTestId('inspector-workflow-back').click()
   await page.getByTestId('action-invariant-measure-data-toggle').click()
   await expect(page.getByTestId('invariant-measure-convergence-status')).toHaveText(
@@ -172,21 +221,61 @@ async function runEigenmodeCase(
     expect(parsedModuli[index]).toBeLessThanOrEqual(parsedModuli[index - 1] + 1e-12)
   }
 
-  const scenePlot = page.locator('[data-testid^="plotly-viewport-"]').first()
+  const scenePlots = await page.locator('[data-testid^="plotly-viewport-"]').all()
+  expect(scenePlots).toHaveLength(2)
   const modeTraceName = `${measureName} mode 1 real`
-  await expect.poll(
-    () => plotHasTrace(scenePlot, modeTraceName),
-    { timeout: 30_000 }
-  ).toBe(true)
-  const markerAppearance = await readTraceMarkerAppearance(scenePlot, modeTraceName)
-  expect(markerAppearance?.colors.length).toBeGreaterThan(0)
+  for (const scenePlot of scenePlots) {
+    await expect.poll(
+      () => plotHasTrace(scenePlot, modeTraceName),
+      { timeout: 30_000 }
+    ).toBe(true)
+    const stationaryAppearance = await readTraceMarkerAppearance(scenePlot, measureName)
+    const modeAppearance = await readTraceMarkerAppearance(scenePlot, modeTraceName)
+    expect(stationaryAppearance).not.toBeNull()
+    expect(modeAppearance).not.toBeNull()
+    expect(modeAppearance?.traceType).toBe(stationaryAppearance?.traceType)
+    expect(modeAppearance?.sizes).toEqual(stationaryAppearance?.sizes)
+    expect(modeAppearance?.sizes).toEqual([7])
+    expect(modeAppearance?.symbols).toEqual(stationaryAppearance?.symbols)
+    expect(modeAppearance?.symbols).toEqual([])
+    expect(modeAppearance?.traceOpacity).toBe(stationaryAppearance?.traceOpacity)
+    expect(modeAppearance?.traceOpacity).toBeCloseTo(0.8)
+    expect(
+      modeAppearance?.colors.every(
+        (color) => color === appearanceColor || color.startsWith('rgba(0, 0, 0, ')
+      )
+    ).toBe(true)
+    const stationaryOpacities = markerOpacitySignature(stationaryAppearance!)
+    const modeOpacities = markerOpacitySignature(modeAppearance!)
+    expect(new Set(modeOpacities).size).toBeGreaterThan(1)
+    expect(modeOpacities).not.toEqual(stationaryOpacities)
+    expect(modeAppearance?.uid).toMatch(/^eigenmode-/)
+    expect(modeAppearance?.uid).not.toContain(':')
+    expect(modeAppearance?.selectorValid).toBe(true)
+  }
+
+  await page.getByTestId('invariant-eigenmode-hide').click()
+  for (const scenePlot of scenePlots) {
+    await expect.poll(
+      () => plotHasTrace(scenePlot, modeTraceName),
+      { timeout: 30_000 }
+    ).toBe(false)
+  }
+  await expect(page.locator('.plotly-viewport__overlay.is-error')).toHaveCount(0)
+
+  await page.getByTestId('invariant-eigenmode-1').click()
+  await expect(page.getByTestId('invariant-eigenmode-hide')).toBeVisible()
+  for (const scenePlot of scenePlots) {
+    await expect.poll(
+      () => plotHasTrace(scenePlot, modeTraceName),
+      { timeout: 30_000 }
+    ).toBe(true)
+  }
   expect(
-    markerAppearance?.colors.every((color) => color === appearanceColor)
-  ).toBe(true)
-  expect(markerAppearance?.symbols).toEqual(['diamond'])
-  expect(markerAppearance?.uid).toMatch(/-eigenmode$/)
-  expect(markerAppearance?.uid).not.toContain(':')
-  expect(markerAppearance?.selectorValid).toBe(true)
+    pageErrors.filter(
+      (message) => message.includes('querySelector') || message.includes('not a valid selector')
+    )
+  ).toEqual([])
   return { measureName, coverSize }
 }
 

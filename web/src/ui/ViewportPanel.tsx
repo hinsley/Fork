@@ -304,6 +304,10 @@ function stateGrid3dColorWithOpacity(color: string, opacity: number): string {
   return `rgba(${red}, ${green}, ${blue}, ${serializedAlpha})`
 }
 
+function invariantMeasureEigenmodeTraceUid(nodeId: string): string {
+  return `eigenmode-${nodeId.replace(/[^A-Za-z0-9_-]/g, '-')}`
+}
+
 function statePeriodicPeriods(config: SystemConfig): Array<number | null> {
   return normalizePeriodicVariables(config).map((entry) =>
     entry.enabled && Number.isFinite(entry.period) && entry.period > 0
@@ -3435,7 +3439,8 @@ function buildSceneTraces(
             const modeXs: number[] = []
             const modeYs: number[] = []
             const modeZs: number[] = []
-            const modeSizes: number[] = []
+            const modeColors: string[] = []
+            const modeOpacities: number[] = []
             const modeHoverData: Array<[number, number]> = []
             values.forEach((value, compactCell) => {
               if (!Number.isFinite(value) || Math.abs(value) <= maxMagnitude * 1e-12) return
@@ -3447,7 +3452,11 @@ function buildSceneTraces(
               modeXs.push(projectedPoint[0] ?? 0)
               modeYs.push(projectedPoint[1] ?? 0)
               modeZs.push(projectedPoint[2] ?? 0)
-              modeSizes.push(node.render.pointSize * (0.2 + opacity))
+              if (projectionPlotDim === 3) {
+                modeColors.push(stateGrid3dColorWithOpacity(node.render.color, opacity))
+              } else {
+                modeOpacities.push(opacity)
+              }
               modeHoverData.push([cell, value])
             })
             if (modeXs.length > 0) {
@@ -3458,7 +3467,7 @@ function buildSceneTraces(
               const common = {
                 mode: 'markers' as const,
                 name: `${object.name} mode ${mode.rank} ${componentLabel}`,
-                uid: `${nodeId}-eigenmode`,
+                uid: invariantMeasureEigenmodeTraceUid(nodeId),
                 legendgroup: INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP,
                 opacity: normalizeColorOpacity(node.render.opacity),
                 customdata: modeHoverData,
@@ -3473,9 +3482,8 @@ function buildSceneTraces(
                   y: modeYs,
                   z: modeZs,
                   marker: {
-                    color: node.render.color,
-                    size: modeSizes,
-                    symbol: 'diamond',
+                    color: modeColors,
+                    size: node.render.pointSize,
                   },
                 })
               } else {
@@ -3486,8 +3494,8 @@ function buildSceneTraces(
                   y: projectionPlotDim === 1 ? modeXs.map(() => 0) : modeYs,
                   marker: {
                     color: node.render.color,
-                    size: modeSizes,
-                    symbol: 'diamond',
+                    opacity: modeOpacities,
+                    size: node.render.pointSize,
                   },
                 })
               }
