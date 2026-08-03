@@ -2037,6 +2037,8 @@ function InspectorSelectionSession(props: InspectorDetailsPanelProps) {
         onComputeTransferOperator={props.onComputeTransferOperator}
         onUpdateObjectParams={props.onUpdateObjectParams}
         onUpdateObjectFrozenVariables={props.onUpdateObjectFrozenVariables}
+        onToggleVisibility={props.onToggleVisibility}
+        onUpdateRender={props.onUpdateRender}
       />
     )
   }

@@ -156,7 +156,9 @@ function applyNodeRenderOpacities(
   return traces.map((trace) => {
     if (
       'legendgroup' in trace &&
-      trace.legendgroup === INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP
+      typeof trace.legendgroup === 'string' &&
+      (trace.legendgroup === INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP ||
+        trace.legendgroup.startsWith(`${INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP}:`))
     ) {
       return trace
     }
@@ -3192,11 +3194,105 @@ function buildSceneTraces(
     const object = system.objects[nodeId]
     if (!object) continue
 
-    if (object.type === 'state_grid' || object.type === 'invariant_measure') {
-      const measure =
-        object.type === 'invariant_measure'
-          ? object.result
-          : object.transferOperator?.lastResult
+    if (object.type === 'state_grid') {
+      const snapshot = buildSubsystemSnapshot(system.config, object.frozenVariables)
+      const axisByName = new Map(
+        object.axes.map((axis) => [axis.variableName, axis] as const)
+      )
+      const axes = snapshot.freeVariableNames.map((variableName) => axisByName.get(variableName))
+      if (
+        axes.length < 1 ||
+        axes.some(
+          (axis) =>
+            !axis ||
+            !Number.isFinite(axis.min) ||
+            !Number.isFinite(axis.max) ||
+            axis.min > axis.max ||
+            !Number.isInteger(axis.resolution) ||
+            axis.resolution < 1
+        )
+      ) {
+        continue
+      }
+      const validAxes = axes.filter((axis) => axis !== undefined)
+      const totalPoints = validAxes.reduce(
+        (total, axis) => total * axis.resolution,
+        1
+      )
+      if (!Number.isSafeInteger(totalPoints) || totalPoints < 1) continue
+      const projectedAxisIndices = projectionAxisIndices.slice(0, projectionPlotDim)
+      const xs = new Array<number>(totalPoints)
+      const ys = new Array<number>(totalPoints)
+      const zs = new Array<number>(totalPoints)
+      const cellIndices = new Array<number>(totalPoints)
+      let renderedPointCount = 0
+      for (let cell = 0; cell < totalPoints; cell += 1) {
+        let remaining = cell
+        const reducedPoint = new Array<number>(validAxes.length)
+        for (let axis = validAxes.length - 1; axis >= 0; axis -= 1) {
+          const entry = validAxes[axis]
+          const coordinate = remaining % entry.resolution
+          remaining = Math.floor(remaining / entry.resolution)
+          reducedPoint[axis] =
+            entry.min +
+            (coordinate + 0.5) * (entry.max - entry.min) / entry.resolution
+        }
+        const point = stateVectorToDisplay(snapshot, reducedPoint)
+        const projectedPoint = projectedAxisIndices.map((index) => point[index])
+        if (projectedPoint.some((coordinate) => !Number.isFinite(coordinate))) continue
+        xs[renderedPointCount] = projectedPoint[0] ?? 0
+        ys[renderedPointCount] = projectedPoint[1] ?? 0
+        zs[renderedPointCount] = projectedPoint[2] ?? 0
+        cellIndices[renderedPointCount] = cell
+        renderedPointCount += 1
+      }
+      if (renderedPointCount === 0) continue
+      xs.length = renderedPointCount
+      ys.length = renderedPointCount
+      zs.length = renderedPointCount
+      cellIndices.length = renderedPointCount
+      const marker = {
+        color: node.render.color,
+        opacity: normalizeColorOpacity(node.render.opacity),
+        size: node.render.pointSize,
+      }
+      if (projectionPlotDim === 3) {
+        traces.push({
+          type: 'scatter3d',
+          mode: 'markers',
+          name: object.name,
+          uid: nodeId,
+          legendgroup: `${INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP}:${nodeId}`,
+          x: xs,
+          y: ys,
+          z: zs,
+          customdata: cellIndices,
+          marker,
+          hovertemplate:
+            'x=%{x}<br>y=%{y}<br>z=%{z}<br>cell=%{customdata}<extra></extra>',
+        })
+      } else {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: object.name,
+          uid: nodeId,
+          legendgroup: `${INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP}:${nodeId}`,
+          x: xs,
+          y: projectionPlotDim === 1 ? xs.map(() => 0) : ys,
+          customdata: cellIndices,
+          marker,
+          hovertemplate:
+            projectionPlotDim === 1
+              ? 'x=%{x}<br>cell=%{customdata}<extra></extra>'
+              : 'x=%{x}<br>y=%{y}<br>cell=%{customdata}<extra></extra>',
+        })
+      }
+      continue
+    }
+
+    if (object.type === 'invariant_measure') {
+      const measure = object.result
       if (!measure || measure.stationaryDistribution.length === 0) continue
       const axes = measure.axes
       if (axes.length < 1 || axes.length > 3) continue
@@ -3282,15 +3378,11 @@ function buildSceneTraces(
         hoverData.push([cell, mass])
       })
       if (xs.length === 0) continue
-      const traceName =
-        object.type === 'invariant_measure'
-          ? object.name
-          : `${object.name} invariant measure`
       if (projectionPlotDim === 3) {
         traces.push({
           type: 'scatter3d',
           mode: 'markers',
-          name: traceName,
+          name: object.name,
           uid: nodeId,
           x: xs,
           y: ys,
@@ -3304,7 +3396,7 @@ function buildSceneTraces(
         traces.push({
           type: 'scatter',
           mode: 'markers',
-          name: traceName,
+          name: object.name,
           uid: nodeId,
           x: xs,
           y: projectionPlotDim === 1 ? xs.map(() => 0) : ys,

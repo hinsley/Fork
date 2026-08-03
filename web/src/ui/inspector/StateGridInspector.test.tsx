@@ -37,10 +37,32 @@ function fixture() {
 }
 
 describe('StateGridInspector', () => {
+  it('identifies the State Space scene as the equal-weight State Grid preview', () => {
+    const initial = fixture()
+    render(
+      <StateGridInspector
+        system={initial.system}
+        nodeId={initial.nodeId}
+        object={initial.object}
+        onRename={() => {}}
+        onUpdate={() => {}}
+        onCompute={async () => null}
+      />
+    )
+
+    expect(screen.getByTestId('state-grid-summary')).toHaveTextContent(
+      'State Space scene'
+    )
+    expect(screen.getByTestId('state-grid-summary')).toHaveTextContent(
+      'all 12 cell centers with equal weight'
+    )
+  })
+
   it('uses the shared nested configure actions for parameters and frozen variables', () => {
     const initial = fixture()
     const onUpdateObjectParams = vi.fn()
     const onUpdateObjectFrozenVariables = vi.fn()
+    const onUpdateRender = vi.fn()
     render(
       <WorkflowFocusProvider>
         <StateGridInspector
@@ -52,6 +74,7 @@ describe('StateGridInspector', () => {
           onCompute={async () => null}
           onUpdateObjectParams={onUpdateObjectParams}
           onUpdateObjectFrozenVariables={onUpdateObjectFrozenVariables}
+          onUpdateRender={onUpdateRender}
         />
       </WorkflowFocusProvider>
     )
@@ -61,6 +84,13 @@ describe('StateGridInspector', () => {
     expect(screen.getByTestId('action-state-grid-setup-toggle')).toBeInTheDocument()
     expect(screen.getByTestId('action-state-grid-entropy-toggle')).toBeInTheDocument()
 
+    fireEvent.click(screen.getByTestId('action-appearance-toggle'))
+    fireEvent.change(screen.getByTestId('inspector-color-opacity'), {
+      target: { value: '42' },
+    })
+    expect(onUpdateRender).toHaveBeenCalledWith(initial.nodeId, { opacity: 0.42 })
+
+    fireEvent.click(screen.getByTestId('inspector-workflow-back'))
     fireEvent.click(screen.getByTestId('action-frozen-variables-toggle'))
     fireEvent.click(screen.getByTestId('frozen-variable-toggle-x'))
     expect(onUpdateObjectFrozenVariables).toHaveBeenCalledWith(initial.nodeId, { x: 0 })
@@ -95,6 +125,7 @@ describe('StateGridInspector', () => {
         button.getAttribute('data-testid')
       )
     ).toEqual([
+      'action-appearance-toggle',
       'action-frozen-variables-toggle',
       'action-parameters-toggle',
       'action-state-grid-setup-toggle',

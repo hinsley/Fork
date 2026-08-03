@@ -28,6 +28,7 @@ import type {
   LimitCycleObject,
   OrbitObject,
   Scene,
+  StateGridObject,
   SystemConfig
 } from '../system/types'
 import type {
@@ -120,6 +121,290 @@ function buildIsoclineSignature(object: IsoclineObject): string {
 describe('ViewportPanel view state wiring', () => {
   beforeEach(() => {
     plotlyCalls.length = 0
+  })
+
+  it.each(['flow', 'map'] as const)(
+    'renders every two-dimensional %s State Grid cell center with uniform appearance',
+    (dynamicsType) => {
+      const config: SystemConfig = {
+        name: `${dynamicsType} grid`,
+        equations: dynamicsType === 'flow' ? ['y', '-x'] : ['x', 'y'],
+        params: [],
+        paramNames: [],
+        varNames: ['x', 'y'],
+        solver: dynamicsType === 'flow' ? 'rk4' : 'discrete',
+        type: dynamicsType,
+      }
+      let system = createSystem({ name: config.name, config })
+      const added = addObject(system, {
+        type: 'state_grid',
+        name: `${dynamicsType}_State_Grid`,
+        systemName: config.name,
+        axes: [
+          { variableName: 'x', min: -2, max: 2, resolution: 2 },
+          { variableName: 'y', min: 10, max: 16, resolution: 3 },
+        ],
+        sampling: { type: 'cartesian_cell_centers' },
+        analysis: {
+          type: 'expansion_entropy',
+          steps: 1,
+          dt: 0.01,
+          checkpointStride: 1,
+          stabilizationStride: 1,
+        },
+        createdAt: nowIso(),
+      } as StateGridObject)
+      system = updateNodeRender(added.system, added.nodeId, {
+        color: '#336699',
+        opacity: 0.42,
+        pointSize: 7,
+      })
+      const scene = addScene(system, `${dynamicsType} grid scene`)
+      system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
+
+      renderPanel(system)
+
+      const trace = plotlyCalls
+        .flatMap((call) => call.data)
+        .find((data) => data.name === `${dynamicsType}_State_Grid`) as {
+          type: string
+          x: number[]
+          y: number[]
+          customdata: number[]
+          marker: { color: string; opacity: number; size: number }
+        }
+      expect(trace.type).toBe('scatter')
+      expect(trace.x).toEqual([-1, -1, -1, 1, 1, 1])
+      expect(trace.y).toEqual([11, 13, 15, 11, 13, 15])
+      expect(trace.customdata).toEqual([0, 1, 2, 3, 4, 5])
+      expect(trace.marker).toEqual({ color: '#336699', opacity: 0.42, size: 7 })
+    }
+  )
+
+  it.each(['flow', 'map'] as const)(
+    'renders every three-dimensional %s State Grid point with scalar Plotly opacity',
+    (dynamicsType) => {
+      const config: SystemConfig = {
+        name: `${dynamicsType} 3D grid`,
+        equations: dynamicsType === 'flow' ? ['y', 'z', '-x'] : ['x', 'y', 'z'],
+        params: [],
+        paramNames: [],
+        varNames: ['x', 'y', 'z'],
+        solver: dynamicsType === 'flow' ? 'rk4' : 'discrete',
+        type: dynamicsType,
+      }
+      let system = createSystem({ name: config.name, config })
+      const added = addObject(system, {
+        type: 'state_grid',
+        name: `${dynamicsType}_Three_Dimensional_Grid`,
+        systemName: config.name,
+        axes: [
+          { variableName: 'x', min: -2, max: 2, resolution: 2 },
+          { variableName: 'y', min: 10, max: 14, resolution: 2 },
+          { variableName: 'z', min: -1, max: 2, resolution: 3 },
+        ],
+        sampling: { type: 'cartesian_cell_centers' },
+        analysis: {
+          type: 'expansion_entropy',
+          steps: 1,
+          dt: 0.01,
+          checkpointStride: 1,
+          stabilizationStride: 1,
+        },
+        createdAt: nowIso(),
+      } as StateGridObject)
+      system = updateNodeRender(added.system, added.nodeId, {
+        color: '#336699',
+        opacity: 0.42,
+        pointSize: 7,
+      })
+      const scene = addScene(system, `${dynamicsType} 3D grid scene`)
+      system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
+
+      renderPanel(system)
+
+      const trace = plotlyCalls
+        .flatMap((call) => call.data)
+        .find((data) => data.name === `${dynamicsType}_Three_Dimensional_Grid`) as {
+          type: string
+          x: number[]
+          y: number[]
+          z: number[]
+          customdata: number[]
+          marker: { color: string; opacity: number; size: number }
+        }
+      expect(trace.type).toBe('scatter3d')
+      expect(trace.x).toEqual([-1, -1, -1, -1, -1, -1, 1, 1, 1, 1, 1, 1])
+      expect(trace.y).toEqual([11, 11, 11, 13, 13, 13, 11, 11, 11, 13, 13, 13])
+      expect(trace.z).toEqual([-0.5, 0.5, 1.5, -0.5, 0.5, 1.5, -0.5, 0.5, 1.5, -0.5, 0.5, 1.5])
+      expect(trace.customdata).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+      expect(trace.marker).toEqual({ color: '#336699', opacity: 0.42, size: 7 })
+      expect(typeof trace.marker.opacity).toBe('number')
+      expect(trace.marker.color).not.toContain('rgba')
+    }
+  )
+
+  it('renders all 125,000 points in a 50 cubed State Grid without sampling', () => {
+    const config: SystemConfig = {
+      name: 'Large grid flow',
+      equations: ['y', 'z', '-x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const added = addObject(system, {
+      type: 'state_grid',
+      name: 'Large_State_Grid',
+      systemName: config.name,
+      axes: [
+        { variableName: 'x', min: -2, max: 2, resolution: 50 },
+        { variableName: 'y', min: -2, max: 2, resolution: 50 },
+        { variableName: 'z', min: -1, max: 2, resolution: 50 },
+      ],
+      sampling: { type: 'cartesian_cell_centers' },
+      analysis: {
+        type: 'expansion_entropy',
+        steps: 1,
+        dt: 0.01,
+        checkpointStride: 1,
+        stabilizationStride: 1,
+      },
+      createdAt: nowIso(),
+    } as StateGridObject)
+    system = added.system
+    const scene = addScene(system, 'Large grid scene')
+    system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
+
+    renderPanel(system)
+
+    const trace = plotlyCalls
+      .flatMap((call) => call.data)
+      .find((data) => data.name === 'Large_State_Grid') as {
+        x: number[]
+        y: number[]
+        z: number[]
+        marker: { opacity: number }
+      }
+    expect(trace.x).toHaveLength(125_000)
+    expect(trace.y).toHaveLength(125_000)
+    expect(trace.z).toHaveLength(125_000)
+    expect(trace.x[0]).toBeCloseTo(-1.96)
+    expect(trace.y[0]).toBeCloseTo(-1.96)
+    expect(trace.z[0]).toBeCloseTo(-0.97)
+    expect(trace.x.at(-1)).toBeCloseTo(1.96)
+    expect(trace.y.at(-1)).toBeCloseTo(1.96)
+    expect(trace.z.at(-1)).toBeCloseTo(1.97)
+    expect(typeof trace.marker.opacity).toBe('number')
+  })
+
+  it('embeds a State Grid frozen coordinate and follows Scene axis order', () => {
+    const config: SystemConfig = {
+      name: 'Frozen grid flow',
+      equations: ['y', '-x', '0'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const added = addObject(system, {
+      type: 'state_grid',
+      name: 'Frozen_State_Grid',
+      systemName: config.name,
+      axes: [
+        { variableName: 'x', min: 0, max: 2, resolution: 2 },
+        { variableName: 'y', min: 10, max: 12, resolution: 2 },
+        { variableName: 'z', min: -1, max: 1, resolution: 2 },
+      ],
+      sampling: { type: 'cartesian_cell_centers' },
+      analysis: {
+        type: 'expansion_entropy',
+        steps: 1,
+        dt: 0.01,
+        checkpointStride: 1,
+        stabilizationStride: 1,
+      },
+      frozenVariables: { frozenValuesByVarName: { z: 0.75 } },
+      createdAt: nowIso(),
+    } as StateGridObject)
+    system = added.system
+    const scene = addScene(system, 'Frozen grid scene')
+    system = updateScene(scene.system, scene.nodeId, {
+      axisVariables: ['y', 'x', 'z'],
+      selectedNodeIds: [added.nodeId],
+    })
+
+    renderPanel(system)
+
+    const trace = plotlyCalls
+      .flatMap((call) => call.data)
+      .find((data) => data.name === 'Frozen_State_Grid') as {
+        x: number[]
+        y: number[]
+        z: number[]
+      }
+    expect(trace.x).toEqual([10.5, 11.5, 10.5, 11.5])
+    expect(trace.y).toEqual([0.5, 0.5, 1.5, 1.5])
+    expect(trace.z).toEqual([0.75, 0.75, 0.75, 0.75])
+  })
+
+  it('projects every point from a State Grid with more than three free axes', () => {
+    const config: SystemConfig = {
+      name: 'Four-dimensional grid map',
+      equations: ['x', 'y', 'z', 'w'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z', 'w'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: config.name, config })
+    const added = addObject(system, {
+      type: 'state_grid',
+      name: 'Four_Dimensional_State_Grid',
+      systemName: config.name,
+      axes: [
+        { variableName: 'x', min: 0, max: 2, resolution: 2 },
+        { variableName: 'y', min: 0, max: 2, resolution: 2 },
+        { variableName: 'z', min: 0, max: 2, resolution: 2 },
+        { variableName: 'w', min: 0, max: 2, resolution: 2 },
+      ],
+      sampling: { type: 'cartesian_cell_centers' },
+      analysis: {
+        type: 'expansion_entropy',
+        steps: 1,
+        dt: 0.01,
+        checkpointStride: 1,
+        stabilizationStride: 1,
+      },
+      createdAt: nowIso(),
+    } as StateGridObject)
+    system = added.system
+    const scene = addScene(system, 'Four-dimensional grid scene')
+    system = updateScene(scene.system, scene.nodeId, {
+      axisVariables: ['x', 'z', 'w'],
+      selectedNodeIds: [added.nodeId],
+    })
+
+    renderPanel(system)
+
+    const trace = plotlyCalls
+      .flatMap((call) => call.data)
+      .find((data) => data.name === 'Four_Dimensional_State_Grid') as {
+        x: number[]
+        y: number[]
+        z: number[]
+      }
+    expect(trace.x).toHaveLength(16)
+    expect(trace.y).toHaveLength(16)
+    expect(trace.z).toHaveLength(16)
+    expect(new Set(trace.x)).toEqual(new Set([0.5, 1.5]))
+    expect(new Set(trace.y)).toEqual(new Set([0.5, 1.5]))
+    expect(new Set(trace.z)).toEqual(new Set([0.5, 1.5]))
   })
 
   it('renders a separate two-dimensional invariant measure with independent styling', () => {

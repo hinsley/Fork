@@ -16,6 +16,13 @@ curve for flows and finite-iteration convergence curve for maps. It provides
 ordinary data and layout objects and adds no Plotly event, state, or rendering
 injection.
 
+State Grid objects use the existing State Space scene trace path in
+`web/src/ui/ViewportPanel.tsx`. The trace includes every Cartesian cell center
+without sampling and gives every marker the same color, size, and scalar
+`marker.opacity` from the object's Appearance settings. Three-axis previews use
+the shared `scatter3d` capture and WebGL fallback path described below; this adds
+ordinary trace construction and no Plotly event or layout injection.
+
 ## Runtime touchpoints
 
 ### Plotly lifecycle and render config

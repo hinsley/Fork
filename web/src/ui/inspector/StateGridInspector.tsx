@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Data, Layout } from 'plotly.js'
-import type { StateGridObject, System } from '../../system/types'
+import type { StateGridObject, System, TreeNode } from '../../system/types'
 import type { StateGridComputeRequest } from '../../state/appState'
 import { PlotlyViewport } from '../../viewports/plotly/PlotlyViewport'
+import { OpacityPercentInput } from '../OpacityPercentInput'
 import { resolveObjectParams } from '../../system/parameters'
 import { buildSubsystemSnapshot } from '../../system/subsystemGateway'
 import { autonomousContextError } from '../../system/expressionContext'
@@ -40,6 +41,8 @@ type StateGridInspectorProps = {
     id: string,
     frozenValuesByVarName: Record<string, number>
   ) => void
+  onToggleVisibility?: (id: string) => void
+  onUpdateRender?: (id: string, render: Partial<TreeNode['render']>) => void
   onComputeTransferOperator?: (request: StateGridComputeRequest, opts?: { signal?: AbortSignal }) => Promise<unknown>
 }
 
@@ -94,6 +97,8 @@ export function StateGridInspector({
   onCompute,
   onUpdateObjectParams = () => {},
   onUpdateObjectFrozenVariables = () => {},
+  onToggleVisibility = () => {},
+  onUpdateRender = () => {},
   onComputeTransferOperator,
 }: StateGridInspectorProps) {
   const workflowFocus = useWorkflowFocus()
@@ -152,6 +157,7 @@ export function StateGridInspector({
         ? 'moderate'
         : 'small'
   const result = object.lastResult
+  const node = system.nodes[nodeId]
   const resultStale = Boolean(
     result &&
       (!sameJson(result.axes, object.axes) ||
@@ -163,6 +169,12 @@ export function StateGridInspector({
         result.dynamicsType !== system.config.type)
   )
   const workflowActions: WorkflowActionEntry[] = [
+    {
+      id: 'appearance-toggle',
+      group: 'Configure',
+      label: 'Appearance',
+      description: 'Change visibility, color, opacity, and point size.',
+    },
     {
       id: 'frozen-variables-toggle',
       group: 'Configure',
@@ -521,12 +533,66 @@ export function StateGridInspector({
         <WorkflowFocusToolbar entries={workflowActions} />
         <WorkflowActionList entries={workflowActions} />
 
+        {node ? (
+          <InspectorDisclosure
+            title="Appearance"
+            testId="appearance-toggle"
+            actionOnly={actionOnly}
+            defaultOpen={!workflowFocus}
+          >
+            <div className="inspector-section" data-testid="appearance-section">
+              <label>
+                Visibility
+                <button
+                  type="button"
+                  onClick={() => onToggleVisibility(nodeId)}
+                  data-testid="inspector-visibility"
+                >
+                  {node.visibility ? 'Visible' : 'Hidden'}
+                </button>
+              </label>
+              <label>
+                Color
+                <input
+                  type="color"
+                  value={node.render.color}
+                  onChange={(event) => onUpdateRender(nodeId, { color: event.target.value })}
+                  data-testid="inspector-color"
+                />
+              </label>
+              <label>
+                Opacity (%)
+                <OpacityPercentInput
+                  value={node.render.opacity}
+                  onChange={(opacity) => onUpdateRender(nodeId, { opacity })}
+                  ariaLabel="Color opacity percentage"
+                  testId="inspector-color-opacity"
+                />
+              </label>
+              <label>
+                Point Size
+                <input
+                  type="number"
+                  min={2}
+                  max={12}
+                  value={node.render.pointSize}
+                  onChange={(event) =>
+                    onUpdateRender(nodeId, { pointSize: Number(event.target.value) })
+                  }
+                  data-testid="inspector-point-size"
+                />
+              </label>
+            </div>
+          </InspectorDisclosure>
+        ) : null}
+
         {!workflowFocus?.activeWorkflow ? (
           <section className="inspector-section" data-testid="state-grid-summary">
             <h3 className="inspector-subheading">State Grid</h3>
             <p className="inspector-help">
               A bounded regular Cartesian grid in the full state space. Resolution is the number of
-              cell-center samples on each coordinate.
+              cell-center samples on each coordinate. A State Space scene previews all{' '}
+              {formatCount(totalPoints)} cell centers with equal weight and the selected Appearance.
             </p>
             {workloadSummary}
           </section>
