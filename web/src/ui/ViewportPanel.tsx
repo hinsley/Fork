@@ -3435,7 +3435,7 @@ function buildSceneTraces(
             const modeXs: number[] = []
             const modeYs: number[] = []
             const modeZs: number[] = []
-            const modeColors: string[] = []
+            const modeSizes: number[] = []
             const modeHoverData: Array<[number, number]> = []
             values.forEach((value, compactCell) => {
               if (!Number.isFinite(value) || Math.abs(value) <= maxMagnitude * 1e-12) return
@@ -3447,9 +3447,7 @@ function buildSceneTraces(
               modeXs.push(projectedPoint[0] ?? 0)
               modeYs.push(projectedPoint[1] ?? 0)
               modeZs.push(projectedPoint[2] ?? 0)
-              modeColors.push(
-                colorWithOpacity(value >= 0 ? '#ef4444' : '#3b82f6', opacity)
-              )
+              modeSizes.push(node.render.pointSize * (0.2 + opacity))
               modeHoverData.push([cell, value])
             })
             if (modeXs.length > 0) {
@@ -3460,7 +3458,7 @@ function buildSceneTraces(
               const common = {
                 mode: 'markers' as const,
                 name: `${object.name} mode ${mode.rank} ${componentLabel}`,
-                uid: `${nodeId}:eigenmode`,
+                uid: `${nodeId}-eigenmode`,
                 legendgroup: INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP,
                 opacity: normalizeColorOpacity(node.render.opacity),
                 customdata: modeHoverData,
@@ -3475,8 +3473,8 @@ function buildSceneTraces(
                   y: modeYs,
                   z: modeZs,
                   marker: {
-                    color: modeColors,
-                    size: node.render.pointSize * 1.2,
+                    color: node.render.color,
+                    size: modeSizes,
                     symbol: 'diamond',
                   },
                 })
@@ -3487,8 +3485,8 @@ function buildSceneTraces(
                   x: modeXs,
                   y: projectionPlotDim === 1 ? modeXs.map(() => 0) : modeYs,
                   marker: {
-                    color: modeColors,
-                    size: node.render.pointSize * 1.2,
+                    color: node.render.color,
+                    size: modeSizes,
                     symbol: 'diamond',
                   },
                 })

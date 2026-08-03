@@ -449,7 +449,7 @@ describe('ViewportPanel view state wiring', () => {
     expect(trace.customdata).toEqual([[1, 3.70926e-36], [2, 0.01], [3, 0.99]])
   })
 
-  it('overlays a signed right eigenmode without replacing the stationary measure', () => {
+  it('uses one invariant-measure appearance color for a signed right eigenmode overlay', () => {
     const config: SystemConfig = { name: 'Eigenmode map', equations: ['x', 'y'], params: [], paramNames: [], varNames: ['x', 'y'], solver: 'discrete', type: 'map' }
     const computedAt = '2026-08-02T12:00:00.000Z'
     const added = addObject(createSystem({ name: config.name, config }), {
@@ -477,24 +477,31 @@ describe('ViewportPanel view state wiring', () => {
       eigenmodeView: { modeRank: 1, component: 'real', phase: 0 },
       createdAt: computedAt,
     } as InvariantMeasureObject)
-    const scene = addScene(added.system, 'Eigenmode scene')
-    const system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
+    let system = updateNodeRender(added.system, added.nodeId, { color: '#000000' })
+    const scene = addScene(system, 'Eigenmode scene')
+    system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
 
     renderPanel(system)
 
     const traces = plotlyCalls.flatMap((call) => call.data)
-    expect(traces.find((trace) => trace.name === 'Map_Eigenmode')).toBeDefined()
+    const stationary = traces.find((trace) => trace.name === 'Map_Eigenmode') as {
+      marker: { color: string }
+    }
+    expect(stationary.marker.color).toBe('#000000')
     const mode = traces.find((trace) => trace.name === 'Map_Eigenmode mode 1 real') as {
       type: string
+      uid: string
       x: number[]
-      marker: { color: string[]; symbol: string }
+      marker: { color: string; size: number[]; symbol: string }
       customdata: Array<[number, number]>
     }
     expect(mode.type).toBe('scatter')
+    expect(mode.uid).toBe(`${added.nodeId}-eigenmode`)
+    expect(mode.uid).not.toContain(':')
     expect(mode.x).toHaveLength(4)
     expect(mode.marker.symbol).toBe('diamond')
-    expect(mode.marker.color[0]).toBe('#ef4444')
-    expect(mode.marker.color[1]).toContain('rgba(59, 130, 246')
+    expect(mode.marker.color).toBe('#000000')
+    expect(mode.marker.size).toEqual([4.8, 2.8, 1.8, 4.8])
     expect(mode.customdata).toEqual([[0, 1], [1, -0.5], [2, 0.25], [3, -1]])
   })
 
@@ -526,16 +533,26 @@ describe('ViewportPanel view state wiring', () => {
       eigenmodeView: { modeRank: 1, component: 'phase', phase: Math.PI / 2 },
       createdAt: computedAt,
     } as InvariantMeasureObject)
-    const scene = addScene(added.system, 'Flow eigenmode scene')
-    const system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
+    let system = updateNodeRender(added.system, added.nodeId, { color: '#8a2be2' })
+    const scene = addScene(system, 'Flow eigenmode scene')
+    system = updateScene(scene.system, scene.nodeId, { selectedNodeIds: [added.nodeId] })
 
     renderPanel(system)
 
     const mode = plotlyCalls.flatMap((call) => call.data).find(
       (trace) => trace.name === 'Flow_Eigenmode mode 1 phase 0.50π'
-    ) as { type: string; z: number[]; customdata: Array<[number, number]> }
+    ) as {
+      type: string
+      z: number[]
+      marker: { color: string; size: number[]; symbol: string }
+      customdata: Array<[number, number]>
+    }
     expect(mode.type).toBe('scatter3d')
     expect(mode.z.length).toBeGreaterThan(0)
+    expect(mode.marker.color).toBe('#8a2be2')
+    expect(mode.marker.symbol).toBe('diamond')
+    expect(mode.marker.size).toHaveLength(mode.z.length)
+    expect(new Set(mode.marker.size).size).toBeGreaterThan(1)
     expect(mode.customdata.some((entry) => entry[1] > 0)).toBe(true)
     expect(mode.customdata.some((entry) => entry[1] < 0)).toBe(true)
   })

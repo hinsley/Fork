@@ -42,6 +42,54 @@ async function plotHasTrace(plot: Locator, name: string): Promise<boolean> {
   }, name)
 }
 
+async function readTraceMarkerAppearance(
+  plot: Locator,
+  name: string
+): Promise<{
+  colors: string[]
+  symbols: string[]
+  uid: string
+  selectorValid: boolean
+} | null> {
+  return await plot.evaluate((element, traceName) => {
+    type PlotTrace = {
+      name?: string
+      uid?: string
+      marker?: {
+        color?: string | string[]
+        symbol?: string | string[]
+      }
+    }
+    const ownPlotElement = element as HTMLElement & { data?: PlotTrace[] }
+    const plotElement = ownPlotElement.data
+      ? ownPlotElement
+      : (element.querySelector('.js-plotly-plot') as typeof ownPlotElement | null)
+    const trace = plotElement?.data?.find((candidate) => candidate.name === traceName)
+    if (!trace?.marker) return null
+    const uid = trace.uid ?? ''
+    let selectorValid = true
+    try {
+      element.ownerDocument.querySelector(`.cb${uid}`)
+    } catch {
+      selectorValid = false
+    }
+    return {
+      colors: Array.isArray(trace.marker.color)
+        ? trace.marker.color
+        : trace.marker.color
+          ? [trace.marker.color]
+          : [],
+      symbols: Array.isArray(trace.marker.symbol)
+        ? trace.marker.symbol
+        : trace.marker.symbol
+          ? [trace.marker.symbol]
+          : [],
+      uid,
+      selectorValid,
+    }
+  }, name)
+}
+
 async function runEigenmodeCase(
   page: Page,
   options: {
@@ -88,6 +136,10 @@ async function runEigenmodeCase(
   await expect(page.getByTestId('inspector-name')).toHaveValue(measureName, {
     timeout: 60_000,
   })
+  const appearanceColor = '#000000'
+  await page.getByTestId('action-appearance-toggle').click()
+  await page.getByTestId('inspector-color').fill(appearanceColor)
+  await page.getByTestId('inspector-workflow-back').click()
   await page.getByTestId('action-invariant-measure-data-toggle').click()
   await expect(page.getByTestId('invariant-measure-convergence-status')).toHaveText(
     'Converged'
@@ -96,7 +148,7 @@ async function runEigenmodeCase(
   const coverSize = Number(coverText.split('/')[0].trim().replaceAll(',', ''))
   expect(coverSize).toBeGreaterThan(3)
 
-  await page.getByTestId('invariant-eigenmode-count-preset').selectOption('3')
+  await page.getByTestId('invariant-eigenmode-count').fill('3')
   await expect(page.getByTestId('invariant-eigenmode-compute')).toBeEnabled()
   await page.getByTestId('invariant-eigenmode-compute').click()
   await expect(page.getByTestId('invariant-eigenmode-subset')).toContainText('modes', {
@@ -121,10 +173,20 @@ async function runEigenmodeCase(
   }
 
   const scenePlot = page.locator('[data-testid^="plotly-viewport-"]').first()
+  const modeTraceName = `${measureName} mode 1 real`
   await expect.poll(
-    () => plotHasTrace(scenePlot, `${measureName} mode 1 real`),
+    () => plotHasTrace(scenePlot, modeTraceName),
     { timeout: 30_000 }
   ).toBe(true)
+  const markerAppearance = await readTraceMarkerAppearance(scenePlot, modeTraceName)
+  expect(markerAppearance?.colors.length).toBeGreaterThan(0)
+  expect(
+    markerAppearance?.colors.every((color) => color === appearanceColor)
+  ).toBe(true)
+  expect(markerAppearance?.symbols).toEqual(['diamond'])
+  expect(markerAppearance?.uid).toMatch(/-eigenmode$/)
+  expect(markerAppearance?.uid).not.toContain(':')
+  expect(markerAppearance?.selectorValid).toBe(true)
   return { measureName, coverSize }
 }
 

@@ -431,18 +431,36 @@ describe('InspectorDetailsPanel', () => {
     )
     fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
 
-    expect(screen.getByTestId('invariant-eigenmode-count-preset')).toHaveValue('6')
+    const eigenmodeSection = screen.getByTestId('invariant-measure-eigenmodes')
+    const modeCount = within(eigenmodeSection).getByRole('spinbutton', {
+      name: 'Nontrivial modes',
+    })
+    expect(modeCount).toHaveValue(6)
+    expect(modeCount).toHaveAttribute('min', '1')
+    expect(modeCount).toHaveAttribute('max', '7')
+    expect(screen.queryByTestId('invariant-eigenmode-count-preset')).not.toBeInTheDocument()
+    expect(eigenmodeSection).not.toHaveTextContent('Custom')
     expect(screen.getByTestId('invariant-measure-spectrum-plot')).toBeInTheDocument()
     expect(screen.getByTestId('invariant-spectral-gap')).toHaveTextContent('1.000000e-1')
     expect(screen.getByTestId('invariant-eigenmode-1')).toHaveTextContent('Mode 1 pair')
     expect(screen.getByTestId('invariant-eigenmode-view-controls')).toHaveTextContent(
       'right eigenvector describes density relaxation'
     )
+    expect(screen.getByTestId('invariant-eigenmode-view-controls')).toHaveTextContent(
+      "every marker uses this object's Appearance color"
+    )
 
+    fireEvent.change(modeCount, { target: { value: '8' } })
+    expect(screen.getByTestId('invariant-eigenmode-compute')).toBeDisabled()
+    fireEvent.change(modeCount, { target: { value: '4' } })
+    expect(screen.getByTestId('invariant-eigenmode-compute')).toBeEnabled()
+    expect(screen.getByTestId('invariant-eigenmode-compute')).toHaveTextContent(
+      'Compute 4 modes'
+    )
     fireEvent.click(screen.getByTestId('invariant-eigenmode-compute'))
     await waitFor(() => {
       expect(onCompute).toHaveBeenCalledWith(
-        { invariantMeasureId: added.nodeId, requestedModes: 6 },
+        { invariantMeasureId: added.nodeId, requestedModes: 4 },
         expect.objectContaining({ signal: expect.any(AbortSignal) })
       )
     })

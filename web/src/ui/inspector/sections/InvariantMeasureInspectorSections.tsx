@@ -238,28 +238,6 @@ export function InvariantMeasureInspectorSections({
   )
 }
 
-type EigenmodePreset = 'off' | '3' | '6' | '12' | '24' | 'custom'
-
-const EIGENMODE_PRESETS: Array<{
-  value: EigenmodePreset
-  label: string
-  count: number
-}> = [
-  { value: 'off', label: 'Off', count: 0 },
-  { value: '3', label: '3', count: 3 },
-  { value: '6', label: '6 Recommended', count: 6 },
-  { value: '12', label: '12', count: 12 },
-  { value: '24', label: '24 Deep', count: 24 },
-  { value: 'custom', label: 'Custom', count: 0 },
-]
-
-function presetForCount(count: number | undefined): EigenmodePreset {
-  if (count === 3 || count === 6 || count === 12 || count === 24) {
-    return String(count) as EigenmodePreset
-  }
-  return count === 0 ? 'off' : count === undefined ? '6' : 'custom'
-}
-
 function InvariantMeasureEigenmodeAnalysis({
   scope,
   invariantMeasure,
@@ -290,18 +268,14 @@ function InvariantMeasureEigenmodeAnalysis({
     result.stationaryDistribution.length
   )
   const initialCount = analysis?.requestedModes ?? DEFAULT_EIGENMODE_COUNT
-  const [preset, setPreset] = useState<EigenmodePreset>(
-    presetForCount(initialCount)
-  )
-  const [customCount, setCustomCount] = useState(initialCount)
+  const [modeCount, setModeCount] = useState(initialCount)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     const nextCount = analysis?.requestedModes ?? DEFAULT_EIGENMODE_COUNT
-    setPreset(presetForCount(nextCount))
-    setCustomCount(nextCount)
+    setModeCount(nextCount)
     setError(null)
     return () => {
       controllerRef.current?.abort()
@@ -309,10 +283,7 @@ function InvariantMeasureEigenmodeAnalysis({
     }
   }, [analysis?.requestedModes, selectionKey])
 
-  const requestedCount =
-    preset === 'custom'
-      ? Math.trunc(customCount)
-      : EIGENMODE_PRESETS.find((entry) => entry.value === preset)?.count ?? 0
+  const requestedCount = Math.trunc(modeCount)
   const requestValid =
     requestedCount >= 1 && requestedCount <= maxSupported
   const selectedMode = analysis?.modes.find(
@@ -413,16 +384,6 @@ function InvariantMeasureEigenmodeAnalysis({
     })
   }
 
-  const choosePreset = (value: EigenmodePreset) => {
-    setPreset(value)
-    setError(null)
-    if (value === 'off') {
-      updateView({ modeRank: null })
-    } else if (analysis && invariantMeasure.eigenmodeView?.modeRank === null) {
-      updateView({ modeRank: analysis.modes[0]?.rank ?? null })
-    }
-  }
-
   const runAnalysis = async () => {
     if (!selectedNodeId || !requestValid) return
     controllerRef.current?.abort()
@@ -452,67 +413,40 @@ function InvariantMeasureEigenmodeAnalysis({
     >
       <h4 className="inspector-subheading">Sparse eigenmodes</h4>
       <p className="inspector-help">
-        Analyze the stored sparse operator after the stationary solve. The count is the number of
-        selectable nontrivial modes; a complex conjugate pair is kept together as one oscillatory
-        mode. The stationary mode remains separate.
+        Enter how many selectable nontrivial modes to compute after the stationary solve. A complex
+        conjugate pair is kept together as one oscillatory mode; the stationary mode remains
+        separate.
       </p>
       <label>
         Nontrivial modes
-        <select
-          value={preset}
-          onChange={(event) => choosePreset(event.target.value as EigenmodePreset)}
-          data-testid="invariant-eigenmode-count-preset"
-        >
-          {EIGENMODE_PRESETS.map((entry) => (
-            <option
-              key={entry.value}
-              value={entry.value}
-              disabled={entry.count > 0 && entry.count > maxSupported}
-            >
-              {entry.label}
-            </option>
-          ))}
-        </select>
+        <input
+          type="number"
+          min={1}
+          max={Math.max(1, maxSupported)}
+          step={1}
+          value={modeCount}
+          onChange={(event) => {
+            setModeCount(Number(event.target.value))
+            setError(null)
+          }}
+          data-testid="invariant-eigenmode-count"
+        />
       </label>
-      {preset === 'custom' ? (
-        <label>
-          Custom count
-          <input
-            type="number"
-            min={1}
-            max={Math.max(1, maxSupported)}
-            step={1}
-            value={customCount}
-            onChange={(event) => setCustomCount(Number(event.target.value))}
-            data-testid="invariant-eigenmode-custom-count"
-          />
-        </label>
-      ) : null}
-      {preset === '24' || (preset === 'custom' && requestedCount > 12) ? (
+      {requestedCount > 12 ? (
         <p className="inspector-help" data-testid="invariant-eigenmode-deep-warning">
           Deep requests use more sparse products and can persist large mode vectors. Fork caps the
           request at {maxSupported.toLocaleString()} modes for this cover.
         </p>
       ) : null}
-      {preset === 'off' ? (
-        <p className="inspector-help">
-          State-space mode rendering is off. Any completed analysis remains cached on this object.
-        </p>
-      ) : (
-        <button
-          type="button"
-          className="primary"
-          onClick={() => void runAnalysis()}
-          disabled={running || !stationaryConverged || !requestValid}
-          data-testid="invariant-eigenmode-compute"
-        >
-          {running
-            ? 'Computing modes…'
-            : analysis
-              ? `Compute ${requestedCount} modes`
-              : `Compute ${requestedCount} modes`}
-        </button>
-      )}
+      <button
+        type="button"
+        className="primary"
+        onClick={() => void runAnalysis()}
+        disabled={running || !stationaryConverged || !requestValid}
+        data-testid="invariant-eigenmode-compute"
+      >
+        {running ? 'Computing modes…' : `Compute ${requestedCount} modes`}
+      </button>
       {!stationaryConverged ? (
         <p className="inspector-error">
           Eigenmodes require a converged stationary measure.
@@ -596,8 +530,9 @@ function InvariantMeasureEigenmodeAnalysis({
               <h4 className="inspector-subheading">State-space mode {selectedMode.rank}</h4>
               <p className="inspector-help">
                 This right eigenvector describes density relaxation under the column-stochastic
-                operator. It is signed and is not a probability density. Left observable modes are
-                not computed in this analysis.
+                operator. It is signed and is not a probability density. Marker size shows
+                magnitude, hover values retain sign, and every marker uses this object's Appearance
+                color. Left observable modes are not computed in this analysis.
               </p>
               {selectedMode.conjugatePair ? (
                 <>
