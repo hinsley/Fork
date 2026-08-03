@@ -254,6 +254,26 @@ async function runEigenmodeCase(
     expect(modeAppearance?.selectorValid).toBe(true)
   }
 
+  const updatedPointSize = 11
+  await page.getByTestId('inspector-workflow-back').click()
+  await page.getByTestId('action-appearance-toggle').click()
+  await page.getByTestId('inspector-point-size').fill(String(updatedPointSize))
+  for (const scenePlot of scenePlots) {
+    await expect.poll(async () => {
+      const stationaryAppearance = await readTraceMarkerAppearance(scenePlot, measureName)
+      const modeAppearance = await readTraceMarkerAppearance(scenePlot, modeTraceName)
+      return {
+        stationary: stationaryAppearance?.sizes ?? [],
+        mode: modeAppearance?.sizes ?? [],
+      }
+    }, { timeout: 30_000 }).toEqual({
+      stationary: [updatedPointSize],
+      mode: [updatedPointSize],
+    })
+  }
+  await page.getByTestId('inspector-workflow-back').click()
+  await page.getByTestId('action-invariant-measure-data-toggle').click()
+
   await page.getByTestId('invariant-eigenmode-hide').click()
   for (const scenePlot of scenePlots) {
     await expect.poll(
