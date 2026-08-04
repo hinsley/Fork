@@ -4,14 +4,8 @@ import type { System, SystemConfig } from './types'
 
 type DefaultSystemSpec = SystemConfig
 
-const tanh = (value: string) =>
-  `(exp(${value}) - exp(-(${value}))) / (exp(${value}) + exp(-(${value})))`
-
-// Morris-Lecar uses tanh/cosh; expand them into exp-only forms for the parser.
-const morrisLecarMInf = `0.5 * (1 + ${tanh('(V - V1) / V2')})`
-const morrisLecarWInf = `0.5 * (1 + ${tanh('(V - V3) / V4')})`
-const morrisLecarTauW =
-  '2 / (exp((V - V3) / (2 * V4)) + exp(-((V - V3) / (2 * V4))))'
+const morrisLecarMInf = '0.5 * (1 + tanh((V - V1) / V2))'
+const morrisLecarWInf = '0.5 * (1 + tanh((V - V3) / V4))'
 
 const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
   {
@@ -107,7 +101,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     name: 'MorrisLecar',
     equations: [
       `(I - g_L * (V - V_L) - g_Ca * (${morrisLecarMInf}) * (V - V_Ca) - g_K * w * (V - V_K)) / C`,
-      `(${morrisLecarWInf} - w) / (${morrisLecarTauW})`,
+      `(${morrisLecarWInf} - w) * cosh((V - V3) / (2 * V4))`,
     ],
     params: [20, 2, 4.4, 8, -60, 120, -84, -1.2, 18, 2, 30, 90],
     paramNames: [

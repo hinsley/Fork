@@ -100,7 +100,7 @@ fn compute_spectral_jacobian(
     kind: SystemKind,
     state: &[f64],
 ) -> Result<DMatrix<f64>> {
-    let n = system.equations.len();
+    let n = system.equations().len();
     let values = match kind {
         SystemKind::Flow => compute_jacobian(system, kind, state)?,
         SystemKind::Map { .. } => compute_system_jacobian(system, kind, state)?,
@@ -314,7 +314,7 @@ impl<'a> HopfCurveProblem<'a> {
         param1_index: usize,
         param2_index: usize,
     ) -> Result<Self> {
-        let n = system.equations.len();
+        let n = system.equations().len();
         if hopf_state.len() != n {
             bail!("Hopf state dimension mismatch");
         }
@@ -375,7 +375,7 @@ impl<'a> HopfCurveProblem<'a> {
 
     /// Number of phase variables.
     fn nphase(&self) -> usize {
-        self.system.equations.len()
+        self.system.equations().len()
     }
 
     /// Set parameters temporarily and execute a function.

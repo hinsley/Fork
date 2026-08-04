@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod autodiff;
+pub mod batch;
 pub mod continuation;
 pub mod equation_engine;
 pub mod equilibrium;
@@ -7,6 +8,7 @@ pub mod event_series;
 pub mod expansion_entropy;
 pub mod forced_response;
 pub mod isocline;
+mod register_vm;
 pub mod solvers;
 pub mod state_periodicity;
 /// The `fork_core` crate provides the fundamental mathematical engine for the Fork CLI.

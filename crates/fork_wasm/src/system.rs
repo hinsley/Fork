@@ -126,7 +126,7 @@ impl WasmSystem {
         let mut system = EquationSystem::new(bytecodes, params);
         system.set_maps(compiler.param_map, compiler.var_map);
 
-        let dim = system.equations.len();
+        let dim = system.equations().len();
 
         let solver = match solver_name {
             "rk4" => SolverType::RK4(RK4::new(dim)),
@@ -156,7 +156,7 @@ impl WasmSystem {
     }
 
     pub fn set_periods(&mut self, periods: &[f64]) {
-        let dim = self.system.equations.len();
+        let dim = self.system.equations().len();
         self.periodicity = StatePeriodicity::from_periods(periods, dim);
         self.periodicity.wrap_state(&mut self.state);
     }
@@ -207,7 +207,7 @@ impl WasmSystem {
     }
 
     pub fn compute_jacobian(&self) -> Vec<f64> {
-        let n = self.system.equations.len();
+        let n = self.system.equations().len();
         let mut jacobian = vec![0.0; n * n];
         let mut dual_x = vec![Dual::new(0.0, 0.0); n];
         let mut dual_out = vec![Dual::new(0.0, 0.0); n];

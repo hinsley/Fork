@@ -312,7 +312,7 @@ pub fn zero_hopf_normal_form(
     param2_value: f64,
     frequency_hint: f64,
 ) -> Result<ZeroHopfNormalForm> {
-    if state.len() != system.equations.len() || state.len() < 3 {
+    if state.len() != system.equations().len() || state.len() < 3 {
         bail!("Zero-Hopf normal form requires a matching state of dimension at least three");
     }
     if param1_index == param2_index
@@ -604,7 +604,7 @@ pub fn hopf_hopf_normal_form(
     param2_value: f64,
     source_frequency_hint: f64,
 ) -> Result<HopfHopfNormalForm> {
-    if state.len() != system.equations.len() || state.len() < 4 {
+    if state.len() != system.equations().len() || state.len() < 4 {
         bail!("Hopf-Hopf normal form requires a matching state of dimension at least four");
     }
     if param1_index == param2_index

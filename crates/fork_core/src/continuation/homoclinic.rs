@@ -249,7 +249,7 @@ impl<'a> HomoclinicProblem<'a> {
     }
 
     fn dim(&self) -> usize {
-        self.system.equations.len()
+        self.system.equations().len()
     }
 
     fn orbit_unknown_count(&self) -> usize {

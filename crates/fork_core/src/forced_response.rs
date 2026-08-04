@@ -194,7 +194,7 @@ struct ParameterSeededSystem<'a> {
 
 impl DynamicalSystem<Dual> for ParameterSeededSystem<'_> {
     fn dimension(&self) -> usize {
-        self.system.equations.len()
+        self.system.equations().len()
     }
 
     fn apply(&self, t: Dual, x: &[Dual], out: &mut [Dual]) {
@@ -211,7 +211,7 @@ impl<'a> StroboscopicMap<'a> {
         settings: StroboscopicSettings,
         periodicity: StatePeriodicity,
     ) -> Result<Self> {
-        if system.equations.is_empty() {
+        if system.equations().is_empty() {
             bail!("Stroboscopic map requires a non-empty system");
         }
         if !settings.phase.is_finite() {
@@ -397,10 +397,10 @@ impl<'a> StroboscopicMap<'a> {
     }
 
     fn validate_state(&self, state: &[f64]) -> Result<()> {
-        if state.len() != self.system.equations.len() {
+        if state.len() != self.system.equations().len() {
             bail!(
                 "Stroboscopic state dimension mismatch: expected {}, got {}",
-                self.system.equations.len(),
+                self.system.equations().len(),
                 state.len()
             );
         }
@@ -912,7 +912,7 @@ impl<'a> ForcedResponseContinuationProblem<'a> {
 
 impl ContinuationProblem for ForcedResponseContinuationProblem<'_> {
     fn dimension(&self) -> usize {
-        self.system.equations.len()
+        self.system.equations().len()
     }
 
     fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {

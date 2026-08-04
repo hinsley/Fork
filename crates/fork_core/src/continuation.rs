@@ -2709,7 +2709,7 @@ fn extend_branch_legacy(
     settings: ContinuationSettings,
     forward: bool,
 ) -> Result<ContinuationBranch> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if branch.points.is_empty() {
         bail!("Cannot extend empty branch");
     }
@@ -2976,7 +2976,7 @@ pub fn continue_parameter(
     settings: ContinuationSettings,
     forward: bool,
 ) -> Result<ContinuationBranch> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if initial_state.len() != dim {
         bail!("Initial state dimension mismatch");
     }
@@ -3055,7 +3055,7 @@ fn refine_fold_point(
     new_tests: &TestFunctionValues,
     prev_tangent: &DVector<f64>,
 ) -> Result<(ContinuationPoint, PointDiagnostics, DVector<f64>)> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let prev_aug = continuation_point_to_aug(prev_point);
     let new_aug = continuation_point_to_aug(new_point);
     let refined_aug = solve_fold_newton(
@@ -3106,7 +3106,7 @@ fn refine_hopf_point(
     new_tests: &TestFunctionValues,
     prev_tangent: &DVector<f64>,
 ) -> Result<(ContinuationPoint, PointDiagnostics, DVector<f64>)> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let prev_aug = continuation_point_to_aug(prev_point);
     let new_aug = continuation_point_to_aug(new_point);
     let refined_aug = solve_hopf_newton(
@@ -3156,7 +3156,7 @@ fn solve_fold_newton(
     param_index: usize,
     settings: ContinuationSettings,
 ) -> Result<DVector<f64>> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let mut current = prev_aug.clone();
     let denom = prev_fold - new_fold;
     if denom.abs() > 1e-12 {
@@ -3229,7 +3229,7 @@ fn solve_hopf_newton(
     param_index: usize,
     settings: ContinuationSettings,
 ) -> Result<DVector<f64>> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let mut current = prev_aug.clone();
     let denom = prev_hopf - new_hopf;
     if denom.abs() > 1e-12 {
@@ -3299,7 +3299,7 @@ fn compute_test_gradient(
     param_index: usize,
     selector: &dyn Fn(&TestFunctionValues) -> f64,
 ) -> Result<DVector<f64>> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let mut grad = DVector::zeros(dim + 1);
     let base_eps = 1e-6;
 
@@ -4155,7 +4155,7 @@ fn compute_point_diagnostics(
     aug_state: &DVector<f64>,
     param_index: usize,
 ) -> Result<PointDiagnostics> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let param = aug_state[0];
     let state: Vec<f64> = aug_state.rows(1, dim).iter().cloned().collect();
 
@@ -4236,7 +4236,7 @@ fn compute_extended_jacobian(
     aug_state: &DVector<f64>,
     param_index: usize,
 ) -> Result<DMatrix<f64>> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let param = aug_state[0];
     let state: Vec<f64> = aug_state.rows(1, dim).iter().cloned().collect();
 
@@ -4281,7 +4281,7 @@ fn solve_palc(
     param_index: usize,
     settings: ContinuationSettings,
 ) -> Result<Option<(DVector<f64>, DVector<f64>)>> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let mut current_aug = pred_aug.clone();
 
     for _ in 0..settings.corrector_steps {

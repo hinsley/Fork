@@ -55,7 +55,7 @@ impl OwnedEquilibriumContinuationProblem {
 
 impl ContinuationProblem for OwnedEquilibriumContinuationProblem {
     fn dimension(&self) -> usize {
-        self.system.equations.len()
+        self.system.equations().len()
     }
 
     fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> anyhow::Result<()> {

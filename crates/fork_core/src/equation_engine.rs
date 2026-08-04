@@ -1,9 +1,11 @@
 use crate::{
     autodiff::Dual,
+    register_vm::RegisterProgram,
     traits::{DynamicalSystem, Scalar},
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExpressionContext {
@@ -45,6 +47,12 @@ pub enum OpCode {
     Div,
     /// Pops top two values (b, a), pushes (a ^ b).
     Pow,
+    /// Pops top value (a), pushes a * a.
+    Square,
+    /// Pops top value (a), pushes a * a * a.
+    Cube,
+    /// Pops top value (a), pushes a raised to a compile-time integer power.
+    PowI(i32),
     /// Pops top value (a), pushes sin(a).
     Sin,
     /// Pops top value (a), pushes cos(a).
@@ -479,6 +487,18 @@ impl VM {
                     let a = stack.pop().unwrap();
                     stack.push(a.powf(b));
                 }
+                OpCode::Square => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a * a);
+                }
+                OpCode::Cube => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a * a * a);
+                }
+                OpCode::PowI(exponent) => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.powi(*exponent));
+                }
                 OpCode::Sin => {
                     let a = stack.pop().unwrap();
                     stack.push(a.sin());
@@ -830,42 +850,60 @@ impl Compiler {
         Ok(Bytecode { ops })
     }
 
-    fn compile_recursive(&self, expr: &Expr, ops: &mut Vec<OpCode>) -> Result<(), String> {
+    /// Compiles one expression and returns its value when the emitted subtree
+    /// is a safely folded constant.
+    fn compile_recursive(&self, expr: &Expr, ops: &mut Vec<OpCode>) -> Result<Option<f64>, String> {
+        let start = ops.len();
         match expr {
-            Expr::Number(n) => ops.push(OpCode::LoadConst(*n)),
+            Expr::Number(n) => {
+                ops.push(OpCode::LoadConst(*n));
+                Ok(Some(*n))
+            }
             Expr::Variable(name) => {
                 if let Some(&idx) = self.var_map.get(name) {
                     ops.push(OpCode::LoadVar(idx));
+                    Ok(None)
                 } else if let Some(&idx) = self.param_map.get(name) {
                     ops.push(OpCode::LoadParam(idx));
+                    Ok(None)
                 } else if self.context.symbol() == Some(name.as_str()) {
                     ops.push(OpCode::LoadContext);
+                    Ok(None)
                 } else if let Some(value) = builtin_constant(name) {
                     ops.push(OpCode::LoadConst(value));
+                    Ok(Some(value))
                 } else if name == "t" || name == "n" {
                     let expected = self.context.symbol().unwrap_or("no contextual symbol");
-                    return Err(format!(
+                    Err(format!(
                         "Context symbol {name} is not available here; this expression context provides {expected}"
-                    ));
+                    ))
                 } else {
-                    return Err(format!("Unknown variable or parameter: {name}"));
+                    Err(format!("Unknown variable or parameter: {name}"))
                 }
             }
             Expr::Binary(left, op, right) => {
-                self.compile_recursive(left, ops)?;
-                self.compile_recursive(right, ops)?;
-                match op {
-                    '+' => ops.push(OpCode::Add),
-                    '-' => ops.push(OpCode::Sub),
-                    '*' => ops.push(OpCode::Mul),
-                    '/' => ops.push(OpCode::Div),
-                    '^' => ops.push(OpCode::Pow),
-                    _ => return Err(format!("Unknown binary operator: {op}")),
+                if *op == '^' {
+                    return self.compile_power(left, right, start, ops);
                 }
+
+                let left_constant = self.compile_recursive(left, ops)?;
+                let right_constant = self.compile_recursive(right, ops)?;
+                ops.push(match op {
+                    '+' => OpCode::Add,
+                    '-' => OpCode::Sub,
+                    '*' => OpCode::Mul,
+                    '/' => OpCode::Div,
+                    _ => return Err(format!("Unknown binary operator: {op}")),
+                });
+                Ok(self.fold_if_all_constant(
+                    start,
+                    left_constant.is_some() && right_constant.is_some(),
+                    ops,
+                ))
             }
             Expr::Comparison(left, comparison, right) => {
-                self.compile_recursive(left, ops)?;
-                self.compile_recursive(right, ops)?;
+                let left_constant = self.compile_recursive(left, ops)?;
+                let right_constant = self.compile_recursive(right, ops)?;
                 ops.push(match comparison {
                     ComparisonOp::Less => OpCode::Less,
                     ComparisonOp::LessEqual => OpCode::LessEqual,
@@ -874,13 +912,19 @@ impl Compiler {
                     ComparisonOp::Equal => OpCode::Equal,
                     ComparisonOp::NotEqual => OpCode::NotEqual,
                 });
+                Ok(self.fold_if_all_constant(
+                    start,
+                    left_constant.is_some() && right_constant.is_some(),
+                    ops,
+                ))
             }
             Expr::Unary(op, operand) => {
-                self.compile_recursive(operand, ops)?;
+                let constant = self.compile_recursive(operand, ops)?;
                 match op {
                     '-' => ops.push(OpCode::Neg),
                     _ => return Err(format!("Unknown unary operator: {op}")),
                 }
+                Ok(self.fold_if_all_constant(start, constant.is_some(), ops))
             }
             Expr::Call(func, args) => {
                 if matches!(func.as_str(), "min" | "max") {
@@ -891,25 +935,109 @@ impl Compiler {
                             args.len(),
                         ));
                     }
-                    self.compile_recursive(&args[0], ops)?;
+                    let mut all_constant = self.compile_recursive(&args[0], ops)?.is_some();
                     for arg in &args[1..] {
-                        self.compile_recursive(arg, ops)?;
+                        all_constant &= self.compile_recursive(arg, ops)?.is_some();
                         ops.push(if func == "min" {
                             OpCode::Min
                         } else {
                             OpCode::Max
                         });
                     }
-                    return Ok(());
+                    return Ok(self.fold_if_all_constant(start, all_constant, ops));
                 }
 
+                if func == "pow" && args.len() == 2 {
+                    return self.compile_power(&args[0], &args[1], start, ops);
+                }
+
+                let mut all_constant = true;
                 for arg in args {
-                    self.compile_recursive(arg, ops)?;
+                    all_constant &= self.compile_recursive(arg, ops)?.is_some();
                 }
                 ops.push(resolve_fixed_function(func, args.len())?);
+                Ok(self.fold_if_all_constant(start, all_constant, ops))
             }
         }
-        Ok(())
+    }
+
+    fn compile_power(
+        &self,
+        base: &Expr,
+        exponent: &Expr,
+        start: usize,
+        ops: &mut Vec<OpCode>,
+    ) -> Result<Option<f64>, String> {
+        let base_constant = self.compile_recursive(base, ops)?;
+        let exponent_start = ops.len();
+        let exponent_constant = self.compile_recursive(exponent, ops)?;
+
+        if base_constant.is_some() && exponent_constant.is_some() {
+            ops.push(OpCode::Pow);
+            if let Some(value) = self.fold_if_all_constant(start, true, ops) {
+                return Ok(Some(value));
+            }
+            ops.pop();
+        }
+
+        if let Some(exponent) = exponent_constant.and_then(integer_exponent) {
+            ops.truncate(exponent_start);
+            ops.push(specialized_power_opcode(exponent));
+        } else {
+            ops.push(OpCode::Pow);
+        }
+        Ok(None)
+    }
+
+    fn fold_if_all_constant(
+        &self,
+        start: usize,
+        all_constant: bool,
+        ops: &mut Vec<OpCode>,
+    ) -> Option<f64> {
+        if !all_constant {
+            return None;
+        }
+
+        let bytecode = Bytecode {
+            ops: ops[start..].to_vec(),
+        };
+        let mut f64_stack = Vec::with_capacity(bytecode.ops.len());
+        let value: f64 = VM::execute(&bytecode, &[], &[], &mut f64_stack);
+        let mut dual_stack = Vec::with_capacity(bytecode.ops.len());
+        let dual = VM::execute(&bytecode, &[] as &[Dual], &[], &mut dual_stack);
+
+        // Preserve the exact Dual result, including the sign of zero. Even
+        // when a subtree cannot safely be replaced, return its known scalar
+        // value so a surrounding integer power can still be specialized.
+        if value.is_finite()
+            && dual.eps.to_bits() == 0.0_f64.to_bits()
+            && dual.val.to_bits() == value.to_bits()
+        {
+            ops.truncate(start);
+            ops.push(OpCode::LoadConst(value));
+        }
+        Some(value)
+    }
+}
+
+fn integer_exponent(value: f64) -> Option<i32> {
+    if value.is_finite()
+        && value.fract() == 0.0
+        && value >= i32::MIN as f64
+        && value <= i32::MAX as f64
+    {
+        Some(value as i32)
+    } else {
+        None
+    }
+}
+
+fn specialized_power_opcode(exponent: i32) -> OpCode {
+    match exponent {
+        2 => OpCode::Square,
+        3 => OpCode::Cube,
+        exponent => OpCode::PowI(exponent),
     }
 }
 
@@ -1364,7 +1492,7 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, Compiler, Dual, EquationSystem, ExpressionContext};
+    use super::{parse, Bytecode, Compiler, Dual, EquationSystem, ExpressionContext, OpCode, VM};
     use crate::traits::DynamicalSystem;
 
     fn eval_with_x_and_p(expr: &str, x: f64, p: f64) -> f64 {
@@ -1412,6 +1540,157 @@ mod tests {
     fn numeric_derivative_wrt_p(expr: &str, x: f64, p: f64) -> f64 {
         let h = 1e-6;
         (eval_with_x_and_p(expr, x, p + h) - eval_with_x_and_p(expr, x, p - h)) / (2.0 * h)
+    }
+
+    fn compile_single_variable_expression(expression: &str) -> Bytecode {
+        let compiler = Compiler::new(&["x".to_string()], &[]);
+        compiler.compile(&parse(expression).expect("expression should parse"))
+    }
+
+    fn execute_f64(bytecode: &Bytecode, x: f64) -> f64 {
+        VM::execute(bytecode, &[x], &[], &mut Vec::new())
+    }
+
+    fn execute_dual(bytecode: &Bytecode, x: Dual) -> Dual {
+        VM::execute(bytecode, &[x], &[], &mut Vec::new())
+    }
+
+    #[test]
+    fn compiler_recursively_folds_only_constant_subtrees() {
+        let constant = compile_single_variable_expression("2 + 3 * 4");
+        assert!(
+            matches!(constant.ops.as_slice(), [OpCode::LoadConst(value)] if *value == 14.0),
+            "unexpected constant bytecode: {:?}",
+            constant.ops
+        );
+
+        let mixed = compile_single_variable_expression("x + (2 * 3 + sin(0))");
+        assert!(
+            matches!(
+                mixed.ops.as_slice(),
+                [
+                    OpCode::LoadVar(0),
+                    OpCode::LoadConst(value),
+                    OpCode::Add
+                ] if *value == 6.0
+            ),
+            "unexpected mixed bytecode: {:?}",
+            mixed.ops
+        );
+
+        let ieee_sensitive = compile_single_variable_expression("x + 0");
+        assert!(
+            matches!(
+                ieee_sensitive.ops.as_slice(),
+                [OpCode::LoadVar(0), OpCode::LoadConst(value), OpCode::Add]
+                    if value.to_bits() == 0.0_f64.to_bits()
+            ),
+            "x + 0 must not be algebraically simplified: {:?}",
+            ieee_sensitive.ops
+        );
+
+        let signed_zero_dual = compile_single_variable_expression("-2");
+        assert!(
+            matches!(
+                signed_zero_dual.ops.as_slice(),
+                [OpCode::LoadConst(value), OpCode::Neg] if *value == 2.0
+            ),
+            "folding must preserve a constant subtree's signed Dual zero: {:?}",
+            signed_zero_dual.ops
+        );
+
+        let non_finite = compile_single_variable_expression("1 / 0");
+        assert!(
+            matches!(
+                non_finite.ops.as_slice(),
+                [
+                    OpCode::LoadConst(one),
+                    OpCode::LoadConst(zero),
+                    OpCode::Div
+                ] if *one == 1.0 && *zero == 0.0
+            ),
+            "non-finite constant results should remain runtime operations: {:?}",
+            non_finite.ops
+        );
+    }
+
+    #[test]
+    fn compiler_lowers_compile_time_integer_powers() {
+        for (expression, expected) in [
+            ("x^2", OpCode::Square),
+            ("x^3", OpCode::Cube),
+            ("x^-4", OpCode::PowI(-4)),
+            ("x^(1 + 1)", OpCode::Square),
+            ("pow(x, 5)", OpCode::PowI(5)),
+            ("pow(x, 3)", OpCode::Cube),
+        ] {
+            let bytecode = compile_single_variable_expression(expression);
+            assert_eq!(
+                bytecode.ops.len(),
+                2,
+                "unexpected bytecode for {expression}: {:?}",
+                bytecode.ops
+            );
+            assert!(matches!(bytecode.ops[0], OpCode::LoadVar(0)));
+            let matches_expected = match (bytecode.ops[1], expected) {
+                (OpCode::Square, OpCode::Square) | (OpCode::Cube, OpCode::Cube) => true,
+                (OpCode::PowI(actual), OpCode::PowI(expected)) => actual == expected,
+                _ => false,
+            };
+            assert!(
+                matches_expected,
+                "unexpected power opcode for {expression}: {:?}",
+                bytecode.ops[1]
+            );
+        }
+
+        let non_integer = compile_single_variable_expression("x^2.5");
+        assert!(matches!(
+            non_integer.ops.as_slice(),
+            [
+                OpCode::LoadVar(0),
+                OpCode::LoadConst(exponent),
+                OpCode::Pow
+            ] if *exponent == 2.5
+        ));
+    }
+
+    #[test]
+    fn folded_and_specialized_bytecode_preserves_f64_and_dual_results() {
+        let optimized =
+            compile_single_variable_expression("x^2 + x^3 + x^-4 + pow(x, 5) + (2 * 3)");
+        let reference = Bytecode {
+            ops: vec![
+                OpCode::LoadVar(0),
+                OpCode::LoadConst(2.0),
+                OpCode::Pow,
+                OpCode::LoadVar(0),
+                OpCode::LoadConst(3.0),
+                OpCode::Pow,
+                OpCode::Add,
+                OpCode::LoadVar(0),
+                OpCode::LoadConst(4.0),
+                OpCode::Neg,
+                OpCode::Pow,
+                OpCode::Add,
+                OpCode::LoadVar(0),
+                OpCode::LoadConst(5.0),
+                OpCode::Pow,
+                OpCode::Add,
+                OpCode::LoadConst(2.0),
+                OpCode::LoadConst(3.0),
+                OpCode::Mul,
+                OpCode::Add,
+            ],
+        };
+
+        for x in [0.7, 1.3, 2.1] {
+            assert_close(execute_f64(&optimized, x), execute_f64(&reference, x));
+            let actual = execute_dual(&optimized, Dual::new(x, 0.75));
+            let expected = execute_dual(&reference, Dual::new(x, 0.75));
+            assert_close(actual.val, expected.val);
+            assert_close(actual.eps, expected.eps);
+        }
     }
 
     #[test]
@@ -1763,14 +2042,42 @@ mod tests {
 /// A concrete implementation of `DynamicalSystem` that uses the VM.
 /// Contains one compiled bytecode expression per state variable.
 pub struct EquationSystem {
-    pub equations: Vec<Bytecode>,
+    /// Immutable postfix bytecode retained for standalone/event evaluation and
+    /// batch interpreters. Clones share this storage with the fused program.
+    equations: Arc<[Bytecode]>,
     pub params: Vec<f64>,
     pub param_map: HashMap<String, usize>,
     pub var_map: HashMap<String, usize>,
-    // Separate stacks/param caches for f64 and Dual execution to avoid reallocations.
-    stack_f64: RefCell<Vec<f64>>,
-    stack_dual: RefCell<Vec<Dual>>,
-    pub(crate) params_dual: RefCell<Vec<Dual>>,
+    program: Arc<RegisterProgram>,
+    workspace: RefCell<EquationWorkspace>,
+}
+
+/// Mutable evaluation memory is deliberately separate from the immutable,
+/// Arc-shared compiled program. Every EquationSystem clone gets its own
+/// workspace, so hot-path buffers are reusable without coupling clones.
+struct EquationWorkspace {
+    registers_f64: Vec<f64>,
+    registers_dual: Vec<Dual>,
+    params_dual: Vec<Dual>,
+    state_dual: Vec<Dual>,
+}
+
+impl EquationWorkspace {
+    fn new(register_count: usize, parameter_count: usize, dimension: usize) -> Self {
+        Self {
+            registers_f64: Vec::with_capacity(register_count),
+            registers_dual: Vec::with_capacity(register_count),
+            params_dual: Vec::with_capacity(parameter_count),
+            state_dual: Vec::with_capacity(dimension),
+        }
+    }
+}
+
+fn sync_dual_params(params: &[f64], params_dual: &mut Vec<Dual>) {
+    params_dual.resize(params.len(), Dual::new(0.0, 0.0));
+    for (destination, &source) in params_dual.iter_mut().zip(params) {
+        *destination = Dual::new(source, 0.0);
+    }
 }
 
 impl Clone for EquationSystem {
@@ -1780,23 +2087,32 @@ impl Clone for EquationSystem {
             params: self.params.clone(),
             param_map: self.param_map.clone(),
             var_map: self.var_map.clone(),
-            stack_f64: RefCell::new(Vec::with_capacity(64)),
-            stack_dual: RefCell::new(Vec::with_capacity(64)),
-            params_dual: RefCell::new(Vec::new()),
+            program: self.program.clone(),
+            workspace: RefCell::new(EquationWorkspace::new(
+                self.program.register_count(),
+                self.params.len(),
+                self.equations.len(),
+            )),
         }
     }
 }
 
 impl EquationSystem {
     pub fn new(equations: Vec<Bytecode>, params: Vec<f64>) -> Self {
+        let equations: Arc<[Bytecode]> = equations.into();
+        let program = Arc::new(RegisterProgram::compile(equations.as_ref()));
+        let workspace = RefCell::new(EquationWorkspace::new(
+            program.register_count(),
+            params.len(),
+            equations.len(),
+        ));
         Self {
             equations,
             params,
             param_map: HashMap::new(),
             var_map: HashMap::new(),
-            stack_f64: RefCell::new(Vec::with_capacity(64)),
-            stack_dual: RefCell::new(Vec::with_capacity(64)),
-            params_dual: RefCell::new(Vec::new()),
+            program,
+            workspace,
         }
     }
 
@@ -1805,20 +2121,32 @@ impl EquationSystem {
         self.var_map = var_map;
     }
 
+    /// Read-only access to the immutable postfix equations. Equation bytecode
+    /// cannot be mutated after construction because the fused program is
+    /// compiled from it and must remain in lockstep.
+    pub fn equations(&self) -> &[Bytecode] {
+        &self.equations
+    }
+
     pub fn uses_context(&self) -> bool {
-        self.equations.iter().any(Bytecode::uses_context)
+        self.program.uses_context()
+    }
+
+    /// Number of fixed registers evaluated by the fused program after exact
+    /// common-subexpression elimination across all equations.
+    pub fn register_count(&self) -> usize {
+        self.program.register_count()
+    }
+
+    /// Total number of instructions in the original independent postfix
+    /// equations, before cross-equation sharing.
+    pub fn naive_instruction_count(&self) -> usize {
+        self.program.naive_instruction_count()
     }
 
     pub fn ensure_dual_params(&self) {
-        let mut params_dual = self.params_dual.borrow_mut();
-        if params_dual.len() != self.params.len() {
-            params_dual.clear();
-            params_dual.extend(self.params.iter().map(|&p| Dual::new(p, 0.0)));
-        } else {
-            for (dst, &src) in params_dual.iter_mut().zip(self.params.iter()) {
-                *dst = Dual::new(src, 0.0);
-            }
-        }
+        let mut workspace = self.workspace.borrow_mut();
+        sync_dual_params(&self.params, &mut workspace.params_dual);
     }
 
     /// Evaluates the system values and state Jacobian into caller-owned buffers.
@@ -1842,17 +2170,26 @@ impl EquationSystem {
         assert_eq!(dual_state.len(), dim);
         assert_eq!(dual_out.len(), dim);
 
-        self.ensure_dual_params();
-        let params = self.params_dual.borrow();
-        let mut stack = self.stack_dual.borrow_mut();
+        let mut workspace = self.workspace.borrow_mut();
+        let EquationWorkspace {
+            registers_dual,
+            params_dual,
+            ..
+        } = &mut *workspace;
+        sync_dual_params(&self.params, params_dual);
         let dual_context = Dual::new(context, 0.0);
         for column in 0..dim {
             for row in 0..dim {
                 dual_state[row] = Dual::new(state[row], if row == column { 1.0 } else { 0.0 });
             }
-            for (row, equation) in self.equations.iter().enumerate() {
-                dual_out[row] =
-                    VM::execute_at(equation, dual_state, &params, dual_context, &mut stack);
+            self.program.execute(
+                dual_state,
+                params_dual,
+                dual_context,
+                registers_dual,
+                dual_out,
+            );
+            for row in 0..dim {
                 if column == 0 {
                     values[row] = dual_out[row].val;
                 }
@@ -1874,20 +2211,26 @@ impl EquationSystem {
         context: f64,
         out: &mut [Dual],
     ) {
-        self.ensure_dual_params();
-
-        {
-            let mut params = self.params_dual.borrow_mut();
-            params[param_idx].eps = 1.0;
+        let mut workspace = self.workspace.borrow_mut();
+        let EquationWorkspace {
+            registers_dual,
+            params_dual,
+            state_dual,
+            ..
+        } = &mut *workspace;
+        sync_dual_params(&self.params, params_dual);
+        params_dual[param_idx].eps = 1.0;
+        state_dual.resize(x.len(), Dual::new(0.0, 0.0));
+        for (destination, &source) in state_dual.iter_mut().zip(x) {
+            *destination = Dual::new(source, 0.0);
         }
-
-        let x_dual: Vec<Dual> = x.iter().map(|&v| Dual::new(v, 0.0)).collect();
-
-        let params = self.params_dual.borrow();
-        let mut stack = self.stack_dual.borrow_mut();
-        for (i, eq) in self.equations.iter().enumerate() {
-            out[i] = VM::execute_at(eq, &x_dual, &params, Dual::new(context, 0.0), &mut stack);
-        }
+        self.program.execute(
+            state_dual,
+            params_dual,
+            Dual::new(context, 0.0),
+            registers_dual,
+            out,
+        );
     }
 
     /// Evaluates the complete system with Dual state/context values while
@@ -1900,16 +2243,16 @@ impl EquationSystem {
         param_idx: usize,
         out: &mut [Dual],
     ) {
-        self.ensure_dual_params();
-        {
-            let mut params = self.params_dual.borrow_mut();
-            params[param_idx].eps = 1.0;
-        }
-        let params = self.params_dual.borrow();
-        let mut stack = self.stack_dual.borrow_mut();
-        for (i, eq) in self.equations.iter().enumerate() {
-            out[i] = VM::execute_at(eq, x, &params, context, &mut stack);
-        }
+        let mut workspace = self.workspace.borrow_mut();
+        let EquationWorkspace {
+            registers_dual,
+            params_dual,
+            ..
+        } = &mut *workspace;
+        sync_dual_params(&self.params, params_dual);
+        params_dual[param_idx].eps = 1.0;
+        self.program
+            .execute(x, params_dual, context, registers_dual, out);
     }
 }
 
@@ -1919,10 +2262,9 @@ impl DynamicalSystem<f64> for EquationSystem {
     }
 
     fn apply(&self, t: f64, x: &[f64], out: &mut [f64]) {
-        let mut stack = self.stack_f64.borrow_mut();
-        for (i, eq) in self.equations.iter().enumerate() {
-            out[i] = VM::execute_at(eq, x, &self.params, t, &mut stack);
-        }
+        let mut workspace = self.workspace.borrow_mut();
+        self.program
+            .execute(x, &self.params, t, &mut workspace.registers_f64, out);
     }
 }
 
@@ -1932,12 +2274,14 @@ impl DynamicalSystem<Dual> for EquationSystem {
     }
 
     fn apply(&self, t: Dual, x: &[Dual], out: &mut [Dual]) {
-        self.ensure_dual_params();
-        let params = self.params_dual.borrow();
-        let mut stack = self.stack_dual.borrow_mut();
-        for (i, eq) in self.equations.iter().enumerate() {
-            out[i] = VM::execute_at(eq, x, &params, t, &mut stack);
-        }
+        let mut workspace = self.workspace.borrow_mut();
+        let EquationWorkspace {
+            registers_dual,
+            params_dual,
+            ..
+        } = &mut *workspace;
+        sync_dual_params(&self.params, params_dual);
+        self.program.execute(x, params_dual, t, registers_dual, out);
     }
 }
 
@@ -1964,6 +2308,33 @@ impl DynamicalSystem<Dual> for &EquationSystem {
 #[cfg(test)]
 mod equation_system_value_jacobian_tests {
     use super::{parse, Compiler, Dual, EquationSystem};
+    use crate::traits::DynamicalSystem;
+    use std::sync::Arc;
+
+    #[test]
+    fn clones_share_immutable_programs_but_keep_independent_workspaces() {
+        let variables = vec!["x".to_string(), "y".to_string()];
+        let compiler = Compiler::new(&variables, &[]);
+        let equations = ["x*x + y", "x*x - y"]
+            .iter()
+            .map(|source| compiler.compile(&parse(source).expect("parse equation")))
+            .collect();
+        let system = EquationSystem::new(equations, Vec::new());
+        let clone = system.clone();
+
+        assert!(Arc::ptr_eq(&system.equations, &clone.equations));
+        assert!(Arc::ptr_eq(&system.program, &clone.program));
+        assert_ne!(system.workspace.as_ptr(), clone.workspace.as_ptr());
+        assert_eq!(system.naive_instruction_count(), 10);
+        assert_eq!(system.register_count(), 5);
+
+        let mut first = [0.0; 2];
+        let mut second = [0.0; 2];
+        system.apply(0.0, &[3.0, 4.0], &mut first);
+        clone.apply(0.0, &[2.0, -1.0], &mut second);
+        assert_eq!(first, [13.0, 5.0]);
+        assert_eq!(second, [3.0, 5.0]);
+    }
 
     #[test]
     fn value_and_jacobian_in_place_reuses_caller_buffers() {
