@@ -123,7 +123,7 @@ impl WasmLimitCycleRunner {
             )
             .map(|(setup, flat_state, report)| (setup, flat_state, Some(report)))
         } else {
-            prepare_limit_cycle_setup(setup, system.equations.len())
+            prepare_limit_cycle_setup(setup, system.equations().len())
                 .map(|(setup, flat_state)| (setup, flat_state, None))
         };
         let (setup, flat_state, correction_report) =

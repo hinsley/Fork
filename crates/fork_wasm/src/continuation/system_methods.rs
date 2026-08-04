@@ -242,7 +242,7 @@ impl WasmSystem {
         if matches!(&branch.branch_type, BranchType::LimitCycle { .. }) {
             if branch.upoldp.is_none() {
                 let endpoint = &branch.points[endpoint_idx];
-                let dim = self.system.equations.len();
+                let dim = self.system.equations().len();
                 if endpoint.state.len() > dim {
                     let x0 = &endpoint.state[0..dim];
                     let period = *endpoint.state.last().unwrap_or(&1.0);
@@ -309,7 +309,7 @@ impl WasmSystem {
 
                 // Anchor phase at the signed-index endpoint that is being extended.
                 let endpoint = &branch.points[endpoint_idx];
-                let dim = self.system.equations.len();
+                let dim = self.system.equations().len();
                 let phase_anchor: Vec<f64> = endpoint.state.iter().take(dim).cloned().collect();
 
                 let config = CollocationConfig {
@@ -376,7 +376,7 @@ impl WasmSystem {
                 JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
             })?;
 
-        if state.len() != self.system.equations.len() {
+        if state.len() != self.system.equations().len() {
             return Err(JsValue::from_str(
                 "State dimension mismatch for eigenvalue computation.",
             ));
@@ -1031,7 +1031,7 @@ impl WasmSystem {
     ) -> Result<JsValue, JsValue> {
         self.require_autonomous("limit-cycle analysis")?;
         validate_limit_cycle_system_type(&self.system_type).map_err(JsValue::from_str)?;
-        let dim = self.system.equations.len();
+        let dim = self.system.equations().len();
 
         // Unflatten orbit_states: orbit_states_flat is [x0_0, x0_1, ..., x1_0, x1_1, ..., ...]
         if orbit_states_flat.len() % dim != 0 {
@@ -2120,7 +2120,7 @@ impl WasmSystem {
         self.system.params[param1_index] = param1_value;
         self.system.params[param2_index] = param2_value;
 
-        let dim = self.system.equations.len();
+        let dim = self.system.equations().len();
         let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
         let implicit_ncoords = ntst * ncol * dim + ntst * dim;
 
@@ -2276,7 +2276,7 @@ impl WasmSystem {
         self.system.params[param1_index] = param1_value;
         self.system.params[param2_index] = param2_value;
 
-        let dim = self.system.equations.len();
+        let dim = self.system.equations().len();
         let full_lc_state = normalize_lc_seed_for_stage_first_explicit(&lc_state, ntst, ncol, dim)
             .map_err(|error| JsValue::from_str(&error))?;
 
@@ -2398,7 +2398,7 @@ impl WasmSystem {
 
         // Handle implicit periodicity: if lc_state has ntst mesh points instead of ntst+1,
         // duplicate the first mesh point at the end (u_0 = u_ntst for periodic BC)
-        let dim = self.system.equations.len();
+        let dim = self.system.equations().len();
         let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
         let implicit_ncoords = ntst * ncol * dim + ntst * dim; // Without u_ntst
 
@@ -2536,7 +2536,7 @@ impl WasmSystem {
         self.system.params[param1_index] = param1_value;
         self.system.params[param2_index] = param2_value;
 
-        let dim = self.system.equations.len();
+        let dim = self.system.equations().len();
         let full_lc_state = normalize_lc_seed_for_stage_first_explicit(&lc_state, ntst, ncol, dim)
             .map_err(|error| JsValue::from_str(&error))?;
 

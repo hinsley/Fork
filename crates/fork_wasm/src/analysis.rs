@@ -25,7 +25,7 @@ impl WasmSystem {
         dt: f64,
         qr_stride: u32,
     ) -> Result<Float64Array, JsValue> {
-        let dim = self.system.equations.len();
+        let dim = self.system.equations().len();
         if start_state.len() != dim {
             return Err(JsValue::from_str("Initial state dimension mismatch."));
         }
@@ -73,7 +73,7 @@ impl WasmSystem {
         forward_transient: u32,
         backward_transient: u32,
     ) -> Result<JsValue, JsValue> {
-        let dim = self.system.equations.len();
+        let dim = self.system.equations().len();
         if start_state.len() != dim {
             return Err(JsValue::from_str("Initial state dimension mismatch."));
         }
@@ -358,7 +358,7 @@ impl WasmLyapunovRunner {
             expression_context,
         )?;
         let dim = initial_state.len();
-        if dim != system.equations.len() {
+        if dim != system.equations().len() {
             return Err(JsValue::from_str("Initial state dimension mismatch."));
         }
 
@@ -669,7 +669,7 @@ impl WasmCovariantLyapunovRunner {
             expression_context,
         )?;
         let dim = initial_state.len();
-        if dim != system.equations.len() {
+        if dim != system.equations().len() {
             return Err(JsValue::from_str("Initial state dimension mismatch."));
         }
 

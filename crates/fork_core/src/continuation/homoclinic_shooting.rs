@@ -230,7 +230,7 @@ pub fn homoclinic_shooting_setup_from_point(
     {
         bail!("Invalid homoclinic shooting restart parameter plane");
     }
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let node_len = (source_intervals + 1) * dim;
     let header_len = node_len + dim + 1 + source_extras.free_count();
     if point_state.len() < header_len {
@@ -879,7 +879,7 @@ impl<'a> ContinuationProblem for HomoclinicShootingProblem<'a> {
 }
 
 fn validate_setup(system: &EquationSystem, setup: &HomoclinicShootingSetup) -> Result<()> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if setup.param1_index == setup.param2_index {
         bail!("Homoclinic continuation requires two distinct model parameters");
     }

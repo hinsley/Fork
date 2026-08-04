@@ -196,12 +196,6 @@ function getArrayU8FromWasm0(ptr, len) {
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
 }
 
-function takeFromExternrefTable0(idx) {
-    const value = wasm.__wbindgen_externrefs.get(idx);
-    wasm.__externref_table_dealloc(idx);
-    return value;
-}
-
 function passArrayJsValueToWasm0(array, malloc) {
     const ptr = malloc(array.length * 4, 4) >>> 0;
     for (let i = 0; i < array.length; i++) {
@@ -217,6 +211,12 @@ function passArrayF64ToWasm0(arg, malloc) {
     getFloat64ArrayMemory0().set(arg, ptr / 8);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
+}
+
+function takeFromExternrefTable0(idx) {
+    const value = wasm.__wbindgen_externrefs.get(idx);
+    wasm.__externref_table_dealloc(idx);
+    return value;
 }
 
 let cachedUint32ArrayMemory0 = null;
@@ -251,46 +251,6 @@ export class WasmCodim1CurveExtensionRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmcodim1curveextensionrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmcodim1curveextensionrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmcodim1curveextensionrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_adaptation_report() {
-        const ret = wasm.wasmcodim1curveextensionrunner_get_adaptation_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result_with_report() {
-        const ret = wasm.wasmcodim1curveextensionrunner_get_result_with_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -343,6 +303,46 @@ export class WasmCodim1CurveExtensionRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmcodim1curveextensionrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_adaptation_report() {
+        const ret = wasm.wasmcodim1curveextensionrunner_get_adaptation_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result_with_report() {
+        const ret = wasm.wasmcodim1curveextensionrunner_get_result_with_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmcodim1curveextensionrunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmCodim1CurveExtensionRunner.prototype[Symbol.dispose] = WasmCodim1CurveExtensionRunner.prototype.free;
 
@@ -362,56 +362,6 @@ export class WasmContinuationExtensionRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmcontinuationextensionrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmcontinuationextensionrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmcontinuationextensionrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_adaptation_report() {
-        const ret = wasm.wasmcontinuationextensionrunner_get_adaptation_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result_with_report() {
-        const ret = wasm.wasmcontinuationextensionrunner_get_result_with_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_linear_solver_stats() {
-        const ret = wasm.wasmcontinuationextensionrunner_get_linear_solver_stats(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -464,6 +414,56 @@ export class WasmContinuationExtensionRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmcontinuationextensionrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_adaptation_report() {
+        const ret = wasm.wasmcontinuationextensionrunner_get_adaptation_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_linear_solver_stats() {
+        const ret = wasm.wasmcontinuationextensionrunner_get_linear_solver_stats(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmcontinuationextensionrunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result_with_report() {
+        const ret = wasm.wasmcontinuationextensionrunner_get_result_with_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmContinuationExtensionRunner.prototype[Symbol.dispose] = WasmContinuationExtensionRunner.prototype.free;
 
@@ -483,26 +483,6 @@ export class WasmCovariantLyapunovRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmcovariantlyapunovrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmcovariantlyapunovrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmcovariantlyapunovrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -557,6 +537,26 @@ export class WasmCovariantLyapunovRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmcovariantlyapunovrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmcovariantlyapunovrunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmCovariantLyapunovRunner.prototype[Symbol.dispose] = WasmCovariantLyapunovRunner.prototype.free;
 
@@ -576,26 +576,6 @@ export class WasmCycleManifold2DRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmcyclemanifold2drunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmcyclemanifold2drunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmcyclemanifold2drunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -648,6 +628,26 @@ export class WasmCycleManifold2DRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmcyclemanifold2drunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmcyclemanifold2drunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmCycleManifold2DRunner.prototype[Symbol.dispose] = WasmCycleManifold2DRunner.prototype.free;
 
@@ -667,26 +667,6 @@ export class WasmEqManifold1DExtensionRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmeqmanifold1dextensionrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmeqmanifold1dextensionrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmeqmanifold1dextensionrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -738,6 +718,26 @@ export class WasmEqManifold1DExtensionRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmeqmanifold1dextensionrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmeqmanifold1dextensionrunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmEqManifold1DExtensionRunner.prototype[Symbol.dispose] = WasmEqManifold1DExtensionRunner.prototype.free;
 
@@ -757,26 +757,6 @@ export class WasmEqManifold1DGroupExtensionRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmeqmanifold1dgroupextensionrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmeqmanifold1dgroupextensionrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmeqmanifold1dgroupextensionrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -828,6 +808,26 @@ export class WasmEqManifold1DGroupExtensionRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmeqmanifold1dgroupextensionrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmeqmanifold1dgroupextensionrunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmEqManifold1DGroupExtensionRunner.prototype[Symbol.dispose] = WasmEqManifold1DGroupExtensionRunner.prototype.free;
 
@@ -847,26 +847,6 @@ export class WasmEqManifold1DRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmeqmanifold1drunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmeqmanifold1drunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmeqmanifold1drunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -920,6 +900,26 @@ export class WasmEqManifold1DRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmeqmanifold1drunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmeqmanifold1drunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmEqManifold1DRunner.prototype[Symbol.dispose] = WasmEqManifold1DRunner.prototype.free;
 
@@ -939,26 +939,6 @@ export class WasmEqManifold2DRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmeqmanifold2drunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmeqmanifold2drunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmeqmanifold2drunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -1008,6 +988,26 @@ export class WasmEqManifold2DRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmeqmanifold2drunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmeqmanifold2drunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmEqManifold2DRunner.prototype[Symbol.dispose] = WasmEqManifold2DRunner.prototype.free;
 
@@ -1030,28 +1030,6 @@ export class WasmEquilibriumRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmequilibriumrunner_free(ptr, 0);
-    }
-    /**
-     * Get the final branch result.
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmequilibriumrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Get progress information.
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmequilibriumrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * Create a new stepped equilibrium continuation runner.
@@ -1112,6 +1090,28 @@ export class WasmEquilibriumRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * Get progress information.
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmequilibriumrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Get the final branch result.
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmequilibriumrunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmEquilibriumRunner.prototype[Symbol.dispose] = WasmEquilibriumRunner.prototype.free;
 
@@ -1131,56 +1131,6 @@ export class WasmEquilibriumSolverRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmequilibriumsolverrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmequilibriumsolverrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmequilibriumsolverrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} flattened_roots
-     * @param {number} exponent
-     * @param {number} shift
-     */
-    set_deflation(flattened_roots, exponent, shift) {
-        const ptr0 = passArrayF64ToWasm0(flattened_roots, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmequilibriumsolverrunner_set_deflation(this.__wbg_ptr, ptr0, len0, exponent, shift);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
-        }
-    }
-    /**
-     * @param {Float64Array} flattened_roots
-     * @param {Float64Array} exponents
-     * @param {Float64Array} shifts
-     */
-    set_deflation_targets(flattened_roots, exponents, shifts) {
-        const ptr0 = passArrayF64ToWasm0(flattened_roots, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(exponents, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passArrayF64ToWasm0(shifts, wasm.__wbindgen_malloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmequilibriumsolverrunner_set_deflation_targets(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
-        }
     }
     /**
      * @param {string[]} equations
@@ -1218,6 +1168,36 @@ export class WasmEquilibriumSolverRunner {
         return this;
     }
     /**
+     * @param {Float64Array} flattened_roots
+     * @param {number} exponent
+     * @param {number} shift
+     */
+    set_deflation(flattened_roots, exponent, shift) {
+        const ptr0 = passArrayF64ToWasm0(flattened_roots, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmequilibriumsolverrunner_set_deflation(this.__wbg_ptr, ptr0, len0, exponent, shift);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {Float64Array} flattened_roots
+     * @param {Float64Array} exponents
+     * @param {Float64Array} shifts
+     */
+    set_deflation_targets(flattened_roots, exponents, shifts) {
+        const ptr0 = passArrayF64ToWasm0(flattened_roots, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(exponents, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayF64ToWasm0(shifts, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmequilibriumsolverrunner_set_deflation_targets(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @returns {boolean}
      */
     is_done() {
@@ -1230,6 +1210,26 @@ export class WasmEquilibriumSolverRunner {
      */
     run_steps(batch_size) {
         const ret = wasm.wasmequilibriumsolverrunner_run_steps(this.__wbg_ptr, batch_size);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmequilibriumsolverrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmequilibriumsolverrunner_get_result(this.__wbg_ptr);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -1254,26 +1254,6 @@ export class WasmExpansionEntropyRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmexpansionentropyrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmexpansionentropyrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmexpansionentropyrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -1315,12 +1295,6 @@ export class WasmExpansionEntropyRunner {
         WasmExpansionEntropyRunnerFinalization.register(this, this.__wbg_ptr, this);
         return this;
     }
-    cancel() {
-        const ret = wasm.wasmexpansionentropyrunner_cancel(this.__wbg_ptr);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
-        }
-    }
     /**
      * @returns {any}
      */
@@ -1337,6 +1311,32 @@ export class WasmExpansionEntropyRunner {
      */
     run_steps(_batch_size) {
         const ret = wasm.wasmexpansionentropyrunner_run_steps(this.__wbg_ptr, _batch_size);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    cancel() {
+        const ret = wasm.wasmexpansionentropyrunner_cancel(this.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmexpansionentropyrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmexpansionentropyrunner_get_result(this.__wbg_ptr);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -1361,26 +1361,6 @@ export class WasmFoldCurveRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmfoldcurverunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmfoldcurverunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmfoldcurverunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -1440,6 +1420,26 @@ export class WasmFoldCurveRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmfoldcurverunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmfoldcurverunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmFoldCurveRunner.prototype[Symbol.dispose] = WasmFoldCurveRunner.prototype.free;
 
@@ -1459,26 +1459,6 @@ export class WasmForcedResponseRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmforcedresponserunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmforcedresponserunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmforcedresponserunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -1545,6 +1525,26 @@ export class WasmForcedResponseRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmforcedresponserunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmforcedresponserunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmForcedResponseRunner.prototype[Symbol.dispose] = WasmForcedResponseRunner.prototype.free;
 
@@ -1564,26 +1564,6 @@ export class WasmHeteroclinicRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmheteroclinicrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmheteroclinicrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmheteroclinicrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -1629,6 +1609,26 @@ export class WasmHeteroclinicRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmheteroclinicrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmheteroclinicrunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmHeteroclinicRunner.prototype[Symbol.dispose] = WasmHeteroclinicRunner.prototype.free;
 
@@ -1648,26 +1648,6 @@ export class WasmHeteroclinicShootingRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmheteroclinicshootingrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmheteroclinicshootingrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmheteroclinicshootingrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -1713,6 +1693,26 @@ export class WasmHeteroclinicShootingRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmheteroclinicshootingrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmheteroclinicshootingrunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmHeteroclinicShootingRunner.prototype[Symbol.dispose] = WasmHeteroclinicShootingRunner.prototype.free;
 
@@ -1732,26 +1732,6 @@ export class WasmHomoclinicRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmhomoclinicrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmhomoclinicrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmhomoclinicrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -1797,6 +1777,26 @@ export class WasmHomoclinicRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmhomoclinicrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmhomoclinicrunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmHomoclinicRunner.prototype[Symbol.dispose] = WasmHomoclinicRunner.prototype.free;
 
@@ -1816,26 +1816,6 @@ export class WasmHomoclinicShootingRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmhomoclinicshootingrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmhomoclinicshootingrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmhomoclinicshootingrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -1881,6 +1861,26 @@ export class WasmHomoclinicShootingRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmhomoclinicshootingrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmhomoclinicshootingrunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmHomoclinicShootingRunner.prototype[Symbol.dispose] = WasmHomoclinicShootingRunner.prototype.free;
 
@@ -1900,26 +1900,6 @@ export class WasmHomotopySaddleRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmhomotopysaddlerunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmhomotopysaddlerunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmhomotopysaddlerunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -1965,6 +1945,26 @@ export class WasmHomotopySaddleRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmhomotopysaddlerunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmhomotopysaddlerunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmHomotopySaddleRunner.prototype[Symbol.dispose] = WasmHomotopySaddleRunner.prototype.free;
 
@@ -1984,26 +1984,6 @@ export class WasmHopfCurveRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmhopfcurverunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmhopfcurverunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmhopfcurverunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -2064,6 +2044,26 @@ export class WasmHopfCurveRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmhopfcurverunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmhopfcurverunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmHopfCurveRunner.prototype[Symbol.dispose] = WasmHopfCurveRunner.prototype.free;
 
@@ -2083,46 +2083,6 @@ export class WasmIsoperiodicCurveRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmisoperiodiccurverunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmisoperiodiccurverunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmisoperiodiccurverunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_adaptation_report() {
-        const ret = wasm.wasmisoperiodiccurverunner_get_adaptation_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result_with_report() {
-        const ret = wasm.wasmisoperiodiccurverunner_get_result_with_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -2184,6 +2144,46 @@ export class WasmIsoperiodicCurveRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmisoperiodiccurverunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_adaptation_report() {
+        const ret = wasm.wasmisoperiodiccurverunner_get_adaptation_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result_with_report() {
+        const ret = wasm.wasmisoperiodiccurverunner_get_result_with_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmisoperiodiccurverunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmIsoperiodicCurveRunner.prototype[Symbol.dispose] = WasmIsoperiodicCurveRunner.prototype.free;
 
@@ -2203,46 +2203,6 @@ export class WasmLPCCurveRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmlpccurverunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmlpccurverunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmlpccurverunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_adaptation_report() {
-        const ret = wasm.wasmlpccurverunner_get_adaptation_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result_with_report() {
-        const ret = wasm.wasmlpccurverunner_get_result_with_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -2304,6 +2264,46 @@ export class WasmLPCCurveRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmlpccurverunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_adaptation_report() {
+        const ret = wasm.wasmlpccurverunner_get_adaptation_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result_with_report() {
+        const ret = wasm.wasmlpccurverunner_get_result_with_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmlpccurverunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmLPCCurveRunner.prototype[Symbol.dispose] = WasmLPCCurveRunner.prototype.free;
 
@@ -2323,56 +2323,6 @@ export class WasmLimitCycleRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmlimitcyclerunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmlimitcyclerunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmlimitcyclerunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_adaptation_report() {
-        const ret = wasm.wasmlimitcyclerunner_get_adaptation_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result_with_report() {
-        const ret = wasm.wasmlimitcyclerunner_get_result_with_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_linear_solver_stats() {
-        const ret = wasm.wasmlimitcyclerunner_get_linear_solver_stats(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -2424,6 +2374,56 @@ export class WasmLimitCycleRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmlimitcyclerunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_adaptation_report() {
+        const ret = wasm.wasmlimitcyclerunner_get_adaptation_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_linear_solver_stats() {
+        const ret = wasm.wasmlimitcyclerunner_get_linear_solver_stats(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmlimitcyclerunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result_with_report() {
+        const ret = wasm.wasmlimitcyclerunner_get_result_with_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmLimitCycleRunner.prototype[Symbol.dispose] = WasmLimitCycleRunner.prototype.free;
 
@@ -2443,26 +2443,6 @@ export class WasmLyapunovRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmlyapunovrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmlyapunovrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmlyapunovrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -2515,6 +2495,26 @@ export class WasmLyapunovRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmlyapunovrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmlyapunovrunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmLyapunovRunner.prototype[Symbol.dispose] = WasmLyapunovRunner.prototype.free;
 
@@ -2534,26 +2534,6 @@ export class WasmManifold2DExtensionRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmmanifold2dextensionrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmmanifold2dextensionrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmmanifold2dextensionrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -2587,7 +2567,7 @@ export class WasmManifold2DExtensionRunner {
      * @returns {boolean}
      */
     is_done() {
-        const ret = wasm.wasmeqmanifold2drunner_is_done(this.__wbg_ptr);
+        const ret = wasm.wasmcyclemanifold2drunner_is_done(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -2596,6 +2576,26 @@ export class WasmManifold2DExtensionRunner {
      */
     run_steps(_batch_size) {
         const ret = wasm.wasmmanifold2dextensionrunner_run_steps(this.__wbg_ptr, _batch_size);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmmanifold2dextensionrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmmanifold2dextensionrunner_get_result(this.__wbg_ptr);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -2620,46 +2620,6 @@ export class WasmNSCurveRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmnscurverunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmnscurverunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmnscurverunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_adaptation_report() {
-        const ret = wasm.wasmnscurverunner_get_adaptation_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result_with_report() {
-        const ret = wasm.wasmnscurverunner_get_result_with_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -2722,6 +2682,46 @@ export class WasmNSCurveRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmnscurverunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_adaptation_report() {
+        const ret = wasm.wasmnscurverunner_get_adaptation_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result_with_report() {
+        const ret = wasm.wasmnscurverunner_get_result_with_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmnscurverunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmNSCurveRunner.prototype[Symbol.dispose] = WasmNSCurveRunner.prototype.free;
 
@@ -2741,46 +2741,6 @@ export class WasmPDCurveRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmpdcurverunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmpdcurverunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmpdcurverunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_adaptation_report() {
-        const ret = wasm.wasmpdcurverunner_get_adaptation_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result_with_report() {
-        const ret = wasm.wasmpdcurverunner_get_result_with_report(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -2842,6 +2802,46 @@ export class WasmPDCurveRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmpdcurverunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_adaptation_report() {
+        const ret = wasm.wasmpdcurverunner_get_adaptation_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result_with_report() {
+        const ret = wasm.wasmpdcurverunner_get_result_with_report(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmpdcurverunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmPDCurveRunner.prototype[Symbol.dispose] = WasmPDCurveRunner.prototype.free;
 
@@ -2863,214 +2863,525 @@ export class WasmSystem {
         wasm.__wbg_wasmsystem_free(ptr, 0);
     }
     /**
-     * @param {Float64Array} periods
-     */
-    set_periods(periods) {
-        const ptr0 = passArrayF64ToWasm0(periods, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        wasm.wasmsystem_set_periods(this.__wbg_ptr, ptr0, len0);
-    }
-    /**
-     * @returns {boolean}
-     */
-    uses_context() {
-        const ret = wasm.wasmsystem_uses_context(this.__wbg_ptr);
-        return ret !== 0;
-    }
-    /**
-     * @returns {string | undefined}
-     */
-    context_symbol() {
-        const ret = wasm.wasmsystem_context_symbol(this.__wbg_ptr);
-        let v1;
-        if (ret[0] !== 0) {
-            v1 = getStringFromWasm0(ret[0], ret[1]).slice();
-            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        }
-        return v1;
-    }
-    /**
-     * @param {string} expression
-     * @param {number} level
-     * @param {Uint32Array} axis_indices
-     * @param {Float64Array} axis_mins
-     * @param {Float64Array} axis_maxs
-     * @param {Uint32Array} axis_samples
-     * @param {Float64Array} frozen_state
-     * @param {string[]} var_names
-     * @param {string[]} param_names
+     * Compute detailed, serializable Zero-Hopf coefficients and numerical
+     * conditioning diagnostics at a refined equilibrium codimension-two
+     * point.
+     * @param {Float64Array} state
+     * @param {number} param1_index
+     * @param {number} param2_index
+     * @param {number} param1_value
+     * @param {number} param2_value
+     * @param {number} frequency
      * @returns {any}
      */
-    compute_isocline(expression, level, axis_indices, axis_mins, axis_maxs, axis_samples, frozen_state, var_names, param_names) {
-        const ptr0 = passStringToWasm0(expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    compute_zero_hopf_normal_form(state, param1_index, param2_index, param1_value, param2_value, frequency) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArray32ToWasm0(axis_indices, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passArrayF64ToWasm0(axis_mins, wasm.__wbindgen_malloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passArrayF64ToWasm0(axis_maxs, wasm.__wbindgen_malloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ptr4 = passArray32ToWasm0(axis_samples, wasm.__wbindgen_malloc);
-        const len4 = WASM_VECTOR_LEN;
-        const ptr5 = passArrayF64ToWasm0(frozen_state, wasm.__wbindgen_malloc);
-        const len5 = WASM_VECTOR_LEN;
-        const ptr6 = passArrayJsValueToWasm0(var_names, wasm.__wbindgen_malloc);
-        const len6 = WASM_VECTOR_LEN;
-        const ptr7 = passArrayJsValueToWasm0(param_names, wasm.__wbindgen_malloc);
-        const len7 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_isocline(this.__wbg_ptr, ptr0, len0, level, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7);
+        const ret = wasm.wasmsystem_compute_zero_hopf_normal_form(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, frequency);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * @returns {Float64Array}
+     * Compute detailed, serializable nonresonant Hopf-Hopf coefficients and
+     * both NS unfolding predictors.
+     * @param {Float64Array} state
+     * @param {number} param1_index
+     * @param {number} param2_index
+     * @param {number} param1_value
+     * @param {number} param2_value
+     * @param {number} source_frequency
+     * @returns {any}
      */
-    compute_jacobian() {
-        const ret = wasm.wasmsystem_compute_jacobian(this.__wbg_ptr);
-        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
-        return v1;
-    }
-    /**
-     * @param {string[]} equations
-     * @param {Float64Array} params
-     * @param {string[]} param_names
-     * @param {string[]} var_names
-     * @param {string} solver_name
-     * @param {string} system_type
-     */
-    constructor(equations, params, param_names, var_names, solver_name, system_type) {
-        const ptr0 = passArrayJsValueToWasm0(equations, wasm.__wbindgen_malloc);
+    compute_hopf_hopf_normal_form(state, param1_index, param2_index, param1_value, param2_value, source_frequency) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(params, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passArrayJsValueToWasm0(param_names, wasm.__wbindgen_malloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passArrayJsValueToWasm0(var_names, wasm.__wbindgen_malloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ptr4 = passStringToWasm0(solver_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len4 = WASM_VECTOR_LEN;
-        const ptr5 = passStringToWasm0(system_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len5 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_new(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5);
+        const ret = wasm.wasmsystem_compute_hopf_hopf_normal_form(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, source_frequency);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
-        this.__wbg_ptr = ret[0] >>> 0;
-        WasmSystemFinalization.register(this, this.__wbg_ptr, this);
-        return this;
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Produce corrected Zero-Hopf switches to both fold/Hopf orientations
+     * and, when the coefficient sign condition permits it, the periodic-orbit
+     * Neimark-Sacker curve.
+     * @param {Float64Array} state
+     * @param {number} param1_index
+     * @param {number} param2_index
+     * @param {number} param1_value
+     * @param {number} param2_value
+     * @param {number} frequency
+     * @param {number} curve_perturbation
+     * @param {number} cycle_amplitude
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {number} tolerance
+     * @returns {any}
+     */
+    switch_from_zero_hopf(state, param1_index, param2_index, param1_value, param2_value, frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_switch_from_zero_hopf(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Produce corrected Hopf-Hopf switches to both orientations of both Hopf
+     * curves and to both periodic-orbit Neimark-Sacker curves.
+     * @param {Float64Array} state
+     * @param {number} param1_index
+     * @param {number} param2_index
+     * @param {number} param1_value
+     * @param {number} param2_value
+     * @param {number} source_frequency
+     * @param {number} curve_perturbation
+     * @param {number} cycle_amplitude
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {number} tolerance
+     * @returns {any}
+     */
+    switch_from_hopf_hopf(state, param1_index, param2_index, param1_value, param2_value, source_frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_switch_from_hopf_hopf(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, source_frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {any} request_val
+     * @returns {any}
+     */
+    compute_event_series_from_orbit(request_val) {
+        const ret = wasm.wasmsystem_compute_event_series_from_orbit(this.__wbg_ptr, request_val);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {any} request_val
+     * @returns {any}
+     */
+    compute_event_series_from_samples(request_val) {
+        const ret = wasm.wasmsystem_compute_event_series_from_samples(this.__wbg_ptr, request_val);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} start_state
+     * @param {number} start_time
+     * @param {number} steps
      * @param {number} dt
-     */
-    step(dt) {
-        wasm.wasmsystem_step(this.__wbg_ptr, dt);
-    }
-    /**
-     * @returns {number}
-     */
-    get_t() {
-        const ret = wasm.wasmsystem_get_t(this.__wbg_ptr);
-        return ret;
-    }
-    /**
-     * @param {number} t
-     */
-    set_t(t) {
-        wasm.wasmsystem_set_t(this.__wbg_ptr, t);
-    }
-    /**
+     * @param {number} qr_stride
      * @returns {Float64Array}
      */
-    get_state() {
-        const ret = wasm.wasmsystem_get_state(this.__wbg_ptr);
-        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
-        return v1;
+    compute_lyapunov_exponents(start_state, start_time, steps, dt, qr_stride) {
+        const ptr0 = passArrayF64ToWasm0(start_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_lyapunov_exponents(this.__wbg_ptr, ptr0, len0, start_time, steps, dt, qr_stride);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} start_state
+     * @param {number} start_time
+     * @param {number} window_steps
+     * @param {number} dt
+     * @param {number} qr_stride
+     * @param {number} forward_transient
+     * @param {number} backward_transient
+     * @returns {any}
+     */
+    compute_covariant_lyapunov_vectors(start_state, start_time, window_steps, dt, qr_stride, forward_transient, backward_transient) {
+        const ptr0 = passArrayF64ToWasm0(start_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_covariant_lyapunov_vectors(this.__wbg_ptr, ptr0, len0, start_time, window_steps, dt, qr_stride, forward_transient, backward_transient);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {string} period_expression
+     * @param {number} iteration_period
+     * @returns {number}
+     */
+    validate_periodic_forcing(period_expression, iteration_period) {
+        const ptr0 = passStringToWasm0(period_expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_validate_periodic_forcing(this.__wbg_ptr, ptr0, len0, iteration_period);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0];
+    }
+    /**
+     * @param {string} period_expression
+     * @param {number} iteration_period
+     * @param {number} phase
+     * @param {number} steps_per_forcing_period
+     * @param {number} initial_context
+     * @param {Float64Array} initial_state
+     * @returns {any}
+     */
+    advance_forced_response_seed(period_expression, iteration_period, phase, steps_per_forcing_period, initial_context, initial_state) {
+        const ptr0 = passStringToWasm0(period_expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(initial_state, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_advance_forced_response_seed(this.__wbg_ptr, ptr0, len0, iteration_period, phase, steps_per_forcing_period, initial_context, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {string} period_expression
+     * @param {number} iteration_period
+     * @param {number} phase
+     * @param {number} response_multiple
+     * @param {number} steps_per_forcing_period
+     * @param {Float64Array} initial_guess
+     * @param {number} max_steps
+     * @param {number} damping
+     * @param {number} tolerance
+     * @returns {any}
+     */
+    solve_forced_response(period_expression, iteration_period, phase, response_multiple, steps_per_forcing_period, initial_guess, max_steps, damping, tolerance) {
+        const ptr0 = passStringToWasm0(period_expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_solve_forced_response(this.__wbg_ptr, ptr0, len0, iteration_period, phase, response_multiple, steps_per_forcing_period, ptr1, len1, max_steps, damping, tolerance);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} initial_guess
+     * @param {number} max_steps
+     * @param {number} damping
+     * @param {number} map_iterations
+     * @returns {any}
+     */
+    solve_equilibrium(initial_guess, max_steps, damping, map_iterations) {
+        const ptr0 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_solve_equilibrium(this.__wbg_ptr, ptr0, len0, max_steps, damping, map_iterations);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} initial_guess
+     * @param {number} max_steps
+     * @param {number} damping
+     * @param {number} map_iterations
+     * @param {Float64Array} flattened_roots
+     * @param {number} exponent
+     * @param {number} shift
+     * @returns {any}
+     */
+    solve_equilibrium_deflated(initial_guess, max_steps, damping, map_iterations, flattened_roots, exponent, shift) {
+        const ptr0 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(flattened_roots, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_solve_equilibrium_deflated(this.__wbg_ptr, ptr0, len0, max_steps, damping, map_iterations, ptr1, len1, exponent, shift);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} initial_guess
+     * @param {number} max_steps
+     * @param {number} damping
+     * @param {number} map_iterations
+     * @param {Float64Array} flattened_roots
+     * @param {Float64Array} exponents
+     * @param {Float64Array} shifts
+     * @returns {any}
+     */
+    solve_equilibrium_deflated_targets(initial_guess, max_steps, damping, map_iterations, flattened_roots, exponents, shifts) {
+        const ptr0 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(flattened_roots, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayF64ToWasm0(exponents, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArrayF64ToWasm0(shifts, wasm.__wbindgen_malloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_solve_equilibrium_deflated_targets(this.__wbg_ptr, ptr0, len0, max_steps, damping, map_iterations, ptr1, len1, ptr2, len2, ptr3, len3);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {any} setup_val
+     * @param {number} intervals
+     * @param {number} integration_steps_per_segment
+     * @returns {any}
+     */
+    init_heteroclinic_shooting_from_collocation(setup_val, intervals, integration_steps_per_segment) {
+        const ret = wasm.wasmsystem_init_heteroclinic_shooting_from_collocation(this.__wbg_ptr, setup_val, intervals, integration_steps_per_segment);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Blocking entry point retained for the Node CLI.
+     * @param {any} setup_val
+     * @param {any} settings_val
+     * @param {boolean} forward
+     * @returns {any}
+     */
+    compute_heteroclinic_shooting_continuation(setup_val, settings_val, forward) {
+        const ret = wasm.wasmsystem_compute_heteroclinic_shooting_continuation(this.__wbg_ptr, setup_val, settings_val, forward);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} equilibrium_state
+     * @param {string} parameter_name
+     * @param {number} map_iterations
+     * @param {any} settings_val
+     * @param {boolean} forward
+     * @returns {any}
+     */
+    compute_continuation(equilibrium_state, parameter_name, map_iterations, settings_val, forward) {
+        const ptr0 = passArrayF64ToWasm0(equilibrium_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_continuation(this.__wbg_ptr, ptr0, len0, ptr1, len1, map_iterations, settings_val, forward);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {any} branch_val
+     * @param {string} parameter_name
+     * @param {number} map_iterations
+     * @param {any} settings_val
+     * @param {boolean} forward
+     * @returns {any}
+     */
+    extend_continuation(branch_val, parameter_name, map_iterations, settings_val, forward) {
+        const ptr0 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_extend_continuation(this.__wbg_ptr, branch_val, ptr0, len0, map_iterations, settings_val, forward);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {Float64Array} state
+     * @param {string} parameter_name
+     * @param {number} map_iterations
+     * @param {number} param_value
+     * @returns {any}
      */
-    set_state(state) {
+    compute_equilibrium_eigenvalues(state, parameter_name, map_iterations, param_value) {
         const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        wasm.wasmsystem_set_state(this.__wbg_ptr, ptr0, len0);
-    }
-    /**
-     * Initializes a period-doubled limit cycle from a period-doubling bifurcation.
-     * Takes the LC state at the PD point and constructs a doubled-period initial guess
-     * by computing the PD eigenvector and perturbing the original orbit.
-     * @param {Float64Array} lc_state
-     * @param {string} param_name
-     * @param {number} param_value
-     * @param {number} ntst
-     * @param {number} ncol
-     * @param {number} amplitude
-     * @returns {any}
-     */
-    init_lc_from_pd(lc_state, param_name, param_value, ntst, ncol, amplitude) {
-        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(param_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_lc_from_pd(this.__wbg_ptr, ptr0, len0, ptr1, len1, param_value, ntst, ncol, amplitude);
+        const ret = wasm.wasmsystem_compute_equilibrium_eigenvalues(this.__wbg_ptr, ptr0, len0, ptr1, len1, map_iterations, param_value);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * Continues an NS (Neimark-Sacker) bifurcation curve in two-parameter space.
-     * @param {Float64Array} lc_state
-     * @param {number} period
-     * @param {string} param1_name
-     * @param {number} param1_value
-     * @param {string} param2_name
-     * @param {number} param2_value
-     * @param {number} initial_k
-     * @param {number} ntst
-     * @param {number} ncol
+     * @param {Float64Array} equilibrium_state
+     * @param {number} map_iterations
      * @param {any} settings_val
-     * @param {boolean} forward
      * @returns {any}
      */
-    continue_ns_curve(lc_state, period, param1_name, param1_value, param2_name, param2_value, initial_k, ntst, ncol, settings_val, forward) {
-        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
+    compute_eq_manifold_1d(equilibrium_state, map_iterations, settings_val) {
+        const ptr0 = passArrayF64ToWasm0(equilibrium_state, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_continue_ns_curve(this.__wbg_ptr, ptr0, len0, period, ptr1, len1, param1_value, ptr2, len2, param2_value, initial_k, ntst, ncol, settings_val, forward);
+        const ret = wasm.wasmsystem_compute_eq_manifold_1d(this.__wbg_ptr, ptr0, len0, map_iterations, settings_val);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * Continues a PD (Period-Doubling) bifurcation curve in two-parameter space.
-     * @param {Float64Array} lc_state
-     * @param {number} period
-     * @param {string} param1_name
-     * @param {number} param1_value
-     * @param {string} param2_name
-     * @param {number} param2_value
-     * @param {number} ntst
-     * @param {number} ncol
+     * @param {Float64Array} equilibrium_state
      * @param {any} settings_val
-     * @param {boolean} forward
      * @returns {any}
      */
-    continue_pd_curve(lc_state, period, param1_name, param1_value, param2_name, param2_value, ntst, ncol, settings_val, forward) {
-        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
+    compute_eq_manifold_2d(equilibrium_state, settings_val) {
+        const ptr0 = passArrayF64ToWasm0(equilibrium_state, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ret = wasm.wasmsystem_compute_eq_manifold_2d(this.__wbg_ptr, ptr0, len0, settings_val);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} equilibrium_state
+     * @param {any} settings_val
+     * @param {Function} progress_callback
+     * @returns {any}
+     */
+    compute_eq_manifold_2d_with_progress(equilibrium_state, settings_val, progress_callback) {
+        const ptr0 = passArrayF64ToWasm0(equilibrium_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_eq_manifold_2d_with_progress(this.__wbg_ptr, ptr0, len0, settings_val, progress_callback);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} cycle_state
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {any} floquet_multipliers_val
+     * @param {any} settings_val
+     * @returns {any}
+     */
+    compute_cycle_manifold_2d(cycle_state, ntst, ncol, floquet_multipliers_val, settings_val) {
+        const ptr0 = passArrayF64ToWasm0(cycle_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_cycle_manifold_2d(this.__wbg_ptr, ptr0, len0, ntst, ncol, floquet_multipliers_val, settings_val);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} cycle_state
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {any} floquet_multipliers_val
+     * @param {any} settings_val
+     * @param {Function} progress_callback
+     * @returns {any}
+     */
+    compute_cycle_manifold_2d_with_progress(cycle_state, ntst, ncol, floquet_multipliers_val, settings_val, progress_callback) {
+        const ptr0 = passArrayF64ToWasm0(cycle_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_cycle_manifold_2d_with_progress(this.__wbg_ptr, ptr0, len0, ntst, ncol, floquet_multipliers_val, settings_val, progress_callback);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Extend a persisted 2D manifold while reporting each accepted new ring.
+     * @param {any} branch_val
+     * @param {any} settings_val
+     * @param {Function} progress_callback
+     * @returns {any}
+     */
+    extend_manifold_2d_with_progress(branch_val, settings_val, progress_callback) {
+        const ret = wasm.wasmsystem_extend_manifold_2d_with_progress(this.__wbg_ptr, branch_val, settings_val, progress_callback);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} cycle_state
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {string} parameter_name
+     * @returns {any}
+     */
+    compute_limit_cycle_floquet_modes(cycle_state, ntst, ncol, parameter_name) {
+        const ptr0 = passArrayF64ToWasm0(cycle_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ret = wasm.wasmsystem_compute_limit_cycle_floquet_modes(this.__wbg_ptr, ptr0, len0, ntst, ncol, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} cycle_state
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {string} parameter_name
+     * @param {string} backend
+     * @returns {any}
+     */
+    compute_limit_cycle_floquet_modes_with_backend(cycle_state, ntst, ncol, parameter_name, backend) {
+        const ptr0 = passArrayF64ToWasm0(cycle_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(backend, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_continue_pd_curve(this.__wbg_ptr, ptr0, len0, period, ptr1, len1, param1_value, ptr2, len2, param2_value, ntst, ncol, settings_val, forward);
+        const ret = wasm.wasmsystem_compute_limit_cycle_floquet_modes_with_backend(this.__wbg_ptr, ptr0, len0, ntst, ncol, ptr1, len1, ptr2, len2);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} cycle_state
+     * @param {number} ncol
+     * @param {Float64Array} normalized_mesh
+     * @param {string} parameter_name
+     * @returns {any}
+     */
+    compute_limit_cycle_floquet_modes_on_mesh(cycle_state, ncol, normalized_mesh, parameter_name) {
+        const ptr0 = passArrayF64ToWasm0(cycle_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(normalized_mesh, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_limit_cycle_floquet_modes_on_mesh(this.__wbg_ptr, ptr0, len0, ncol, ptr1, len1, ptr2, len2);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} cycle_state
+     * @param {number} ncol
+     * @param {Float64Array} normalized_mesh
+     * @param {string} parameter_name
+     * @param {string} backend
+     * @returns {any}
+     */
+    compute_limit_cycle_floquet_modes_on_mesh_with_backend(cycle_state, ncol, normalized_mesh, parameter_name, backend) {
+        const ptr0 = passArrayF64ToWasm0(cycle_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(normalized_mesh, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(backend, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_limit_cycle_floquet_modes_on_mesh_with_backend(this.__wbg_ptr, ptr0, len0, ncol, ptr1, len1, ptr2, len2, ptr3, len3);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -3099,39 +3410,82 @@ export class WasmSystem {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * Continues an LPC (Limit Point of Cycles) bifurcation curve in two-parameter space.
-     *
-     * # Arguments
-     * * `lc_state` - Flattened LC collocation state at the LPC point
-     * * `period` - Period at the LPC point
-     * * `param1_name` - Name of first active parameter
-     * * `param1_value` - Value of first parameter at LPC point
-     * * `param2_name` - Name of second active parameter
-     * * `param2_value` - Value of second parameter at LPC point
-     * * `ntst` - Number of mesh intervals in collocation
-     * * `ncol` - Collocation degree
-     * * `settings_val` - Continuation settings as JsValue
-     * * `forward` - Direction of continuation
-     * @param {Float64Array} lc_state
-     * @param {number} period
+     * @param {Float64Array} gh_state
+     * @param {Float64Array} neighbor_state
      * @param {string} param1_name
-     * @param {number} param1_value
      * @param {string} param2_name
-     * @param {number} param2_value
+     * @param {number} gh_param1
+     * @param {number} gh_param2
+     * @param {number} neighbor_param1
+     * @param {number} neighbor_param2
+     * @param {number} gh_kappa
+     * @param {number} neighbor_kappa
+     * @param {number} neighbor_l1
+     * @param {number} second_lyapunov
+     * @param {number} amplitude
      * @param {number} ntst
      * @param {number} ncol
-     * @param {any} settings_val
-     * @param {boolean} forward
+     * @param {number} tolerance
      * @returns {any}
      */
-    continue_lpc_curve(lc_state, period, param1_name, param1_value, param2_name, param2_value, ntst, ncol, settings_val, forward) {
-        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
+    init_lpc_from_generalized_hopf(gh_state, neighbor_state, param1_name, param2_name, gh_param1, gh_param2, neighbor_param1, neighbor_param2, gh_kappa, neighbor_kappa, neighbor_l1, second_lyapunov, amplitude, ntst, ncol, tolerance) {
+        const ptr0 = passArrayF64ToWasm0(gh_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(neighbor_state, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_init_lpc_from_generalized_hopf(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, gh_param1, gh_param2, neighbor_param1, neighbor_param2, gh_kappa, neighbor_kappa, neighbor_l1, second_lyapunov, amplitude, ntst, ncol, tolerance);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} state
+     * @param {string} param1_name
+     * @param {string} param2_name
+     * @param {number} param1_value
+     * @param {number} param2_value
+     * @param {number} perturbation
+     * @param {number} tolerance
+     * @returns {any}
+     */
+    init_curves_from_bogdanov_takens(state, param1_name, param2_name, param1_value, param2_value, perturbation, tolerance) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
         const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_continue_lpc_curve(this.__wbg_ptr, ptr0, len0, period, ptr1, len1, param1_value, ptr2, len2, param2_value, ntst, ncol, settings_val, forward);
+        const ret = wasm.wasmsystem_init_curves_from_bogdanov_takens(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, param1_value, param2_value, perturbation, tolerance);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} state
+     * @param {string} param1_name
+     * @param {string} param2_name
+     * @param {number} param1_value
+     * @param {number} param2_value
+     * @param {number} perturbation
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {number} tolerance
+     * @returns {any}
+     */
+    init_homoclinic_from_bogdanov_takens(state, param1_name, param2_name, param1_value, param2_value, perturbation, ntst, ncol, tolerance) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_init_homoclinic_from_bogdanov_takens(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, param1_value, param2_value, perturbation, ntst, ncol, tolerance);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -3155,6 +3509,341 @@ export class WasmSystem {
         const ptr1 = passArrayF64ToWasm0(orbit_states_flat, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
         const ret = wasm.wasmsystem_init_lc_from_orbit(this.__wbg_ptr, ptr0, len0, ptr1, len1, param_value, ntst, ncol, tolerance);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Initializes a period-doubled limit cycle from a period-doubling bifurcation.
+     * Takes the LC state at the PD point and constructs a doubled-period initial guess
+     * by computing the PD eigenvector and perturbing the original orbit.
+     * @param {Float64Array} lc_state
+     * @param {string} param_name
+     * @param {number} param_value
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {number} amplitude
+     * @returns {any}
+     */
+    init_lc_from_pd(lc_state, param_name, param_value, ntst, ncol, amplitude) {
+        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(param_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_init_lc_from_pd(this.__wbg_ptr, ptr0, len0, ptr1, len1, param_value, ntst, ncol, amplitude);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} lc_state
+     * @param {string} param_name
+     * @param {number} param_value
+     * @param {number} ncol
+     * @param {Float64Array} normalized_mesh
+     * @param {number} amplitude
+     * @returns {any}
+     */
+    init_lc_from_pd_on_mesh(lc_state, param_name, param_value, ncol, normalized_mesh, amplitude) {
+        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(param_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayF64ToWasm0(normalized_mesh, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_init_lc_from_pd_on_mesh(this.__wbg_ptr, ptr0, len0, ptr1, len1, param_value, ncol, ptr2, len2, amplitude);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Initializes a period-doubled map cycle seed from a period-doubling bifurcation.
+     * Takes the cycle state at the PD point and returns a perturbed seed for the doubled cycle.
+     * @param {Float64Array} pd_state
+     * @param {string} param_name
+     * @param {number} param_value
+     * @param {number} map_iterations
+     * @param {number} amplitude
+     * @returns {any}
+     */
+    init_map_cycle_from_pd(pd_state, param_name, param_value, map_iterations, amplitude) {
+        const ptr0 = passArrayF64ToWasm0(pd_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(param_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_init_map_cycle_from_pd(this.__wbg_ptr, ptr0, len0, ptr1, len1, param_value, map_iterations, amplitude);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Computes limit cycle continuation from an initial setup (from init_lc_from_hopf).
+     * @param {any} setup_val
+     * @param {string} parameter_name
+     * @param {any} settings_val
+     * @param {boolean} forward
+     * @returns {any}
+     */
+    compute_limit_cycle_continuation(setup_val, parameter_name, settings_val, forward) {
+        const ptr0 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_limit_cycle_continuation(this.__wbg_ptr, setup_val, ptr0, len0, settings_val, forward);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {any} seed_val
+     * @param {string} parameter_name
+     * @param {string} param2_name
+     * @param {number} target_ntst
+     * @param {number} target_ncol
+     * @param {boolean} free_time
+     * @param {boolean} free_eps0
+     * @param {boolean} free_eps1
+     * @returns {any}
+     */
+    init_heteroclinic_from_orbit(seed_val, parameter_name, param2_name, target_ntst, target_ncol, free_time, free_eps0, free_eps1) {
+        const ptr0 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_init_heteroclinic_from_orbit(this.__wbg_ptr, seed_val, ptr0, len0, ptr1, len1, target_ntst, target_ncol, free_time, free_eps0, free_eps1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {any} setup_val
+     * @param {any} settings_val
+     * @param {boolean} forward
+     * @returns {any}
+     */
+    compute_heteroclinic_continuation(setup_val, settings_val, forward) {
+        const ret = wasm.wasmsystem_compute_heteroclinic_continuation(this.__wbg_ptr, setup_val, settings_val, forward);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {any} branch_val
+     * @param {any} settings_val
+     * @param {boolean} extend_forward
+     * @returns {any}
+     */
+    extend_heteroclinic_continuation(branch_val, settings_val, extend_forward) {
+        const ret = wasm.wasmsystem_extend_heteroclinic_continuation(this.__wbg_ptr, branch_val, settings_val, extend_forward);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} lc_state
+     * @param {number} source_ntst
+     * @param {number} source_ncol
+     * @param {string} parameter_name
+     * @param {string} param2_name
+     * @param {number} target_ntst
+     * @param {number} target_ncol
+     * @param {boolean} free_time
+     * @param {boolean} free_eps0
+     * @param {boolean} free_eps1
+     * @returns {any}
+     */
+    init_homoclinic_from_large_cycle(lc_state, source_ntst, source_ncol, parameter_name, param2_name, target_ntst, target_ncol, free_time, free_eps0, free_eps1) {
+        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_init_homoclinic_from_large_cycle(this.__wbg_ptr, ptr0, len0, source_ntst, source_ncol, ptr1, len1, ptr2, len2, target_ntst, target_ncol, free_time, free_eps0, free_eps1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Nonuniform-mesh counterpart of `init_homoclinic_from_large_cycle`.
+     * `source_normalized_mesh` contains the source LC interval boundaries;
+     * source NTST is inferred from its length.
+     * @param {Float64Array} lc_state
+     * @param {number} source_ncol
+     * @param {Float64Array} source_normalized_mesh
+     * @param {string} parameter_name
+     * @param {string} param2_name
+     * @param {number} target_ntst
+     * @param {number} target_ncol
+     * @param {boolean} free_time
+     * @param {boolean} free_eps0
+     * @param {boolean} free_eps1
+     * @returns {any}
+     */
+    init_homoclinic_from_large_cycle_on_mesh(lc_state, source_ncol, source_normalized_mesh, parameter_name, param2_name, target_ntst, target_ncol, free_time, free_eps0, free_eps1) {
+        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(source_normalized_mesh, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_init_homoclinic_from_large_cycle_on_mesh(this.__wbg_ptr, ptr0, len0, source_ncol, ptr1, len1, ptr2, len2, ptr3, len3, target_ntst, target_ncol, free_time, free_eps0, free_eps1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} point_state
+     * @param {number} source_ntst
+     * @param {number} source_ncol
+     * @param {boolean} source_free_time
+     * @param {boolean} source_free_eps0
+     * @param {boolean} source_free_eps1
+     * @param {number} source_fixed_time
+     * @param {number} source_fixed_eps0
+     * @param {number} source_fixed_eps1
+     * @param {string} parameter_name
+     * @param {string} param2_name
+     * @param {number} target_ntst
+     * @param {number} target_ncol
+     * @param {boolean} free_time
+     * @param {boolean} free_eps0
+     * @param {boolean} free_eps1
+     * @returns {any}
+     */
+    init_homoclinic_from_homoclinic(point_state, source_ntst, source_ncol, source_free_time, source_free_eps0, source_free_eps1, source_fixed_time, source_fixed_eps0, source_fixed_eps1, parameter_name, param2_name, target_ntst, target_ncol, free_time, free_eps0, free_eps1) {
+        const ptr0 = passArrayF64ToWasm0(point_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_init_homoclinic_from_homoclinic(this.__wbg_ptr, ptr0, len0, source_ntst, source_ncol, source_free_time, source_free_eps0, source_free_eps1, source_fixed_time, source_fixed_eps0, source_fixed_eps1, ptr1, len1, ptr2, len2, target_ntst, target_ncol, free_time, free_eps0, free_eps1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Mesh-aware Method 2 initializer for restarting an adaptive homoclinic
+     * collocation point without first pretending its source mesh is uniform.
+     * @param {Float64Array} point_state
+     * @param {number} source_ncol
+     * @param {Float64Array} source_normalized_mesh
+     * @param {boolean} source_free_time
+     * @param {boolean} source_free_eps0
+     * @param {boolean} source_free_eps1
+     * @param {number} source_fixed_time
+     * @param {number} source_fixed_eps0
+     * @param {number} source_fixed_eps1
+     * @param {string} parameter_name
+     * @param {string} param2_name
+     * @param {number} target_ncol
+     * @param {Float64Array} target_normalized_mesh
+     * @param {boolean} free_time
+     * @param {boolean} free_eps0
+     * @param {boolean} free_eps1
+     * @returns {any}
+     */
+    init_homoclinic_from_homoclinic_on_mesh(point_state, source_ncol, source_normalized_mesh, source_free_time, source_free_eps0, source_free_eps1, source_fixed_time, source_fixed_eps0, source_fixed_eps1, parameter_name, param2_name, target_ncol, target_normalized_mesh, free_time, free_eps0, free_eps1) {
+        const ptr0 = passArrayF64ToWasm0(point_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(source_normalized_mesh, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passArrayF64ToWasm0(target_normalized_mesh, wasm.__wbindgen_malloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_init_homoclinic_from_homoclinic_on_mesh(this.__wbg_ptr, ptr0, len0, source_ncol, ptr1, len1, source_free_time, source_free_eps0, source_free_eps1, source_fixed_time, source_fixed_eps0, source_fixed_eps1, ptr2, len2, ptr3, len3, target_ncol, ptr4, len4, free_time, free_eps0, free_eps1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} equilibrium_state
+     * @param {string} parameter_name
+     * @param {string} param2_name
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {number} eps0
+     * @param {number} eps1
+     * @param {number} time
+     * @param {number} eps1_tol
+     * @returns {any}
+     */
+    init_homotopy_saddle_from_equilibrium(equilibrium_state, parameter_name, param2_name, ntst, ncol, eps0, eps1, time, eps1_tol) {
+        const ptr0 = passArrayF64ToWasm0(equilibrium_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_init_homotopy_saddle_from_equilibrium(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ntst, ncol, eps0, eps1, time, eps1_tol);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Float64Array} stage_d_state
+     * @param {number} source_ntst
+     * @param {number} source_ncol
+     * @param {string} parameter_name
+     * @param {string} param2_name
+     * @param {number} target_ntst
+     * @param {number} target_ncol
+     * @param {boolean} free_time
+     * @param {boolean} free_eps0
+     * @param {boolean} free_eps1
+     * @returns {any}
+     */
+    init_homoclinic_from_homotopy_saddle(stage_d_state, source_ntst, source_ncol, parameter_name, param2_name, target_ntst, target_ncol, free_time, free_eps0, free_eps1) {
+        const ptr0 = passArrayF64ToWasm0(stage_d_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_init_homoclinic_from_homotopy_saddle(this.__wbg_ptr, ptr0, len0, source_ntst, source_ncol, ptr1, len1, ptr2, len2, target_ntst, target_ncol, free_time, free_eps0, free_eps1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {any} setup_val
+     * @param {any} settings_val
+     * @param {boolean} forward
+     * @returns {any}
+     */
+    compute_homoclinic_continuation(setup_val, settings_val, forward) {
+        const ret = wasm.wasmsystem_compute_homoclinic_continuation(this.__wbg_ptr, setup_val, settings_val, forward);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {any} setup_val
+     * @param {any} settings_val
+     * @param {boolean} forward
+     * @returns {any}
+     */
+    compute_homotopy_saddle_continuation(setup_val, settings_val, forward) {
+        const ret = wasm.wasmsystem_compute_homotopy_saddle_continuation(this.__wbg_ptr, setup_val, settings_val, forward);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -3237,131 +3926,6 @@ export class WasmSystem {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * @param {any} branch_val
-     * @param {string} parameter_name
-     * @param {number} map_iterations
-     * @param {any} settings_val
-     * @param {boolean} forward
-     * @returns {any}
-     */
-    extend_continuation(branch_val, parameter_name, map_iterations, settings_val, forward) {
-        const ptr0 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_extend_continuation(this.__wbg_ptr, branch_val, ptr0, len0, map_iterations, settings_val, forward);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} equilibrium_state
-     * @param {string} parameter_name
-     * @param {number} map_iterations
-     * @param {any} settings_val
-     * @param {boolean} forward
-     * @returns {any}
-     */
-    compute_continuation(equilibrium_state, parameter_name, map_iterations, settings_val, forward) {
-        const ptr0 = passArrayF64ToWasm0(equilibrium_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_continuation(this.__wbg_ptr, ptr0, len0, ptr1, len1, map_iterations, settings_val, forward);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} equilibrium_state
-     * @param {number} map_iterations
-     * @param {any} settings_val
-     * @returns {any}
-     */
-    compute_eq_manifold_1d(equilibrium_state, map_iterations, settings_val) {
-        const ptr0 = passArrayF64ToWasm0(equilibrium_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_eq_manifold_1d(this.__wbg_ptr, ptr0, len0, map_iterations, settings_val);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} equilibrium_state
-     * @param {any} settings_val
-     * @returns {any}
-     */
-    compute_eq_manifold_2d(equilibrium_state, settings_val) {
-        const ptr0 = passArrayF64ToWasm0(equilibrium_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_eq_manifold_2d(this.__wbg_ptr, ptr0, len0, settings_val);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Initializes a period-doubled map cycle seed from a period-doubling bifurcation.
-     * Takes the cycle state at the PD point and returns a perturbed seed for the doubled cycle.
-     * @param {Float64Array} pd_state
-     * @param {string} param_name
-     * @param {number} param_value
-     * @param {number} map_iterations
-     * @param {number} amplitude
-     * @returns {any}
-     */
-    init_map_cycle_from_pd(pd_state, param_name, param_value, map_iterations, amplitude) {
-        const ptr0 = passArrayF64ToWasm0(pd_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(param_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_map_cycle_from_pd(this.__wbg_ptr, ptr0, len0, ptr1, len1, param_value, map_iterations, amplitude);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} lc_state
-     * @param {string} param_name
-     * @param {number} param_value
-     * @param {number} ncol
-     * @param {Float64Array} normalized_mesh
-     * @param {number} amplitude
-     * @returns {any}
-     */
-    init_lc_from_pd_on_mesh(lc_state, param_name, param_value, ncol, normalized_mesh, amplitude) {
-        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(param_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passArrayF64ToWasm0(normalized_mesh, wasm.__wbindgen_malloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_lc_from_pd_on_mesh(this.__wbg_ptr, ptr0, len0, ptr1, len1, param_value, ncol, ptr2, len2, amplitude);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} cycle_state
-     * @param {number} ntst
-     * @param {number} ncol
-     * @param {any} floquet_multipliers_val
-     * @param {any} settings_val
-     * @returns {any}
-     */
-    compute_cycle_manifold_2d(cycle_state, ntst, ncol, floquet_multipliers_val, settings_val) {
-        const ptr0 = passArrayF64ToWasm0(cycle_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_cycle_manifold_2d(this.__wbg_ptr, ptr0, len0, ntst, ncol, floquet_multipliers_val, settings_val);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
      * Continues an LPC (Limit Point of Cycles) bifurcation curve in two-parameter space.
      *
      * # Arguments
@@ -3401,6 +3965,100 @@ export class WasmSystem {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Continues an LPC (Limit Point of Cycles) bifurcation curve in two-parameter space.
+     *
+     * # Arguments
+     * * `lc_state` - Flattened LC collocation state at the LPC point
+     * * `period` - Period at the LPC point
+     * * `param1_name` - Name of first active parameter
+     * * `param1_value` - Value of first parameter at LPC point
+     * * `param2_name` - Name of second active parameter
+     * * `param2_value` - Value of second parameter at LPC point
+     * * `ntst` - Number of mesh intervals in collocation
+     * * `ncol` - Collocation degree
+     * * `settings_val` - Continuation settings as JsValue
+     * * `forward` - Direction of continuation
+     * @param {Float64Array} lc_state
+     * @param {number} period
+     * @param {string} param1_name
+     * @param {number} param1_value
+     * @param {string} param2_name
+     * @param {number} param2_value
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {any} settings_val
+     * @param {boolean} forward
+     * @returns {any}
+     */
+    continue_lpc_curve(lc_state, period, param1_name, param1_value, param2_name, param2_value, ntst, ncol, settings_val, forward) {
+        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_continue_lpc_curve(this.__wbg_ptr, ptr0, len0, period, ptr1, len1, param1_value, ptr2, len2, param2_value, ntst, ncol, settings_val, forward);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Continues a PD (Period-Doubling) bifurcation curve in two-parameter space.
+     * @param {Float64Array} lc_state
+     * @param {number} period
+     * @param {string} param1_name
+     * @param {number} param1_value
+     * @param {string} param2_name
+     * @param {number} param2_value
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {any} settings_val
+     * @param {boolean} forward
+     * @returns {any}
+     */
+    continue_pd_curve(lc_state, period, param1_name, param1_value, param2_name, param2_value, ntst, ncol, settings_val, forward) {
+        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_continue_pd_curve(this.__wbg_ptr, ptr0, len0, period, ptr1, len1, param1_value, ptr2, len2, param2_value, ntst, ncol, settings_val, forward);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Continues an NS (Neimark-Sacker) bifurcation curve in two-parameter space.
+     * @param {Float64Array} lc_state
+     * @param {number} period
+     * @param {string} param1_name
+     * @param {number} param1_value
+     * @param {string} param2_name
+     * @param {number} param2_value
+     * @param {number} initial_k
+     * @param {number} ntst
+     * @param {number} ncol
+     * @param {any} settings_val
+     * @param {boolean} forward
+     * @returns {any}
+     */
+    continue_ns_curve(lc_state, period, param1_name, param1_value, param2_name, param2_value, initial_k, ntst, ncol, settings_val, forward) {
+        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_continue_ns_curve(this.__wbg_ptr, ptr0, len0, period, ptr1, len1, param1_value, ptr2, len2, param2_value, initial_k, ntst, ncol, settings_val, forward);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * Compute equilibrium continuation with progress reporting capability.
      * Returns a serialized StepResult after running the specified number of steps.
      *
@@ -3426,735 +4084,151 @@ export class WasmSystem {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * @param {any} seed_val
-     * @param {string} parameter_name
-     * @param {string} param2_name
-     * @param {number} target_ntst
-     * @param {number} target_ncol
-     * @param {boolean} free_time
-     * @param {boolean} free_eps0
-     * @param {boolean} free_eps1
-     * @returns {any}
+     * @param {string[]} equations
+     * @param {Float64Array} params
+     * @param {string[]} param_names
+     * @param {string[]} var_names
+     * @param {string} solver_name
+     * @param {string} system_type
      */
-    init_heteroclinic_from_orbit(seed_val, parameter_name, param2_name, target_ntst, target_ncol, free_time, free_eps0, free_eps1) {
-        const ptr0 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    constructor(equations, params, param_names, var_names, solver_name, system_type) {
+        const ptr0 = passArrayJsValueToWasm0(equations, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr1 = passArrayF64ToWasm0(params, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_heteroclinic_from_orbit(this.__wbg_ptr, seed_val, ptr0, len0, ptr1, len1, target_ntst, target_ncol, free_time, free_eps0, free_eps1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} gh_state
-     * @param {Float64Array} neighbor_state
-     * @param {string} param1_name
-     * @param {string} param2_name
-     * @param {number} gh_param1
-     * @param {number} gh_param2
-     * @param {number} neighbor_param1
-     * @param {number} neighbor_param2
-     * @param {number} gh_kappa
-     * @param {number} neighbor_kappa
-     * @param {number} neighbor_l1
-     * @param {number} second_lyapunov
-     * @param {number} amplitude
-     * @param {number} ntst
-     * @param {number} ncol
-     * @param {number} tolerance
-     * @returns {any}
-     */
-    init_lpc_from_generalized_hopf(gh_state, neighbor_state, param1_name, param2_name, gh_param1, gh_param2, neighbor_param1, neighbor_param2, gh_kappa, neighbor_kappa, neighbor_l1, second_lyapunov, amplitude, ntst, ncol, tolerance) {
-        const ptr0 = passArrayF64ToWasm0(gh_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(neighbor_state, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr2 = passArrayJsValueToWasm0(param_names, wasm.__wbindgen_malloc);
         const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr3 = passArrayJsValueToWasm0(var_names, wasm.__wbindgen_malloc);
         const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_lpc_from_generalized_hopf(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, gh_param1, gh_param2, neighbor_param1, neighbor_param2, gh_kappa, neighbor_kappa, neighbor_l1, second_lyapunov, amplitude, ntst, ncol, tolerance);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} state
-     * @param {string} parameter_name
-     * @param {number} map_iterations
-     * @param {number} param_value
-     * @returns {any}
-     */
-    compute_equilibrium_eigenvalues(state, parameter_name, map_iterations, param_value) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_equilibrium_eigenvalues(this.__wbg_ptr, ptr0, len0, ptr1, len1, map_iterations, param_value);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {any} setup_val
-     * @param {any} settings_val
-     * @param {boolean} forward
-     * @returns {any}
-     */
-    compute_homoclinic_continuation(setup_val, settings_val, forward) {
-        const ret = wasm.wasmsystem_compute_homoclinic_continuation(this.__wbg_ptr, setup_val, settings_val, forward);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} point_state
-     * @param {number} source_ntst
-     * @param {number} source_ncol
-     * @param {boolean} source_free_time
-     * @param {boolean} source_free_eps0
-     * @param {boolean} source_free_eps1
-     * @param {number} source_fixed_time
-     * @param {number} source_fixed_eps0
-     * @param {number} source_fixed_eps1
-     * @param {string} parameter_name
-     * @param {string} param2_name
-     * @param {number} target_ntst
-     * @param {number} target_ncol
-     * @param {boolean} free_time
-     * @param {boolean} free_eps0
-     * @param {boolean} free_eps1
-     * @returns {any}
-     */
-    init_homoclinic_from_homoclinic(point_state, source_ntst, source_ncol, source_free_time, source_free_eps0, source_free_eps1, source_fixed_time, source_fixed_eps0, source_fixed_eps1, parameter_name, param2_name, target_ntst, target_ncol, free_time, free_eps0, free_eps1) {
-        const ptr0 = passArrayF64ToWasm0(point_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_homoclinic_from_homoclinic(this.__wbg_ptr, ptr0, len0, source_ntst, source_ncol, source_free_time, source_free_eps0, source_free_eps1, source_fixed_time, source_fixed_eps0, source_fixed_eps1, ptr1, len1, ptr2, len2, target_ntst, target_ncol, free_time, free_eps0, free_eps1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Computes limit cycle continuation from an initial setup (from init_lc_from_hopf).
-     * @param {any} setup_val
-     * @param {string} parameter_name
-     * @param {any} settings_val
-     * @param {boolean} forward
-     * @returns {any}
-     */
-    compute_limit_cycle_continuation(setup_val, parameter_name, settings_val, forward) {
-        const ptr0 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_limit_cycle_continuation(this.__wbg_ptr, setup_val, ptr0, len0, settings_val, forward);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {any} branch_val
-     * @param {any} settings_val
-     * @param {boolean} extend_forward
-     * @returns {any}
-     */
-    extend_heteroclinic_continuation(branch_val, settings_val, extend_forward) {
-        const ret = wasm.wasmsystem_extend_heteroclinic_continuation(this.__wbg_ptr, branch_val, settings_val, extend_forward);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Extend a persisted 2D manifold while reporting each accepted new ring.
-     * @param {any} branch_val
-     * @param {any} settings_val
-     * @param {Function} progress_callback
-     * @returns {any}
-     */
-    extend_manifold_2d_with_progress(branch_val, settings_val, progress_callback) {
-        const ret = wasm.wasmsystem_extend_manifold_2d_with_progress(this.__wbg_ptr, branch_val, settings_val, progress_callback);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} state
-     * @param {string} param1_name
-     * @param {string} param2_name
-     * @param {number} param1_value
-     * @param {number} param2_value
-     * @param {number} perturbation
-     * @param {number} tolerance
-     * @returns {any}
-     */
-    init_curves_from_bogdanov_takens(state, param1_name, param2_name, param1_value, param2_value, perturbation, tolerance) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_curves_from_bogdanov_takens(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, param1_value, param2_value, perturbation, tolerance);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} lc_state
-     * @param {number} source_ntst
-     * @param {number} source_ncol
-     * @param {string} parameter_name
-     * @param {string} param2_name
-     * @param {number} target_ntst
-     * @param {number} target_ncol
-     * @param {boolean} free_time
-     * @param {boolean} free_eps0
-     * @param {boolean} free_eps1
-     * @returns {any}
-     */
-    init_homoclinic_from_large_cycle(lc_state, source_ntst, source_ncol, parameter_name, param2_name, target_ntst, target_ncol, free_time, free_eps0, free_eps1) {
-        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_homoclinic_from_large_cycle(this.__wbg_ptr, ptr0, len0, source_ntst, source_ncol, ptr1, len1, ptr2, len2, target_ntst, target_ncol, free_time, free_eps0, free_eps1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {any} setup_val
-     * @param {any} settings_val
-     * @param {boolean} forward
-     * @returns {any}
-     */
-    compute_heteroclinic_continuation(setup_val, settings_val, forward) {
-        const ret = wasm.wasmsystem_compute_heteroclinic_continuation(this.__wbg_ptr, setup_val, settings_val, forward);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} cycle_state
-     * @param {number} ntst
-     * @param {number} ncol
-     * @param {string} parameter_name
-     * @returns {any}
-     */
-    compute_limit_cycle_floquet_modes(cycle_state, ntst, ncol, parameter_name) {
-        const ptr0 = passArrayF64ToWasm0(cycle_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_limit_cycle_floquet_modes(this.__wbg_ptr, ptr0, len0, ntst, ncol, ptr1, len1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} equilibrium_state
-     * @param {any} settings_val
-     * @param {Function} progress_callback
-     * @returns {any}
-     */
-    compute_eq_manifold_2d_with_progress(equilibrium_state, settings_val, progress_callback) {
-        const ptr0 = passArrayF64ToWasm0(equilibrium_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_eq_manifold_2d_with_progress(this.__wbg_ptr, ptr0, len0, settings_val, progress_callback);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {any} setup_val
-     * @param {any} settings_val
-     * @param {boolean} forward
-     * @returns {any}
-     */
-    compute_homotopy_saddle_continuation(setup_val, settings_val, forward) {
-        const ret = wasm.wasmsystem_compute_homotopy_saddle_continuation(this.__wbg_ptr, setup_val, settings_val, forward);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} state
-     * @param {string} param1_name
-     * @param {string} param2_name
-     * @param {number} param1_value
-     * @param {number} param2_value
-     * @param {number} perturbation
-     * @param {number} ntst
-     * @param {number} ncol
-     * @param {number} tolerance
-     * @returns {any}
-     */
-    init_homoclinic_from_bogdanov_takens(state, param1_name, param2_name, param1_value, param2_value, perturbation, ntst, ncol, tolerance) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(param1_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_homoclinic_from_bogdanov_takens(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, param1_value, param2_value, perturbation, ntst, ncol, tolerance);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} stage_d_state
-     * @param {number} source_ntst
-     * @param {number} source_ncol
-     * @param {string} parameter_name
-     * @param {string} param2_name
-     * @param {number} target_ntst
-     * @param {number} target_ncol
-     * @param {boolean} free_time
-     * @param {boolean} free_eps0
-     * @param {boolean} free_eps1
-     * @returns {any}
-     */
-    init_homoclinic_from_homotopy_saddle(stage_d_state, source_ntst, source_ncol, parameter_name, param2_name, target_ntst, target_ncol, free_time, free_eps0, free_eps1) {
-        const ptr0 = passArrayF64ToWasm0(stage_d_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_homoclinic_from_homotopy_saddle(this.__wbg_ptr, ptr0, len0, source_ntst, source_ncol, ptr1, len1, ptr2, len2, target_ntst, target_ncol, free_time, free_eps0, free_eps1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} equilibrium_state
-     * @param {string} parameter_name
-     * @param {string} param2_name
-     * @param {number} ntst
-     * @param {number} ncol
-     * @param {number} eps0
-     * @param {number} eps1
-     * @param {number} time
-     * @param {number} eps1_tol
-     * @returns {any}
-     */
-    init_homotopy_saddle_from_equilibrium(equilibrium_state, parameter_name, param2_name, ntst, ncol, eps0, eps1, time, eps1_tol) {
-        const ptr0 = passArrayF64ToWasm0(equilibrium_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_homotopy_saddle_from_equilibrium(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ntst, ncol, eps0, eps1, time, eps1_tol);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} cycle_state
-     * @param {number} ntst
-     * @param {number} ncol
-     * @param {any} floquet_multipliers_val
-     * @param {any} settings_val
-     * @param {Function} progress_callback
-     * @returns {any}
-     */
-    compute_cycle_manifold_2d_with_progress(cycle_state, ntst, ncol, floquet_multipliers_val, settings_val, progress_callback) {
-        const ptr0 = passArrayF64ToWasm0(cycle_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_cycle_manifold_2d_with_progress(this.__wbg_ptr, ptr0, len0, ntst, ncol, floquet_multipliers_val, settings_val, progress_callback);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Mesh-aware Method 2 initializer for restarting an adaptive homoclinic
-     * collocation point without first pretending its source mesh is uniform.
-     * @param {Float64Array} point_state
-     * @param {number} source_ncol
-     * @param {Float64Array} source_normalized_mesh
-     * @param {boolean} source_free_time
-     * @param {boolean} source_free_eps0
-     * @param {boolean} source_free_eps1
-     * @param {number} source_fixed_time
-     * @param {number} source_fixed_eps0
-     * @param {number} source_fixed_eps1
-     * @param {string} parameter_name
-     * @param {string} param2_name
-     * @param {number} target_ncol
-     * @param {Float64Array} target_normalized_mesh
-     * @param {boolean} free_time
-     * @param {boolean} free_eps0
-     * @param {boolean} free_eps1
-     * @returns {any}
-     */
-    init_homoclinic_from_homoclinic_on_mesh(point_state, source_ncol, source_normalized_mesh, source_free_time, source_free_eps0, source_free_eps1, source_fixed_time, source_fixed_eps0, source_fixed_eps1, parameter_name, param2_name, target_ncol, target_normalized_mesh, free_time, free_eps0, free_eps1) {
-        const ptr0 = passArrayF64ToWasm0(point_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(source_normalized_mesh, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ptr4 = passArrayF64ToWasm0(target_normalized_mesh, wasm.__wbindgen_malloc);
+        const ptr4 = passStringToWasm0(solver_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len4 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_homoclinic_from_homoclinic_on_mesh(this.__wbg_ptr, ptr0, len0, source_ncol, ptr1, len1, source_free_time, source_free_eps0, source_free_eps1, source_fixed_time, source_fixed_eps0, source_fixed_eps1, ptr2, len2, ptr3, len3, target_ncol, ptr4, len4, free_time, free_eps0, free_eps1);
+        const ptr5 = passStringToWasm0(system_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len5 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_new(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
-        return takeFromExternrefTable0(ret[0]);
+        this.__wbg_ptr = ret[0] >>> 0;
+        WasmSystemFinalization.register(this, this.__wbg_ptr, this);
+        return this;
     }
     /**
-     * Nonuniform-mesh counterpart of `init_homoclinic_from_large_cycle`.
-     * `source_normalized_mesh` contains the source LC interval boundaries;
-     * source NTST is inferred from its length.
-     * @param {Float64Array} lc_state
-     * @param {number} source_ncol
-     * @param {Float64Array} source_normalized_mesh
-     * @param {string} parameter_name
-     * @param {string} param2_name
-     * @param {number} target_ntst
-     * @param {number} target_ncol
-     * @param {boolean} free_time
-     * @param {boolean} free_eps0
-     * @param {boolean} free_eps1
+     * @param {Float64Array} state
+     */
+    set_state(state) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.wasmsystem_set_state(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get_state() {
+        const ret = wasm.wasmsystem_get_state(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * @param {Float64Array} periods
+     */
+    set_periods(periods) {
+        const ptr0 = passArrayF64ToWasm0(periods, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.wasmsystem_set_periods(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * @param {number} t
+     */
+    set_t(t) {
+        wasm.wasmsystem_set_t(this.__wbg_ptr, t);
+    }
+    /**
+     * @returns {number}
+     */
+    get_t() {
+        const ret = wasm.wasmsystem_get_t(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {boolean}
+     */
+    uses_context() {
+        const ret = wasm.wasmsystem_uses_context(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {string | undefined}
+     */
+    context_symbol() {
+        const ret = wasm.wasmsystem_context_symbol(this.__wbg_ptr);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getStringFromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
+    }
+    /**
+     * @param {number} dt
+     */
+    step(dt) {
+        wasm.wasmsystem_step(this.__wbg_ptr, dt);
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    compute_jacobian() {
+        const ret = wasm.wasmsystem_compute_jacobian(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * @param {string} expression
+     * @param {number} level
+     * @param {Uint32Array} axis_indices
+     * @param {Float64Array} axis_mins
+     * @param {Float64Array} axis_maxs
+     * @param {Uint32Array} axis_samples
+     * @param {Float64Array} frozen_state
+     * @param {string[]} var_names
+     * @param {string[]} param_names
      * @returns {any}
      */
-    init_homoclinic_from_large_cycle_on_mesh(lc_state, source_ncol, source_normalized_mesh, parameter_name, param2_name, target_ntst, target_ncol, free_time, free_eps0, free_eps1) {
-        const ptr0 = passArrayF64ToWasm0(lc_state, wasm.__wbindgen_malloc);
+    compute_isocline(expression, level, axis_indices, axis_mins, axis_maxs, axis_samples, frozen_state, var_names, param_names) {
+        const ptr0 = passStringToWasm0(expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(source_normalized_mesh, wasm.__wbindgen_malloc);
+        const ptr1 = passArray32ToWasm0(axis_indices, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr2 = passArrayF64ToWasm0(axis_mins, wasm.__wbindgen_malloc);
         const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(param2_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr3 = passArrayF64ToWasm0(axis_maxs, wasm.__wbindgen_malloc);
         const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_init_homoclinic_from_large_cycle_on_mesh(this.__wbg_ptr, ptr0, len0, source_ncol, ptr1, len1, ptr2, len2, ptr3, len3, target_ntst, target_ncol, free_time, free_eps0, free_eps1);
+        const ptr4 = passArray32ToWasm0(axis_samples, wasm.__wbindgen_malloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ptr5 = passArrayF64ToWasm0(frozen_state, wasm.__wbindgen_malloc);
+        const len5 = WASM_VECTOR_LEN;
+        const ptr6 = passArrayJsValueToWasm0(var_names, wasm.__wbindgen_malloc);
+        const len6 = WASM_VECTOR_LEN;
+        const ptr7 = passArrayJsValueToWasm0(param_names, wasm.__wbindgen_malloc);
+        const len7 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmsystem_compute_isocline(this.__wbg_ptr, ptr0, len0, level, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * @param {Float64Array} cycle_state
-     * @param {number} ncol
-     * @param {Float64Array} normalized_mesh
-     * @param {string} parameter_name
-     * @returns {any}
-     */
-    compute_limit_cycle_floquet_modes_on_mesh(cycle_state, ncol, normalized_mesh, parameter_name) {
-        const ptr0 = passArrayF64ToWasm0(cycle_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(normalized_mesh, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_limit_cycle_floquet_modes_on_mesh(this.__wbg_ptr, ptr0, len0, ncol, ptr1, len1, ptr2, len2);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} cycle_state
-     * @param {number} ntst
-     * @param {number} ncol
-     * @param {string} parameter_name
-     * @param {string} backend
-     * @returns {any}
-     */
-    compute_limit_cycle_floquet_modes_with_backend(cycle_state, ntst, ncol, parameter_name, backend) {
-        const ptr0 = passArrayF64ToWasm0(cycle_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(backend, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_limit_cycle_floquet_modes_with_backend(this.__wbg_ptr, ptr0, len0, ntst, ncol, ptr1, len1, ptr2, len2);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} cycle_state
-     * @param {number} ncol
-     * @param {Float64Array} normalized_mesh
-     * @param {string} parameter_name
-     * @param {string} backend
-     * @returns {any}
-     */
-    compute_limit_cycle_floquet_modes_on_mesh_with_backend(cycle_state, ncol, normalized_mesh, parameter_name, backend) {
-        const ptr0 = passArrayF64ToWasm0(cycle_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(normalized_mesh, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(parameter_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(backend, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_limit_cycle_floquet_modes_on_mesh_with_backend(this.__wbg_ptr, ptr0, len0, ncol, ptr1, len1, ptr2, len2, ptr3, len3);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Blocking entry point retained for the Node CLI.
-     * @param {any} setup_val
-     * @param {any} settings_val
-     * @param {boolean} forward
-     * @returns {any}
-     */
-    compute_heteroclinic_shooting_continuation(setup_val, settings_val, forward) {
-        const ret = wasm.wasmsystem_compute_heteroclinic_shooting_continuation(this.__wbg_ptr, setup_val, settings_val, forward);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
+     * Convert any existing collocation homoclinic seed (including large-cycle
+     * and BT predictors) into standard single/multiple-shooting nodes.
      * @param {any} setup_val
      * @param {number} intervals
      * @param {number} integration_steps_per_segment
      * @returns {any}
      */
-    init_heteroclinic_shooting_from_collocation(setup_val, intervals, integration_steps_per_segment) {
-        const ret = wasm.wasmsystem_init_heteroclinic_shooting_from_collocation(this.__wbg_ptr, setup_val, intervals, integration_steps_per_segment);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {string} period_expression
-     * @param {number} iteration_period
-     * @param {number} phase
-     * @param {number} response_multiple
-     * @param {number} steps_per_forcing_period
-     * @param {Float64Array} initial_guess
-     * @param {number} max_steps
-     * @param {number} damping
-     * @param {number} tolerance
-     * @returns {any}
-     */
-    solve_forced_response(period_expression, iteration_period, phase, response_multiple, steps_per_forcing_period, initial_guess, max_steps, damping, tolerance) {
-        const ptr0 = passStringToWasm0(period_expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_solve_forced_response(this.__wbg_ptr, ptr0, len0, iteration_period, phase, response_multiple, steps_per_forcing_period, ptr1, len1, max_steps, damping, tolerance);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {string} period_expression
-     * @param {number} iteration_period
-     * @returns {number}
-     */
-    validate_periodic_forcing(period_expression, iteration_period) {
-        const ptr0 = passStringToWasm0(period_expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_validate_periodic_forcing(this.__wbg_ptr, ptr0, len0, iteration_period);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return ret[0];
-    }
-    /**
-     * @param {string} period_expression
-     * @param {number} iteration_period
-     * @param {number} phase
-     * @param {number} steps_per_forcing_period
-     * @param {number} initial_context
-     * @param {Float64Array} initial_state
-     * @returns {any}
-     */
-    advance_forced_response_seed(period_expression, iteration_period, phase, steps_per_forcing_period, initial_context, initial_state) {
-        const ptr0 = passStringToWasm0(period_expression, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(initial_state, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_advance_forced_response_seed(this.__wbg_ptr, ptr0, len0, iteration_period, phase, steps_per_forcing_period, initial_context, ptr1, len1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Compute local normal-form coefficients at a refined map bifurcation.
-     *
-     * `normal_form_type` accepts `branchPoint`, `periodDoubling`, or
-     * `neimarkSacker`. The returned object is tagged by its `type` field and
-     * includes coefficient and conditioning diagnostics.
-     * @param {Float64Array} state
-     * @param {number} param_index
-     * @param {number} param_value
-     * @param {number} map_iterations
-     * @param {string} normal_form_type
-     * @returns {any}
-     */
-    compute_map_normal_form(state, param_index, param_value, map_iterations, normal_form_type) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(normal_form_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_map_normal_form(this.__wbg_ptr, ptr0, len0, param_index, param_value, map_iterations, ptr1, len1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Produce corrected Hopf-Hopf switches to both orientations of both Hopf
-     * curves and to both periodic-orbit Neimark-Sacker curves.
-     * @param {Float64Array} state
-     * @param {number} param1_index
-     * @param {number} param2_index
-     * @param {number} param1_value
-     * @param {number} param2_value
-     * @param {number} source_frequency
-     * @param {number} curve_perturbation
-     * @param {number} cycle_amplitude
-     * @param {number} ntst
-     * @param {number} ncol
-     * @param {number} tolerance
-     * @returns {any}
-     */
-    switch_from_hopf_hopf(state, param1_index, param2_index, param1_value, param2_value, source_frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_switch_from_hopf_hopf(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, source_frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Produce corrected Zero-Hopf switches to both fold/Hopf orientations
-     * and, when the coefficient sign condition permits it, the periodic-orbit
-     * Neimark-Sacker curve.
-     * @param {Float64Array} state
-     * @param {number} param1_index
-     * @param {number} param2_index
-     * @param {number} param1_value
-     * @param {number} param2_value
-     * @param {number} frequency
-     * @param {number} curve_perturbation
-     * @param {number} cycle_amplitude
-     * @param {number} ntst
-     * @param {number} ncol
-     * @param {number} tolerance
-     * @returns {any}
-     */
-    switch_from_zero_hopf(state, param1_index, param2_index, param1_value, param2_value, frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_switch_from_zero_hopf(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, frequency, curve_perturbation, cycle_amplitude, ntst, ncol, tolerance);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Compute detailed, serializable nonresonant Hopf-Hopf coefficients and
-     * both NS unfolding predictors.
-     * @param {Float64Array} state
-     * @param {number} param1_index
-     * @param {number} param2_index
-     * @param {number} param1_value
-     * @param {number} param2_value
-     * @param {number} source_frequency
-     * @returns {any}
-     */
-    compute_hopf_hopf_normal_form(state, param1_index, param2_index, param1_value, param2_value, source_frequency) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_hopf_hopf_normal_form(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, source_frequency);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Compute detailed, serializable Zero-Hopf coefficients and numerical
-     * conditioning diagnostics at a refined equilibrium codimension-two
-     * point.
-     * @param {Float64Array} state
-     * @param {number} param1_index
-     * @param {number} param2_index
-     * @param {number} param1_value
-     * @param {number} param2_value
-     * @param {number} frequency
-     * @returns {any}
-     */
-    compute_zero_hopf_normal_form(state, param1_index, param2_index, param1_value, param2_value, frequency) {
-        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_zero_hopf_normal_form(this.__wbg_ptr, ptr0, len0, param1_index, param2_index, param1_value, param2_value, frequency);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Construct a collocation predictor on the periodic branch emanating
-     * from a generic periodic branch point.
-     * @param {any} setup_val
-     * @param {number} param_index
-     * @param {any} normal_form_val
-     * @param {number} amplitude
-     * @returns {any}
-     */
-    switch_periodic_orbit_branch(setup_val, param_index, normal_form_val, amplitude) {
-        const ret = wasm.wasmsystem_switch_periodic_orbit_branch(this.__wbg_ptr, setup_val, param_index, normal_form_val, amplitude);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Compute a Poincare-return-map normal form at a corrected limit cycle.
-     *
-     * The returned tagged object contains PD, NS, or generic `+1`
-     * coefficients and residual/conditioning diagnostics.  A `+1` form is
-     * explicitly classified as either an LPC or a generic periodic branch
-     * point.
-     * @param {any} setup_val
-     * @param {number} param_index
-     * @param {string} normal_form_type
-     * @returns {any}
-     */
-    compute_periodic_orbit_normal_form(setup_val, param_index, normal_form_type) {
-        const ptr0 = passStringToWasm0(normal_form_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_periodic_orbit_normal_form(this.__wbg_ptr, setup_val, param_index, ptr0, len0);
+    init_homoclinic_shooting_from_collocation(setup_val, intervals, integration_steps_per_segment) {
+        const ret = wasm.wasmsystem_init_homoclinic_shooting_from_collocation(this.__wbg_ptr, setup_val, intervals, integration_steps_per_segment);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -4206,37 +4280,24 @@ export class WasmSystem {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * Convert any existing collocation homoclinic seed (including large-cycle
-     * and BT predictors) into standard single/multiple-shooting nodes.
-     * @param {any} setup_val
-     * @param {number} intervals
-     * @param {number} integration_steps_per_segment
-     * @returns {any}
-     */
-    init_homoclinic_shooting_from_collocation(setup_val, intervals, integration_steps_per_segment) {
-        const ret = wasm.wasmsystem_init_homoclinic_shooting_from_collocation(this.__wbg_ptr, setup_val, intervals, integration_steps_per_segment);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Compute the generic `+1` normal form and construct its secondary-cycle
-     * predictor directly from a saved branch point.
-     * @param {Float64Array} packed_state
+     * Compute local normal-form coefficients at a refined map bifurcation.
+     *
+     * `normal_form_type` accepts `branchPoint`, `periodDoubling`, or
+     * `neimarkSacker`. The returned object is tagged by its `type` field and
+     * includes coefficient and conditioning diagnostics.
+     * @param {Float64Array} state
      * @param {number} param_index
      * @param {number} param_value
-     * @param {number} collocation_degree
-     * @param {Float64Array} normalized_mesh
-     * @param {number} amplitude
+     * @param {number} map_iterations
+     * @param {string} normal_form_type
      * @returns {any}
      */
-    switch_periodic_branch_from_packed_state(packed_state, param_index, param_value, collocation_degree, normalized_mesh, amplitude) {
-        const ptr0 = passArrayF64ToWasm0(packed_state, wasm.__wbindgen_malloc);
+    compute_map_normal_form(state, param_index, param_value, map_iterations, normal_form_type) {
+        const ptr0 = passArrayF64ToWasm0(state, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(normalized_mesh, wasm.__wbindgen_malloc);
+        const ptr1 = passStringToWasm0(normal_form_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_switch_periodic_branch_from_packed_state(this.__wbg_ptr, ptr0, len0, param_index, param_value, collocation_degree, ptr1, len1, amplitude);
+        const ret = wasm.wasmsystem_compute_map_normal_form(this.__wbg_ptr, ptr0, len0, param_index, param_value, map_iterations, ptr1, len1);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -4268,120 +4329,59 @@ export class WasmSystem {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * @param {any} request_val
+     * Compute the generic `+1` normal form and construct its secondary-cycle
+     * predictor directly from a saved branch point.
+     * @param {Float64Array} packed_state
+     * @param {number} param_index
+     * @param {number} param_value
+     * @param {number} collocation_degree
+     * @param {Float64Array} normalized_mesh
+     * @param {number} amplitude
      * @returns {any}
      */
-    compute_event_series_from_orbit(request_val) {
-        const ret = wasm.wasmsystem_compute_event_series_from_orbit(this.__wbg_ptr, request_val);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {any} request_val
-     * @returns {any}
-     */
-    compute_event_series_from_samples(request_val) {
-        const ret = wasm.wasmsystem_compute_event_series_from_samples(this.__wbg_ptr, request_val);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} start_state
-     * @param {number} start_time
-     * @param {number} steps
-     * @param {number} dt
-     * @param {number} qr_stride
-     * @returns {Float64Array}
-     */
-    compute_lyapunov_exponents(start_state, start_time, steps, dt, qr_stride) {
-        const ptr0 = passArrayF64ToWasm0(start_state, wasm.__wbindgen_malloc);
+    switch_periodic_branch_from_packed_state(packed_state, param_index, param_value, collocation_degree, normalized_mesh, amplitude) {
+        const ptr0 = passArrayF64ToWasm0(packed_state, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_lyapunov_exponents(this.__wbg_ptr, ptr0, len0, start_time, steps, dt, qr_stride);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} start_state
-     * @param {number} start_time
-     * @param {number} window_steps
-     * @param {number} dt
-     * @param {number} qr_stride
-     * @param {number} forward_transient
-     * @param {number} backward_transient
-     * @returns {any}
-     */
-    compute_covariant_lyapunov_vectors(start_state, start_time, window_steps, dt, qr_stride, forward_transient, backward_transient) {
-        const ptr0 = passArrayF64ToWasm0(start_state, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_compute_covariant_lyapunov_vectors(this.__wbg_ptr, ptr0, len0, start_time, window_steps, dt, qr_stride, forward_transient, backward_transient);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} initial_guess
-     * @param {number} max_steps
-     * @param {number} damping
-     * @param {number} map_iterations
-     * @returns {any}
-     */
-    solve_equilibrium(initial_guess, max_steps, damping, map_iterations) {
-        const ptr0 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_solve_equilibrium(this.__wbg_ptr, ptr0, len0, max_steps, damping, map_iterations);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @param {Float64Array} initial_guess
-     * @param {number} max_steps
-     * @param {number} damping
-     * @param {number} map_iterations
-     * @param {Float64Array} flattened_roots
-     * @param {number} exponent
-     * @param {number} shift
-     * @returns {any}
-     */
-    solve_equilibrium_deflated(initial_guess, max_steps, damping, map_iterations, flattened_roots, exponent, shift) {
-        const ptr0 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(flattened_roots, wasm.__wbindgen_malloc);
+        const ptr1 = passArrayF64ToWasm0(normalized_mesh, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_solve_equilibrium_deflated(this.__wbg_ptr, ptr0, len0, max_steps, damping, map_iterations, ptr1, len1, exponent, shift);
+        const ret = wasm.wasmsystem_switch_periodic_branch_from_packed_state(this.__wbg_ptr, ptr0, len0, param_index, param_value, collocation_degree, ptr1, len1, amplitude);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * @param {Float64Array} initial_guess
-     * @param {number} max_steps
-     * @param {number} damping
-     * @param {number} map_iterations
-     * @param {Float64Array} flattened_roots
-     * @param {Float64Array} exponents
-     * @param {Float64Array} shifts
+     * Compute a Poincare-return-map normal form at a corrected limit cycle.
+     *
+     * The returned tagged object contains PD, NS, or generic `+1`
+     * coefficients and residual/conditioning diagnostics.  A `+1` form is
+     * explicitly classified as either an LPC or a generic periodic branch
+     * point.
+     * @param {any} setup_val
+     * @param {number} param_index
+     * @param {string} normal_form_type
      * @returns {any}
      */
-    solve_equilibrium_deflated_targets(initial_guess, max_steps, damping, map_iterations, flattened_roots, exponents, shifts) {
-        const ptr0 = passArrayF64ToWasm0(initial_guess, wasm.__wbindgen_malloc);
+    compute_periodic_orbit_normal_form(setup_val, param_index, normal_form_type) {
+        const ptr0 = passStringToWasm0(normal_form_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF64ToWasm0(flattened_roots, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passArrayF64ToWasm0(exponents, wasm.__wbindgen_malloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passArrayF64ToWasm0(shifts, wasm.__wbindgen_malloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmsystem_solve_equilibrium_deflated_targets(this.__wbg_ptr, ptr0, len0, max_steps, damping, map_iterations, ptr1, len1, ptr2, len2, ptr3, len3);
+        const ret = wasm.wasmsystem_compute_periodic_orbit_normal_form(this.__wbg_ptr, setup_val, param_index, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Construct a collocation predictor on the periodic branch emanating
+     * from a generic periodic branch point.
+     * @param {any} setup_val
+     * @param {number} param_index
+     * @param {any} normal_form_val
+     * @param {number} amplitude
+     * @returns {any}
+     */
+    switch_periodic_orbit_branch(setup_val, param_index, normal_form_val, amplitude) {
+        const ret = wasm.wasmsystem_switch_periodic_orbit_branch(this.__wbg_ptr, setup_val, param_index, normal_form_val, amplitude);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -4406,26 +4406,6 @@ export class WasmTransferEigenmodeRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmtransfereigenmoderunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmtransfereigenmoderunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmtransfereigenmoderunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {Uint32Array} column_offsets
@@ -4472,6 +4452,26 @@ export class WasmTransferEigenmodeRunner {
         }
         return takeFromExternrefTable0(ret[0]);
     }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmtransfereigenmoderunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmtransfereigenmoderunner_get_result(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) WasmTransferEigenmodeRunner.prototype[Symbol.dispose] = WasmTransferEigenmodeRunner.prototype.free;
 
@@ -4491,26 +4491,6 @@ export class WasmTransferOperatorRunner {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmtransferoperatorrunner_free(ptr, 0);
-    }
-    /**
-     * @returns {any}
-     */
-    get_result() {
-        const ret = wasm.wasmtransferoperatorrunner_get_result(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * @returns {any}
-     */
-    get_progress() {
-        const ret = wasm.wasmtransferoperatorrunner_get_progress(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {string[]} equations
@@ -4565,6 +4545,26 @@ export class WasmTransferOperatorRunner {
      */
     run_steps(batch_size) {
         const ret = wasm.wasmtransferoperatorrunner_run_steps(this.__wbg_ptr, batch_size);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_progress() {
+        const ret = wasm.wasmtransferoperatorrunner_get_progress(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @returns {any}
+     */
+    get_result() {
+        const ret = wasm.wasmtransferoperatorrunner_get_result(this.__wbg_ptr);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }

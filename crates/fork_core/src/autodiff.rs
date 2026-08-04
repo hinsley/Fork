@@ -1,5 +1,6 @@
 use crate::traits::DynamicalSystem;
 use num_traits::{Float, FromPrimitive, Num, NumCast, One, ToPrimitive, Zero};
+use std::cell::RefCell;
 use std::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
@@ -225,7 +226,17 @@ impl Float for Dual {
 
     fn powi(self, n: i32) -> Self {
         let val_pow = self.val.powi(n);
-        Self::new(val_pow, (n as f64) * self.val.powi(n - 1) * self.eps)
+        if n == 0 {
+            return Self::new(val_pow, 0.0);
+        }
+        let derivative_power = if n == i32::MIN {
+            // Avoid overflowing `n - 1`; x^n / x is equivalent for nonzero x
+            // and retains the expected infinite behavior at the singularity.
+            val_pow / self.val
+        } else {
+            self.val.powi(n - 1)
+        };
+        Self::new(val_pow, (n as f64) * derivative_power * self.eps)
     }
 
     fn powf(self, n: Self) -> Self {
@@ -380,9 +391,15 @@ impl Float for Dual {
 
 // --- Tangent System Wrapper ---
 
+struct TangentWorkspace {
+    dual_state: Vec<Dual>,
+    dual_out: Vec<Dual>,
+}
+
 pub struct TangentSystem<S> {
     pub inner: S,
     pub dimension: usize,
+    workspace: RefCell<TangentWorkspace>,
 }
 
 impl<S> TangentSystem<S> {
@@ -390,6 +407,10 @@ impl<S> TangentSystem<S> {
         Self {
             inner,
             dimension: dim,
+            workspace: RefCell::new(TangentWorkspace {
+                dual_state: vec![Dual::zero(); dim],
+                dual_out: vec![Dual::zero(); dim],
+            }),
         }
     }
 }
@@ -405,64 +426,40 @@ where
 
     fn apply(&self, t: f64, x: &[f64], out: &mut [f64]) {
         let n = self.dimension;
+        let augmented_dimension = n + n * n;
+        assert!(
+            x.len() >= augmented_dimension,
+            "tangent-system input dimension mismatch: expected at least {augmented_dimension}, got {}",
+            x.len()
+        );
+        assert!(
+            out.len() >= augmented_dimension,
+            "tangent-system output dimension mismatch: expected at least {augmented_dimension}, got {}",
+            out.len()
+        );
 
-        // 1. Evaluate base flow/map f(x)
-        // We can use the f64 implementation of inner for this to be fast,
-        // or just use the Dual one with eps=0. Let's use f64 for speed.
-        self.inner.apply(t, &x[0..n], &mut out[0..n]);
-
-        // 2. Compute Jacobian J(x) via Dual numbers
-        // We need to compute J * Phi.
-        // Phi is stored in x[n..] as a flattened nxn matrix (row-major or col-major? Let's say Row-Major).
-        // Phi = [ phi_00, phi_01 ... ]
-
-        // To get J * Phi efficiently without building J explicitly:
-        // J * v is the directional derivative in direction v.
-        // Phi has n columns: c_0, c_1, ... c_{n-1}.
-        // (J * Phi).col(k) = J * c_k.
-        // So we can compute J * c_k by running Dual apply with input (x + eps * c_k).
-        // BUT, c_k are vectors in tangent space. The input to apply is state space.
-
-        // Wait, standard Tangent dynamics for flow:
-        // \dot{\Phi} = J(x) \Phi
-        // This means column k of \dot{\Phi} is J(x) * (column k of \Phi).
-        // This requires J(x).
-        // J(x) can be computed column by column.
-        // Column j of J(x) is result of apply with x_j having epsilon=1, others 0.
-
-        // Let's compute J explicitly first (size N*N).
-        // This is acceptable for small N.
-        let mut jacobian = vec![0.0; n * n];
-        let mut dual_x = vec![Dual::new(0.0, 0.0); n];
-        let mut dual_out = vec![Dual::new(0.0, 0.0); n];
+        // Phi is row-major in x[n..]. A forward-mode pass seeded by one
+        // column Phi[:, column] directly returns J(x) * Phi[:, column].
+        // This avoids both materializing J and multiplying J * Phi.
+        let mut workspace = self.workspace.borrow_mut();
+        let TangentWorkspace {
+            dual_state,
+            dual_out,
+        } = &mut *workspace;
         let t_dual = Dual::new(t, 0.0);
 
-        for j in 0..n {
-            // Prepare input: x with perturbation in j-th component
-            for i in 0..n {
-                dual_x[i] = Dual::new(x[i], if i == j { 1.0 } else { 0.0 });
+        for column in 0..n {
+            for row in 0..n {
+                dual_state[row] = Dual::new(x[row], x[n + row * n + column]);
             }
 
-            // Evaluate
-            self.inner.apply(t_dual, &dual_x, &mut dual_out);
+            self.inner.apply(t_dual, dual_state, dual_out);
 
-            // Extract derivatives to column j of Jacobian
-            for i in 0..n {
-                jacobian[i * n + j] = dual_out[i].eps;
-            }
-        }
-
-        // 3. Compute \dot{\Phi} = J * Phi
-        // out[n..] = J * x[n..]
-        let phi_start = n;
-        for i in 0..n {
-            for j in 0..n {
-                let mut sum = 0.0;
-                for k in 0..n {
-                    // J[i, k] * Phi[k, j]
-                    sum += jacobian[i * n + k] * x[phi_start + k * n + j];
+            for row in 0..n {
+                if column == 0 {
+                    out[row] = dual_out[row].val;
                 }
-                out[phi_start + i * n + j] = sum;
+                out[n + row * n + column] = dual_out[row].eps;
             }
         }
     }
@@ -470,9 +467,88 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::Dual;
+    use super::{Dual, TangentSystem};
+    use crate::traits::DynamicalSystem;
     use num_traits::Float;
+    use std::cell::Cell;
     use std::f64::consts::{LN_10, LN_2};
+
+    #[derive(Default)]
+    struct CountingScalarFlow {
+        f64_calls: Cell<usize>,
+        dual_calls: Cell<usize>,
+    }
+
+    impl DynamicalSystem<f64> for CountingScalarFlow {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn apply(&self, t: f64, x: &[f64], out: &mut [f64]) {
+            self.f64_calls.set(self.f64_calls.get() + 1);
+            out[0] = x[0] * x[0] * x[0] + 2.0 * t * x[0];
+        }
+    }
+
+    impl DynamicalSystem<Dual> for CountingScalarFlow {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn apply(&self, t: Dual, x: &[Dual], out: &mut [Dual]) {
+            self.dual_calls.set(self.dual_calls.get() + 1);
+            out[0] = x[0] * x[0] * x[0] + Dual::new(2.0, 0.0) * t * x[0];
+        }
+    }
+
+    struct ThreeDimensionalMap;
+
+    impl DynamicalSystem<f64> for ThreeDimensionalMap {
+        fn dimension(&self) -> usize {
+            3
+        }
+
+        fn apply(&self, t: f64, x: &[f64], out: &mut [f64]) {
+            out[0] = x[0] * x[1] + x[2].sin() + t;
+            out[1] = x[1] * x[1] + x[0];
+            out[2] = x[0].exp() - x[1] * x[2];
+        }
+    }
+
+    impl DynamicalSystem<Dual> for ThreeDimensionalMap {
+        fn dimension(&self) -> usize {
+            3
+        }
+
+        fn apply(&self, t: Dual, x: &[Dual], out: &mut [Dual]) {
+            out[0] = x[0] * x[1] + x[2].sin() + t;
+            out[1] = x[1] * x[1] + x[0];
+            out[2] = x[0].exp() - x[1] * x[2];
+        }
+    }
+
+    fn explicit_jacobian_product(jacobian: &[f64], phi: &[f64], dim: usize) -> Vec<f64> {
+        let mut product = vec![0.0; dim * dim];
+        for row in 0..dim {
+            for column in 0..dim {
+                for inner in 0..dim {
+                    product[row * dim + column] +=
+                        jacobian[row * dim + inner] * phi[inner * dim + column];
+                }
+            }
+        }
+        product
+    }
+
+    fn assert_slice_close(actual: &[f64], expected: &[f64]) {
+        assert_eq!(actual.len(), expected.len());
+        for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "mismatch at {index}: {actual} != {expected}"
+            );
+        }
+    }
 
     fn assert_close(actual: Dual, expected_val: f64, expected_eps: f64) {
         let tol = 1e-12;
@@ -528,6 +604,15 @@ mod tests {
         let val = 1.5_f64.exp2();
         let expected_eps = 0.25 * val * LN_2;
         assert_close(x.exp2(), val, expected_eps);
+    }
+
+    #[test]
+    fn dual_integer_power_handles_zero_and_minimum_exponents() {
+        assert_eq!(Dual::new(0.0, 1.0).powi(0), Dual::new(1.0, 0.0));
+        assert_eq!(
+            Dual::new(1.0, 0.5).powi(i32::MIN),
+            Dual::new(1.0, 0.5 * i32::MIN as f64)
+        );
     }
 
     #[test]
@@ -697,5 +782,60 @@ mod tests {
             |a, b| if a > b { a - b } else { 0.0 },
             |a, b| a.abs_sub(b),
         );
+    }
+
+    #[test]
+    fn tangent_flow_matches_explicit_scalar_jacobian_without_base_evaluation() {
+        let system = TangentSystem::new(CountingScalarFlow::default(), 1);
+        let time = 0.4;
+        let state = [1.25, -0.75];
+        let mut actual = [0.0; 2];
+
+        system.apply(time, &state, &mut actual);
+
+        let value = state[0].powi(3) + 2.0 * time * state[0];
+        let jacobian = [3.0 * state[0] * state[0] + 2.0 * time];
+        let tangent = explicit_jacobian_product(&jacobian, &state[1..], 1);
+        assert_slice_close(&actual, &[value, tangent[0]]);
+        assert_eq!(
+            system.inner.f64_calls.get(),
+            0,
+            "the primal value should come from the first Dual pass"
+        );
+        assert_eq!(system.inner.dual_calls.get(), 1);
+    }
+
+    #[test]
+    fn tangent_map_matches_explicit_three_dimensional_jacobian() {
+        let system = TangentSystem::new(ThreeDimensionalMap, 3);
+        let time = 0.2;
+        let base = [0.7_f64, -1.1, 0.4];
+        let phi = [0.5, -0.2, 1.0, 1.3, 0.7, -0.6, -0.4, 0.9, 0.8];
+        let mut state = Vec::from(base);
+        state.extend(phi);
+        let mut actual = vec![0.0; system.dimension()];
+
+        system.apply(time, &state, &mut actual);
+
+        let values = [
+            base[0] * base[1] + base[2].sin() + time,
+            base[1] * base[1] + base[0],
+            base[0].exp() - base[1] * base[2],
+        ];
+        let jacobian = [
+            base[1],
+            base[0],
+            base[2].cos(),
+            1.0,
+            2.0 * base[1],
+            0.0,
+            base[0].exp(),
+            -base[2],
+            -base[1],
+        ];
+        let tangent = explicit_jacobian_product(&jacobian, &phi, 3);
+        let mut expected = Vec::from(values);
+        expected.extend(tangent);
+        assert_slice_close(&actual, &expected);
     }
 }

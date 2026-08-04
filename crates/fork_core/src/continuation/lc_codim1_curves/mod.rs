@@ -795,7 +795,7 @@ fn collocation_defect_estimate_on_mesh(
     if ntst < 2 || ncol == 0 || nodes.len() != ncol || mesh_states.len() < ntst {
         bail!("Invalid collocation profile for defect estimation");
     }
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if dim == 0
         || stage_states.len() != ntst * ncol
         || mesh_states

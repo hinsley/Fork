@@ -80,7 +80,7 @@ pub fn compute_isocline_at(
     if !level.is_finite() {
         bail!("Isocline level must be finite.");
     }
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if dim == 0 {
         bail!("System dimension must be positive.");
     }
