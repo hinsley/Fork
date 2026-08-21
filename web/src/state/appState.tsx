@@ -83,6 +83,7 @@ import {
   updateAnalysisViewport,
   updateBifurcationDiagram,
   updateLimitCycleRenderTarget,
+  updateNodeRender,
   updateObject,
   updateBranch,
   updateScene,
@@ -678,6 +679,8 @@ function defaultIsoclineSource(system: SystemConfig): IsoclineSource {
   }
   return { kind: 'flow_derivative', variableName: firstVariable }
 }
+
+const DEFAULT_ISOCLINE_OPACITY = 0.75
 
 function defaultStateGridAxes(system: SystemConfig): StateGridObject['axes'] {
   const resolution = system.varNames.length <= 3 ? 5 : 3
@@ -4538,7 +4541,10 @@ export function AppProvider({
           frozenVariables: { frozenValuesByVarName: {} },
         }
         const result = addObject(state.system, obj)
-        const selected = selectNode(result.system, result.nodeId)
+        const withDefaultOpacity = updateNodeRender(result.system, result.nodeId, {
+          opacity: DEFAULT_ISOCLINE_OPACITY,
+        })
+        const selected = selectNode(withDefaultOpacity, result.nodeId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
         return result.nodeId

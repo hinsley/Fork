@@ -2308,7 +2308,6 @@ function buildIsoclineTraces(config: {
     j: Uint32Array.from(j),
     k: Uint32Array.from(k),
     color,
-    opacity: highlight ? 0.5 : 0.35,
     flatshading: true,
     showscale: false,
   } as Data)

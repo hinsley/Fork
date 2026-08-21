@@ -2046,8 +2046,12 @@ describe('ViewportPanel view state wiring', () => {
     }
     const added = addObject(system, isocline)
     const signature = buildIsoclineSignature(isocline)
+    const customOpacitySystem = updateNodeRender(added.system, added.nodeId, {
+      opacity: 0.64
+    })
 
-    renderPanel(added.system, {
+    renderPanel(customOpacitySystem, {
+      selectedNodeId: added.nodeId,
       isoclineGeometryCache: {
         [added.nodeId]: {
           signature,
@@ -2071,10 +2075,15 @@ describe('ViewportPanel view state wiring', () => {
         entry.uid === added.nodeId &&
         'mode' in entry &&
         entry.mode === 'lines'
-    ) as { x?: Array<number | null>; y?: Array<number | null> } | undefined
+    ) as {
+      x?: Array<number | null>
+      y?: Array<number | null>
+      opacity?: number
+    } | undefined
     expect(trace).toBeTruthy()
     expect(trace?.x).toEqual([-1, 1, null])
     expect(trace?.y).toEqual([0, 0, null])
+    expect(trace?.opacity).toBe(0.64)
   })
 
   it('renders limit cycle object traces from standard-shooting homoclinic branch targets', () => {
@@ -2578,8 +2587,12 @@ describe('ViewportPanel view state wiring', () => {
     }
     const added = addObject(system, isocline)
     const signature = buildIsoclineSignature(isocline)
+    const customOpacitySystem = updateNodeRender(added.system, added.nodeId, {
+      opacity: 0.64
+    })
 
-    renderPanel(added.system, {
+    renderPanel(customOpacitySystem, {
+      selectedNodeId: added.nodeId,
       isoclineGeometryCache: {
         [added.nodeId]: {
           signature,
@@ -2602,10 +2615,11 @@ describe('ViewportPanel view state wiring', () => {
         entry.uid === added.nodeId &&
         'mode' in entry &&
         entry.mode === 'markers'
-    ) as { x?: number[]; y?: number[] } | undefined
+    ) as { x?: number[]; y?: number[]; opacity?: number } | undefined
     expect(trace).toBeTruthy()
     expect(trace?.x).toEqual([0.25, 0.75])
     expect(trace?.y).toEqual([0.25, 0.75])
+    expect(trace?.opacity).toBe(0.64)
   })
 
   it('renders cached 1D isocline points as dotted horizontal lines in matching flow timeseries scenes', () => {
@@ -2846,8 +2860,12 @@ describe('ViewportPanel view state wiring', () => {
     }
     const added = addObject(system, isocline)
     const signature = buildIsoclineSignature(isocline)
+    const customOpacity3dSystem = updateNodeRender(added.system, added.nodeId, {
+      opacity: 0.64
+    })
 
-    renderPanel(added.system, {
+    renderPanel(customOpacity3dSystem, {
+      selectedNodeId: added.nodeId,
       isoclineGeometryCache: {
         [added.nodeId]: {
           signature,
@@ -2868,10 +2886,11 @@ describe('ViewportPanel view state wiring', () => {
     const meshTrace = props?.data.find(
       (entry) =>
         'uid' in entry && entry.uid === added.nodeId && entry.type === 'mesh3d'
-    ) as { x?: number[]; i?: Uint32Array | number[] } | undefined
+    ) as { x?: number[]; i?: Uint32Array | number[]; opacity?: number } | undefined
     expect(meshTrace).toBeTruthy()
     expect(meshTrace?.x).toEqual([0, 1, 0])
     expect(Array.from(meshTrace?.i ?? [])).toEqual([0])
+    expect(meshTrace?.opacity).toBe(0.64)
   })
 
   it('omits diagram ranges from layout but seeds initialView', () => {

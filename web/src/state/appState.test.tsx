@@ -3468,6 +3468,7 @@ describe('appState isocline computation', () => {
     }
     const object = next.objects[isoclineId] as IsoclineObject
     expect(object.axes.map((axis) => axis.variableName)).toEqual(['x', 'y', 'z'])
+    expect(next.nodes[isoclineId].render.opacity).toBe(0.75)
   })
 
   it('preserves parseable but semantically invalid axis settings until compute', async () => {

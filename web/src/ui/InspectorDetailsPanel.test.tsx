@@ -2756,6 +2756,10 @@ describe('InspectorDetailsPanel', () => {
       parameters: [...config.params],
     }
     const added = addObject(system, isocline)
+    const systemWithIsoclineOpacity = updateNodeRender(added.system, added.nodeId, {
+      opacity: 0.75,
+    })
+    const onUpdateRender = vi.fn()
     const onUpdateIsoclineObject = vi.fn()
     const onComputeIsocline = vi.fn().mockResolvedValue({
       geometry: 'segments',
@@ -2766,13 +2770,13 @@ describe('InspectorDetailsPanel', () => {
 
     render(
       <InspectorDetailsPanel
-        system={added.system}
+        system={systemWithIsoclineOpacity}
         selectedNodeId={added.nodeId}
         view="selection"
         theme="light"
         onRename={vi.fn()}
         onToggleVisibility={vi.fn()}
-        onUpdateRender={vi.fn()}
+        onUpdateRender={onUpdateRender}
         onUpdateObjectParams={vi.fn()}
         onUpdateIsoclineObject={onUpdateIsoclineObject}
         onComputeIsocline={onComputeIsocline}
@@ -2796,6 +2800,15 @@ describe('InspectorDetailsPanel', () => {
         onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
+
+    await user.click(screen.getByTestId('action-appearance-toggle'))
+    expect(screen.getByTestId('inspector-color-opacity')).toHaveValue(75)
+    fireEvent.change(screen.getByTestId('inspector-color-opacity'), {
+      target: { value: '64' },
+    })
+    expect(onUpdateRender).toHaveBeenLastCalledWith(added.nodeId, {
+      opacity: 0.64,
+    })
 
     await user.click(screen.getByTestId('isocline-toggle'))
     expect(
