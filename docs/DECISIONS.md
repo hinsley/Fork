@@ -19,6 +19,37 @@ Impact:
 References:
 ```
 
+### 2026-08-21: Assemble LPC curve Jacobians by bordered adjoint instead of finite differences
+Context:
+Profiling the MLfast LPC curve workload showed 77 percent of runtime inside
+`LPCCurveProblem::extended_jacobian`: each of the m+1 finite-difference columns re-ran a full
+residual whose singularity test `G` factorizes a dense bordered system, costing about 168 ms per
+Jacobian at ntst=20 and making curve steps roughly 230 times slower than limit-cycle steps.
+Decision:
+Assemble the extended Jacobian analytically. Defect rows come from the existing `build_bvp_jac`
+plus per-stage `df/dp` columns. The `G` row uses the bordered adjoint identity
+`dG/dtheta = -w^T (dB/dtheta) s` with one bordered factorization supplying both `s = B^-1 b` and
+`w^T = e^T B^-1`. Stage-coordinate and parameter directions differentiate only the per-stage
+`J_f` blocks (central differences) and the period-column `f(z_k)` terms analytically; the frozen
+phase gauge and constant border vectors contribute nothing. A retained
+`extended_jacobian_finite_difference` reference backs a unit cross-check test.
+Why:
+Forward-mode autodiff offers no asymptotic win over one-sided differences for dense Jacobians,
+so the win had to come from removing the per-column bordered factorization and reusing the
+already-assembled stage data. The period column of the BVP Jacobian carries `f(z_k)` terms, so
+`dJ/dtheta` acts through it scaled by the period component of `s`; omitting that term or
+differentiating it twice both produce wrong gradients (caught by the cross-check).
+Impact:
+LPC Jacobian cost drops from 168 ms to 1.2 ms (140x) at ntst=20; the 30-step MLfast curve
+workload drops from 8.9 s to 0.81 s (11x) with the published LPC value unchanged. The same
+pattern applies to the PD, NS, and isoperiodic curve problems, which still use finite
+differences. Curve-step time is now dominated by per-residual bordered factorizations and the
+cusp normal-form diagnostics rather than the Jacobian.
+References:
+`crates/fork_core/src/continuation/lc_codim1_curves/lpc_curve.rs`
+
+---
+
 ### 2026-08-01: Check in web WASM packages for hosted build latency
 Context:
 Hosted builds compiled both serial and threaded web WASM on every deployment and installed
