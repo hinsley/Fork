@@ -110,7 +110,7 @@ impl<'a> PDCurveProblem<'a> {
         ncol: usize,
         normalized_mesh: Vec<f64>,
     ) -> Result<Self> {
-        let dim = system.equations.len();
+        let dim = system.equations().len();
         if dim == 0 {
             bail!("PD curve requires a nonempty flow system");
         }

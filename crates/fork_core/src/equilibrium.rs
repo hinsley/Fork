@@ -220,7 +220,7 @@ pub fn solve_equilibrium_with_deflation_targets_and_periodicity(
     periodicity: &StatePeriodicity,
 ) -> Result<EquilibriumResult> {
     let map_iterations = kind.checked_map_iterations()?;
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if dim == 0 {
         bail!("System has zero dimension.");
     }
@@ -588,7 +588,7 @@ pub fn compute_param_jacobian(
     let iterations = kind.checked_map_iterations()?;
     match kind {
         SystemKind::Flow => {
-            let dim = system.equations.len();
+            let dim = system.equations().len();
             let mut f_dual = vec![Dual::new(0.0, 0.0); dim];
             system.evaluate_dual_wrt_param(state, param_index, &mut f_dual);
             Ok(f_dual.iter().map(|value| value.eps).collect())
@@ -613,7 +613,7 @@ pub fn compute_jacobian_with_periodicity(
     state: &[f64],
     periodicity: &StatePeriodicity,
 ) -> Result<Vec<f64>> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let mut jacobian = compute_system_jacobian_with_periodicity(system, kind, state, periodicity)?;
     if kind.is_map() {
         for i in 0..dim {
@@ -648,7 +648,7 @@ pub fn compute_system_jacobian_with_periodicity(
 }
 
 fn compute_single_step_jacobian(system: &EquationSystem, state: &[f64]) -> Result<Vec<f64>> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let mut jacobian = vec![0.0; dim * dim];
     let mut dual_state = vec![Dual::new(0.0, 0.0); dim];
     let mut dual_out = vec![Dual::new(0.0, 0.0); dim];
@@ -703,7 +703,7 @@ pub fn compute_map_cycle_points_with_periodicity(
     if iterations == 0 {
         return Vec::new();
     }
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let mut points = Vec::with_capacity(iterations);
     let mut current = state.to_vec();
     periodicity.wrap_state(&mut current);
@@ -728,7 +728,7 @@ fn compute_map_iterate_jacobian(
         return compute_single_step_jacobian(system, state);
     }
 
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let mut total = vec![0.0; dim * dim];
     for i in 0..dim {
         total[i * dim + i] = 1.0;
@@ -757,7 +757,7 @@ fn compute_map_iterate_param_jacobian(
     param_index: usize,
     iterations: usize,
 ) -> Result<Vec<f64>> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let mut sensitivity = vec![0.0; dim];
     let mut current = state.to_vec();
     let mut next_state = vec![0.0; dim];

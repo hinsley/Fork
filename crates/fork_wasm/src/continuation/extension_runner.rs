@@ -709,7 +709,7 @@ fn synthesize_homoc_context_from_branch_seed(
         return None;
     }
     base_params[param1_index] = param1_value;
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if let Some(param2_value) =
         extract_homoclinic_param2_from_packed_state(&endpoint_state, ntst, ncol, dim)
     {
@@ -732,7 +732,7 @@ fn synthesize_homoc_context_from_branch_seed(
     )
     .ok()?;
 
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if !hydrate_homoclinic_setup_from_endpoint(&mut setup, &endpoint_state, dim) {
         return None;
     }
@@ -850,7 +850,7 @@ fn build_homoclinic_shooting_extension(
         &endpoint.state,
         intervals,
         0,
-        system.equations.len(),
+        system.equations().len(),
     ) {
         base_params[param2_index] = param2_value;
     }
@@ -972,7 +972,7 @@ fn build_homoclinic_shooting_extension(
         })
     });
 
-    let system_dim = system.equations.len();
+    let system_dim = system.equations().len();
     let mut boxed_system = Box::new(system);
     let mut problem = HomoclinicShootingProblem::new(static_system_ref(&mut boxed_system), setup)
         .map_err(|error| {
@@ -1455,7 +1455,7 @@ impl WasmContinuationExtensionRunner {
                 validate_limit_cycle_extension_system_type(system_type)
                     .map_err(JsValue::from_str)?;
                 if merge.branch.upoldp.is_none() {
-                    let dim = system.equations.len();
+                    let dim = system.equations().len();
                     if endpoint.state.len() > dim {
                         let x0 = &endpoint.state[0..dim];
                         let period = *endpoint.state.last().unwrap_or(&1.0);
@@ -1482,7 +1482,7 @@ impl WasmContinuationExtensionRunner {
                     vec![1.0]
                 };
 
-                let dim = system.equations.len();
+                let dim = system.equations().len();
                 let phase_anchor: Vec<f64> = endpoint.state.iter().take(dim).cloned().collect();
 
                 let mut boxed_system = Box::new(system);
@@ -1820,7 +1820,7 @@ impl WasmContinuationExtensionRunner {
                     &endpoint.state,
                     *ntst,
                     *ncol,
-                    system.equations.len(),
+                    system.equations().len(),
                 ) {
                     base_params[param2_index] = param2_value;
                 }
@@ -1860,7 +1860,7 @@ impl WasmContinuationExtensionRunner {
                         &endpoint.state,
                         *ntst,
                         *ncol,
-                        system.equations.len(),
+                        system.equations().len(),
                     ) {
                         base_params[param2_index] = param2_value;
                     }
@@ -1878,7 +1878,7 @@ impl WasmContinuationExtensionRunner {
                         eps0: context.fixed_eps0,
                         eps1: context.fixed_eps1,
                     });
-                let system_dim = system.equations.len();
+                let system_dim = system.equations().len();
                 let mut setup = homoclinic_setup_from_homoclinic_point_with_source_extras_on_mesh(
                     &mut system,
                     &endpoint.state,

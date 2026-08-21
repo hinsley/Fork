@@ -394,7 +394,7 @@ fn validate_inputs(
     param_index: usize,
     settings: PeriodicOrbitNormalFormSettings,
 ) -> Result<()> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if dim < 2 {
         bail!("Periodic normal forms require a flow dimension of at least two");
     }
@@ -1075,12 +1075,12 @@ pub fn periodic_branch_point_switch_setup(
         bail!("Periodic branch-switch parameter index is out of bounds");
     }
     if source.guess.mesh_states.is_empty()
-        || source.guess.mesh_states[0].len() != system.equations.len()
+        || source.guess.mesh_states[0].len() != system.equations().len()
         || source.mesh_points == 0
     {
         bail!("Periodic branch-switch source setup has inconsistent dimensions");
     }
-    if normal_form.critical_mode.len() != system.equations.len() {
+    if normal_form.critical_mode.len() != system.equations().len() {
         bail!("Periodic branch-point mode dimension does not match the system");
     }
     let parameter_displacement = match normal_form.kind {

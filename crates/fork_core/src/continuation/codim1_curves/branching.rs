@@ -160,7 +160,7 @@ pub fn generalized_hopf_lpc_seed(
     ncol: usize,
     tolerance: f64,
 ) -> Result<Codim2BranchSeed> {
-    if gh_state.len() != neighbor_state.len() || gh_state.len() != system.equations.len() {
+    if gh_state.len() != neighbor_state.len() || gh_state.len() != system.equations().len() {
         bail!("Generalized-Hopf source point dimension mismatch");
     }
     if !neighbor_l1.is_finite() || neighbor_l1.abs() <= 1e-12 {
@@ -831,7 +831,7 @@ where
     if !period.is_finite() || period <= 0.0 || !k.is_finite() || k.abs() > 1.0 {
         bail!("Codimension-two NS predictor produced invalid period or multiplier cosine");
     }
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let coords = collocation_coordinates(dim, ntst, ncol, orbit)?;
     system.params[param1_index] = predicted_param1;
     system.params[param2_index] = predicted_param2;

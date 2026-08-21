@@ -56,7 +56,7 @@ impl<'a> FoldCurveProblem<'a> {
         param1_index: usize,
         param2_index: usize,
     ) -> Result<Self> {
-        let n = system.equations.len();
+        let n = system.equations().len();
         if fold_state.len() != n {
             bail!("Fold state dimension mismatch");
         }
@@ -81,7 +81,7 @@ impl<'a> FoldCurveProblem<'a> {
 
     /// Number of phase variables.
     fn nphase(&self) -> usize {
-        self.system.equations.len()
+        self.system.equations().len()
     }
 
     /// Set parameters temporarily and execute a function.

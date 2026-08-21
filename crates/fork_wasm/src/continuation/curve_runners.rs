@@ -961,7 +961,7 @@ impl WasmLPCCurveRunner {
         system.params[param1_index] = param1_value;
         system.params[param2_index] = param2_value;
 
-        let dim = system.equations.len();
+        let dim = system.equations().len();
         let normalized_mesh = if normalized_mesh.is_empty() {
             uniform_normalized_mesh(ntst)
         } else {
@@ -1211,7 +1211,7 @@ impl WasmIsoperiodicCurveRunner {
         system.params[param1_index] = param1_value;
         system.params[param2_index] = param2_value;
 
-        let dim = system.equations.len();
+        let dim = system.equations().len();
         let normalized_mesh = if normalized_mesh.is_empty() {
             uniform_normalized_mesh(ntst)
         } else {
@@ -1402,7 +1402,7 @@ impl WasmPDCurveRunner {
         system.params[param1_index] = param1_value;
         system.params[param2_index] = param2_value;
 
-        let dim = system.equations.len();
+        let dim = system.equations().len();
         let normalized_mesh = if normalized_mesh.is_empty() {
             uniform_normalized_mesh(ntst)
         } else {
@@ -1622,7 +1622,7 @@ impl WasmNSCurveRunner {
         system.params[param1_index] = param1_value;
         system.params[param2_index] = param2_value;
 
-        let dim = system.equations.len();
+        let dim = system.equations().len();
         let normalized_mesh = if normalized_mesh.is_empty() {
             uniform_normalized_mesh(ntst)
         } else {

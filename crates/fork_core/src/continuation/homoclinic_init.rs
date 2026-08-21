@@ -588,7 +588,7 @@ pub fn homoclinic_setup_from_large_cycle_on_mesh(
         bail!("Collocation degree must be positive");
     }
 
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let (mesh_states, stage_states, period) =
         parse_limit_cycle_state(lc_state, dim, lc_ntst, lc_ncol)?;
     validate_positive_finite("Large-cycle period", period)?;
@@ -804,7 +804,7 @@ pub fn homoclinic_setup_from_homoclinic_point_with_source_extras_on_mesh(
     if source_ncol == 0 || target_ncol == 0 {
         bail!("Homoclinic restart collocation degrees must be positive");
     }
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let inferred = infer_fixed_homoclinic_extras(point_state, dim, source_ntst, source_ncol);
     let source_scalars = source_fixed.unwrap_or(HomoclinicFixedScalars {
         time: inferred.time,

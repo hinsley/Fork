@@ -35,7 +35,7 @@ impl<'a> FlowContext<'a> {
     }
 
     fn dimension(&self) -> usize {
-        self.system.equations.len()
+        self.system.equations().len()
     }
 
     fn with_param<F, R>(&mut self, param: f64, mut f: F) -> Result<R>
@@ -455,7 +455,7 @@ pub fn limit_cycle_setup_from_hopf(
     if amplitude <= 0.0 {
         bail!("Amplitude must be positive");
     }
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if hopf_state.len() != dim {
         bail!("Hopf state dimension mismatch");
     }
@@ -905,7 +905,7 @@ pub fn limit_cycle_setup_from_pd_on_mesh(
 ) -> Result<LimitCycleSetup> {
     let ntst = normalized_mesh.len().saturating_sub(1);
     let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if ntst < 2 {
         bail!("Period-doubling setup requires at least 2 mesh intervals");
     }
@@ -1347,7 +1347,7 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
                 mesh_points
             );
         }
-        let dim = system.equations.len();
+        let dim = system.equations().len();
         // Keep validating the serialized seed data for backwards compatibility.
         // The actual gauge is the mesh-independent integral phase condition,
         // initialized from the complete collocation profile on first use.
@@ -3372,7 +3372,7 @@ pub(crate) fn compute_cycle_monodromy_data_on_mesh(
 ) -> Result<MonodromyData> {
     let ntst = normalized_mesh.len().saturating_sub(1);
     let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if dim == 0 {
         bail!("System has zero dimension.");
     }
@@ -3472,7 +3472,7 @@ pub fn compute_limit_cycle_floquet_modes_on_mesh_with_backend(
 ) -> Result<FloquetModeVectors> {
     let ntst = normalized_mesh.len().saturating_sub(1);
     let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if dim == 0 {
         bail!("System has zero dimension.");
     }
@@ -4181,7 +4181,7 @@ fn correct_limit_cycle_setup_impl(
     if param_index >= system.params.len() {
         bail!("Continuation parameter index is out of bounds");
     }
-    let state_dim = system.equations.len();
+    let state_dim = system.equations().len();
     let (mut setup, flat_state) = prepare_limit_cycle_setup(setup, state_dim)?;
     let mut current = DVector::zeros(flat_state.len() + 1);
     current[0] = setup.guess.param_value;
@@ -4354,7 +4354,7 @@ pub fn correct_limit_cycle_setup_adaptive(
         bail!("Adaptive collocation requires a mesh-point cap of at least 2");
     }
 
-    let state_dim = system.equations.len();
+    let state_dim = system.equations().len();
     let initial_mesh_points = setup.mesh_points;
     let initial_normalized_mesh = setup.resolved_normalized_mesh()?;
     let degree = setup.collocation_degree;
@@ -4740,7 +4740,7 @@ pub fn continue_limit_cycle_collocation_with_report(
     } else {
         let initial_mesh_points = setup.mesh_points;
         let degree = setup.collocation_degree;
-        let (setup, flat_state) = prepare_limit_cycle_setup(setup, system.equations.len())?;
+        let (setup, flat_state) = prepare_limit_cycle_setup(setup, system.equations().len())?;
         let initial_normalized_mesh = setup.resolved_normalized_mesh()?;
         (
             setup,
@@ -7087,7 +7087,7 @@ mod tests {
 
     fn stuart_landau_with_transverse_pair(decay: f64, frequency: f64) -> EquationSystem {
         let base = stuart_landau_system();
-        let mut equations = base.equations;
+        let mut equations = base.equations().to_vec();
         equations.push(Bytecode {
             ops: vec![
                 OpCode::LoadConst(decay),
@@ -7810,7 +7810,7 @@ mod tests {
             .find(|point| point.param_value.abs() > 1e-4)
             .expect("Continuation did not move away from PD point");
 
-        let dim = system.equations.len();
+        let dim = system.equations().len();
         let mesh_data_len = mesh_points * dim;
         let stage_data_len = mesh_points * collocation_degree * dim;
         let expected_len = mesh_data_len + stage_data_len + 1;

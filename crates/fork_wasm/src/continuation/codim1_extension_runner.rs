@@ -310,7 +310,7 @@ impl WasmCodim1CurveExtensionRunner {
 
         let runner_kind = match &merge.branch.branch_type {
             Codim1BranchType::FoldCurve { .. } => {
-                let dim = system.equations.len();
+                let dim = system.equations().len();
                 let endpoint_state = endpoint.state.clone();
                 let endpoint_param2 = endpoint
                     .param2_value
@@ -380,7 +380,7 @@ impl WasmCodim1CurveExtensionRunner {
                 }
             }
             Codim1BranchType::HopfCurve { .. } => {
-                let dim = system.equations.len();
+                let dim = system.equations().len();
                 if endpoint.state.len() != dim {
                     return Err(JsValue::from_str(&format!(
                         "Hopf curve point state has length {}, expected {}",
@@ -473,7 +473,7 @@ impl WasmCodim1CurveExtensionRunner {
                 normalized_mesh,
                 ..
             } => {
-                let dim = system.equations.len();
+                let dim = system.equations().len();
                 let endpoint_param2 = endpoint
                     .param2_value
                     .ok_or_else(|| JsValue::from_str("LPC curve point missing param2_value"))?;
@@ -569,7 +569,7 @@ impl WasmCodim1CurveExtensionRunner {
                 normalized_mesh,
                 ..
             } => {
-                let dim = system.equations.len();
+                let dim = system.equations().len();
                 let endpoint_param2 = endpoint.param2_value.ok_or_else(|| {
                     JsValue::from_str("Isoperiodic curve point missing param2_value")
                 })?;
@@ -666,7 +666,7 @@ impl WasmCodim1CurveExtensionRunner {
                 normalized_mesh,
                 ..
             } => {
-                let dim = system.equations.len();
+                let dim = system.equations().len();
                 let endpoint_param2 = endpoint
                     .param2_value
                     .ok_or_else(|| JsValue::from_str("PD curve point missing param2_value"))?;
@@ -762,7 +762,7 @@ impl WasmCodim1CurveExtensionRunner {
                 normalized_mesh,
                 ..
             } => {
-                let dim = system.equations.len();
+                let dim = system.equations().len();
                 let endpoint_param2 = endpoint
                     .param2_value
                     .ok_or_else(|| JsValue::from_str("NS curve point missing param2_value"))?;
@@ -993,7 +993,7 @@ impl WasmCodim1CurveExtensionRunner {
                     Codim1BranchType::LPCCurve { ntst, ncol, .. } => (*ntst, *ncol),
                     _ => unreachable!("LPC runner requires LPC metadata"),
                 };
-                let dim = system.equations.len();
+                let dim = system.equations().len();
                 let (extension, mut problem) = runner.take_result_with_problem();
                 let final_mesh = problem.normalized_mesh().to_vec();
                 remesh_persisted_lc_branch(
@@ -1021,7 +1021,7 @@ impl WasmCodim1CurveExtensionRunner {
                     Codim1BranchType::IsoperiodicCurve { ntst, ncol, .. } => (*ntst, *ncol),
                     _ => unreachable!("isoperiodic runner requires isoperiodic metadata"),
                 };
-                let dim = system.equations.len();
+                let dim = system.equations().len();
                 let (extension, problem) = runner.take_result_with_problem();
                 let final_mesh = problem.normalized_mesh().to_vec();
                 remesh_persisted_lc_branch(
@@ -1050,7 +1050,7 @@ impl WasmCodim1CurveExtensionRunner {
                     Codim1BranchType::PDCurve { ntst, ncol, .. } => (*ntst, *ncol),
                     _ => unreachable!("PD runner requires PD metadata"),
                 };
-                let dim = system.equations.len();
+                let dim = system.equations().len();
                 let (extension, mut problem) = runner.take_result_with_problem();
                 let final_mesh = problem.normalized_mesh().to_vec();
                 remesh_persisted_lc_branch(
@@ -1079,7 +1079,7 @@ impl WasmCodim1CurveExtensionRunner {
                     Codim1BranchType::NSCurve { ntst, ncol, .. } => (*ntst, *ncol),
                     _ => unreachable!("NS runner requires NS metadata"),
                 };
-                let dim = system.equations.len();
+                let dim = system.equations().len();
                 let (extension, mut problem) = runner.take_result_with_problem();
                 let final_mesh = problem.normalized_mesh().to_vec();
                 remesh_persisted_lc_branch(

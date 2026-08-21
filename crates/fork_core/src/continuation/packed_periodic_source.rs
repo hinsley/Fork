@@ -51,7 +51,7 @@ pub fn limit_cycle_setup_from_packed_state(
     if collocation_degree == 0 {
         bail!("Packed limit-cycle source collocation degree must be positive");
     }
-    let state_dimension = system.equations.len();
+    let state_dimension = system.equations().len();
     if state_dimension == 0 {
         bail!("Packed limit-cycle source has zero state dimension");
     }

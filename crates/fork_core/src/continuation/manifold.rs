@@ -155,7 +155,7 @@ pub fn continue_manifold_eq_1d_with_kind_and_periodicity(
     settings: Manifold1DSettings,
     periodicity: &StatePeriodicity,
 ) -> Result<Vec<ContinuationBranch>> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if dim == 0 {
         bail!("System dimension must be greater than zero.");
     }
@@ -209,7 +209,7 @@ pub fn extend_manifold_eq_1d_with_kind_and_periodicity(
     mut settings: Manifold1DSettings,
     periodicity: &StatePeriodicity,
 ) -> Result<ContinuationBranch> {
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     validate_manifold_1d_settings(dim, kind, &settings)?;
     let (branch_stability, branch_direction, branch_eig_index, map_iterations, _cycle_point_index) =
         match &branch.branch_type {
@@ -1336,7 +1336,7 @@ pub fn continue_manifold_eq_2d_with_progress(
 ) -> Result<ContinuationBranch> {
     let mut settings = settings;
     apply_eq_2d_profile(&mut settings);
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if dim < 3 {
         bail!("2D manifold computation requires ambient dimension n >= 3.");
     }
@@ -1776,7 +1776,7 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
 ) -> Result<ContinuationBranch> {
     let mut settings = settings;
     apply_cycle_2d_profile(&mut settings);
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if dim < 3 {
         bail!("2D manifold computation requires ambient dimension n >= 3.");
     }
@@ -2814,7 +2814,7 @@ fn continue_limit_cycle_manifold_2d_hko(
     if !period.is_finite() || period <= 0.0 {
         bail!("HKO isochron manifolds require a positive limit-cycle period.");
     }
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let phase_points = settings.ring_points.max(8);
     let (cycle, floquet_dirs, multiplier) = build_cycle_floquet_seed(
         system,
@@ -3035,7 +3035,7 @@ fn continue_limit_cycle_manifold_2d_segmented_preimage(
         bail!("Isochron-fiber cycle manifolds require a positive limit-cycle period.");
     }
 
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     let phase_points = settings.ring_points.max(8);
     let (cycle, floquet_dirs, multiplier) = build_cycle_floquet_seed(
         system,
@@ -8331,7 +8331,7 @@ fn build_flow_manifold_extension(
     settings: &Manifold1DSettings,
     periodicity: &StatePeriodicity,
 ) -> Result<ManifoldCurveSolve> {
-    if endpoint.len() != system.equations.len() {
+    if endpoint.len() != system.equations().len() {
         bail!("Flow manifold extension endpoint dimension mismatch.");
     }
     let mut start = endpoint.to_vec();

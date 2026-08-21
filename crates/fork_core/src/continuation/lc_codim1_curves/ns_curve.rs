@@ -193,7 +193,7 @@ impl<'a> NSCurveProblem<'a> {
         ncol: usize,
         normalized_mesh: Vec<f64>,
     ) -> Result<Self> {
-        let dim = system.equations.len();
+        let dim = system.equations().len();
         if dim == 0 || ntst < 2 {
             bail!("NS continuation requires a positive state dimension and at least two mesh intervals");
         }

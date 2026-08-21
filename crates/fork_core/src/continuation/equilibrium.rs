@@ -47,7 +47,7 @@ impl<'a> EquilibriumContinuationProblem<'a> {
 
 impl<'a> ContinuationProblem for EquilibriumContinuationProblem<'a> {
     fn dimension(&self) -> usize {
-        self.system.equations.len()
+        self.system.equations().len()
     }
 
     fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
@@ -231,7 +231,7 @@ pub fn map_cycle_seed_from_pd(
     if amplitude == 0.0 {
         bail!("Amplitude must be non-zero.");
     }
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if dim == 0 {
         bail!("System has zero dimension.");
     }

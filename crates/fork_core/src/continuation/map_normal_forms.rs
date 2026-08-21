@@ -132,10 +132,10 @@ fn validate_inputs(
     param_index: usize,
     map_iterations: usize,
 ) -> Result<SystemKind> {
-    if state.len() != system.equations.len() || state.is_empty() {
+    if state.len() != system.equations().len() || state.is_empty() {
         bail!(
             "Map normal-form state dimension mismatch: expected {}, got {}",
-            system.equations.len(),
+            system.equations().len(),
             state.len()
         );
     }

@@ -75,7 +75,7 @@ impl WasmSystem {
                 iterations: map_iterations as usize,
             },
         };
-        let roots = unflatten_deflation_roots(flattened_roots, self.system.equations.len())?;
+        let roots = unflatten_deflation_roots(flattened_roots, self.system.equations().len())?;
         let result = core_deflated_equilibrium_solver(
             &self.system,
             kind,
@@ -116,7 +116,7 @@ impl WasmSystem {
             flattened_roots,
             exponents,
             shifts,
-            self.system.equations.len(),
+            self.system.equations().len(),
         )?;
         let result = core_targeted_deflated_equilibrium_solver(
             &self.system,
@@ -191,7 +191,7 @@ impl WasmEquilibriumSolverRunner {
             ..NewtonSettings::default()
         };
 
-        let dim = system.equations.len();
+        let dim = system.equations().len();
         if dim == 0 {
             return Err(JsValue::from_str("System has zero dimension."));
         }
@@ -240,7 +240,7 @@ impl WasmEquilibriumSolverRunner {
             .as_ref()
             .ok_or_else(|| JsValue::from_str("Runner not initialized"))?
             .system
-            .equations
+            .equations()
             .len();
         let root_count = if dimension == 0 {
             0
@@ -273,7 +273,7 @@ impl WasmEquilibriumSolverRunner {
             flattened_roots,
             exponents,
             shifts,
-            state.system.equations.len(),
+            state.system.equations().len(),
         )?;
         let deflated_residual_norm = compute_deflated_residual_norm_with_targets(
             &state.state,
@@ -338,7 +338,7 @@ impl WasmEquilibriumSolverRunner {
             )
             .map_err(|e| JsValue::from_str(&format!("Deflation failed: {}", e)))?;
             let delta =
-                solve_linear_system(state.system.equations.len(), &jacobian, &state.residual)
+                solve_linear_system(state.system.equations().len(), &jacobian, &state.residual)
                     .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
 
             for i in 0..state.state.len() {
@@ -410,7 +410,7 @@ impl WasmEquilibriumSolverRunner {
             &state.periodicity,
         )
         .map_err(|e| JsValue::from_str(&format!("Jacobian failed: {}", e)))?;
-        let eigenpairs = compute_equilibrium_eigenpairs(state.system.equations.len(), &jacobian)
+        let eigenpairs = compute_equilibrium_eigenpairs(state.system.equations().len(), &jacobian)
             .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
         let cycle_points = match state.kind {
             SystemKind::Map { iterations } if iterations > 1 => {

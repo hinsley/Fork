@@ -112,7 +112,7 @@ impl<'a> IsoperiodicCurveProblem<'a> {
             bail!("Unknown continuation parameter index");
         }
 
-        let dim = system.equations.len();
+        let dim = system.equations().len();
         let coeffs = CollocationCoefficients::new(ncol)?;
 
         let stage_count = ntst * ncol;

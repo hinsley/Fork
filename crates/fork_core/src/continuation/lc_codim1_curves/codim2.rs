@@ -54,7 +54,7 @@ pub(crate) fn limit_cycle_setup_from_profile(
     normalized_mesh: &[f64],
 ) -> Result<LimitCycleSetup> {
     let mesh_points = stage_states.len();
-    let dimension = system.equations.len();
+    let dimension = system.equations().len();
     if mesh_points < 2
         || collocation_degree == 0
         || mesh_states.len() != mesh_points

@@ -1046,7 +1046,7 @@ fn validate_setup(system: &EquationSystem, setup: &HeteroclinicShootingSetupV1) 
     )?;
     validate_homoclinic_scalars(setup.guess.time, setup.guess.eps0, setup.guess.eps1)?;
     validate_shooting_settings(setup.shooting)?;
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if setup.source_basis.dim != dim
         || setup.target_basis.dim != dim
         || setup.source_basis.npos + setup.target_basis.nneg != dim

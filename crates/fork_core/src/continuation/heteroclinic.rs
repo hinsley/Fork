@@ -279,7 +279,7 @@ pub fn heteroclinic_setup_from_orbit(
     if ntst < 2 || ncol == 0 {
         bail!("Heteroclinic collocation requires at least two intervals and positive degree");
     }
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     validate_orbit_seed(seed, dim)?;
     if l2_norm(&vector_sub(
         &seed.source_equilibrium,
@@ -634,7 +634,7 @@ impl<'a> HeteroclinicProblem<'a> {
     }
 
     fn dim(&self) -> usize {
-        self.system.equations.len()
+        self.system.equations().len()
     }
 
     pub fn projector_refresh_count(&self) -> usize {
@@ -1158,7 +1158,7 @@ fn validate_setup(system: &EquationSystem, setup: &HeteroclinicSetupV1) -> Resul
         setup.param2_index,
     )?;
     validate_homoclinic_scalars(setup.guess.time, setup.guess.eps0, setup.guess.eps1)?;
-    let dim = system.equations.len();
+    let dim = system.equations().len();
     if setup.source_basis.dim != dim
         || setup.target_basis.dim != dim
         || setup.source_basis.npos + setup.target_basis.nneg != dim

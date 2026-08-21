@@ -116,7 +116,7 @@ impl<'a> LPCCurveProblem<'a> {
         ncol: usize,
         normalized_mesh: Vec<f64>,
     ) -> Result<Self> {
-        let dim = system.equations.len();
+        let dim = system.equations().len();
         if ntst < 2 {
             bail!("LPC curve requires at least two mesh intervals");
         }
