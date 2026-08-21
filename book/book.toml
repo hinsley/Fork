@@ -1,0 +1,14 @@
+[book]
+title = "The Fork Book"
+authors = ["Carter Hinsley"]
+description = "Continuation and bifurcation analysis of dynamical systems in Rust, from user-written equations to curves, manifolds, and connections."
+src = "src"
+
+[build]
+build-dir = "site"
+create-missing = false
+
+[output.html]
+mathjax-support = true
+git-repository-url = "https://github.com/hinsley/Fork"
+edit-url-template = "https://github.com/hinsley/Fork/edit/main/book/{path}"
