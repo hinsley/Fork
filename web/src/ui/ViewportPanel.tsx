@@ -67,6 +67,7 @@ import {
   isSubsystemSnapshotCompatible,
 } from '../system/subsystemGateway'
 import { usesEquationContext } from '../system/expressionContext'
+import { buildIsoclineSnapshotSignature } from '../system/isoclineSnapshot'
 import { normalizeFloquetMultipliersForRendering } from '../system/floquetModes'
 import {
   eigenmodeScalarValues,
@@ -2018,17 +2019,6 @@ function buildLimitCyclePreviewTraces(
     subsystemSnapshot: branchSnapshot,
     projection,
     statePeriods: periodsByStateIndex,
-  })
-}
-
-function buildIsoclineSnapshotSignature(snapshot: IsoclineComputedSnapshot): string {
-  return JSON.stringify({
-    source: snapshot.source,
-    expression: snapshot.expression,
-    level: snapshot.level,
-    axes: snapshot.axes,
-    frozenState: snapshot.frozenState,
-    parameters: snapshot.parameters,
   })
 }
 

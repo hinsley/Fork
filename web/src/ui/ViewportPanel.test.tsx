@@ -38,6 +38,7 @@ import type {
 } from './branchPointSelection'
 import { nowIso } from '../utils/determinism'
 import { buildSubsystemSnapshot } from '../system/subsystemGateway'
+import { buildIsoclineSnapshotSignature } from '../system/isoclineSnapshot'
 
 type PlotlyProps = {
   plotId: string
@@ -108,14 +109,7 @@ function renderPanel(
 function buildIsoclineSignature(object: IsoclineObject): string {
   const snapshot = object.lastComputed
   if (!snapshot) return ''
-  return JSON.stringify({
-    source: snapshot.source,
-    expression: snapshot.expression,
-    level: snapshot.level,
-    axes: snapshot.axes,
-    frozenState: snapshot.frozenState,
-    parameters: snapshot.parameters
-  })
+  return buildIsoclineSnapshotSignature(snapshot)
 }
 
 describe('ViewportPanel view state wiring', () => {

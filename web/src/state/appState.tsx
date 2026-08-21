@@ -89,6 +89,7 @@ import {
   updateSystem,
 } from '../system/model'
 import type { ReorderPlacement } from '../system/model'
+import { buildIsoclineSnapshotSignature } from '../system/isoclineSnapshot'
 import {
   canonicalizeLimitCycleStateForAnalysis,
   ensureHomoclinicEndpointResumeSeeds,
@@ -876,21 +877,6 @@ function buildLastIsoclineComputeRequest(
       subsystemSnapshot,
     },
   }
-}
-
-function buildIsoclineSnapshotSignature(
-  snapshot: NonNullable<IsoclineObject['lastComputed']>
-): string {
-  return JSON.stringify({
-    source: snapshot.source,
-    expression: snapshot.expression,
-    level: snapshot.level,
-    axes: snapshot.axes,
-    frozenState: snapshot.frozenState,
-    parameters: snapshot.parameters,
-    frozenEquationContext: snapshot.subsystemSnapshot?.frozenEquationContext ?? null,
-    frozenContextParameterName: snapshot.subsystemSnapshot?.frozenContextParameterName ?? null,
-  })
 }
 
 type FreezableAnalysisObject =
