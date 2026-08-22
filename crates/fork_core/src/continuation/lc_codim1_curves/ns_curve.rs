@@ -31,7 +31,7 @@ use crate::continuation::problem::{
 };
 use crate::continuation::{Codim2BifurcationType, Codim2Coefficient};
 use crate::equation_engine::EquationSystem;
-use crate::equilibrium::{compute_jacobian, SystemKind};
+use crate::equilibrium::{compute_jacobian, compute_param_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
 use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
@@ -597,6 +597,20 @@ impl<'a> NSCurveProblem<'a> {
         compute_jacobian(self.system, SystemKind::Flow, state)
     }
 
+    /// Set parameters and evaluate the derivative of f with respect to one
+    /// parameter.
+    fn eval_dfdp(
+        &mut self,
+        state: &[f64],
+        p1: f64,
+        p2: f64,
+        param_index: usize,
+    ) -> Result<Vec<f64>> {
+        self.system.params[self.param1_index] = p1;
+        self.system.params[self.param2_index] = p2;
+        compute_param_jacobian(self.system, SystemKind::Flow, state, param_index)
+    }
+
     /// Compute the two singularity functions from a two-column bordered solve
     /// of the doubled-period characteristic operator.
     fn compute_ns_singularities(&self, operator: &DMatrix<f64>) -> Result<(f64, f64)> {
@@ -849,6 +863,87 @@ impl<'a> NSCurveProblem<'a> {
 
         remapped
     }
+
+    /// Transfer matrix T = I - C_s * G_s^-1 for one interval, assembled from
+    /// per-stage Jacobians. This mirrors the elimination performed by
+    /// extract_collocation_transfers_from_jacobian for that interval's
+    /// collocation and continuity blocks.
+    fn interval_transfer(
+        h: f64,
+        ncol: usize,
+        dim: usize,
+        a: &[Vec<f64>],
+        b: &[f64],
+        stage_jacs: &[Vec<f64>],
+    ) -> Result<DMatrix<f64>> {
+        let nc = ncol * dim;
+        let mut g_x = DMatrix::<f64>::zeros(nc, dim);
+        for stage_row in 0..ncol {
+            for d in 0..dim {
+                g_x[(stage_row * dim + d, d)] = -1.0;
+            }
+        }
+        let mut g_s = DMatrix::<f64>::zeros(nc, nc);
+        for stage_row in 0..ncol {
+            for r in 0..dim {
+                g_s[(stage_row * dim + r, stage_row * dim + r)] = 1.0;
+                for k_local in 0..ncol {
+                    let jf = &stage_jacs[k_local];
+                    for c in 0..dim {
+                        g_s[(stage_row * dim + r, k_local * dim + c)] -=
+                            h * a[stage_row][k_local] * jf[r * dim + c];
+                    }
+                }
+            }
+        }
+        let ds_dx = g_s
+            .clone()
+            .lu()
+            .solve(&-&g_x)
+            .ok_or_else(|| anyhow::anyhow!("NS stage block is singular"))?;
+        let mut c_x = DMatrix::<f64>::zeros(dim, dim);
+        for d in 0..dim {
+            c_x[(d, d)] = -1.0;
+        }
+        let mut c_s = DMatrix::<f64>::zeros(dim, nc);
+        for k_local in 0..ncol {
+            let jf = &stage_jacs[k_local];
+            for d in 0..dim {
+                for c in 0..dim {
+                    c_s[(d, k_local * dim + c)] = -h * b[k_local] * jf[d * dim + c];
+                }
+            }
+        }
+        let effective_c_x = &c_x + &c_s * &ds_dx;
+        // C_next is the +I continuity block on the next mesh point.
+        Ok(-effective_c_x)
+    }
+
+    /// Reference finite-difference Jacobian retained for cross-checking the
+    /// analytic implementation in tests.
+    #[cfg(test)]
+    fn extended_jacobian_finite_difference(&mut self, aug: &DVector<f64>) -> Result<DMatrix<f64>> {
+        let n = self.dimension();
+        let m = aug.len();
+        let eps = 1e-7;
+
+        let mut jac = DMatrix::zeros(n, m);
+        let mut res_base = DVector::zeros(n);
+        self.residual(aug, &mut res_base)?;
+
+        for j in 0..m {
+            let mut aug_p = aug.clone();
+            aug_p[j] += eps;
+            let mut res_p = DVector::zeros(n);
+            self.residual(&aug_p, &mut res_p)?;
+
+            for i in 0..n {
+                jac[(i, j)] = (res_p[i] - res_base[i]) / eps;
+            }
+        }
+
+        Ok(jac)
+    }
 }
 
 impl<'a> ContinuationProblem for NSCurveProblem<'a> {
@@ -957,34 +1052,245 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
     }
 
     fn extended_jacobian(&mut self, aug: &DVector<f64>) -> Result<DMatrix<f64>> {
-        // Numerical differentiation
-        let n = self.dimension();
-        let m = aug.len();
-        let eps = 1e-7;
+        let p1 = self.get_p1(aug);
+        let p2 = self.get_p2(aug);
+        let period = self.get_period(aug);
+        let k = self.get_k(aug);
+        if period <= 0.0 {
+            bail!("Period must be positive");
+        }
+        if !k.is_finite() {
+            bail!("NS rotation parameter k must be finite");
+        }
+        self.ensure_phase_reference(aug)?;
 
-        let mut jac = DMatrix::zeros(n, m);
-        let mut res_base = DVector::zeros(n);
-        self.residual(aug, &mut res_base)?;
+        let n_eqs = self.dimension();
+        let n = n_eqs - 2;
+        let m_aug = aug.len();
+        let dim = self.dim;
+        let ncol = self.ncol;
+        let ntst = self.ntst;
+        let n_stages = ntst * ncol;
+        let ncoords = self.ncoords();
+        debug_assert_eq!(m_aug, 1 + ncoords + 3);
 
-        for j in 0..m {
-            let mut aug_p = aug.clone();
-            let use_backward_difference = j == self.k_index() && aug[j] + eps > 1.0;
-            aug_p[j] += if use_backward_difference { -eps } else { eps };
-            let mut res_p = DVector::zeros(n);
-            self.residual(&aug_p, &mut res_p)?;
+        // Baseline BVP Jacobian (fills the stage caches) and doubled operator.
+        let jac_base = self.build_periodic_jac(aug)?;
+        debug_assert_eq!(jac_base.nrows(), n);
+        debug_assert_eq!(jac_base.ncols(), n);
+        let operator0 = self.ns_operator_from_bvp_jac(&jac_base, k)?;
+        let nl = operator0.nrows();
+        debug_assert_eq!(nl, 2 * ntst * dim);
+        let phi1 = self.borders1.phi.clone();
+        let psi1 = self.borders1.psi.clone();
+        let phi2 = self.borders2.phi.clone();
+        let psi2 = self.borders2.psi.clone();
 
-            for i in 0..n {
-                jac[(i, j)] = if use_backward_difference {
-                    (res_base[i] - res_p[i]) / eps
-                } else {
-                    (res_p[i] - res_base[i]) / eps
-                };
+        // One bordered factorization: X = B^-1 R carries both singularity
+        // solves; both selections use border row nl, so one adjoint vector w
+        // serves G1 and G2.
+        let mut bordered = DMatrix::zeros(nl + 2, nl + 2);
+        bordered.view_mut((0, 0), (nl, nl)).copy_from(&operator0);
+        for i in 0..nl {
+            bordered[(i, nl)] = psi1[i];
+            bordered[(i, nl + 1)] = psi2[i];
+            bordered[(nl, i)] = phi1[i];
+            bordered[(nl + 1, i)] = phi2[i];
+        }
+        let mut rhs_two = DMatrix::zeros(nl + 2, 2);
+        rhs_two[(nl, 0)] = 1.0;
+        rhs_two[(nl + 1, 1)] = 1.0;
+        let lu = bordered.clone().lu();
+        let x_sol = lu
+            .solve(&rhs_two)
+            .ok_or_else(|| anyhow::anyhow!("NS bordered solve is singular"))?;
+        let mut adjoint_rhs = DVector::zeros(nl + 2);
+        adjoint_rhs[nl] = 1.0;
+        let w_adjoint = bordered
+            .transpose()
+            .lu()
+            .solve(&adjoint_rhs)
+            .ok_or_else(|| anyhow::anyhow!("NS bordered adjoint solve is singular"))?;
+
+        let mesh_widths: Vec<f64> = (0..ntst)
+            .map(|interval| self.normalized_mesh[interval + 1] - self.normalized_mesh[interval])
+            .collect();
+        let a_coeffs = self.coeffs.a.clone();
+        let b_weights = self.coeffs.b.clone();
+        let stage_states: Vec<Vec<f64>> = (0..n_stages)
+            .map(|idx| {
+                let interval = idx / ncol;
+                let stage = idx % ncol;
+                self.stage_slice(aug.as_slice(), interval, stage).to_vec()
+            })
+            .collect();
+
+        let cont_row = n_stages * dim;
+
+        // G-row gradients with dG/dtheta = -w^T (dB/dtheta) X_sel. Mesh
+        // columns are exactly zero: meshes enter L only through constant
+        // identity blocks.
+        let mut grad_g1 = DVector::<f64>::zeros(m_aug);
+        let mut grad_g2 = DVector::<f64>::zeros(m_aug);
+        let delta_scale = |value: f64| 1.0e-6 * value.abs().max(1.0);
+
+        // Stage coordinates: only transfer T_interval changes. Rebuild it from
+        // locally perturbed stage Jacobians; T_i enters L at doubled positions
+        // i and i + ntst.
+        for interval in 0..ntst {
+            let h = period * mesh_widths[interval];
+            for stage_local in 0..ncol {
+                let idx = interval * ncol + stage_local;
+                for comp in 0..dim {
+                    let delta = delta_scale(stage_states[idx][comp]);
+                    let mut z_plus = stage_states[idx].clone();
+                    z_plus[comp] += delta;
+                    let mut z_minus = stage_states[idx].clone();
+                    z_minus[comp] -= delta;
+                    let j_plus = self.eval_jac(&z_plus, p1, p2)?;
+                    let j_minus = self.eval_jac(&z_minus, p1, p2)?;
+
+                    let mut plus_stages = Vec::with_capacity(ncol);
+                    let mut minus_stages = Vec::with_capacity(ncol);
+                    for k_local in 0..ncol {
+                        let start = (interval * ncol + k_local) * dim * dim;
+                        let base = self.work_j[start..start + dim * dim].to_vec();
+                        if k_local == stage_local {
+                            plus_stages.push(j_plus.clone());
+                            minus_stages.push(j_minus.clone());
+                        } else {
+                            plus_stages.push(base.clone());
+                            minus_stages.push(base);
+                        }
+                    }
+                    let t_plus =
+                        Self::interval_transfer(h, ncol, dim, &a_coeffs, &b_weights, &plus_stages)?;
+                    let t_minus = Self::interval_transfer(
+                        h,
+                        ncol,
+                        dim,
+                        &a_coeffs,
+                        &b_weights,
+                        &minus_stages,
+                    )?;
+
+                    for doubled in [interval, interval + ntst] {
+                        let row_block = doubled * dim;
+                        let col_block = doubled * dim;
+                        for i_rhs in 0..2 {
+                            let mut acc = 0.0f64;
+                            for r in 0..dim {
+                                let mut inner = 0.0f64;
+                                for c in 0..dim {
+                                    inner += (t_plus[(r, c)] - t_minus[(r, c)]) / (2.0 * delta)
+                                        * x_sol[(col_block + c, i_rhs)];
+                                }
+                                acc += w_adjoint[row_block + r] * inner;
+                            }
+                            if i_rhs == 0 {
+                                grad_g1[1 + idx * dim + comp] -= acc;
+                            } else {
+                                grad_g2[1 + idx * dim + comp] -= acc;
+                            }
+                        }
+                    }
+                }
             }
         }
 
+        // Period and parameter columns reach every transfer; take one central
+        // difference of the whole operator for each of those three columns.
+        for col in [self.period_index(), 0usize, self.param2_idx()] {
+            let eps = 1.0e-6 * aug[col].abs().max(1.0);
+            let mut aug_plus = aug.clone();
+            aug_plus[col] += eps;
+            let mut aug_minus = aug.clone();
+            aug_minus[col] -= eps;
+            let jac_plus = self.build_periodic_jac(&aug_plus)?;
+            let op_plus = self.ns_operator_from_bvp_jac(&jac_plus, self.get_k(&aug_plus))?;
+            let jac_minus = self.build_periodic_jac(&aug_minus)?;
+            let op_minus = self.ns_operator_from_bvp_jac(&jac_minus, self.get_k(&aug_minus))?;
+
+            let mut acc1 = 0.0f64;
+            let mut acc2 = 0.0f64;
+            for row in 0..nl {
+                for col_l in 0..nl {
+                    let d_entry = (op_plus[(row, col_l)] - op_minus[(row, col_l)]) / (2.0 * eps);
+                    if d_entry != 0.0 {
+                        acc1 += w_adjoint[row] * d_entry * x_sol[(col_l, 0)];
+                        acc2 += w_adjoint[row] * d_entry * x_sol[(col_l, 1)];
+                    }
+                }
+            }
+            grad_g1[col] -= acc1;
+            grad_g2[col] -= acc2;
+        }
+
+        // Exact k action: dL/dk carries -2 entries coupling the last doubled
+        // row block to the second-period block.
+        {
+            let last_block = (2 * ntst - 1) * dim;
+            for r in 0..dim {
+                let contribution = w_adjoint[last_block + r] * 2.0 * x_sol[(ntst * dim + r, 0)];
+                grad_g1[self.k_index()] += contribution;
+                let contribution2 = w_adjoint[last_block + r] * 2.0 * x_sol[(ntst * dim + r, 1)];
+                grad_g2[self.k_index()] += contribution2;
+            }
+        }
+
+        let mut jac = DMatrix::zeros(n_eqs, m_aug);
+        for r in 0..n {
+            for c in 0..ncoords {
+                jac[(r, 1 + c)] = jac_base[(r, c)];
+            }
+            jac[(r, self.period_index())] = jac_base[(r, ncoords)];
+        }
+
+        // Parameter columns of the defect rows via per-stage df/dp.
+        for (col, param_index) in [
+            (0usize, self.param1_index),
+            (self.param2_idx(), self.param2_index),
+        ] {
+            let mut dfdp = vec![vec![0.0; dim]; n_stages];
+            for idx in 0..n_stages {
+                dfdp[idx] = self.eval_dfdp(&stage_states[idx], p1, p2, param_index)?;
+            }
+            for interval in 0..ntst {
+                let h = period * mesh_widths[interval];
+                for stage_row in 0..ncol {
+                    let row_start = (interval * ncol + stage_row) * dim;
+                    for r in 0..dim {
+                        let mut sum = 0.0;
+                        for k_local in 0..ncol {
+                            let idx = interval * ncol + k_local;
+                            sum += a_coeffs[stage_row][k_local] * dfdp[idx][r];
+                        }
+                        jac[(row_start + r, col)] = -h * sum;
+                    }
+                }
+                let crow = cont_row + interval * dim;
+                for d in 0..dim {
+                    let mut sum = 0.0;
+                    for k_local in 0..ncol {
+                        let idx = interval * ncol + k_local;
+                        sum += b_weights[k_local] * dfdp[idx][d];
+                    }
+                    jac[(crow + d, col)] = -h * sum;
+                }
+            }
+        }
+
+        for j in 0..m_aug {
+            jac[(n, j)] = grad_g1[j];
+            jac[(n + 1, j)] = grad_g2[j];
+        }
+
+        // Diagnostics following tangent construction must see the accepted
+        // base point, so publish the baseline assembly.
+        self.cached_jac = Some(jac_base);
+
         Ok(jac)
     }
-
     fn diagnostics(&mut self, aug: &DVector<f64>) -> Result<PointDiagnostics> {
         let k = self.get_k(aug);
 
@@ -1162,7 +1468,7 @@ mod tests {
     use crate::continuation::{
         BifurcationType, ContinuationPoint, ContinuationRunner, ContinuationSettings,
     };
-    use crate::equation_engine::{Bytecode, OpCode};
+    use crate::equation_engine::{Bytecode, Compiler, OpCode};
 
     fn linear_growth_system() -> EquationSystem {
         EquationSystem::new(
@@ -1796,5 +2102,74 @@ mod tests {
         assert!(!problem
             .is_step_acceptable(&aug)
             .expect("under-resolved profile"));
+    }
+    #[test]
+    fn analytic_extended_jacobian_matches_finite_difference() {
+        let variables = vec!["v".to_string(), "w".to_string()];
+        let parameters = vec!["p1".to_string(), "p2".to_string()];
+        let compiler = Compiler::new(&variables, &parameters);
+        let equations = ["p1*v - w*w + 0.5*sin(v)", "v*w - p2"];
+        let bytecode = equations
+            .iter()
+            .map(|equation| {
+                compiler.compile(&crate::equation_engine::parse(equation).expect("parse"))
+            })
+            .collect();
+        let mut system = EquationSystem::new(bytecode, vec![0.3, -0.2]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+
+        let ntst = 3;
+        let ncol = 2;
+        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
+        let mut ns = NSCurveProblem::new_on_mesh(
+            &mut system,
+            vec![0.0; ncoords],
+            0.8,
+            0,
+            1,
+            0.3,
+            -0.2,
+            0.3,
+            ntst,
+            ncol,
+            vec![0.0, 0.2, 0.55, 1.0],
+        )
+        .expect("nonlinear NS problem");
+
+        let mut aug = DVector::zeros(ns.dimension() + 1);
+        aug[0] = 0.3;
+        for index in 1..=ncoords {
+            aug[index] = ((index as f64) * 0.61).sin() * 0.8;
+        }
+        aug[ns.period_index()] = 0.8;
+        aug[ns.param2_idx()] = -0.2;
+        aug[ns.k_index()] = 0.3;
+
+        let analytic = ns.extended_jacobian(&aug).expect("analytic NS Jacobian");
+        let reference = ns
+            .extended_jacobian_finite_difference(&aug)
+            .expect("finite-difference NS Jacobian");
+
+        assert_eq!(analytic.shape(), reference.shape());
+        let mut max_scaled = 0.0f64;
+        for j in 0..reference.ncols() {
+            for i in 0..reference.nrows() {
+                let expected = reference[(i, j)];
+                let deviation = (analytic[(i, j)] - expected).abs() / (1.0 + expected.abs());
+                max_scaled = max_scaled.max(deviation);
+            }
+        }
+        let mut max_scaled = 0.0f64;
+        for j in 0..reference.ncols() {
+            for i in 0..reference.nrows() {
+                let expected = reference[(i, j)];
+                let deviation = (analytic[(i, j)] - expected).abs() / (1.0 + expected.abs());
+                max_scaled = max_scaled.max(deviation);
+            }
+        }
+        assert!(
+            max_scaled < 1.0e-5,
+            "analytic NS Jacobian deviates from finite differences: max_scaled={max_scaled:.3e}"
+        );
     }
 }

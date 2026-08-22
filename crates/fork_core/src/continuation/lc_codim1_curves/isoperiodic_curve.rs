@@ -17,7 +17,7 @@ use crate::continuation::problem::{
     ContinuationProblem, PointDiagnostics, StepRejectionAction, TestFunctionValues,
 };
 use crate::equation_engine::EquationSystem;
-use crate::equilibrium::{compute_jacobian, SystemKind};
+use crate::equilibrium::{compute_jacobian, compute_param_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
 use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
@@ -225,6 +225,20 @@ impl<'a> IsoperiodicCurveProblem<'a> {
     fn stage_profile<'b>(&self, aug: &'b DVector<f64>) -> &'b [f64] {
         let stage_len = self.ntst * self.ncol * self.dim;
         &aug.as_slice()[1..1 + stage_len]
+    }
+
+    /// Set parameters and evaluate the derivative of f with respect to one
+    /// parameter.
+    fn eval_dfdp(
+        &mut self,
+        state: &[f64],
+        p1: f64,
+        p2: f64,
+        param_index: usize,
+    ) -> Result<Vec<f64>> {
+        self.system.params[self.param1_index] = p1;
+        self.system.params[self.param2_index] = p2;
+        compute_param_jacobian(self.system, SystemKind::Flow, state, param_index)
     }
 
     fn defect_estimate(
@@ -509,6 +523,35 @@ impl<'a> IsoperiodicCurveProblem<'a> {
 
         remapped
     }
+
+    /// Reference finite-difference Jacobian retained for cross-checking the
+    /// analytic implementation in tests.
+    #[cfg(test)]
+    fn extended_jacobian_finite_difference(&mut self, aug: &DVector<f64>) -> Result<DMatrix<f64>> {
+        let n = self.dimension();
+        let m = aug.len();
+        let eps = 1e-7;
+
+        let mut jac = DMatrix::zeros(n, m);
+        let mut res_base = DVector::zeros(n);
+        self.residual(aug, &mut res_base)?;
+        let base_bvp_jac = self.cached_jac.clone();
+
+        for j in 0..m {
+            let mut aug_p = aug.clone();
+            aug_p[j] += eps;
+            let mut res_p = DVector::zeros(n);
+            self.residual(&aug_p, &mut res_p)?;
+
+            for i in 0..n {
+                jac[(i, j)] = (res_p[i] - res_base[i]) / eps;
+            }
+        }
+
+        self.cached_jac = base_bvp_jac;
+
+        Ok(jac)
+    }
 }
 
 impl<'a> ContinuationProblem for IsoperiodicCurveProblem<'a> {
@@ -609,31 +652,95 @@ impl<'a> ContinuationProblem for IsoperiodicCurveProblem<'a> {
     }
 
     fn extended_jacobian(&mut self, aug: &DVector<f64>) -> Result<DMatrix<f64>> {
-        // Numerical differentiation.
-        let n = self.dimension();
-        let m = aug.len();
-        let eps = 1e-7;
+        let p1 = self.get_p1(aug);
+        let p2 = self.get_p2(aug);
+        let _period = self.get_period(aug);
+        self.ensure_phase_reference(aug)?;
 
-        let mut jac = DMatrix::zeros(n, m);
-        let mut res_base = DVector::zeros(n);
-        self.residual(aug, &mut res_base)?;
-        let base_bvp_jac = self.cached_jac.clone();
+        let n_eqs = self.dimension();
+        let m_aug = aug.len();
+        let dim = self.dim;
+        let ncol = self.ncol;
+        let ntst = self.ntst;
+        let n_stages = ntst * ncol;
+        let ncoords = self.ncoords();
+        debug_assert_eq!(m_aug, 1 + ncoords + 2);
 
-        for j in 0..m {
-            let mut aug_p = aug.clone();
-            aug_p[j] += eps;
-            let mut res_p = DVector::zeros(n);
-            self.residual(&aug_p, &mut res_p)?;
+        // Defect block (collocation + continuity + phase + periodic BC) over
+        // columns [stages, meshes(0..=ntst), T], straight from the builder.
+        let jac_base = self.build_bvp_jac(aug)?;
+        debug_assert_eq!(jac_base.nrows(), n_eqs - 1);
+        debug_assert_eq!(jac_base.ncols(), ncoords + 1);
 
-            for i in 0..n {
-                jac[(i, j)] = (res_p[i] - res_base[i]) / eps;
+        let mut jac = DMatrix::<f64>::zeros(n_eqs, m_aug);
+        // Builder rows: collocation, continuity, phase, boundary. The residual
+        // inserts the fixed-period constraint between phase and boundary.
+        let phase_res_row = n_stages * dim + ntst * dim;
+        for r in 0..phase_res_row + 1 {
+            for c in 0..ncoords {
+                jac[(r, 1 + c)] = jac_base[(r, c)];
+            }
+            jac[(r, self.period_index())] = jac_base[(r, ncoords)];
+        }
+        // Boundary rows of the builder follow the phase row directly.
+        for d in 0..dim {
+            let src = phase_res_row + 1 + d;
+            let dst = phase_res_row + 2 + d;
+            for c in 0..ncoords + 1 {
+                jac[(dst, 1 + c)] = jac_base[(src, c)];
             }
         }
 
-        // Every perturbed residual refreshes the Floquet cache. Diagnostics
-        // following tangent construction must see the accepted base point,
-        // not the final finite-difference perturbation.
-        self.cached_jac = base_bvp_jac;
+        // Fixed-period constraint row: d/dT = 1, everything else zero.
+        let fixed_row = phase_res_row + 1;
+        jac[(fixed_row, self.period_index())] = 1.0;
+
+        // Parameter columns of the defect rows via per-stage df/dp; the phase,
+        // boundary, and fixed-period rows are parameter-independent.
+        let mesh_widths: Vec<f64> = (0..ntst)
+            .map(|interval| self.normalized_mesh[interval + 1] - self.normalized_mesh[interval])
+            .collect();
+        let a_coeffs = self.coeffs.a.clone();
+        let b_weights = self.coeffs.b.clone();
+        let stage_states: Vec<Vec<f64>> = (0..n_stages)
+            .map(|idx| {
+                let interval = idx / ncol;
+                let stage = idx % ncol;
+                self.stage_slice(aug.as_slice(), interval, stage).to_vec()
+            })
+            .collect();
+        for (col, param_index) in [
+            (0usize, self.param1_index),
+            (self.param2_idx(), self.param2_index),
+        ] {
+            let mut dfdp = vec![vec![0.0; dim]; n_stages];
+            for idx in 0..n_stages {
+                dfdp[idx] = self.eval_dfdp(&stage_states[idx], p1, p2, param_index)?;
+            }
+            for interval in 0..ntst {
+                let h = self.get_period(aug) * mesh_widths[interval];
+                for stage_row in 0..ncol {
+                    let idx = interval * ncol + stage_row;
+                    for r in 0..dim {
+                        let mut sum = 0.0;
+                        for k_local in 0..ncol {
+                            let k_idx = interval * ncol + k_local;
+                            sum += a_coeffs[stage_row][k_local] * dfdp[k_idx][r];
+                        }
+                        jac[(idx * dim + r, col)] = -h * sum;
+                    }
+                }
+                let crow = n_stages * dim + interval * dim;
+                for d in 0..dim {
+                    let mut sum = 0.0;
+                    for k_local in 0..ncol {
+                        let k_idx = interval * ncol + k_local;
+                        sum += b_weights[k_local] * dfdp[k_idx][d];
+                    }
+                    jac[(crow + d, col)] = -h * sum;
+                }
+            }
+        }
 
         Ok(jac)
     }
@@ -775,7 +882,7 @@ mod tests {
         CollocationRefinementAttempt,
     };
     use crate::continuation::{ContinuationProblem, StepRejectionAction};
-    use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
+    use crate::equation_engine::{Bytecode, Compiler, EquationSystem, OpCode};
     use nalgebra::{DMatrix, DVector};
 
     fn make_two_dim_flow_system() -> EquationSystem {
@@ -1319,5 +1426,65 @@ mod tests {
         for (actual, expected) in transferred[0].iter().zip(expected) {
             assert!((actual - expected).abs() < 1.0e-12);
         }
+    }
+
+    #[test]
+    fn analytic_extended_jacobian_matches_finite_difference() {
+        let variables = vec!["v".to_string(), "w".to_string()];
+        let parameters = vec!["p1".to_string(), "p2".to_string()];
+        let compiler = Compiler::new(&variables, &parameters);
+        let equations = ["p1*v - w*w + 0.5*sin(v)", "v*w - p2"];
+        let bytecode = equations
+            .iter()
+            .map(|equation| {
+                compiler.compile(&crate::equation_engine::parse(equation).expect("parse"))
+            })
+            .collect();
+        let mut system = EquationSystem::new(bytecode, vec![0.3, -0.2]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+
+        let ntst = 3;
+        let ncol = 2;
+        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
+        let mut iso = IsoperiodicCurveProblem::new_on_mesh(
+            &mut system,
+            vec![0.0; ncoords],
+            0.8,
+            0,
+            1,
+            0.3,
+            -0.2,
+            ncol,
+            vec![0.0, 0.2, 0.55, 1.0],
+        )
+        .expect("nonlinear isoperiodic problem");
+
+        let target = 0.8; // the period passed to new_on_mesh becomes the target
+        let mut aug = DVector::zeros(iso.dimension() + 1);
+        aug[0] = 0.3;
+        for index in 1..=ncoords {
+            aug[index] = ((index as f64) * 0.53).cos() * 0.7;
+        }
+        aug[iso.period_index()] = target;
+        aug[iso.param2_idx()] = -0.2;
+
+        let analytic = iso.extended_jacobian(&aug).expect("analytic Jacobian");
+        let reference = iso
+            .extended_jacobian_finite_difference(&aug)
+            .expect("finite-difference Jacobian");
+
+        assert_eq!(analytic.shape(), reference.shape());
+        let mut max_scaled = 0.0f64;
+        for j in 0..reference.ncols() {
+            for i in 0..reference.nrows() {
+                let expected = reference[(i, j)];
+                let deviation = (analytic[(i, j)] - expected).abs() / (1.0 + expected.abs());
+                max_scaled = max_scaled.max(deviation);
+            }
+        }
+        assert!(
+            max_scaled < 1.0e-5,
+            "analytic isoperiodic Jacobian deviates: max_scaled={max_scaled:.3e}"
+        );
     }
 }

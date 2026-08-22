@@ -29,7 +29,7 @@ use crate::continuation::problem::{
 };
 use crate::continuation::{Codim2BifurcationType, Codim2Coefficient};
 use crate::equation_engine::EquationSystem;
-use crate::equilibrium::{compute_jacobian, SystemKind};
+use crate::equilibrium::{compute_jacobian, compute_param_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
 use anyhow::{bail, Result};
 use nalgebra::{DMatrix, DVector};
@@ -463,6 +463,20 @@ impl<'a> PDCurveProblem<'a> {
         compute_jacobian(self.system, SystemKind::Flow, state)
     }
 
+    /// Set parameters and evaluate the derivative of f with respect to one
+    /// parameter.
+    fn eval_dfdp(
+        &mut self,
+        state: &[f64],
+        p1: f64,
+        p2: f64,
+        param_index: usize,
+    ) -> Result<Vec<f64>> {
+        self.system.params[self.param1_index] = p1;
+        self.system.params[self.param2_index] = p2;
+        compute_param_jacobian(self.system, SystemKind::Flow, state, param_index)
+    }
+
     /// Compute singularity G from bordered system.
     ///
     /// For PD, the bordered system uses the **antiperiodic** Jacobian.
@@ -636,6 +650,32 @@ impl<'a> PDCurveProblem<'a> {
     fn build_antiperiodic_jac(&mut self, aug: &DVector<f64>) -> Result<DMatrix<f64>> {
         self.build_state_variational_jac(aug, true)
     }
+
+    /// Reference finite-difference Jacobian retained for cross-checking the
+    /// analytic implementation in tests.
+    #[cfg(test)]
+    fn extended_jacobian_finite_difference(&mut self, aug: &DVector<f64>) -> Result<DMatrix<f64>> {
+        let n = self.dimension();
+        let m = aug.len();
+        let eps = 1e-7;
+
+        let mut jac = DMatrix::zeros(n, m);
+        let mut res_base = DVector::zeros(n);
+        self.residual(aug, &mut res_base)?;
+
+        for j in 0..m {
+            let mut aug_p = aug.clone();
+            aug_p[j] += eps;
+            let mut res_p = DVector::zeros(n);
+            self.residual(&aug_p, &mut res_p)?;
+
+            for i in 0..n {
+                jac[(i, j)] = (res_p[i] - res_base[i]) / eps;
+            }
+        }
+
+        Ok(jac)
+    }
 }
 
 impl<'a> ContinuationProblem for PDCurveProblem<'a> {
@@ -759,34 +799,291 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
     }
 
     fn extended_jacobian(&mut self, aug: &DVector<f64>) -> Result<DMatrix<f64>> {
-        // NOTE: We do NOT cache G here. Each residual() call computes G fresh.
-        // This is slower but necessary for correct numerical differentiation.
-        // If we cached G, all residual calls would return the same G value,
-        // resulting in a zero row in the numerical Jacobian and a singular matrix.
+        let p1 = self.get_p1(aug);
+        let p2 = self.get_p2(aug)?;
+        let period = self.get_period(aug);
+        if period <= 0.0 {
+            bail!("Period must be positive");
+        }
+        self.ensure_phase_reference(aug)?;
 
-        // Numerical differentiation
-        let n = self.dimension();
-        let m = aug.len();
-        let eps = 1e-7;
+        let n_eqs = self.dimension();
+        let m_aug = aug.len();
+        let dim = self.dim;
+        let ncol = self.ncol;
+        let ntst = self.ntst;
+        let n_stages = ntst * ncol;
+        let stage_offset = self.stage_offset();
 
-        let mut jac = DMatrix::zeros(n, m);
-        let mut res_base = DVector::zeros(n);
-        self.residual(aug, &mut res_base)?;
-
-        for j in 0..m {
-            let mut aug_p = aug.clone();
-            aug_p[j] += eps;
-            let mut res_p = DVector::zeros(n);
-            self.residual(&aug_p, &mut res_p)?;
-
-            for i in 0..n {
-                jac[(i, j)] = (res_p[i] - res_base[i]) / eps;
+        // Stage vector fields and Jacobians for this state.
+        for interval in 0..ntst {
+            for stage in 0..ncol {
+                let z = self.stage_slice(aug.as_slice(), interval, stage).to_vec();
+                let f = self.eval_f(&z, p1, p2);
+                let start = (interval * ncol + stage) * dim;
+                self.work_f[start..start + dim].copy_from_slice(&f);
+                let j = self.eval_jac(&z, p1, p2)?;
+                let j_start = start * dim;
+                self.work_j[j_start..j_start + dim * dim].copy_from_slice(&j);
             }
+        }
+        let a_coeffs = self.coeffs.a.clone();
+        let b_weights = self.coeffs.b.clone();
+        let mesh_widths: Vec<f64> = (0..ntst)
+            .map(|interval| self.normalized_mesh[interval + 1] - self.normalized_mesh[interval])
+            .collect();
+        let stage_states: Vec<Vec<f64>> = (0..n_stages)
+            .map(|idx| {
+                let interval = idx / ncol;
+                let stage = idx % ncol;
+                self.stage_slice(aug.as_slice(), interval, stage).to_vec()
+            })
+            .collect();
+        // Column indices in the augmented state.
+        let stage_col = |idx: usize, c: usize| stage_offset + idx * dim + c;
+        let mesh_col = |i: usize, d: usize| 1 + i * dim + d;
+
+        let mut jac = DMatrix::<f64>::zeros(n_eqs, m_aug);
+
+        // Antiperiodic variational operator and bordered factorization for the
+        // singularity row.
+        let operator0 = self.build_antiperiodic_jac(aug)?;
+        let nl = operator0.nrows();
+        let phi = self.borders.phi.clone();
+        let psi = self.borders.psi.clone();
+        let mut bordered = DMatrix::zeros(nl + 1, nl + 1);
+        bordered.view_mut((0, 0), (nl, nl)).copy_from(&operator0);
+        for i in 0..nl {
+            bordered[(i, nl)] = psi[i];
+            bordered[(nl, i)] = phi[i];
+        }
+        bordered[(nl, nl)] = 0.0;
+        let mut rhs_unit = DVector::zeros(nl + 1);
+        rhs_unit[nl] = 1.0;
+        let lu = bordered.clone().lu();
+        let x_sol = lu
+            .solve(&rhs_unit)
+            .ok_or_else(|| anyhow::anyhow!("PD bordered solve is singular"))?;
+        let w_adjoint = bordered
+            .transpose()
+            .lu()
+            .solve(&rhs_unit)
+            .ok_or_else(|| anyhow::anyhow!("PD bordered adjoint solve is singular"))?;
+
+        // Defect block: collocation rows.
+        for interval in 0..ntst {
+            let h = period * mesh_widths[interval];
+            for stage_row in 0..ncol {
+                let idx = interval * ncol + stage_row;
+                for d in 0..dim {
+                    jac[(idx * dim + d, stage_col(idx, d))] += 1.0;
+                    jac[(idx * dim + d, mesh_col(interval, d))] -= 1.0;
+                }
+                for k_local in 0..ncol {
+                    let k_idx = interval * ncol + k_local;
+                    let j_start = k_idx * dim * dim;
+                    for r in 0..dim {
+                        for c in 0..dim {
+                            jac[(idx * dim + r, stage_col(k_idx, c))] -= h
+                                * a_coeffs[stage_row][k_local]
+                                * self.work_j[j_start + r * dim + c];
+                        }
+                    }
+                }
+            }
+        }
+        // Continuity rows.
+        let cont_res_row = n_stages * dim;
+        for interval in 0..ntst {
+            let h = period * mesh_widths[interval];
+            for d in 0..dim {
+                jac[(cont_res_row + interval * dim + d, mesh_col(interval, d))] -= 1.0;
+                jac[(
+                    cont_res_row + interval * dim + d,
+                    mesh_col((interval + 1) % (ntst + 1), d),
+                )] += 1.0;
+            }
+            for k_local in 0..ncol {
+                let k_idx = interval * ncol + k_local;
+                let j_start = k_idx * dim * dim;
+                for r in 0..dim {
+                    for c in 0..dim {
+                        jac[(cont_res_row + interval * dim + r, stage_col(k_idx, c))] -=
+                            h * b_weights[k_local] * self.work_j[j_start + r * dim + c];
+                    }
+                }
+            }
+        }
+        // Integral phase condition on all Gauss stages.
+        let phase_res_row = cont_res_row + ntst * dim;
+        self.phase_gauge
+            .write_jacobian_row(&mut jac, phase_res_row, stage_offset)?;
+        // Explicit periodic boundary rows on the orbit itself.
+        let bc_res_row = phase_res_row + 2;
+        for d in 0..dim {
+            jac[(bc_res_row + d, mesh_col(ntst, d))] += 1.0;
+            jac[(bc_res_row + d, mesh_col(0, d))] -= 1.0;
+        }
+
+        // G-row gradient via the bordered adjoint of the antiperiodic
+        // operator: dG/dtheta = -w^T (dL/dtheta) x. Mesh states enter L only
+        // through constant identity blocks, so those columns are zero.
+        let g_res_row = phase_res_row + 1;
+        let mut grad_g = DVector::<f64>::zeros(m_aug);
+        let delta_scale = |value: f64| 1.0e-6 * value.abs().max(1.0);
+
+        for interval in 0..ntst {
+            let h = period * mesh_widths[interval];
+            for stage_local in 0..ncol {
+                let idx = interval * ncol + stage_local;
+                for comp in 0..dim {
+                    let delta = delta_scale(stage_states[idx][comp]);
+                    let mut z_plus = stage_states[idx].clone();
+                    z_plus[comp] += delta;
+                    let mut z_minus = stage_states[idx].clone();
+                    z_minus[comp] -= delta;
+                    let j_plus = self.eval_jac(&z_plus, p1, p2)?;
+                    let j_minus = self.eval_jac(&z_minus, p1, p2)?;
+                    let mut acc = 0.0f64;
+                    for r in 0..dim {
+                        let mut djf = 0.0f64;
+                        for c in 0..dim {
+                            djf +=
+                                (j_plus[r * dim + c] - j_minus[r * dim + c]) * x_sol[idx * dim + c];
+                        }
+                        djf /= 2.0 * delta;
+                        for stage_row in 0..ncol {
+                            acc += w_adjoint[(interval * ncol + stage_row) * dim + r]
+                                * h
+                                * a_coeffs[stage_row][stage_local]
+                                * djf;
+                        }
+                        acc += w_adjoint[nl - ntst * dim + interval * dim + r]
+                            * h
+                            * b_weights[stage_local]
+                            * djf;
+                    }
+                    // The accumulated terms already carry the minus sign of
+                    // the -h * coefficient entries in dL/dz.
+                    grad_g[stage_col(idx, comp)] += acc;
+                }
+            }
+        }
+
+        // Period column: h scaling inside every J_f entry of L.
+        {
+            let mut acc = 0.0f64;
+            for interval in 0..ntst {
+                let width = mesh_widths[interval];
+                for stage_local in 0..ncol {
+                    let idx = interval * ncol + stage_local;
+                    for r in 0..dim {
+                        let mut jx = 0.0f64;
+                        for c in 0..dim {
+                            jx += self.work_j[(idx * dim + r) * dim + c] * x_sol[idx * dim + c];
+                        }
+                        for stage_row in 0..ncol {
+                            acc += w_adjoint[(interval * ncol + stage_row) * dim + r]
+                                * width
+                                * a_coeffs[stage_row][stage_local]
+                                * jx;
+                        }
+                        acc += w_adjoint[nl - ntst * dim + interval * dim + r]
+                            * width
+                            * b_weights[stage_local]
+                            * jx;
+                    }
+                }
+            }
+            grad_g[self.period_index()] = acc;
+        }
+
+        // Parameter columns of L: full-operator central differences.
+        for col in [0usize, self.param2_idx()] {
+            let eps = 1.0e-6 * aug[col].abs().max(1.0);
+            let mut aug_plus = aug.clone();
+            aug_plus[col] += eps;
+            let mut aug_minus = aug.clone();
+            aug_minus[col] -= eps;
+            let l_plus = self.build_antiperiodic_jac(&aug_plus)?;
+            let l_minus = self.build_antiperiodic_jac(&aug_minus)?;
+            let mut acc = 0.0f64;
+            for row in 0..nl {
+                for col_l in 0..nl {
+                    let d_entry = (l_plus[(row, col_l)] - l_minus[(row, col_l)]) / (2.0 * eps);
+                    if d_entry != 0.0 {
+                        acc += w_adjoint[row] * d_entry * x_sol[col_l];
+                    }
+                }
+            }
+            grad_g[col] -= acc;
+        }
+
+        // Defect parameter columns via per-stage df/dp; phase/boundary rows are
+        // independent of the parameters.
+        for (col, param_index) in [
+            (0usize, self.param1_index),
+            (self.param2_idx(), self.param2_index),
+        ] {
+            let mut dfdp = vec![vec![0.0; dim]; n_stages];
+            for idx in 0..n_stages {
+                dfdp[idx] = self.eval_dfdp(&stage_states[idx], p1, p2, param_index)?;
+            }
+            for interval in 0..ntst {
+                let h = period * mesh_widths[interval];
+                for stage_row in 0..ncol {
+                    let idx = interval * ncol + stage_row;
+                    for r in 0..dim {
+                        let mut sum = 0.0;
+                        for k_local in 0..ncol {
+                            let k_idx = interval * ncol + k_local;
+                            sum += a_coeffs[stage_row][k_local] * dfdp[k_idx][r];
+                        }
+                        jac[(idx * dim + r, col)] = -h * sum;
+                    }
+                }
+                for d in 0..dim {
+                    let mut sum = 0.0;
+                    for k_local in 0..ncol {
+                        let k_idx = interval * ncol + k_local;
+                        sum += b_weights[k_local] * dfdp[k_idx][d];
+                    }
+                    jac[(cont_res_row + interval * dim + d, col)] = -h * sum;
+                }
+            }
+        }
+
+        // Defect period column: h = T * width scaling of the vector fields.
+        for interval in 0..ntst {
+            let width = mesh_widths[interval];
+            for stage_row in 0..ncol {
+                let idx = interval * ncol + stage_row;
+                for r in 0..dim {
+                    let mut sum = 0.0;
+                    for k_local in 0..ncol {
+                        let f_idx = (interval * ncol + k_local) * dim + r;
+                        sum += a_coeffs[stage_row][k_local] * self.work_f[f_idx];
+                    }
+                    jac[(idx * dim + r, self.period_index())] = -width * sum;
+                }
+            }
+            for d in 0..dim {
+                let mut sum = 0.0;
+                for k_local in 0..ncol {
+                    let f_idx = (interval * ncol + k_local) * dim + d;
+                    sum += b_weights[k_local] * self.work_f[f_idx];
+                }
+                jac[(cont_res_row + interval * dim + d, self.period_index())] = -width * sum;
+            }
+        }
+
+        // G row from the adjoint gradient.
+        for j in 0..m_aug {
+            jac[(g_res_row, j)] = grad_g[j];
         }
 
         Ok(jac)
     }
-
     fn diagnostics(&mut self, aug: &DVector<f64>) -> Result<PointDiagnostics> {
         let jac = self.build_periodic_jac(aug)?;
         let multipliers = extract_multipliers_collocation(&jac, self.dim, self.ntst, self.ncol)?;
@@ -948,7 +1245,7 @@ mod tests {
     use crate::continuation::{
         BifurcationType, ContinuationPoint, ContinuationRunner, ContinuationSettings,
     };
-    use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
+    use crate::equation_engine::{Bytecode, Compiler, EquationSystem, OpCode};
     use nalgebra::DVector;
 
     fn two_oscillator_system(primary_frequency: f64, flip_frequency: f64) -> EquationSystem {
@@ -1352,5 +1649,94 @@ mod tests {
         assert!(!problem
             .is_step_acceptable(&aug)
             .expect("under-resolved profile"));
+    }
+
+    #[test]
+    fn analytic_extended_jacobian_matches_finite_difference() {
+        let variables = vec!["v".to_string(), "w".to_string()];
+        let parameters = vec!["p1".to_string(), "p2".to_string()];
+        let compiler = Compiler::new(&variables, &parameters);
+        let equations = ["p1*v - w*w + 0.5*sin(v)", "v*w - p2"];
+        let bytecode = equations
+            .iter()
+            .map(|equation| {
+                compiler.compile(&crate::equation_engine::parse(equation).expect("parse"))
+            })
+            .collect();
+        let mut system = EquationSystem::new(bytecode, vec![0.3, -0.2]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+
+        let ntst = 3;
+        let ncol = 2;
+        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
+        let mut pd = PDCurveProblem::new_on_mesh(
+            &mut system,
+            vec![0.0; ncoords],
+            0.8,
+            0,
+            1,
+            0.3,
+            -0.2,
+            ntst,
+            ncol,
+            vec![0.0, 0.2, 0.55, 1.0],
+        )
+        .expect("nonlinear PD problem");
+
+        let mut aug = DVector::zeros(pd.dimension() + 1);
+        aug[0] = 0.3;
+        for index in 1..=ncoords {
+            aug[index] = ((index as f64) * 0.53).cos() * 0.7;
+        }
+        aug[pd.period_index()] = 0.9;
+        aug[pd.param2_idx()] = -0.2;
+
+        let analytic = pd.extended_jacobian(&aug).expect("analytic PD Jacobian");
+        let reference = pd
+            .extended_jacobian_finite_difference(&aug)
+            .expect("finite-difference PD Jacobian");
+
+        assert_eq!(analytic.shape(), reference.shape());
+        let mut max_scaled = 0.0f64;
+        for j in 0..reference.ncols() {
+            for i in 0..reference.nrows() {
+                let expected = reference[(i, j)];
+                let deviation = (analytic[(i, j)] - expected).abs() / (1.0 + expected.abs());
+                max_scaled = max_scaled.max(deviation);
+            }
+        }
+        let mut worst: Vec<(f64, usize, usize, f64, f64)> = Vec::new();
+        for j in 0..reference.ncols() {
+            for i in 0..reference.nrows() {
+                let expected = reference[(i, j)];
+                worst.push((
+                    (analytic[(i, j)] - expected).abs() / (1.0 + expected.abs()),
+                    i,
+                    j,
+                    analytic[(i, j)],
+                    expected,
+                ));
+            }
+        }
+        worst.sort_by(|l, r| r.0.total_cmp(&l.0));
+        for w in worst.iter().take(6) {
+            eprintln!(
+                "dev={:.3e} row={} col={} a={:.6e} fd={:.6e}",
+                w.0, w.1, w.2, w.3, w.4
+            );
+        }
+        let g_row = 19;
+        eprintln!("G row = {g_row}");
+        for j in 0..reference.ncols() {
+            eprintln!(
+                "col={j}: analytic={:+.6e} fd={:+.6e}",
+                analytic[(g_row, j)],
+                reference[(g_row, j)]
+            );
+        }
+        assert!(
+            max_scaled < 1.0e-5,
+            "analytic PD Jacobian deviates from finite differences: max_scaled={max_scaled:.3e}"
+        );
     }
 }
