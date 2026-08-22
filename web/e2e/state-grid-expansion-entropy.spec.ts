@@ -2,8 +2,12 @@ import { expect, test, type Page } from '@playwright/test'
 import { createHarness } from './harness'
 
 test.describe.configure({ mode: 'serial' })
-
+// Each test drives real wasm computations (orbit settling, entropy runs over
+// thousands of steps) and CI runs the suite beside other spec workers, so the
+// default thirty-second test budget is too tight.
+test.setTimeout(180_000)
 async function configureTwoDimensionalMap(
+
   page: Page,
   equations: [string, string]
 ) {
@@ -15,14 +19,46 @@ async function configureTwoDimensionalMap(
   await page.getByTestId('close-system-settings').click()
 }
 
+async function returnToWorkflowOverview(page: Page) {
+  // Re-opening a system restores the object's last focused workflow, so the
+  // actions-bar toggles may not exist until we walk back out of it.
+  for (let depth = 0; depth < 8; depth++) {
+    const back = page.getByTestId('inspector-workflow-back')
+    if ((await back.count()) === 0) return
+    await back.click()
+    await expect(back).toHaveCount(0)
+  }
+}
+
 async function openStateGridSetup(page: Page) {
-  const action = page.getByTestId('action-state-grid-setup-toggle')
-  if (await action.count()) await action.click()
+  await returnToWorkflowOverview(page)
+  await page.getByTestId('action-state-grid-setup-toggle').click()
 }
 
 async function openExpansionEntropy(page: Page) {
-  const action = page.getByTestId('action-state-grid-entropy-toggle')
-  if (await action.count()) await action.click()
+  await returnToWorkflowOverview(page)
+  await page.getByTestId('action-state-grid-entropy-toggle').click()
+}
+
+/**
+ * After reopening a system and re-selecting its State Grid node the app may
+ * land either directly inside the restored expansion-entropy workflow (with
+ * the previous estimate shown) or on the workflow overview, depending on how
+ * hydration races with selection. Wait for either state and make sure the
+ * entropy panel with its persisted estimate ends up visible.
+ */
+async function expectRestoredEntropyResult(page: Page) {
+  const estimate = page.getByTestId('state-grid-final-estimate')
+  await expect
+    .poll(
+      async () =>
+        (await estimate.count()) > 0 ||
+        (await page.getByTestId('action-state-grid-entropy-toggle').count()) > 0,
+      { timeout: 30_000 }
+    )
+    .toBe(true)
+  if ((await estimate.count()) === 0) await openExpansionEntropy(page)
+  await expect(estimate).toBeVisible()
 }
 
 async function leaveStateGridWorkflow(page: Page) {
@@ -90,8 +126,9 @@ test('State Grid computes and restores a flow expansion-entropy convergence resu
   await page.getByTestId('open-systems').click()
   await page.getByRole('button', { name: 'State_Grid_Entropy', exact: true }).click()
   await harness.selectTreeNode('State_Grid_1')
-  await openExpansionEntropy(page)
-  await expect(page.getByTestId('state-grid-final-estimate')).toBeVisible()
+  // Re-selecting the object restores its last focused workflow (expansion
+  // entropy) directly, with the previous result still displayed.
+  await expectRestoredEntropyResult(page)
   await expect(page.getByTestId('state-grid-expansion-entropy-result')).toContainText('9 / 9')
 })
 
@@ -132,7 +169,9 @@ test('State Grid map entropy matches the analytic diagonal-map value by iteratio
   await page.getByTestId('open-systems').click()
   await page.getByRole('button', { name: 'State_Grid_Map_Log2', exact: true }).click()
   await harness.selectTreeNode('State_Grid_1')
-  await openExpansionEntropy(page)
+  // Re-selection restores the expansion-entropy focus directly; the persisted
+  // estimate must still be shown without re-running.
+  await expectRestoredEntropyResult(page)
   await expect(page.getByTestId('state-grid-final-estimate')).toHaveText('0.693147')
 })
 

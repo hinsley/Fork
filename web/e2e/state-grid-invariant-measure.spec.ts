@@ -216,11 +216,16 @@ test('State Grid reports advancing cover progress and cancels without a late res
   const toolbar = page.getByTestId('toolbar')
   await expect(toolbar).toContainText('Invariant measure · Exploring cover')
   await expect(toolbar).toContainText('dynamics steps')
-  const initialProgress = await toolbar.innerText()
-  const initialMatch = initialProgress.match(/([\d,]+) cells explored/)
-  expect(initialMatch).not.toBeNull()
-  const initialCells = Number(initialMatch?.[1].replaceAll(',', ''))
-  expect(initialCells).toBeGreaterThan(0)
+  // Under load the first worker tick can land after the toolbar renders, so
+  // poll for the first nonzero reading instead of sampling once.
+  let initialCells = 0
+  await expect
+    .poll(async () => {
+      const match = (await toolbar.innerText()).match(/([\d,]+) cells explored/)
+      initialCells = Number(match?.[1].replaceAll(',', '') ?? 0)
+      return initialCells
+    })
+    .toBeGreaterThan(0)
   await expect
     .poll(async () => {
       const match = (await toolbar.innerText()).match(/([\d,]+) cells explored/)

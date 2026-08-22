@@ -10,7 +10,10 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
   expect: { timeout: 5_000 },
-  fullyParallel: true,
+  // The specs drive real wasm computations; running them beside each other
+  // starves the workers and makes progress-dependent assertions flaky.
+  fullyParallel: false,
+  workers: process.env.CI ? 1 : 2,
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     headless: true,
