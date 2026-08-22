@@ -13,6 +13,8 @@ jobs:
       - name: Install pinned nightly for threaded wasm
         run: rustup toolchain install nightly-2025-11-15 --component rust-src --target wasm32-unknown-unknown
       - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          wasm-pack-version: v0.13.1
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -41,6 +43,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          wasm-pack-version: v0.13.1
       - uses: actions/setup-node@v4
         with:
           node-version: 20
