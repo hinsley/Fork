@@ -2159,14 +2159,6 @@ mod tests {
                 max_scaled = max_scaled.max(deviation);
             }
         }
-        let mut max_scaled = 0.0f64;
-        for j in 0..reference.ncols() {
-            for i in 0..reference.nrows() {
-                let expected = reference[(i, j)];
-                let deviation = (analytic[(i, j)] - expected).abs() / (1.0 + expected.abs());
-                max_scaled = max_scaled.max(deviation);
-            }
-        }
         assert!(
             max_scaled < 1.0e-5,
             "analytic NS Jacobian deviates from finite differences: max_scaled={max_scaled:.3e}"

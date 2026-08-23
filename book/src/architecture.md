@@ -69,7 +69,6 @@ workload): equilibrium continuation is microseconds per step; limit-cycle
 collocation continuation is ~1 ms per step with the structured solver; the
 expensive workflows are the codim-1 curve problems, whose cost concentrates in
 Jacobian assembly and the bordered factorizations inside singularity
-conditions. The LPC curve's Jacobian is now assembled by a bordered adjoint
-identity; PD, NS, and isoperiodic curves still differentiate residuals
-numerically (tracked as Fork-5x7p). See [Numerical
+conditions. LPC, PD, NS, and isoperiodic curve Jacobians are all assembled
+analytically via bordered adjoint identities. See [Numerical
 Contracts](numerical-contracts.md) for the rules optimization work must obey.

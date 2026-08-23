@@ -10,8 +10,7 @@
 
 use fork_core::continuation::{
     continue_limit_cycle_collocation, continue_with_problem, limit_cycle_setup_from_orbit,
-    BifurcationType, ContinuationPoint, ContinuationProblem, ContinuationSettings, LPCCurveProblem,
-    OrbitTimeMode,
+    BifurcationType, ContinuationPoint, ContinuationSettings, LPCCurveProblem, OrbitTimeMode,
 };
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 use fork_core::solvers::RK4;

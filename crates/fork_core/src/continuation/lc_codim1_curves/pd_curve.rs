@@ -1705,35 +1705,6 @@ mod tests {
                 max_scaled = max_scaled.max(deviation);
             }
         }
-        let mut worst: Vec<(f64, usize, usize, f64, f64)> = Vec::new();
-        for j in 0..reference.ncols() {
-            for i in 0..reference.nrows() {
-                let expected = reference[(i, j)];
-                worst.push((
-                    (analytic[(i, j)] - expected).abs() / (1.0 + expected.abs()),
-                    i,
-                    j,
-                    analytic[(i, j)],
-                    expected,
-                ));
-            }
-        }
-        worst.sort_by(|l, r| r.0.total_cmp(&l.0));
-        for w in worst.iter().take(6) {
-            eprintln!(
-                "dev={:.3e} row={} col={} a={:.6e} fd={:.6e}",
-                w.0, w.1, w.2, w.3, w.4
-            );
-        }
-        let g_row = 19;
-        eprintln!("G row = {g_row}");
-        for j in 0..reference.ncols() {
-            eprintln!(
-                "col={j}: analytic={:+.6e} fd={:+.6e}",
-                analytic[(g_row, j)],
-                reference[(g_row, j)]
-            );
-        }
         assert!(
             max_scaled < 1.0e-5,
             "analytic PD Jacobian deviates from finite differences: max_scaled={max_scaled:.3e}"

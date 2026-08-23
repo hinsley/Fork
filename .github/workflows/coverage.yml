@@ -49,6 +49,8 @@ jobs:
 
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          wasm-pack-version: v0.13.1
 
       - name: Build NodeJS bindings
         working-directory: cli
