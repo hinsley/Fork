@@ -188,6 +188,7 @@ type InspectorDetailsPanelProps = {
   selectedNodeId: string | null
   view: 'selection' | 'system'
   theme: 'light' | 'dark'
+  onActiveWorkflowChange?: () => void
   branchPointSelection?: BranchPointSelection
   orbitPointSelection?: OrbitPointSelection
   limitCyclePointSelection?: LimitCyclePointSelection
@@ -2006,7 +2007,10 @@ export function InspectorDetailsPanel(props: InspectorDetailsPanelProps) {
   }
   const sessionKey = `${props.system.id}:${props.selectedNodeId ?? 'none'}:${buildSystemConfigKey(props.system.config)}`
   return (
-    <WorkflowFocusProvider key={sessionKey}>
+    <WorkflowFocusProvider
+      key={sessionKey}
+      onActiveWorkflowChange={props.onActiveWorkflowChange}
+    >
       <InspectorSelectionSession {...props} />
     </WorkflowFocusProvider>
   )

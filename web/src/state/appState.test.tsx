@@ -13,6 +13,7 @@ import {
 import { normalizeBranchEigenvalues } from '../system/continuation'
 import { buildSubsystemSnapshot } from '../system/subsystemGateway'
 import { projectLimitCyclePackedStateForSnapshot } from '../system/limitCycleAnalysis'
+import { DEFAULT_INVARIANT_MEASURE_COLOR } from '../system/color'
 import type {
   AnalysisObject,
   ContinuationObject,
@@ -396,6 +397,10 @@ describe('appState State Grid subsystem configuration', () => {
     expect(measures).toHaveLength(1)
     const [measureId, measure] = measures[0]
     expect(system.ui.selectedNodeId).toBe(measureId)
+    expect(system.nodes[measureId].render.color).toBe(DEFAULT_INVARIANT_MEASURE_COLOR)
+    expect(system.nodes[measureId].render.pointSize).toBe(6)
+    expect(system.scenes).toHaveLength(1)
+    expect(system.scenes[0]?.name).toBe('Scene_1')
     expect(measure.name).toBe('Invariant_Measure_State_Grid_1')
     expect(measure.sourceStateGridId).toBe(fixture.nodeId)
     expect(measure.sourceStateGridName).toBe('State_Grid_1')
@@ -657,6 +662,7 @@ describe('appState State Grid subsystem configuration', () => {
       'Invariant_Measure_State_Grid_1',
       'Invariant_Measure_State_Grid_1_2',
     ])
+    expect(getContext().state.system!.scenes).toHaveLength(1)
 
     const controller = new AbortController()
     controller.abort()
@@ -836,6 +842,83 @@ describe('appState State Grid subsystem configuration', () => {
         (object) => object.type === 'invariant_measure'
       )
     ).toHaveLength(1)
+  })
+})
+
+describe('appState orbit result handoff', () => {
+  it('creates a State Space scene after the first successful orbit run', async () => {
+    const config: SystemConfig = {
+      name: 'Orbit_Handoff',
+      equations: ['-x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const base = createSystem({ name: config.name, config })
+    const added = addObject(base, {
+      type: 'orbit',
+      name: 'Orbit_1',
+      systemName: config.name,
+      data: [],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+      parameters: [],
+    } as OrbitObject)
+    const { getContext } = setupApp(added.system)
+
+    await act(async () => {
+      await getContext().actions.runOrbit({
+        orbitId: added.nodeId,
+        initialState: [1],
+        initialContext: 0,
+        duration: 1,
+        dt: 0.1,
+      })
+    })
+
+    const system = getContext().state.system!
+    expect(system.scenes).toHaveLength(1)
+    expect(system.scenes[0]?.name).toBe('Scene_1')
+    expect((system.objects[added.nodeId] as OrbitObject).data.length).toBeGreaterThan(1)
+  })
+
+  it('reuses an existing State Space scene after an orbit run', async () => {
+    const config: SystemConfig = {
+      name: 'Orbit_Existing_Viewport',
+      equations: ['-x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const base = addScene(createSystem({ name: config.name, config }), 'State Space')
+    const added = addObject(base.system, {
+      type: 'orbit',
+      name: 'Orbit_1',
+      systemName: config.name,
+      data: [],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+      parameters: [],
+    } as OrbitObject)
+    const { getContext } = setupApp(added.system)
+
+    await act(async () => {
+      await getContext().actions.runOrbit({
+        orbitId: added.nodeId,
+        initialState: [1],
+        initialContext: 0,
+        duration: 1,
+        dt: 0.1,
+      })
+    })
+
+    expect(getContext().state.system!.scenes).toHaveLength(1)
   })
 })
 

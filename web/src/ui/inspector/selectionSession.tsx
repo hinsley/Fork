@@ -17,7 +17,13 @@ function shouldAnimateNavigation() {
   return !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 }
 
-export function WorkflowFocusProvider({ children }: { children: ReactNode }) {
+export function WorkflowFocusProvider({
+  children,
+  onActiveWorkflowChange,
+}: {
+  children: ReactNode
+  onActiveWorkflowChange?: () => void
+}) {
   const [state, dispatch] = useReducer(selectionSessionReducer, {
     activeWorkflow: null,
     navigationDirection: null,
@@ -53,6 +59,9 @@ export function WorkflowFocusProvider({ children }: { children: ReactNode }) {
     )
     return () => window.clearTimeout(timeout)
   }, [state.navigationPhase])
+  useEffect(() => {
+    onActiveWorkflowChange?.()
+  }, [onActiveWorkflowChange, state.activeWorkflow])
   const value = useMemo<WorkflowFocusValue>(
     () => ({
       ...state,

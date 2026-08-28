@@ -175,6 +175,103 @@ describe('ViewportPanel view state wiring', () => {
     }
   )
 
+  it('uses a relative-mass axis and draws a 1D invariant measure above its source grid', () => {
+    const config: SystemConfig = {
+      name: 'One dimensional measure map',
+      equations: ['3.7 * x * (1 - x)'],
+      params: [],
+      paramNames: [],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    const grid = addObject(createSystem({ name: config.name, config }), {
+      type: 'state_grid',
+      name: 'State_Grid_1',
+      systemName: config.name,
+      axes: [{ variableName: 'x', min: 0, max: 1, resolution: 3 }],
+      sampling: { type: 'cartesian_cell_centers' },
+      analysis: {
+        type: 'expansion_entropy',
+        steps: 1,
+        dt: 1,
+        checkpointStride: 1,
+        stabilizationStride: 1,
+      },
+      createdAt: nowIso(),
+    } as StateGridObject)
+    let system = updateNodeRender(grid.system, grid.nodeId, {
+      color: '#e06c3f',
+      pointSize: 4,
+    })
+    const measure = addObject(system, {
+      type: 'invariant_measure',
+      name: 'Invariant_Measure_State_Grid_1',
+      systemName: config.name,
+      sourceStateGridId: grid.nodeId,
+      sourceStateGridName: 'State_Grid_1',
+      result: {
+        analysisType: 'transfer_operator',
+        dynamicsType: 'map',
+        axes: [{ variableName: 'x', min: 0, max: 1, resolution: 3 }],
+        settings: {
+          samplesPerCell: 4,
+          iterations: 1,
+          maxStationaryIterations: 20,
+          tolerance: 1e-8,
+          outsidePolicy: 'conditional_in_grid',
+        },
+        parameters: [],
+        totalBoxes: 3,
+        coverBoxIndices: [0, 1, 2],
+        columnOffsets: [0, 1, 2, 3],
+        targetIndices: [0, 1, 2],
+        probabilities: [1, 1, 1],
+        retainedMass: 1,
+        zeroSurvivorSources: 0,
+        stationaryDistribution: [0.1, 0.2, 0.4],
+        dominantEigenvalue: 1,
+        residual: 0,
+        stationaryIterations: 1,
+        computedAt: nowIso(),
+      },
+      createdAt: nowIso(),
+    } as InvariantMeasureObject)
+    system = updateNodeRender(measure.system, measure.nodeId, {
+      color: '#8b5cf6',
+      pointSize: 6,
+    })
+    const scene = addScene(system, 'Map Scene')
+    system = scene.system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === scene.nodeId)
+    const gridIndex = props?.data.findIndex((trace) => trace.name === 'State_Grid_1') ?? -1
+    const measureIndex = props?.data.findIndex(
+      (trace) => trace.name === 'Invariant_Measure_State_Grid_1'
+    ) ?? -1
+    expect(gridIndex).toBeGreaterThanOrEqual(0)
+    expect(measureIndex).toBeGreaterThan(gridIndex)
+    const gridTrace = props?.data[gridIndex] as { y: number[]; yaxis?: string; showlegend?: boolean }
+    const measureTrace = props?.data[measureIndex] as {
+      y: number[]
+      yaxis?: string
+      showlegend?: boolean
+      marker: { color: string; size: number; opacity: number[] }
+    }
+    expect(gridTrace.y).toEqual([0, 0, 0])
+    expect(gridTrace.yaxis).toBe('y2')
+    expect(gridTrace.showlegend).toBe(true)
+    expect(measureTrace.y).toEqual([0.25, 0.5, 1])
+    expect(measureTrace.yaxis).toBe('y2')
+    expect(measureTrace.showlegend).toBe(true)
+    expect(measureTrace.marker).toMatchObject({ color: '#8b5cf6', size: 6 })
+    expect(measureTrace.marker.opacity).toEqual([0.25, 0.5, 1])
+    expect(props?.layout.showlegend).toBe(true)
+    expect(props?.layout.yaxis2?.title).toMatchObject({ text: 'Relative mass' })
+  })
+
   it.each(['flow', 'map'] as const)(
     'renders every three-dimensional %s State Grid point with scalar Plotly opacity',
     (dynamicsType) => {
@@ -759,6 +856,18 @@ describe('ViewportPanel view state wiring', () => {
     expect(screen.queryByTestId(`viewport-resize-${first.nodeId}`)).toBeNull()
     expect(screen.queryByTestId(`viewport-insert-${first.nodeId}`)).toBeNull()
     expect(plotlyCalls.find((entry) => entry.plotId === first.nodeId)?.onPointClick).toBeUndefined()
+  })
+
+  it('lets one unsized viewport fill the workspace and labels its resize handle', () => {
+    const scene = addScene(createSystem({ name: 'Viewport_Fill' }), 'State Space')
+
+    renderPanel(scene.system)
+
+    const tile = screen.getByTestId(`viewport-tile-${scene.nodeId}`)
+    expect(tile.closest('.viewport-item')).toHaveClass('viewport-item--fill-workspace')
+    expect(screen.getByTestId(`viewport-resize-${scene.nodeId}`)).toHaveAccessibleName(
+      'Resize State Space viewport'
+    )
   })
 
   it('keeps 1D map figure capture pending until function sampling settles', async () => {

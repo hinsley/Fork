@@ -335,6 +335,7 @@
 }
 
 .panel--viewport .panel__body {
+  flex: 1 1 auto;
   overflow: auto;
 }
 
@@ -955,14 +956,20 @@
 .state-grid-axis-table {
   display: grid;
   gap: 6px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--input-bg);
 }
 
 .state-grid-axis-table__header,
 .state-grid-axis-table__row {
   display: grid;
-  grid-template-columns: minmax(58px, 0.8fr) repeat(3, minmax(64px, 1fr));
+  grid-template-columns: minmax(44px, 0.7fr) repeat(3, minmax(0, 1fr));
   gap: 6px;
   align-items: center;
+  min-width: 0;
 }
 
 .state-grid-axis-table__header {
@@ -974,6 +981,10 @@
 .state-grid-axis-table__row input {
   min-width: 0;
   width: 100%;
+}
+
+.state-grid-axis-table__row > span {
+  min-width: 0;
 }
 
 .inspector-data {
@@ -1193,6 +1204,22 @@
   gap: 4px;
 }
 
+.workflow-result-card {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--panel-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--input-bg));
+  color: var(--text);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.workflow-result-card strong {
+  color: var(--accent-strong);
+}
+
 .inspector-meta {
   display: flex;
   gap: 8px;
@@ -1295,6 +1322,10 @@
 
 .viewport-item--collapsed {
   min-height: 0;
+}
+
+.viewport-item--fill-workspace {
+  flex: 1 1 auto;
 }
 
 .viewport-tile {
@@ -1495,8 +1526,23 @@
   background: var(--panel-border-strong, var(--panel-border));
 }
 
+.viewport-resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 1px;
+  transform: translate(-50%, -50%);
+  background: color-mix(in srgb, var(--text-muted) 42%, transparent);
+}
+
 .viewport-resize-handle:hover {
   background: var(--accent-soft, var(--accent));
+}
+
+.viewport-resize-handle:hover::before {
+  background: var(--accent);
 }
 
 .inspector {

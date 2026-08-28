@@ -161,6 +161,19 @@ export function OrbitInspectorSections({
                     Run Orbit
                   </button>
                   {orbit.data.length > 0 ? (
+                    <div
+                      className="workflow-result-card"
+                      role="status"
+                      data-testid="orbit-run-result"
+                    >
+                      <strong>Orbit ready</strong>
+                      <span>
+                        {orbit.data.length.toLocaleString()} points are available in the State
+                        Space viewport and Orbit Data.
+                      </span>
+                    </div>
+                  ) : null}
+                  {orbit.data.length > 0 ? (
                     <button
                       onClick={handleExtendOrbit}
                       disabled={runDisabled}

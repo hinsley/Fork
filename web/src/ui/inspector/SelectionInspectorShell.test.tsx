@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { addObject, createSystem } from '../../system/model'
@@ -189,6 +189,10 @@ describe('selection inspector workflow shell', () => {
     await user.click(screen.getByTestId('action-orbit-data-toggle'))
     expect(screen.getByTestId('inspector-workflow-focus')).toHaveTextContent('View Data')
     expect(screen.getByTestId('orbit-data-summary-toggle')).toBeVisible()
+    await user.click(screen.getByTestId('inspector-workflow-back'))
+    await user.click(screen.getByTestId('action-orbit-run-toggle'))
+    expect(screen.getByTestId('orbit-run-result')).toHaveTextContent('Orbit ready')
+    expect(screen.getByTestId('orbit-run-result')).toHaveTextContent('2 points')
   })
 
   it('focuses one action and retains its draft when returning to browse mode', async () => {
@@ -212,6 +216,25 @@ describe('selection inspector workflow shell', () => {
 
     await user.click(screen.getByTestId('action-orbit-run-toggle'))
     expect(screen.getByTestId('orbit-run-duration')).toHaveValue(42)
+  })
+
+  it('reports workflow changes so the inspector can reset its scroll position', async () => {
+    const user = userEvent.setup()
+    const base = createSystem({ name: 'Workflow_Scroll_Reset' })
+    const added = addObject(base, orbit('Orbit_A', base.name))
+    const onActiveWorkflowChange = vi.fn()
+    render(
+      <InspectorDetailsPanel
+        {...requiredProps(added.system, added.nodeId)}
+        onActiveWorkflowChange={onActiveWorkflowChange}
+      />
+    )
+
+    await waitFor(() => expect(onActiveWorkflowChange).toHaveBeenCalledTimes(1))
+    await user.click(screen.getByTestId('action-orbit-run-toggle'))
+    await waitFor(() => expect(onActiveWorkflowChange.mock.calls.length).toBeGreaterThan(1))
+    await user.click(screen.getByTestId('inspector-workflow-back'))
+    await waitFor(() => expect(onActiveWorkflowChange.mock.calls.length).toBeGreaterThan(2))
   })
 
   it('creates a fresh keyed session when the selected node changes', async () => {

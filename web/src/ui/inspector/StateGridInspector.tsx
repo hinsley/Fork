@@ -709,56 +709,58 @@ export function StateGridInspector({
           <section className="inspector-section">
         {workflowFocus?.activeWorkflow === 'state-grid-setup-toggle' ? workloadSummary : null}
         <h4 className="inspector-subheading">Bounds and resolution</h4>
-        <div className="state-table__wrap" role="region" aria-label="Bounds and resolution">
-          <table className="state-table__grid">
-            <thead>
-              <tr>
-                <th>Variable</th>
-                <th>Min</th>
-                <th>Max</th>
-                <th>Resolution</th>
-              </tr>
-            </thead>
-            <tbody>
-              {object.axes.map((axis, index) => freeVariableNames.has(axis.variableName) ? (
-                <tr key={axis.variableName}>
-                  <td>{axis.variableName}</td>
-                  <td>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      className="state-table__input"
-                      value={axisDrafts[axis.variableName]?.min ?? axis.min.toString()}
-                      onChange={(event) => updateAxis(index, 'min', event.target.value)}
-                      data-testid={`state-grid-${axis.variableName}-min`}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      className="state-table__input"
-                      value={axisDrafts[axis.variableName]?.max ?? axis.max.toString()}
-                      onChange={(event) => updateAxis(index, 'max', event.target.value)}
-                      data-testid={`state-grid-${axis.variableName}-max`}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      min={1}
-                      step={1}
-                      className="state-table__input"
-                      value={axisDrafts[axis.variableName]?.resolution ?? axis.resolution.toString()}
-                      onChange={(event) => updateAxis(index, 'resolution', event.target.value)}
-                      data-testid={`state-grid-${axis.variableName}-resolution`}
-                    />
-                  </td>
-                </tr>
-              ) : null)}
-            </tbody>
-          </table>
+        <div
+          className="state-grid-axis-table"
+          role="table"
+          aria-label="Bounds and resolution"
+        >
+          <div className="state-grid-axis-table__header" role="row">
+            <span role="columnheader">Variable</span>
+            <span role="columnheader">Min</span>
+            <span role="columnheader">Max</span>
+            <span role="columnheader">Resolution</span>
+          </div>
+          {object.axes.map((axis, index) => freeVariableNames.has(axis.variableName) ? (
+            <div
+              className="state-grid-axis-table__row"
+              role="row"
+              key={axis.variableName}
+            >
+              <strong role="cell">{axis.variableName}</strong>
+              <span role="cell">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  aria-label={`${axis.variableName} minimum`}
+                  value={axisDrafts[axis.variableName]?.min ?? axis.min.toString()}
+                  onChange={(event) => updateAxis(index, 'min', event.target.value)}
+                  data-testid={`state-grid-${axis.variableName}-min`}
+                />
+              </span>
+              <span role="cell">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  aria-label={`${axis.variableName} maximum`}
+                  value={axisDrafts[axis.variableName]?.max ?? axis.max.toString()}
+                  onChange={(event) => updateAxis(index, 'max', event.target.value)}
+                  data-testid={`state-grid-${axis.variableName}-max`}
+                />
+              </span>
+              <span role="cell">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  min={1}
+                  step={1}
+                  aria-label={`${axis.variableName} resolution`}
+                  value={axisDrafts[axis.variableName]?.resolution ?? axis.resolution.toString()}
+                  onChange={(event) => updateAxis(index, 'resolution', event.target.value)}
+                  data-testid={`state-grid-${axis.variableName}-resolution`}
+                />
+              </span>
+            </div>
+          ) : null)}
         </div>
           </section>
         </InspectorDisclosure>

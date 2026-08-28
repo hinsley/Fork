@@ -1,4 +1,5 @@
 export const DEFAULT_COLOR_OPACITY = 1
+export const DEFAULT_INVARIANT_MEASURE_COLOR = '#8b5cf6'
 
 export function normalizeColorOpacity(
   value: unknown,

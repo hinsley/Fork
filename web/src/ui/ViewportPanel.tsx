@@ -1180,6 +1180,29 @@ function collectVisibleSceneNodeIds(system: VisibleSceneSource): string[] {
   return ids
 }
 
+function resolveSceneCandidateIds(
+  system: VisibleSceneSource,
+  scene: Scene,
+  selectedNodeId: string | null
+): string[] {
+  const manualSelection = scene.selectedNodeIds ?? []
+  const candidateIds =
+    manualSelection.length > 0
+      ? manualSelection
+      : scene.display === 'selection' && selectedNodeId
+        ? [selectedNodeId]
+        : collectVisibleSceneNodeIds(system)
+  return [...candidateIds].sort((leftId, rightId) => {
+    const priority = (nodeId: string) => {
+      const object = system.objects[nodeId]
+      if (object?.type === 'state_grid') return 0
+      if (object?.type === 'invariant_measure') return 2
+      return 1
+    }
+    return priority(leftId) - priority(rightId)
+  })
+}
+
 function resolveBranchSnapshot(
   system: Pick<System, 'config'>,
   branch: ContinuationObject
@@ -3119,13 +3142,7 @@ function buildSceneTraces(
   const isMap = system.config.type === 'map'
   const isTimeSeries = projection?.kind === 'flow_timeseries_1d'
   const isMap1D = projection?.kind === 'map_cobweb_1d'
-  const manualSelection = scene.selectedNodeIds ?? []
-  const candidateIds =
-    manualSelection.length > 0
-      ? manualSelection
-      : scene.display === 'selection' && selectedNodeId
-        ? [selectedNodeId]
-        : collectVisibleSceneNodeIds(system)
+  const candidateIds = resolveSceneCandidateIds(system, scene, selectedNodeId)
   const canPlotEigenvectors = !isMap1D && !isTimeSeries && projectionPlotDim >= 2
   let timeRange: [number, number] | null = null
   const pendingEquilibria: Array<{
@@ -3273,8 +3290,10 @@ function buildSceneTraces(
           legendgroup: `${INDEPENDENT_COLOR_OPACITY_LEGEND_GROUP}:${nodeId}`,
           x: xs,
           y: projectionPlotDim === 1 ? xs.map(() => 0) : ys,
+          yaxis: projectionPlotDim === 1 ? 'y2' : undefined,
           customdata: cellIndices,
           marker,
+          showlegend: projectionPlotDim === 1,
           hovertemplate:
             projectionPlotDim === 1
               ? 'x=%{x}<br>cell=%{customdata}<extra></extra>'
@@ -3392,13 +3411,15 @@ function buildSceneTraces(
           name: object.name,
           uid: nodeId,
           x: xs,
-          y: projectionPlotDim === 1 ? xs.map(() => 0) : ys,
+          y: projectionPlotDim === 1 ? opacities : ys,
+          yaxis: projectionPlotDim === 1 ? 'y2' : undefined,
           customdata: hoverData,
           marker: {
             color: node.render.color,
             opacity: opacities,
             size: node.render.pointSize,
           },
+          showlegend: projectionPlotDim === 1,
           hovertemplate:
             projectionPlotDim === 1
               ? 'x=%{x}<br>cell=%{customdata[0]}<br>mass=%{customdata[1]:.6g}<extra></extra>'
@@ -3439,7 +3460,9 @@ function buildSceneTraces(
               if (projectedPoint.some((coordinate) => !Number.isFinite(coordinate))) return
               const opacity = Math.abs(value) / maxMagnitude
               modeXs.push(projectedPoint[0] ?? 0)
-              modeYs.push(projectedPoint[1] ?? 0)
+              modeYs.push(
+                projectionPlotDim === 1 ? opacity : projectedPoint[1] ?? 0
+              )
               modeZs.push(projectedPoint[2] ?? 0)
               if (projectionPlotDim === 3) {
                 modeColors.push(stateGrid3dColorWithOpacity(node.render.color, opacity))
@@ -3480,7 +3503,9 @@ function buildSceneTraces(
                   ...common,
                   type: 'scatter',
                   x: modeXs,
-                  y: projectionPlotDim === 1 ? modeXs.map(() => 0) : modeYs,
+                  y: modeYs,
+                  yaxis: projectionPlotDim === 1 ? 'y2' : undefined,
+                  showlegend: projectionPlotDim === 1,
                   marker: {
                     color: node.render.color,
                     opacity: modeOpacities,
@@ -7003,7 +7028,8 @@ function buildDiagramTraces(
 function buildSceneBaseLayout(
   config: SystemConfig,
   axisVariables: SceneAxisVariables | null | undefined,
-  plotlyTheme: PlotlyThemeTokens
+  plotlyTheme: PlotlyThemeTokens,
+  showStateGridMeasureAxis = false
 ): Partial<Layout> {
   const base = {
     autosize: true,
@@ -7054,6 +7080,18 @@ function buildSceneBaseLayout(
     const cobwebYLabel = appendMathJaxWrappedSuffix(xLabel, '_{n+1}')
     return {
       ...base,
+      margin: showStateGridMeasureAxis
+        ? { l: 40, r: 58, t: 52, b: 40 }
+        : base.margin,
+      showlegend: showStateGridMeasureAxis,
+      legend: {
+        font: { color: plotlyTheme.text },
+        orientation: 'h',
+        x: 0,
+        y: 1.16,
+        xanchor: 'left',
+        yanchor: 'bottom',
+      },
       xaxis: {
         title: { text: cobwebXLabel, font: { color: plotlyTheme.text } },
         tickfont: { color: plotlyTheme.text },
@@ -7064,6 +7102,17 @@ function buildSceneBaseLayout(
         tickfont: { color: plotlyTheme.text },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
+      yaxis2: showStateGridMeasureAxis
+        ? {
+            title: { text: 'Relative mass', font: { color: plotlyTheme.text } },
+            tickfont: { color: plotlyTheme.text },
+            overlaying: 'y',
+            side: 'right',
+            range: [0, 1.05],
+            showgrid: false,
+            zerolinecolor: 'rgba(120,120,120,0.3)',
+          }
+        : undefined,
     }
   }
 
@@ -7370,6 +7419,16 @@ function ViewportTile({
     if (!scene) return null
     return resolveSceneProjection(systemConfig, scene.axisVariables)
   }, [scene, systemConfig])
+  const showStateGridMeasureAxis = useMemo(() => {
+    if (!scene || sceneProjection?.kind !== 'map_cobweb_1d') return false
+    return resolveSceneCandidateIds(traceSystem, scene, sceneTraceSelectedNodeId).some(
+      (candidateId) => {
+        if (!isNodeEffectivelyVisible(systemNodes, candidateId)) return false
+        const object = systemObjects[candidateId]
+        return object?.type === 'state_grid' || object?.type === 'invariant_measure'
+      }
+    )
+  }, [scene, sceneProjection, sceneTraceSelectedNodeId, systemNodes, systemObjects, traceSystem])
   const timeSeriesRange =
     timeSeriesState.sceneId === activeSceneId ? timeSeriesState.range : null
   const plotHeight =
@@ -7475,7 +7534,14 @@ function ViewportTile({
   }, [diagram, scene, traceSystem])
 
   const layout = useMemo(() => {
-    if (scene) return buildSceneBaseLayout(systemConfig, scene.axisVariables, plotlyTheme)
+    if (scene) {
+      return buildSceneBaseLayout(
+        systemConfig,
+        scene.axisVariables,
+        plotlyTheme,
+        showStateGridMeasureAxis
+      )
+    }
     if (diagram) return buildDiagramBaseLayout(diagramTraceState, plotlyTheme)
     const fallbackAxisVariables = systemScenes[0]?.axisVariables ?? null
     return buildSceneBaseLayout(systemConfig, fallbackAxisVariables, plotlyTheme)
@@ -7484,6 +7550,7 @@ function ViewportTile({
     diagramTraceState,
     plotlyTheme,
     scene,
+    showStateGridMeasureAxis,
     systemConfig,
     systemScenes,
   ])
@@ -7709,6 +7776,10 @@ function ViewportTile({
           {mode === 'editor' ? <div
             className="viewport-resize-handle"
             onPointerDown={(event) => onResizeStart(node.id, event)}
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label={`Resize ${node.name} viewport`}
+            title="Drag to resize viewport"
             data-testid={`viewport-resize-${node.id}`}
           /> : null}
         </>
@@ -8156,13 +8227,16 @@ export function ViewportPanel({
       {viewports.map((entry, index) => {
         const height = viewportHeights[entry.node.id]
         const isCollapsed = mode === 'editor' && !entry.node.expanded
+        const fillsWorkspace = viewports.length === 1 && !isCollapsed && !height
         const targetId = viewports[index + 1]?.node.id ?? null
         const isEditing = editingId === entry.node.id
 
         return (
           <Fragment key={entry.node.id}>
             <div
-              className={`viewport-item${isCollapsed ? ' viewport-item--collapsed' : ''}`}
+              className={`viewport-item${isCollapsed ? ' viewport-item--collapsed' : ''}${
+                fillsWorkspace ? ' viewport-item--fill-workspace' : ''
+              }`}
               ref={(node) => {
                 tileRefs.current.set(entry.node.id, node)
               }}

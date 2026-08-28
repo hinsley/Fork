@@ -1,3 +1,4 @@
+import { useCallback, useRef } from 'react'
 import { InspectorDetailsPanel } from './InspectorDetailsPanel'
 import type { System } from '../system/types'
 import type { InspectorActions, InspectorPointSelections } from './inspector/types'
@@ -17,14 +18,20 @@ export function InspectorPanel({
   actions,
   pointSelections,
 }: InspectorPanelProps) {
+  const contentRef = useRef<HTMLDivElement>(null)
+  const resetScrollPosition = useCallback(() => {
+    contentRef.current?.scrollTo({ top: 0 })
+  }, [])
+
   return (
     <div className="inspector">
-      <div className="inspector__content">
+      <div className="inspector__content" ref={contentRef}>
         <InspectorDetailsPanel
           system={system}
           selectedNodeId={selectedNodeId}
           theme={theme}
           view="selection"
+          onActiveWorkflowChange={resetScrollPosition}
           branchPointSelection={pointSelections.branch.value}
           orbitPointSelection={pointSelections.orbit.value}
           limitCyclePointSelection={pointSelections.limitCycle.value}

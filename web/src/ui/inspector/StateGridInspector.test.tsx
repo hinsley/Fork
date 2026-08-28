@@ -212,6 +212,29 @@ describe('StateGridInspector', () => {
     expect(screen.getByTestId('state-grid-workload')).toHaveTextContent('2,000')
   })
 
+  it('fits bounds and resolution into the inspector without a scrolling table', () => {
+    const initial = fixture()
+    render(
+      <WorkflowFocusProvider>
+        <StateGridInspector
+          system={initial.system}
+          nodeId={initial.nodeId}
+          object={initial.object}
+          onRename={() => {}}
+          onUpdate={() => {}}
+          onCompute={async () => null}
+        />
+      </WorkflowFocusProvider>
+    )
+
+    fireEvent.click(screen.getByTestId('action-state-grid-setup-toggle'))
+    const bounds = screen.getByRole('table', { name: 'Bounds and resolution' })
+    expect(bounds).toHaveClass('state-grid-axis-table')
+    expect(bounds).not.toHaveClass('state-table__wrap')
+    expect(screen.getByRole('textbox', { name: 'x minimum' })).toBeVisible()
+    expect(screen.getByRole('textbox', { name: 'y resolution' })).toBeVisible()
+  })
+
   it.each(['flow', 'map'] as const)(
     'keeps transient State Grid bounds and resolution drafts for %s systems',
     (dynamicsType) => {

@@ -21,7 +21,11 @@ State Grid objects use the existing State Space scene trace path in
 without sampling and gives every marker the same color, size, and scalar
 `marker.opacity` from the object's Appearance settings. Three-axis previews use
 the shared `scatter3d` capture and WebGL fallback path described below; this adds
-ordinary trace construction and no Plotly event or layout injection.
+ordinary trace construction and no Plotly event or layout injection. In
+one-axis map scenes, State Grid and invariant-measure markers use a labeled
+right-side relative-mass axis while the map remains on `x_n` versus
+`x_{n+1}`. The source grid is drawn first and derived invariant measures are
+drawn above it, with a visible legend for the two layers.
 
 ## Runtime touchpoints
 
@@ -133,6 +137,10 @@ ordinary trace construction and no Plotly event or layout injection.
 - `web/src/ui/ViewportPanel.tsx`: 1-axis map scenes for systems with more than
   one variable render cobweb projection (`x_n` vs `x_{n+1}`) for the selected
   variable and intentionally do **not** render a governing map function graph.
+- `web/src/ui/ViewportPanel.tsx`: 1-axis map scenes containing a State Grid or
+  invariant measure add an overlaid `yaxis2` labeled `Relative mass`, enable a
+  horizontal layer legend, and use the secondary axis for grid, stationary
+  distribution, and eigenmode markers.
 - `web/src/ui/ViewportPanel.tsx`: orbit scene traces set explicit
   `hovertemplate` strings so hover labels use the active scene axis variable
   names (not Plotly defaults) and include trajectory position metadata:

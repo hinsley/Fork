@@ -139,6 +139,7 @@ import {
 import { validateSystemConfig } from './systemValidation'
 import { isValidDisplayName, suggestDefaultName } from '../utils/naming'
 import { makeStableId } from '../utils/determinism'
+import { DEFAULT_INVARIANT_MEASURE_COLOR } from '../system/color'
 import {
   DEFAULT_EIGENMODE_MAX_RESTARTS,
   DEFAULT_EIGENMODE_TOLERANCE,
@@ -157,6 +158,14 @@ import {
 function findObjectIdByName(system: System, name: string): string | null {
   const match = Object.entries(system.objects).find(([, obj]) => obj.name === name)
   return match ? match[0] : null
+}
+
+function ensureStateSpaceScene(system: System): System {
+  if (system.scenes.length > 0) return system
+  const name = suggestDefaultName('scene', {
+    existingNames: system.scenes.map((scene) => scene.name),
+  })
+  return addScene(system, name).system
 }
 
 function equilibriumSolutionFingerprint(
@@ -3057,8 +3066,9 @@ export function AppProvider({
           subsystemSnapshot: snapshot,
           frozenVariables: normalizeObjectFrozenVariables(system, orbit),
         })
-        dispatch({ type: 'SET_SYSTEM', system: updated })
-        await store.save(updated)
+        const withViewport = ensureStateSpaceScene(updated)
+        dispatch({ type: 'SET_SYSTEM', system: withViewport })
+        await store.save(withViewport)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         dispatch({ type: 'SET_ERROR', error: message })
@@ -3532,7 +3542,11 @@ export function AppProvider({
           createdAt: computedAt,
         }
         const created = addObject(updatedCurrent, measureObject)
-        const selected = selectNode(created.system, created.nodeId)
+        const styled = updateNodeRender(created.system, created.nodeId, {
+          color: DEFAULT_INVARIANT_MEASURE_COLOR,
+          pointSize: 6,
+        })
+        const selected = selectNode(ensureStateSpaceScene(styled), created.nodeId)
         if (systemSaveTimer.current) {
           clearTimeout(systemSaveTimer.current)
           systemSaveTimer.current = null
