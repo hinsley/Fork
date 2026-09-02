@@ -2,7 +2,7 @@ use crate::{
     autodiff::Dual,
     traits::{DynamicalSystem, Scalar},
 };
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -403,6 +403,350 @@ impl Bytecode {
 
     pub fn uses_context(&self) -> bool {
         self.ops.iter().any(|op| matches!(op, OpCode::LoadContext))
+    }
+
+    /// Maximum number of stack slots needed to execute this bytecode, computed by
+    /// walking the op stream once. Used to size preallocated evaluation buffers so
+    /// hot paths can run with pure index arithmetic and no per-eval bookkeeping.
+    pub fn max_stack_depth(&self) -> usize {
+        let mut height = 0usize;
+        let mut max = 1usize; // at least one slot so callers can always index buf[0]
+        for op in &self.ops {
+            match op {
+                OpCode::LoadConst(_) | OpCode::LoadVar(_) | OpCode::LoadParam(_) | OpCode::LoadContext => {
+                    height += 1;
+                }
+                OpCode::Clamp | OpCode::Select => {
+                    height = height.saturating_sub(2);
+                }
+                OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Div | OpCode::Pow
+                | OpCode::LogBase
+                | OpCode::Atan2
+                | OpCode::Hypot
+                | OpCode::Min
+                | OpCode::Max
+                | OpCode::LogAddExp
+                | OpCode::Less
+                | OpCode::LessEqual
+                | OpCode::Greater
+                | OpCode::GreaterEqual
+                | OpCode::Equal
+                | OpCode::NotEqual => {
+                    height = height.saturating_sub(1);
+                }
+                _ => {} // unary ops: net zero stack change
+            }
+            if height > max {
+                max = height;
+            }
+        }
+        max
+    }
+}
+
+/// Executes a bytecode op stream against a preallocated buffer using direct slot
+/// indexing instead of `Vec` push/pop. `buf` must be at least as long as the
+/// maximum stack depth reached (see [`Bytecode::max_stack_depth`]); slots are
+/// overwritten in place and no growth is ever required. Returns the final top
+/// value, or 0 if the stream leaves the stack empty — matching `VM::execute_at`.
+fn execute_ops<T: ExpressionScalar + Copy>(
+    ops: &[OpCode],
+    vars: &[T],
+    params: &[T],
+    context: T,
+    buf: &mut [T],
+) -> T {
+    let mut top = 0usize;
+    for op in ops {
+        match op {
+            OpCode::LoadConst(val) => {
+                buf[top] = T::from_f64(*val).unwrap();
+                top += 1;
+            }
+            OpCode::LoadVar(idx) => {
+                buf[top] = vars[*idx];
+                top += 1;
+            }
+            OpCode::LoadParam(idx) => {
+                buf[top] = params[*idx];
+                top += 1;
+            }
+            OpCode::LoadContext => {
+                buf[top] = context;
+                top += 1;
+            }
+            OpCode::Add => {
+                let b = buf[top - 1];
+                let a = buf[top - 2];
+                top -= 1;
+                buf[top - 1] = a + b;
+            }
+            OpCode::Sub => {
+                let b = buf[top - 1];
+                let a = buf[top - 2];
+                top -= 1;
+                buf[top - 1] = a - b;
+            }
+            OpCode::Mul => {
+                let b = buf[top - 1];
+                let a = buf[top - 2];
+                top -= 1;
+                buf[top - 1] = a * b;
+            }
+            OpCode::Div => {
+                let b = buf[top - 1];
+                let a = buf[top - 2];
+                top -= 1;
+                buf[top - 1] = a / b;
+            }
+            OpCode::Pow => {
+                let b = buf[top - 1];
+                let a = buf[top - 2];
+                top -= 1;
+                buf[top - 1] = a.powf(b);
+            }
+            OpCode::Sin => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.sin();
+            }
+            OpCode::Cos => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.cos();
+            }
+            OpCode::Tan => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.tan();
+            }
+            OpCode::Exp => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.exp();
+            }
+            OpCode::Log => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.ln();
+            }
+            OpCode::Sinh => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.sinh();
+            }
+            OpCode::Cosh => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.cosh();
+            }
+            OpCode::Tanh => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.tanh();
+            }
+            OpCode::Sec => {
+                let a = buf[top - 1];
+                buf[top - 1] = T::one() / a.cos();
+            }
+            OpCode::Csc => {
+                let a = buf[top - 1];
+                buf[top - 1] = T::one() / a.sin();
+            }
+            OpCode::Cot => {
+                let a = buf[top - 1];
+                buf[top - 1] = T::one() / a.tan();
+            }
+            OpCode::Sech => {
+                let a = buf[top - 1];
+                buf[top - 1] = T::one() / a.cosh();
+            }
+            OpCode::Csch => {
+                let a = buf[top - 1];
+                buf[top - 1] = T::one() / a.sinh();
+            }
+            OpCode::Coth => {
+                let a = buf[top - 1];
+                buf[top - 1] = T::one() / a.tanh();
+            }
+            OpCode::Asin => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.asin();
+            }
+            OpCode::Acos => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.acos();
+            }
+            OpCode::Atan => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.atan();
+            }
+            OpCode::Asinh => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.asinh();
+            }
+            OpCode::Acosh => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.acosh();
+            }
+            OpCode::Atanh => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.atanh();
+            }
+            OpCode::Sqrt => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.sqrt();
+            }
+            OpCode::Cbrt => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.cbrt();
+            }
+            OpCode::Exp2 => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.exp2();
+            }
+            OpCode::ExpM1 => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.exp_m1();
+            }
+            OpCode::Log2 => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.log2();
+            }
+            OpCode::Log10 => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.log10();
+            }
+            OpCode::Log1P => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.ln_1p();
+            }
+            OpCode::LogBase => {
+                let base = buf[top - 1];
+                let value = buf[top - 2];
+                top -= 1;
+                buf[top - 1] = value.log(base);
+            }
+            OpCode::Atan2 => {
+                let x = buf[top - 1];
+                let y = buf[top - 2];
+                top -= 1;
+                buf[top - 1] = y.atan2(x);
+            }
+            OpCode::Hypot => {
+                let b = buf[top - 1];
+                let a = buf[top - 2];
+                top -= 1;
+                buf[top - 1] = a.hypot(b);
+            }
+            OpCode::Min => {
+                let b = buf[top - 1];
+                let a = buf[top - 2];
+                top -= 1;
+                buf[top - 1] = a.min(b);
+            }
+            OpCode::Max => {
+                let b = buf[top - 1];
+                let a = buf[top - 2];
+                top -= 1;
+                buf[top - 1] = a.max(b);
+            }
+            OpCode::Abs => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.abs();
+            }
+            OpCode::Floor => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.floor();
+            }
+            OpCode::Ceil => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.ceil();
+            }
+            OpCode::Round => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.round();
+            }
+            OpCode::Trunc => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.trunc();
+            }
+            OpCode::Fract => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.fract();
+            }
+            OpCode::Sign => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.signum();
+            }
+            OpCode::Erf => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.expr_erf();
+            }
+            OpCode::Erfc => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.expr_erfc();
+            }
+            OpCode::Sinc => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.expr_sinc();
+            }
+            OpCode::Sigmoid => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.expr_sigmoid();
+            }
+            OpCode::Softplus => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.expr_softplus();
+            }
+            OpCode::LogAddExp => {
+                let b = buf[top - 1];
+                let a = buf[top - 2];
+                top -= 1;
+                buf[top - 1] = a.expr_logaddexp(b);
+            }
+            OpCode::Clamp => {
+                let upper = buf[top - 1];
+                let lower = buf[top - 2];
+                let value = buf[top - 3];
+                top -= 2;
+                buf[top - 1] = value.expr_clamp(lower, upper);
+            }
+            OpCode::Heaviside => {
+                let a = buf[top - 1];
+                buf[top - 1] = a.expr_heaviside();
+            }
+            OpCode::Less
+            | OpCode::LessEqual
+            | OpCode::Greater
+            | OpCode::GreaterEqual
+            | OpCode::Equal
+            | OpCode::NotEqual => {
+                let b = buf[top - 1];
+                let a = buf[top - 2];
+                top -= 1;
+                let comparison = match op {
+                    OpCode::Less => ComparisonOp::Less,
+                    OpCode::LessEqual => ComparisonOp::LessEqual,
+                    OpCode::Greater => ComparisonOp::Greater,
+                    OpCode::GreaterEqual => ComparisonOp::GreaterEqual,
+                    OpCode::Equal => ComparisonOp::Equal,
+                    OpCode::NotEqual => ComparisonOp::NotEqual,
+                    _ => unreachable!(),
+                };
+                buf[top - 1] = a.expr_compare(b, comparison);
+            }
+            OpCode::Select => {
+                let if_false = buf[top - 1];
+                let if_true = buf[top - 2];
+                let condition = buf[top - 3];
+                top -= 2;
+                buf[top - 1] = condition.expr_select(if_true, if_false);
+            }
+            OpCode::Neg => {
+                let a = buf[top - 1];
+                buf[top - 1] = -a;
+            }
+        }
+    }
+
+    // The result is the last item on the stack. Default to 0 if empty (shouldn't happen in valid code).
+    if top == 0 {
+        T::from_f64(0.0).unwrap()
+    } else {
+        buf[top - 1]
     }
 }
 
@@ -1911,6 +2255,42 @@ impl EquationSystem {
             out[i] = VM::execute_at(eq, x, &params, context, &mut stack);
         }
     }
+
+    /// Borrows the system's parameter cache once, returning an evaluator that can run any number of dual evaluations without re-borrowing.
+    /// The f64 parameters are snapshotted into the dual cache at creation time;
+    /// dropping the evaluator releases the borrow. The evaluation buffer is pre-sized to the maximum stack depth across all equations so `apply` runs with pure index arithmetic and no per-eval bookkeeping.
+    pub fn dual_evaluator(&self) -> DualEvaluator<'_> {
+        self.ensure_dual_params();
+        let params = self.params_dual.borrow();
+        let depth = self
+            .equations
+            .iter()
+            .map(|eq| eq.max_stack_depth())
+            .max()
+            .unwrap_or(1);
+        let stack = vec![Dual::new(0.0, 0.0); depth];
+        DualEvaluator {
+            equations: &self.equations,
+            params,
+            stack,
+        }
+    }
+}
+
+/// A dual-mode evaluator that borrows the system's parameter cache once and owns a pre-sized evaluation buffer, so repeated evaluations within a single integration step pay neither per-call borrow overhead nor stack bookkeeping.
+pub struct DualEvaluator<'a> {
+    equations: &'a [Bytecode],
+    params: Ref<'a, Vec<Dual>>,
+    stack: Vec<Dual>,
+}
+
+impl DualEvaluator<'_> {
+    /// Evaluates every equation in dual mode into `out`.
+    pub fn apply(&mut self, t: Dual, x: &[Dual], out: &mut [Dual]) {
+        for (i, eq) in self.equations.iter().enumerate() {
+            out[i] = execute_ops(&eq.ops, x, &self.params, t, &mut self.stack[..]);
+        }
+    }
 }
 
 impl DynamicalSystem<f64> for EquationSystem {
@@ -1963,7 +2343,7 @@ impl DynamicalSystem<Dual> for &EquationSystem {
 
 #[cfg(test)]
 mod equation_system_value_jacobian_tests {
-    use super::{parse, Compiler, Dual, EquationSystem};
+    use super::{parse, Compiler, Dual, DynamicalSystem, EquationSystem};
 
     #[test]
     fn value_and_jacobian_in_place_reuses_caller_buffers() {
@@ -2009,6 +2389,31 @@ mod equation_system_value_jacobian_tests {
         let expected = [0.25, 1.0, (-0.2_f64).cos(), -0.25];
         for (actual, expected) in jacobian.iter().zip(expected) {
             assert!((actual - expected).abs() <= 1e-15);
+        }
+    }
+
+    #[test]
+    fn dual_evaluator_matches_per_call_apply() {
+        let variables = vec!["x".to_string(), "y".to_string()];
+        let parameters = vec!["mu".to_string()];
+        let compiler = Compiler::new(&variables, &parameters);
+        let equations = ["mu*x + y*y", "sin(x) - mu*y"]
+            .iter()
+            .map(|source| compiler.compile(&parse(source).expect("parse equation")))
+            .collect();
+        let system = EquationSystem::new(equations, vec![0.25]);
+
+        let state = [Dual::new(0.4, 1.0), Dual::new(-0.3, -0.5)];
+        let mut per_call = vec![Dual::new(f64::NAN, f64::NAN); 2];
+        system.apply(Dual::new(0.0, 0.0), &state, &mut per_call);
+
+        // Repeated evaluations under one held borrow must stay bit-identical
+        // to the per-call apply path.
+        let mut evaluator = system.dual_evaluator();
+        for _ in 0..3 {
+            let mut held = vec![Dual::new(f64::NAN, f64::NAN); 2];
+            evaluator.apply(Dual::new(0.0, 0.0), &state, &mut held);
+            assert_eq!(held, per_call);
         }
     }
 }

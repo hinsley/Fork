@@ -2,6 +2,8 @@ use anyhow::{anyhow, bail, Result};
 use nalgebra::linalg::SVD;
 use nalgebra::DMatrix;
 use num_complex::Complex;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 use crate::autodiff::Dual;
 use crate::continuation::periodic::{
@@ -19,7 +21,7 @@ use crate::continuation::types::{
     ManifoldStability, ManifoldSurfaceGeometry, ManifoldSurfaceResumeState,
     ManifoldSurfaceSolverDiagnostics, ManifoldTerminationCaps,
 };
-use crate::equation_engine::EquationSystem;
+use crate::equation_engine::{DualEvaluator, EquationSystem};
 use crate::equilibrium::{
     compute_jacobian, compute_system_jacobian_with_periodicity, solve_equilibrium,
     solve_equilibrium_with_periodicity, NewtonSettings, SystemKind,
@@ -3991,6 +3993,15 @@ struct LeafFailure {
     last_tau: f64,
 }
 
+/// One accepted point on a leaf continuation walk, recorded so that later
+/// delta-shrink retries can resolve the distance event without re-walking from t=0.
+#[derive(Clone, Copy)]
+struct WalkPoint {
+    source_s: f64,
+    time: f64,
+    radial_distance: f64,
+}
+
 #[derive(Clone, Copy, Default)]
 struct GeodesicQuality {
     max_angle: f64,
@@ -4559,6 +4570,9 @@ fn grow_surface_from_geodesic_seed(
             break;
         }
         let prev_in_anchors = &prev_layer.in_anchors;
+        // Per-leaf walk recorders persist across refinement attempts so a failed
+        // attempt's walks seed the next attempt's event solves.
+        let mut recorded_walks: Vec<Vec<WalkPoint>> = vec![Vec::new(); prev.len()];
 
         let mut accepted_ring: Option<RingSolve> = None;
         let mut accepted_geodesic = GeodesicQuality::default();
@@ -4566,6 +4580,7 @@ fn grow_surface_from_geodesic_seed(
         let mut used_delta = current_leaf_delta;
         let mut last_failure: Option<(SurfaceTerminationReason, String)> = None;
         for attempt in 0..LEAF_REFINE_ATTEMPTS {
+            let t_bnr = std::time::Instant::now();
             reported_leaf_delta = used_delta;
             solver_diagnostics.ring_attempts += 1;
             let raw_next = match build_next_ring(
@@ -4578,6 +4593,7 @@ fn grow_surface_from_geodesic_seed(
                 integration_dt,
                 max_steps_per_leaf,
                 max_time,
+                &mut recorded_walks[..],
             ) {
                 Ok(raw_next) => raw_next,
                 Err(failure) => {
@@ -4621,6 +4637,17 @@ fn grow_surface_from_geodesic_seed(
                     break;
                 }
             };
+            if manifold_profile_enabled() {
+                let (scalls, stime_ns) = sample_counters();
+                eprintln!(
+                    "bnr ring={} attempt={} dt={:.4}s scalls={} stime={:.4}",
+                    ring_index,
+                    attempt,
+                    t_bnr.elapsed().as_secs_f64(),
+                    scalls,
+                    stime_ns as f64 / 1e9
+                );
+            }
             let raw_quality = evaluate_ring_quality(&raw_next.points);
             let geodesic_raw =
                 evaluate_geodesic_quality_for_solve(prev, prev_in_anchors, &raw_next);
@@ -4666,6 +4693,7 @@ fn grow_surface_from_geodesic_seed(
                 }
             }
 
+            let t_ars = std::time::Instant::now();
             let next = match adapt_ring_spacing(
                 system,
                 prev,
@@ -4718,6 +4746,14 @@ fn grow_surface_from_geodesic_seed(
                     break;
                 }
             };
+            if manifold_profile_enabled() {
+                eprintln!(
+                    "ars ring={} attempt={} dt={:.4}s",
+                    ring_index,
+                    attempt,
+                    t_ars.elapsed().as_secs_f64()
+                );
+            }
             let adapted_quality = evaluate_ring_quality(&next.points);
             solver_diagnostics.last_ring_max_turn_angle = adapted_quality.max_turn_angle;
             solver_diagnostics.last_ring_max_distance_angle = adapted_quality.max_distance_angle;
@@ -4978,6 +5014,459 @@ fn grow_surface_from_geodesic_seed(
     }
 }
 
+/// Shoot one leaf from ring point `index`, deriving its tangent and outward
+/// direction from neighboring points of the previous ring. Pure function of
+/// its inputs, so leaves may be shot concurrently across ring points.
+#[allow(clippy::too_many_arguments)]
+fn shoot_ring_leaf(
+    system: &EquationSystem,
+    prev_ring: &[Vec<f64>],
+    prev_in_anchors: &[Vec<f64>],
+    index: usize,
+    leaf_delta: f64,
+    leaf_delta_floor: f64,
+    sigma: f64,
+    dt: f64,
+    max_steps_per_leaf: usize,
+    max_time: f64,
+    walk_recorder: &mut Vec<WalkPoint>,
+) -> Result<(LeafHit, f64), LeafFailure> {
+    let m = prev_ring.len();
+    let s = (index as f64) / (m as f64);
+    let base_point = &prev_ring[index];
+    let base_in_anchor = prev_in_anchors.get(index).unwrap_or(base_point);
+    let tangent = ring_tangent_neighbor_average(prev_ring, index);
+    let outward = outward_from_in_anchor(base_point, base_in_anchor, &tangent)
+        .or_else(|_| canonical_orthogonal_unit(&tangent))
+        .unwrap_or_else(|_| {
+            let mut fallback = vec![0.0; base_point.len()];
+            if let Some(first) = fallback.first_mut() {
+                *first = 1.0;
+            }
+            fallback
+        });
+    solve_leaf_point_with_local_floor(
+        system,
+        prev_ring,
+        base_point,
+        s,
+        &tangent,
+        &outward,
+        leaf_delta,
+        leaf_delta_floor,
+        sigma,
+        dt,
+        max_steps_per_leaf,
+        max_time,
+        None,
+        walk_recorder,
+    )
+}
+
+fn manifold_profile_enabled() -> bool {
+    // Cached: this is consulted on every strict leaf sample, so the env var
+    // must not be re-read per call.
+    static ENABLED: std::sync::LazyLock<bool> =
+        std::sync::LazyLock::new(|| std::env::var("FORK_MANIFOLD_PROFILE").is_ok());
+    *ENABLED
+}
+static SAMPLE_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static SAMPLE_TIME_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn record_leaf_sample(time: f64, phase: u8) {
+    if manifold_profile_enabled() {
+        use std::sync::atomic::Ordering;
+        let t = time.abs();
+        SAMPLE_CALLS.fetch_add(1, Ordering::Relaxed);
+        LEAF_CTX.with(|c| {
+            let (calls, ns) = c.get();
+            c.set((calls + 1, ns + ((t * 1e9).round().max(0.0) as u64)));
+        });
+        PHASE_T[phase as usize]
+            .fetch_add((t * 1e9).round().max(0.0) as u64, Ordering::Relaxed);
+    }
+}
+
+fn sample_counters() -> (u64, u64) {
+    use std::sync::atomic::Ordering;
+    (SAMPLE_CALLS.load(Ordering::Relaxed), SAMPLE_TIME_NS.load(Ordering::Relaxed))
+}
+
+static PHASE_CALLS: [std::sync::atomic::AtomicU64; 4] = [
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+];
+static PHASE_T: [std::sync::atomic::AtomicU64; 4] = [
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+];
+
+/// Diagnostic: cumulative count of strict leaf-continuation samples and the
+/// total ODE time (seconds) those samples integrated. Counters accumulate
+/// across workloads until reset; see `leaf_profile_reset`.
+pub fn leaf_profile_counters() -> (u64, u64) {
+    sample_counters()
+}
+
+/// Diagnostic: strict-sample counts and integrated ODE time per phase.
+/// Phase indices: 0 = initial t=0 sample, 1 = walk corrector, 2 = direct
+/// event attempt, 3 = in-walk / retry event solves.
+pub fn leaf_phase_counters() -> ([u64; 4], [f64; 4]) {
+    use std::sync::atomic::Ordering;
+    let calls: [u64; 4] = core::array::from_fn(|i| PHASE_CALLS[i].load(Ordering::Relaxed));
+    let tsums: [f64; 4] = core::array::from_fn(|i| {
+        PHASE_T[i].load(Ordering::Relaxed) as f64 / 1e9
+    });
+    (calls, tsums)
+}
+
+static FOLLOW_ATTEMPTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FOLLOW_OK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FOLLOW_FAIL_SHIFT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FOLLOW_FAIL_BACKWARD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FOLLOW_FAIL_OTHER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static CHECKPOINT_ATTEMPTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static CHECKPOINT_OK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static CHECKPOINT_DEAD_SKIPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static DEATH_REBASE_GUARD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static DEATH_QUERY_SHIFT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static DEATH_EXTEND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PRESCAN_OK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PRESCAN_DEAD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PRESCAN_NOTIME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PRESCAN_NONE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Diagnostic: per-leaf strict-sample attribution. Mode 0 = direct event solve from pre-scan seed, mode 1 = continuation walk with no pre-scan seed, mode 2 = fallback walk after a failed seeded event solve. Index [mode][ok].
+static LEAF_MODE_CALLS: [[std::sync::atomic::AtomicU64; 2]; 3] = [
+    [
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ],
+    [
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ],
+    [
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ],
+];
+static LEAF_MODE_T_NS: [[std::sync::atomic::AtomicU64; 2]; 3] = [
+    [
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ],
+    [
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ],
+    [
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ],
+];
+static LEAF_MODE_LEAVES: [[std::sync::atomic::AtomicU64; 2]; 3] = [
+    [
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ],
+    [
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ],
+    [
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ],
+];
+thread_local! {
+    /// Per-thread strict-sample accumulator for the leaf currently being shot: (calls, ode_ns). Reset at each `shoot_leaf_point` entry.
+    static LEAF_CTX: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+    /// Last completed leaf's strict-sample stats on this thread (calls, ode_ns); diagnostic only.
+    static LEAF_LAST: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// Diagnostic: record a pre-scan outcome for one leaf attempt. `dead` is true when the reference trajectory diverged during the scan; `cache_present` false means no cache was built at all.
+fn record_prescan_outcome(seed_found: bool, dead: bool, cache_present: bool) {
+    if manifold_profile_enabled() {
+        use std::sync::atomic::Ordering;
+        match (seed_found, dead, cache_present) {
+            (true, _, _) => {
+                PRESCAN_OK.fetch_add(1, Ordering::Relaxed);
+            }
+            (_, true, true) => {
+                PRESCAN_DEAD.fetch_add(1, Ordering::Relaxed);
+            }
+            (_, false, true) => {
+                PRESCAN_NOTIME.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {
+                PRESCAN_NONE.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+/// Diagnostic: `solve_leaf_distance_event` outcome counters. Indices: 0 = radial distance collapsed, 1 = singular determinant, 2 = non-finite Newton delta, 3 = all damped candidates rejected, 4 = max iterations exhausted, 5 = strict integration error. Followed by (ok_iteration_sum, fail_iteration_sum).
+static EVENT_FAILS: [std::sync::atomic::AtomicU64; 6] = [
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+];
+static EVENT_OK_ITERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static EVENT_FAIL_ITERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static DIRECT_GUARD_REJECTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static DIRECT_GUARD_T_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static DIRECT_GUARD_FAR_S: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static WALK_JUMPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static RING_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static WALK_STEPS_SUM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static WALK_BRACKETS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Diagnostic: walk jump-start and step-to-bracket counters. Returns (jumps_applied, accepted_steps_summed_over_successes, successful_brackets).
+pub fn walk_diagnostics() -> (u64, u64, u64) {
+    (
+        WALK_JUMPS.load(std::sync::atomic::Ordering::Relaxed),
+        WALK_STEPS_SUM.load(std::sync::atomic::Ordering::Relaxed),
+        WALK_BRACKETS.load(std::sync::atomic::Ordering::Relaxed),
+    )
+}
+
+/// Diagnostic: record a direct-path hit that converged but failed the outward guard. `ring_ds` is the shortest ring-parameter distance between the hit's source and the leaf base point; values near 1/16 indicate an adjacent-ring spurious root.
+fn record_direct_guard_reject(time: f64, ring_ds: f64) {
+    if manifold_profile_enabled() {
+        use std::sync::atomic::Ordering;
+        DIRECT_GUARD_REJECTS.fetch_add(1, Ordering::Relaxed);
+        DIRECT_GUARD_T_US.fetch_add((time * 1e6).round().max(0.0) as u64, Ordering::Relaxed);
+        if ring_ds > 0.03 {
+            DIRECT_GUARD_FAR_S.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Diagnostic: record a `solve_leaf_distance_event` outcome.
+fn record_event_outcome(ok: bool, reason: u8, iteration: usize) {
+    if manifold_profile_enabled() {
+        use std::sync::atomic::Ordering;
+        if ok {
+            EVENT_OK_ITERS.fetch_add(iteration as u64, Ordering::Relaxed);
+        } else {
+            EVENT_FAILS[reason as usize].fetch_add(1, Ordering::Relaxed);
+            EVENT_FAIL_ITERS.fetch_add(iteration as u64, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Diagnostic: event-solver outcome counters. Returns (fails[[6]], ok_iteration_sum, fail_iteration_sum, direct_guard_rejects, direct_guard_t_us, direct_guard_far_s).
+pub fn leaf_event_counters() -> ([u64; 6], u64, u64, u64, u64, u64) {
+    use std::sync::atomic::Ordering;
+    let fails: [u64; 6] = core::array::from_fn(|i| EVENT_FAILS[i].load(Ordering::Relaxed));
+    (
+        fails,
+        EVENT_OK_ITERS.load(Ordering::Relaxed),
+        EVENT_FAIL_ITERS.load(Ordering::Relaxed),
+        DIRECT_GUARD_REJECTS.load(Ordering::Relaxed),
+        DIRECT_GUARD_T_US.load(Ordering::Relaxed),
+        DIRECT_GUARD_FAR_S.load(Ordering::Relaxed),
+    )
+}
+
+fn record_leaf_finish(mode: u8, ok: bool) {
+    if manifold_profile_enabled() {
+        use std::sync::atomic::Ordering;
+        let (calls, ns) = LEAF_CTX.with(|c| {
+            let v = c.get();
+            c.set((0, 0));
+            v
+        });
+        LEAF_LAST.with(|l| l.set((calls, ns)));
+        let idx = ok as usize;
+        LEAF_MODE_CALLS[mode as usize][idx].fetch_add(calls, Ordering::Relaxed);
+        LEAF_MODE_T_NS[mode as usize][idx].fetch_add(ns, Ordering::Relaxed);
+        LEAF_MODE_LEAVES[mode as usize][idx].fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Diagnostic: pre-scan outcome and per-mode leaf attribution counters. Returns (prescan_ok, prescan_dead, prescan_notime, prescan_none, mode_calls[[3][2]], mode_ode_s[[3][2]], mode_leaves[[3][2]]).
+pub fn leaf_prescan_counters() -> ([u64; 4], [[u64; 2]; 3], [[f64; 2]; 3], [[u64; 2]; 3]) {
+    use std::sync::atomic::Ordering;
+    let prescan = [
+        PRESCAN_OK.load(Ordering::Relaxed),
+        PRESCAN_DEAD.load(Ordering::Relaxed),
+        PRESCAN_NOTIME.load(Ordering::Relaxed),
+        PRESCAN_NONE.load(Ordering::Relaxed),
+    ];
+    let calls: [[u64; 2]; 3] = core::array::from_fn(|m| {
+        [
+            LEAF_MODE_CALLS[m][0].load(Ordering::Relaxed),
+            LEAF_MODE_CALLS[m][1].load(Ordering::Relaxed),
+        ]
+    });
+    let t: [[f64; 2]; 3] = core::array::from_fn(|m| {
+        [
+            LEAF_MODE_T_NS[m][0].load(Ordering::Relaxed) as f64 / 1e9,
+            LEAF_MODE_T_NS[m][1].load(Ordering::Relaxed) as f64 / 1e9,
+        ]
+    });
+    let leaves: [[u64; 2]; 3] = core::array::from_fn(|m| {
+        [
+            LEAF_MODE_LEAVES[m][0].load(Ordering::Relaxed),
+            LEAF_MODE_LEAVES[m][1].load(Ordering::Relaxed),
+        ]
+    });
+    (prescan, calls, t, leaves)
+}
+
+/// Diagnostic: reason a cursor-follow query was rejected.
+enum FollowFailReason {
+    /// Rejected by the first-order shift error bound.
+    ShiftGuard,
+    /// Query time is behind the cursor (kept for counter stability; backward propagation is now handled in [`LeafTrajectoryCache::cheap_follow`]).
+    #[allow(dead_code)]
+    Backward,
+    /// Cursor invalid, non-finite input or s jump too large, or non-finite propagation.
+    Other,
+}
+
+/// Diagnostic: record a cursor-follow query outcome.
+fn record_follow_outcome(ok: bool, reason: FollowFailReason) {
+    if manifold_profile_enabled() {
+        use std::sync::atomic::Ordering;
+        FOLLOW_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+        match (ok, reason) {
+            (true, _) => FOLLOW_OK.fetch_add(1, Ordering::Relaxed),
+            (_, FollowFailReason::ShiftGuard) => FOLLOW_FAIL_SHIFT.fetch_add(1, Ordering::Relaxed),
+            (_, FollowFailReason::Backward) => FOLLOW_FAIL_BACKWARD.fetch_add(1, Ordering::Relaxed),
+            _ => FOLLOW_FAIL_OTHER.fetch_add(1, Ordering::Relaxed),
+        };
+    }
+}
+
+/// Diagnostic: record a checkpoint-cache query outcome. `dead_skip` is true when the query was rejected because the cache had already been invalidated by exponential growth.
+fn record_checkpoint_outcome(ok: bool, dead_skip: bool) {
+    if manifold_profile_enabled() {
+        use std::sync::atomic::Ordering;
+        CHECKPOINT_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+        match (ok, dead_skip) {
+            (true, _) => {
+                CHECKPOINT_OK.fetch_add(1, Ordering::Relaxed);
+            }
+            (_, true) => {
+                CHECKPOINT_DEAD_SKIPS.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+}
+/// Diagnostic cause of a first cache death inside [`LeafTrajectoryCache::cheap_sample`].
+enum DeathCause {
+    RebaseGuard,
+    QueryShift,
+    Extend,
+}
+
+/// Diagnostic: record the cause when a live checkpoint cache is invalidated for the first time.
+fn record_death_cause(cause: DeathCause) {
+    if manifold_profile_enabled() {
+        use std::sync::atomic::Ordering;
+        match cause {
+            DeathCause::RebaseGuard => DEATH_REBASE_GUARD.fetch_add(1, Ordering::Relaxed),
+            DeathCause::QueryShift => DEATH_QUERY_SHIFT.fetch_add(1, Ordering::Relaxed),
+            DeathCause::Extend => DEATH_EXTEND.fetch_add(1, Ordering::Relaxed),
+        };
+    }
+}
+
+/// Diagnostic: cursor-follow and checkpoint-cache path counters. Returns (follow_attempts, follow_ok, follow_fail_shift_guard, follow_fail_backward, follow_fail_other, checkpoint_attempts, checkpoint_ok, checkpoint_dead_skips, death_rebase_guard, death_query_shift, death_extend).
+pub fn leaf_path_counters() -> [u64; 11] {
+    use std::sync::atomic::Ordering;
+    [
+        FOLLOW_ATTEMPTS.load(Ordering::Relaxed),
+        FOLLOW_OK.load(Ordering::Relaxed),
+        FOLLOW_FAIL_SHIFT.load(Ordering::Relaxed),
+        FOLLOW_FAIL_BACKWARD.load(Ordering::Relaxed),
+        FOLLOW_FAIL_OTHER.load(Ordering::Relaxed),
+        CHECKPOINT_ATTEMPTS.load(Ordering::Relaxed),
+        CHECKPOINT_OK.load(Ordering::Relaxed),
+        CHECKPOINT_DEAD_SKIPS.load(Ordering::Relaxed),
+        DEATH_REBASE_GUARD.load(Ordering::Relaxed),
+        DEATH_QUERY_SHIFT.load(Ordering::Relaxed),
+        DEATH_EXTEND.load(Ordering::Relaxed),
+    ]
+}
+/// Diagnostic: reset the leaf-profile counters to zero.
+pub fn leaf_profile_reset() {
+    use std::sync::atomic::Ordering;
+    SAMPLE_CALLS.store(0, Ordering::Relaxed);
+    SAMPLE_TIME_NS.store(0, Ordering::Relaxed);
+    for a in PHASE_CALLS.iter() {
+        a.store(0, Ordering::Relaxed);
+    }
+    for a in PHASE_T.iter() {
+        a.store(0, Ordering::Relaxed);
+    }
+    FOLLOW_ATTEMPTS.store(0, Ordering::Relaxed);
+    FOLLOW_OK.store(0, Ordering::Relaxed);
+    FOLLOW_FAIL_SHIFT.store(0, Ordering::Relaxed);
+    FOLLOW_FAIL_BACKWARD.store(0, Ordering::Relaxed);
+    FOLLOW_FAIL_OTHER.store(0, Ordering::Relaxed);
+    CHECKPOINT_ATTEMPTS.store(0, Ordering::Relaxed);
+    CHECKPOINT_OK.store(0, Ordering::Relaxed);
+    CHECKPOINT_DEAD_SKIPS.store(0, Ordering::Relaxed);
+    PRESCAN_OK.store(0, Ordering::Relaxed);
+    PRESCAN_DEAD.store(0, Ordering::Relaxed);
+    PRESCAN_NOTIME.store(0, Ordering::Relaxed);
+    PRESCAN_NONE.store(0, Ordering::Relaxed);
+    for a in EVENT_FAILS.iter() {
+        a.store(0, Ordering::Relaxed);
+    }
+    DEATH_REBASE_GUARD.store(0, Ordering::Relaxed);
+    DEATH_QUERY_SHIFT.store(0, Ordering::Relaxed);
+    DEATH_EXTEND.store(0, Ordering::Relaxed);
+    DIRECT_GUARD_REJECTS.store(0, Ordering::Relaxed);
+    DIRECT_GUARD_T_US.store(0, Ordering::Relaxed);
+    DIRECT_GUARD_FAR_S.store(0, Ordering::Relaxed);
+    WALK_JUMPS.store(0, Ordering::Relaxed);
+    WALK_STEPS_SUM.store(0, Ordering::Relaxed);
+    WALK_BRACKETS.store(0, Ordering::Relaxed);
+    EVENT_OK_ITERS.store(0, Ordering::Relaxed);
+    EVENT_FAIL_ITERS.store(0, Ordering::Relaxed);
+    for row in LEAF_MODE_CALLS.iter() {
+        for a in row.iter() {
+            a.store(0, Ordering::Relaxed);
+        }
+    }
+    for row in LEAF_MODE_T_NS.iter() {
+        for a in row.iter() {
+            a.store(0, Ordering::Relaxed);
+        }
+    }
+    for row in LEAF_MODE_LEAVES.iter() {
+        for a in row.iter() {
+            a.store(0, Ordering::Relaxed);
+        }
+    }
+}
+
+struct LeafProfile {
+    start: std::time::Instant,
+    shots: usize,
+}
+
+impl Drop for LeafProfile {
+    fn drop(&mut self) {
+        eprintln!(
+            "insleaf shots={} dt={:.4}s",
+            self.shots,
+            self.start.elapsed().as_secs_f64()
+        );
+    }
+}
+
 fn build_next_ring(
     system: &EquationSystem,
     prev_ring: &[Vec<f64>],
@@ -4988,51 +5477,102 @@ fn build_next_ring(
     dt: f64,
     max_steps_per_leaf: usize,
     max_time: f64,
+    walk_recorders: &mut [Vec<WalkPoint>],
 ) -> Result<RingSolve, RingBuildFailure> {
+    let ring_seq = RING_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let m = prev_ring.len();
     let mut hits = vec![None; m];
     let mut hit_deltas = vec![leaf_delta; m];
     let mut failures: Vec<(usize, LeafFailure)> = Vec::new();
-    for i in 0..m {
-        let s = (i as f64) / (m as f64);
-        let base_point = &prev_ring[i];
-        let base_in_anchor = prev_in_anchors.get(i).unwrap_or(base_point);
-        let tangent = ring_tangent_neighbor_average(prev_ring, i);
-        let outward = outward_from_in_anchor(base_point, base_in_anchor, &tangent)
-            .or_else(|_| canonical_orthogonal_unit(&tangent))
-            .unwrap_or_else(|_| {
-                let mut fallback = vec![0.0; base_point.len()];
-                if let Some(first) = fallback.first_mut() {
-                    *first = 1.0;
+    let t_shoot = std::time::Instant::now();
+    #[cfg(feature = "parallel")]
+    let results: Vec<(Result<(LeafHit, f64), LeafFailure>, Vec<WalkPoint>)> = {
+        // EquationSystem holds RefCell scratch stacks and is not Sync, so the
+        // shared reference cannot cross threads. Each worker gets its own
+        // bit-identical clone (fresh empty stacks); per-task work is a pure
+        // function of (clone, ring data, index), so results are identical to
+        // serial execution regardless of thread count or scheduling. Walk
+        // recorders are taken out slot-by-slot and moved back after the shoot,
+        // so retries see the walks recorded by earlier attempts.
+        let systems: Vec<EquationSystem> = (0..m).map(|_| system.clone()).collect();
+        let recorders: Vec<Vec<WalkPoint>> = walk_recorders.iter_mut().map(std::mem::take).collect();
+        systems
+            .into_par_iter()
+            .zip(recorders.into_par_iter())
+            .enumerate()
+            .map(|(i, (task_system, mut walk_recorder))| {
+                let t_leaf = std::time::Instant::now();
+                let result = shoot_ring_leaf(
+                    &task_system,
+                    prev_ring,
+                    prev_in_anchors,
+                    i,
+                    leaf_delta,
+                    leaf_delta_floor,
+                    sigma,
+                    dt,
+                    max_steps_per_leaf,
+                    max_time,
+                    &mut walk_recorder,
+                );
+                if manifold_profile_enabled() && t_leaf.elapsed().as_millis() >= 2 {
+                    let status = match &result {
+                        Ok(_) => "ok",
+                        Err(f) => f.kind.as_str(),
+                    };
+                    let (lcalls, lns) = LEAF_LAST.with(|l| l.get());
+                    eprintln!(
+                        "slowleaf ring={} i={} dt={:.4}s {} calls={} ode_s={:.2}",
+                        ring_seq,
+                        i,
+                        t_leaf.elapsed().as_secs_f64(),
+                        status,
+                        lcalls,
+                        lns as f64 / 1e9
+                    );
                 }
-                fallback
-            });
-        match solve_leaf_point_with_local_floor(
-            system,
-            prev_ring,
-            base_point,
-            s,
-            &tangent,
-            &outward,
-            leaf_delta,
-            leaf_delta_floor,
-            sigma,
-            dt,
-            max_steps_per_leaf,
-            max_time,
-            None,
-        ) {
+                (result, walk_recorder)
+            })
+            .collect()
+    };
+    #[cfg(not(feature = "parallel"))]
+    let results: Vec<(Result<(LeafHit, f64), LeafFailure>, Vec<WalkPoint>)> = (0..m)
+        .map(|i| {
+            let mut walk_recorder = std::mem::take(&mut walk_recorders[i]);
+            let result = shoot_ring_leaf(
+                system,
+                prev_ring,
+                prev_in_anchors,
+                i,
+                leaf_delta,
+                leaf_delta_floor,
+                sigma,
+                dt,
+                max_steps_per_leaf,
+                max_time,
+                &mut walk_recorder,
+            );
+            (result, walk_recorder)
+        })
+        .collect();
+
+    if manifold_profile_enabled() {
+        eprintln!("bnr m={} shoot={:.4}s", m, t_shoot.elapsed().as_secs_f64());
+    }
+
+    for (i, (result, recorder)) in results.into_iter().enumerate() {
+        walk_recorders[i] = recorder;
+        match result {
             Ok((hit, achieved_delta)) => {
                 hits[i] = Some(hit);
                 hit_deltas[i] = achieved_delta;
-                continue;
             }
             Err(failure) => {
                 if std::env::var("FORK_MANIFOLD_DEBUG").is_ok() {
                     eprintln!(
                         "leaf failure: i={} s={:.6} leaf_delta={:.6e} max_time={:.3} dt={:.3e} reason={}",
                         i,
-                        s,
+                        (i as f64) / (m as f64),
                         leaf_delta,
                         max_time,
                         dt,
@@ -5080,6 +5620,7 @@ fn build_next_ring(
                     max_steps_per_leaf,
                     max_time,
                     None,
+                    &mut walk_recorders[i],
                 ) {
                     Ok((hit, achieved_delta)) => {
                         hits[i] = Some(hit);
@@ -5434,6 +5975,14 @@ fn solve_spacing_insertion_leaf(
         0.5, 0.25, 0.75, 0.125, 0.375, 0.625, 0.875, 0.0625, 0.1875, 0.3125, 0.4375, 0.5625,
         0.6875, 0.8125, 0.9375,
     ];
+    let mut _leaf_profile = if manifold_profile_enabled() {
+        Some(LeafProfile {
+            start: std::time::Instant::now(),
+            shots: 0,
+        })
+    } else {
+        None
+    };
     let original_spacing = l2_distance(edge_start, edge_end);
     let mut best: Option<(LeafHit, f64, f64)> = None;
     let mut last_failure = None;
@@ -5452,6 +6001,7 @@ fn solve_spacing_insertion_leaf(
                 }
                 fallback
             });
+        let mut walk_recorder = Vec::new();
         match solve_leaf_point_with_local_floor(
             system,
             prev_ring,
@@ -5466,6 +6016,7 @@ fn solve_spacing_insertion_leaf(
             max_steps_per_leaf,
             max_time,
             None,
+            &mut walk_recorder,
         ) {
             Ok((hit, achieved_delta))
                 if anchor_strictly_between_cyclic(anchor_start, anchor_end, hit.base_anchor) =>
@@ -5485,6 +6036,9 @@ fn solve_spacing_insertion_leaf(
             }
             Ok(_) => {}
             Err(failure) => last_failure = Some(failure),
+        }
+        if let Some(profile) = _leaf_profile.as_mut() {
+            profile.shots += 1;
         }
     }
 
@@ -5923,19 +6477,17 @@ fn eval_plane_residual_and_derivative_on_segment(
         return Err(LeafFailureKind::PlaneSolveNoConvergence);
     }
     let (start, dldt) = segment_point_with_derivative(ring, segment_index, tau_segment);
-    let (point, mut deriv) = if let Some((point_var, phi)) = integrate_state_and_variational(
+    let (point, mut deriv) = if let Some((point_var, transported)) = integrate_state_and_directional(
         system,
         &start,
+        &dldt,
         tau_time,
         sigma,
         dt,
         max_steps_per_leaf,
         max_time,
     ) {
-        let deriv_var = mat_vec_mul_row_major(&phi, &dldt)
-            .map(|transported| dot(leaf_normal, &transported))
-            .unwrap_or(0.0);
-        (point_var, deriv_var)
+        (point_var, dot(leaf_normal, &transported))
     } else {
         let point = integrate_state_only(
             system,
@@ -6353,6 +6905,7 @@ fn solve_leaf_point_with_retries(
     max_steps_per_leaf: usize,
     max_time: f64,
     center: Option<&[f64]>,
+    walk_recorder: &mut Vec<WalkPoint>,
 ) -> Result<LeafHit, LeafFailure> {
     let time_cap = max_time.max(dt.max(1e-9));
     let mut dt_try = dt.max(1e-9);
@@ -6372,6 +6925,7 @@ fn solve_leaf_point_with_retries(
             max_steps_per_leaf,
             time_cap,
             center,
+            walk_recorder,
         ) {
             Ok(hit) => return Ok(hit),
             Err(failure) => {
@@ -6404,11 +6958,32 @@ fn solve_leaf_point_with_local_floor(
     max_steps_per_leaf: usize,
     max_time: f64,
     center: Option<&[f64]>,
+    walk_recorder: &mut Vec<WalkPoint>,
 ) -> Result<(LeafHit, f64), LeafFailure> {
     let floor = leaf_delta_floor.max(1e-12).min(leaf_delta);
     let mut local_delta = leaf_delta;
     let mut last_failure = None;
     for _ in 0..LEAF_REFINE_ATTEMPTS {
+        // A walk recorded by an earlier attempt (larger target delta, or a prior
+        // ring-level retry) may already bracket this target distance; resolve the
+        // event directly instead of re-walking from t=0.
+        if !walk_recorder.is_empty() {
+            if let Some(hit) = try_seeded_leaf_event(
+                system,
+                ring,
+                base_point,
+                tangent,
+                outward,
+                local_delta,
+                sigma,
+                dt,
+                max_steps_per_leaf,
+                max_time,
+                walk_recorder,
+            ) {
+                return Ok((hit, local_delta));
+            }
+        }
         match solve_leaf_point_with_retries(
             system,
             ring,
@@ -6422,6 +6997,7 @@ fn solve_leaf_point_with_local_floor(
             max_steps_per_leaf,
             max_time,
             center,
+            walk_recorder,
         ) {
             Ok(hit) => return Ok((hit, local_delta)),
             Err(failure) => {
@@ -6475,6 +7051,486 @@ fn sample_ring_parameter_with_derivative(ring: &[Vec<f64>], source_s: f64) -> (V
     (point, derivative)
 }
 
+/// Maximum number of cheap (cache-based) Newton iterations per solver call before forcing an exact evaluation.
+const LEAF_CHEAP_MAX_ITERS: usize = 8;
+
+/// Beyond this ring-parameter distance from the cache reference, rebase the cached trajectory so Taylor shifts stay small.
+const LEAF_TAYLOR_S_MAX: f64 = 0.25;
+
+/// One RK4 step on (state, w) with dual evaluation — same arithmetic as `integrate_state_and_directional`.
+fn rk4_dual_step(
+    evaluator: &mut DualEvaluator<'_>,
+    dual_buf: &mut [Dual],
+    stage_buf: &mut [f64],
+    sigma: f64,
+    h: f64,
+    state: &mut [f64],
+    sderiv: &mut [f64],
+) -> bool {
+    let n = state.len();
+    let (dual_state, dual_out) = dual_buf.split_at_mut(n);
+    let (stage_state, rest) = stage_buf.split_at_mut(n);
+    let (k0, rest) = rest.split_at_mut(n);
+    let (k1, rest) = rest.split_at_mut(n);
+    let (k2, rest) = rest.split_at_mut(n);
+    let (m0, rest) = rest.split_at_mut(n);
+    let (m1, rest) = rest.split_at_mut(n);
+    let (m2, _rest) = rest.split_at_mut(n);
+    for i in 0..n {
+        dual_state[i] = Dual::new(state[i], sderiv[i]);
+    }
+    evaluator.apply(Dual::new(0.0, 0.0), dual_state, dual_out);
+    for i in 0..n {
+        k0[i] = dual_out[i].val * sigma;
+        m0[i] = dual_out[i].eps * sigma;
+        stage_state[i] = state[i] + 0.5 * h * k0[i];
+    }
+    for i in 0..n {
+        dual_state[i] = Dual::new(stage_state[i], sderiv[i] + 0.5 * h * m0[i]);
+    }
+    evaluator.apply(Dual::new(0.0, 0.0), dual_state, dual_out);
+    for i in 0..n {
+        k1[i] = dual_out[i].val * sigma;
+        m1[i] = dual_out[i].eps * sigma;
+        stage_state[i] = state[i] + 0.5 * h * k1[i];
+    }
+    for i in 0..n {
+        dual_state[i] = Dual::new(stage_state[i], sderiv[i] + 0.5 * h * m1[i]);
+    }
+    evaluator.apply(Dual::new(0.0, 0.0), dual_state, dual_out);
+    for i in 0..n {
+        k2[i] = dual_out[i].val * sigma;
+        m2[i] = dual_out[i].eps * sigma;
+        stage_state[i] = state[i] + h * k2[i];
+    }
+    for i in 0..n {
+        dual_state[i] = Dual::new(stage_state[i], sderiv[i] + h * m2[i]);
+    }
+    evaluator.apply(Dual::new(0.0, 0.0), dual_state, dual_out);
+    for i in 0..n {
+        let k3 = dual_out[i].val * sigma;
+        state[i] += h * (k0[i] + 2.0 * k1[i] + 2.0 * k2[i] + k3) / 6.0;
+    }
+    for i in 0..n {
+        let m3 = dual_out[i].eps * sigma;
+        sderiv[i] += h * (m0[i] + 2.0 * m1[i] + 2.0 * m2[i] + m3) / 6.0;
+    }
+    state.iter().all(|value| value.is_finite()) && sderiv.iter().all(|value| value.is_finite())
+}
+
+/// Reusable trajectory cache for leaf continuation samples.
+///
+/// Integrates the reference trajectory X(t) = phi(sigma*t; s0) once, storing a checkpoint at every completed RK4 step. Samples requested near (s, t) are answered by resuming from the nearest checkpoint (at most one partial step) and applying a first-order Taylor shift in the ring parameter:
+///     X(t; s) ≈ X(t; s0) + (s - s0) * dX/ds(t; s0).
+/// Callers MUST treat cheap samples as direction estimates only: any point that is accepted or returned downstream must be verified with a fresh exact integration (`evaluate_leaf_continuation_sample`).
+struct LeafTrajectoryCache<'a> {
+    sys: &'a EquationSystem,
+    n: usize,
+    sigma: f64,
+    dt: f64,
+    s0: f64,
+    /// Flat checkpoint buffer: [t | X (n) | dXdS (n)] per entry.
+    checkpoints: Vec<f64>,
+    end_t: f64,
+    end_state: Vec<f64>,
+    end_sderiv: Vec<f64>,
+    dual_buf: Vec<Dual>,
+    stage_buf: Vec<f64>,
+    resume_state: Vec<f64>,
+    resume_sderiv: Vec<f64>,
+    scratch_point: Vec<f64>,
+    scratch_sderiv: Vec<f64>,
+    scratch_tderiv: Vec<f64>,
+    /// Maximum allowed first-order shift error (distance units) before the cached trajectory is declared unreliable.
+    shift_tol: f64,
+    dead: bool,
+    /// Incremental forward-propagation cursor: last exactly-evaluated sample of this leaf's family. Nearby (s, t) queries are answered by shifting in s at the cursor time and advancing with dual RK4 steps instead of re-integrating from t=0.
+    cursor_valid: bool,
+    cursor_s: f64,
+    cursor_t: f64,
+    cursor_x: Vec<f64>,
+    cursor_w: Vec<f64>,
+}
+
+impl<'a> LeafTrajectoryCache<'a> {
+    fn new(
+        system: &'a EquationSystem,
+        ring: &[Vec<f64>],
+        base_s: f64,
+        sigma: f64,
+        dt: f64,
+        max_time: f64,
+        shift_tol: f64,
+    ) -> Option<Self> {
+        if ring.len() <= 1 || !base_s.is_finite() || dt <= 0.0 || max_time <= 0.0 {
+            return None;
+        }
+        let (start_state, start_sderiv) = sample_ring_parameter_with_derivative(ring, base_s);
+        let n = start_state.len();
+        if n == 0
+            || !start_state.iter().all(|value| value.is_finite())
+            || !start_sderiv.iter().all(|value| value.is_finite())
+        {
+            return None;
+        }
+        // A degenerate ring parameterization (zero derivative) carries no Taylor-shift information.
+        if start_sderiv.iter().all(|value| value.abs() <= NORM_EPS) {
+            return None;
+        }
+        let stride = 1 + 2 * n;
+        let max_checkpoints = ((max_time / dt).ceil() as usize).saturating_add(2);
+        let mut checkpoints = Vec::with_capacity(max_checkpoints * stride);
+        checkpoints.push(0.0);
+        checkpoints.extend_from_slice(&start_state);
+        checkpoints.extend_from_slice(&start_sderiv);
+        Some(Self {
+            sys: system,
+            n,
+            sigma,
+            dt,
+            shift_tol,
+            s0: base_s.rem_euclid(1.0),
+            checkpoints,
+            end_t: 0.0,
+            end_state: start_state.clone(),
+            end_sderiv: start_sderiv,
+            dual_buf: vec![Dual::new(0.0, 0.0); 2 * n],
+            stage_buf: vec![0.0; 7 * n],
+            resume_state: vec![0.0; n],
+            resume_sderiv: vec![0.0; n],
+            scratch_point: vec![0.0; n],
+            scratch_sderiv: vec![0.0; n],
+            scratch_tderiv: vec![0.0; n],
+            dead: false,
+            cursor_valid: false,
+            cursor_s: 0.0,
+            cursor_t: 0.0,
+            cursor_x: vec![0.0; n],
+            cursor_w: vec![0.0; n],
+        })
+    }
+
+    /// Advance the reference trajectory to `t_target`, storing a checkpoint at every completed step.
+    fn extend_to(&mut self, t_target: f64) -> bool {
+        if !t_target.is_finite() || t_target <= self.end_t + 1e-15 {
+            return true;
+        }
+        let nominal_h = self.dt.max(1e-9);
+        let mut evaluator = self.sys.dual_evaluator();
+        let mut t = self.end_t;
+        while t + 1e-15 < t_target {
+            let h = (t_target - t).min(nominal_h);
+            if !rk4_dual_step(
+                &mut evaluator,
+                &mut self.dual_buf,
+                &mut self.stage_buf,
+                self.sigma,
+                h,
+                &mut self.end_state,
+                &mut self.end_sderiv,
+            ) {
+                self.dead = true;
+                return false;
+            }
+            t += h;
+            self.checkpoints.push(t);
+            self.checkpoints.extend_from_slice(&self.end_state);
+            self.checkpoints.extend_from_slice(&self.end_sderiv);
+        }
+        self.end_t = t;
+        true
+    }
+
+    /// Shift the cached reference trajectory by `ds` in ring parameter using stored derivatives, keeping subsequent Taylor shifts small as the leaf drifts along the ring.
+    fn rebase(&mut self, ds: f64) {
+        if self.dead || ds == 0.0 {
+            return;
+        }
+        // A full-width shift at the current trajectory end must stay within tolerance, otherwise first-order rebasing contaminates checkpoints along diverging trajectories.
+        let mut sderiv_sq = 0.0;
+        for i in 0..self.n {
+            sderiv_sq += self.end_sderiv[i] * self.end_sderiv[i];
+        }
+        if LEAF_TAYLOR_S_MAX * sderiv_sq.sqrt() > 2.0 * self.shift_tol {
+            self.dead = true;
+            return;
+        }
+        let stride = 1 + 2 * self.n;
+        let count = self.checkpoints.len() / stride;
+        for k in 0..count {
+            let x_base = k * stride + 1;
+            let d_base = x_base + self.n;
+            for i in 0..self.n {
+                self.checkpoints[x_base + i] += ds * self.checkpoints[d_base + i];
+            }
+        }
+        for i in 0..self.n {
+            self.end_state[i] += ds * self.end_sderiv[i];
+        }
+        self.s0 = (self.s0 + ds).rem_euclid(1.0);
+    }
+
+    /// Compute sigma * f(scratch_point) into `scratch_tderiv` (the time derivative of X at the last cheap sample).
+    fn time_derivative(&mut self) {
+        for i in 0..self.n {
+            self.scratch_tderiv[i] = 0.0;
+        }
+        self.sys.apply(0.0, &self.scratch_point, &mut self.scratch_tderiv);
+        if self.sigma != 1.0 {
+            for value in &mut self.scratch_tderiv {
+                *value *= self.sigma;
+            }
+        }
+    }
+
+    /// Plane residual of the last cheap sample against the leaf plane through `base_point`.
+    fn plane_residual(&self, base_point: &[f64], plane_normal: &[f64]) -> f64 {
+        let mut sum = 0.0;
+        for i in 0..self.n {
+            sum += plane_normal[i] * (self.scratch_point[i] - base_point[i]);
+        }
+        sum
+    }
+
+    /// Radial distance of the last cheap sample from `base_point`.
+    fn radial_distance(&self, base_point: &[f64]) -> f64 {
+        let mut sq = 0.0;
+        for i in 0..self.n {
+            let d = self.scratch_point[i] - base_point[i];
+            sq += d * d;
+        }
+        sq.sqrt()
+    }
+
+    /// Gradient of the plane residual with respect to ring parameter at the last cheap sample.
+    fn gradient_source(&self, plane_normal: &[f64]) -> f64 {
+        dot(plane_normal, &self.scratch_sderiv)
+    }
+
+    /// Gradient of the plane residual with respect to time at the last cheap sample (requires `time_derivative` first).
+    fn gradient_time(&self, plane_normal: &[f64]) -> f64 {
+        dot(plane_normal, &self.scratch_tderiv)
+    }
+
+    /// Dot product of (point - base_point) with the ring-parameter derivative at the last cheap sample.
+    fn offset_dot_sderiv(&self, base_point: &[f64]) -> f64 {
+        let mut sum = 0.0;
+        for i in 0..self.n {
+            sum += (self.scratch_point[i] - base_point[i]) * self.scratch_sderiv[i];
+        }
+        sum
+    }
+
+    /// Dot product of (point - base_point) with the time derivative at the last cheap sample (requires `time_derivative` first).
+    fn offset_dot_tderiv(&self, base_point: &[f64]) -> f64 {
+        let mut sum = 0.0;
+        for i in 0..self.n {
+            sum += (self.scratch_point[i] - base_point[i]) * self.scratch_tderiv[i];
+        }
+        sum
+    }
+
+    /// Answer a sample request at ring parameter `s` and time `t` from the cached trajectory, writing into scratch buffers. Returns false when the cache cannot answer (caller must fall back to exact integration).
+    fn cheap_sample(&mut self, s: f64, t: f64) -> bool {
+        if self.dead || !s.is_finite() || !t.is_finite() || t < 0.0 {
+            record_checkpoint_outcome(false, self.dead);
+            return false;
+        }
+        let mut ds = (s - self.s0).rem_euclid(1.0);
+        if ds > 0.5 {
+            ds -= 1.0;
+        }
+        if ds.abs() > LEAF_TAYLOR_S_MAX {
+            // Split large drift into a bounded rebase plus a residual Taylor shift.
+            let step = if ds > 0.0 { LEAF_TAYLOR_S_MAX } else { -LEAF_TAYLOR_S_MAX };
+            self.rebase(step);
+            ds -= step;
+        }
+        if self.dead {
+            record_death_cause(DeathCause::RebaseGuard);
+            record_checkpoint_outcome(false, true);
+            return false;
+        }
+        if !self.extend_to(t) {
+            record_death_cause(DeathCause::Extend);
+            record_checkpoint_outcome(false, false);
+            return false;
+        }
+        let stride = 1 + 2 * self.n;
+        let count = self.checkpoints.len() / stride;
+        // Find the last checkpoint with t_c <= t (checkpoints are in time order).
+        let mut k = count.saturating_sub(1);
+        while k > 0 && self.checkpoints[k * stride] > t {
+            k -= 1;
+        }
+        let base_t = self.checkpoints[k * stride];
+        if t - base_t <= 1e-15 {
+            for i in 0..self.n {
+                self.scratch_point[i] = self.checkpoints[k * stride + 1 + i];
+                self.scratch_sderiv[i] = self.checkpoints[k * stride + 1 + self.n + i];
+            }
+        } else {
+            for i in 0..self.n {
+                self.resume_state[i] = self.checkpoints[k * stride + 1 + i];
+                self.resume_sderiv[i] = self.checkpoints[k * stride + 1 + self.n + i];
+            }
+            let mut evaluator = self.sys.dual_evaluator();
+            if !rk4_dual_step(
+                &mut evaluator,
+                &mut self.dual_buf,
+                &mut self.stage_buf,
+                self.sigma,
+                t - base_t,
+                &mut self.resume_state,
+                &mut self.resume_sderiv,
+            ) {
+                self.dead = true;
+                record_death_cause(DeathCause::Extend);
+                record_checkpoint_outcome(false, false);
+                return false;
+            }
+            for i in 0..self.n {
+                self.scratch_point[i] = self.resume_state[i];
+                self.scratch_sderiv[i] = self.resume_sderiv[i];
+            }
+        }
+        if ds != 0.0 {
+            let mut sderiv_sq = 0.0;
+            for i in 0..self.n {
+                sderiv_sq += self.scratch_sderiv[i] * self.scratch_sderiv[i];
+            }
+            // Exponential growth of dX/ds along diverging trajectories makes the first-order shift unreliable once its error bound exceeds a fraction of the target distance.
+            if ds.abs() * sderiv_sq.sqrt() > self.shift_tol {
+                self.dead = true;
+                record_death_cause(DeathCause::QueryShift);
+                record_checkpoint_outcome(false, false);
+                return false;
+            }
+            for i in 0..self.n {
+                self.scratch_point[i] += ds * self.scratch_sderiv[i];
+            }
+        }
+        record_checkpoint_outcome(true, false);
+        true
+    }
+    /// Build a [`LeafContinuationSample`] from the last cheap sample's scratch data.
+    /// Must be called immediately after `cheap_sample` + `time_derivative` for the same
+    /// (s, t) request. The point is the first-order Taylor shift of the cached reference
+    /// trajectory; callers accept it in place of an exact re-integration when their own
+    /// residual checks pass on these values. Returns `None` (and kills the cache) if any
+    /// value is non-finite.
+    fn to_sample(
+        &mut self,
+        source_s: f64,
+        time: f64,
+        plane_residual: f64,
+        base_point: &[f64],
+        outward: &[f64],
+    ) -> Option<LeafContinuationSample> {
+        if self.scratch_point.iter().any(|v| !v.is_finite())
+            || self.scratch_sderiv.iter().any(|v| !v.is_finite())
+            || self.scratch_tderiv.iter().any(|v| !v.is_finite())
+        {
+            self.dead = true;
+            return None;
+        }
+        let point = self.scratch_point.clone();
+        let offset = subtract(&point, base_point);
+        Some(LeafContinuationSample {
+            source_s,
+            time,
+            plane_residual,
+            radial_distance: l2_norm(&offset),
+            outward_distance: signed_distance_with_direction(outward, &offset),
+            point_source_derivative: self.scratch_sderiv.clone(),
+            point_time_derivative: self.scratch_tderiv.clone(),
+            point,
+        })
+    }
+
+    /// Anchor the forward-propagation cursor at an exactly-evaluated sample (`point` and its ring-parameter derivative `sderiv`). Called after every strict evaluation so cheap queries stay close to exact data.
+    fn set_cursor(&mut self, source_s: f64, time: f64, point: &[f64], sderiv: &[f64]) {
+        if point.len() != self.n || sderiv.len() != self.n {
+            return;
+        }
+        if !point.iter().all(|v| v.is_finite()) || !sderiv.iter().all(|v| v.is_finite()) {
+            return;
+        }
+        for i in 0..self.n {
+            self.cursor_x[i] = point[i];
+            self.cursor_w[i] = sderiv[i];
+        }
+        self.cursor_s = source_s;
+        self.cursor_t = time;
+        self.cursor_valid = true;
+    }
+
+    /// Answer a sample request by propagating the cursor (forward or backward in time): first-order shift in s at the cursor time, then sign-aware dual RK4 steps to `time`. Writes into the scratch buffers without mutating the cursor. Returns false when the query is not answerable from the cursor — large s jump, excessive first-order shift error, or non-finite propagation — and callers fall back to checkpoint/strict paths. The cursor holds exactly-evaluated data only (anchored via [`Self::set_cursor`] after every strict sample), so first-order shift error never accumulates across accepted cheap steps; it stays usable even once exponential growth has killed the Taylor checkpoints (`dead`).
+    fn cheap_follow(&mut self, source_s: f64, time: f64) -> bool {
+        if !self.cursor_valid || !source_s.is_finite() || !time.is_finite() || time < 0.0 {
+            record_follow_outcome(false, FollowFailReason::Other);
+            return false;
+        }
+        let mut ds = (source_s - self.cursor_s).rem_euclid(1.0);
+        if ds > 0.5 {
+            ds -= 1.0;
+        }
+        if ds.abs() > LEAF_TAYLOR_S_MAX {
+            record_follow_outcome(false, FollowFailReason::Other);
+            return false;
+        }
+        // Early shift guard: if the first-order s-shift error is already over budget at
+        // the cursor, it will only grow along diverging trajectories (both benchmarked
+        // manifolds integrate away from the equilibrium), so fail in O(1) instead of
+        // propagating many dual RK4 steps before the post-loop guard rejects anyway.
+        let cursor_w_sq = self.cursor_w.iter().map(|v| v * v).sum::<f64>();
+        if ds.abs() * cursor_w_sq.sqrt() > self.shift_tol {
+            record_follow_outcome(false, FollowFailReason::ShiftGuard);
+            return false;
+        }
+        for i in 0..self.n {
+            self.resume_state[i] = self.cursor_x[i] + ds * self.cursor_w[i];
+            self.resume_sderiv[i] = self.cursor_w[i];
+        }
+        let mut evaluator = self.sys.dual_evaluator();
+        let mut t_cur = self.cursor_t;
+        while (time - t_cur).abs() > 1e-15 {
+            // Sign-aware step size: RK4 is symmetric in h, so negative steps integrate the flow backward from the cursor to answer queries slightly behind it. Walk points only steer Newton iterations — final vertices are always refined by a strict event solve — and the shift guard below still bounds first-order error at the query time.
+            let remaining = time - t_cur;
+            let h = if remaining > 0.0 {
+                remaining.min(self.dt.max(1e-9))
+            } else {
+                -(self.dt.max(1e-9).min(-remaining))
+            };
+            if !rk4_dual_step(
+                &mut evaluator,
+                &mut self.dual_buf,
+                &mut self.stage_buf,
+                self.sigma,
+                h,
+                &mut self.resume_state,
+                &mut self.resume_sderiv,
+            ) {
+                record_follow_outcome(false, FollowFailReason::Other);
+                return false; // Non-finite propagation — leave the cursor intact and let the caller fall back to strict evaluation.
+            }
+            t_cur += h;
+        }
+        // First-order s-shift error grows with ||dX/ds|| along diverging trajectories. The budget matches the checkpoint cache's shift tolerance exactly: beyond it, first-order data is not trustworthy enough to steer Newton (a badly-shifted sample can pull the iterate toward a spurious root), so fall back to strict evaluation.
+        let sderiv_sq = self.resume_sderiv.iter().map(|v| v * v).sum::<f64>();
+        if ds.abs() * sderiv_sq.sqrt() > self.shift_tol {
+            record_follow_outcome(false, FollowFailReason::ShiftGuard);
+            return false; // Shift error too large — leave the cursor intact and fall back to strict evaluation.
+        }
+        for i in 0..self.n {
+            self.scratch_point[i] = self.resume_state[i];
+            self.scratch_sderiv[i] = self.resume_sderiv[i];
+        }
+        record_follow_outcome(true, FollowFailReason::Other);
+        true
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn evaluate_leaf_continuation_sample(
     system: &EquationSystem,
@@ -6488,17 +7544,20 @@ fn evaluate_leaf_continuation_sample(
     dt: f64,
     max_steps_per_leaf: usize,
     max_time: f64,
+    phase: u8,
 ) -> Result<LeafContinuationSample, LeafFailureKind> {
     if !source_s.is_finite() || !time.is_finite() || time < 0.0 || time > max_time + 1e-12 {
         return Err(LeafFailureKind::PlaneSolveNoConvergence);
     }
+    record_leaf_sample(time, phase);
     let (start, start_source_derivative) = sample_ring_parameter_with_derivative(ring, source_s);
     if start.len() != base_point.len() || start_source_derivative.len() != base_point.len() {
         return Err(LeafFailureKind::PlaneSolveNoConvergence);
     }
-    let (point, phi) = integrate_state_and_variational(
+    let (point, point_source_derivative) = integrate_state_and_directional(
         system,
         &start,
+        &start_source_derivative,
         time,
         sigma,
         dt,
@@ -6506,8 +7565,6 @@ fn evaluate_leaf_continuation_sample(
         max_time,
     )
     .ok_or(LeafFailureKind::IntegratorNonFinite)?;
-    let point_source_derivative = mat_vec_mul_row_major(&phi, &start_source_derivative)
-        .ok_or(LeafFailureKind::PlaneSolveNoConvergence)?;
     let mut point_time_derivative = vec![0.0; point.len()];
     system.apply(0.0, &point, &mut point_time_derivative);
     for value in &mut point_time_derivative {
@@ -6572,10 +7629,76 @@ fn correct_leaf_continuation_predictor(
     max_steps_per_leaf: usize,
     max_time: f64,
     plane_tol: f64,
+    mut cache: Option<&mut LeafTrajectoryCache>,
 ) -> Result<(LeafContinuationSample, usize), LeafFailureKind> {
     let mut source_s = predictor[0];
     let mut time = predictor[1];
+    // Steering samples only: accepted walk points are always re-refined by a strict event solve, so Newton steering here can afford a coarser integration step. The integrator's auto-coarsening (h >= tau/max_steps) already degrades long calls this way near the step cap; extending it to medium-length calls cuts their step count without changing any accepted vertex.
+    let steering_dt = dt * 4.0;
     for iteration in 0..LEAF_CONTINUATION_NEWTON_MAX_ITERS {
+        // Cheap direction estimate from the trajectory cache. When it converges within the
+        // walk tolerance we accept it directly: the vertex is always refined by a strict
+        // event solve from an interpolated seed, so re-integrating from t=0 here would only
+        // cost O(t/dt) per step without changing the accepted point.
+        if let Some(cache) = cache.as_mut() {
+            if iteration < LEAF_CHEAP_MAX_ITERS {
+                if cache.cheap_follow(source_s, time) || cache.cheap_sample(source_s, time) {
+                    let plane_residual = cache.plane_residual(base_point, plane_normal);
+                    let gradient_source = cache.gradient_source(plane_normal);
+                    cache.time_derivative();
+                    let gradient_time = cache.gradient_time(plane_normal);
+                    let pseudo_residual = (source_s - predictor[0]) * tangent[0]
+                        + (time - predictor[1]) * tangent[1];
+                    if plane_residual.abs() <= plane_tol && pseudo_residual.abs() <= plane_tol {
+                        if let Some(sample) =
+                            cache.to_sample(source_s, time, plane_residual, base_point, outward)
+                        {
+                            return Ok((sample, iteration + 1));
+                        }
+                    } else {
+                        let determinant = gradient_source * tangent[1] - gradient_time * tangent[0];
+                        if !determinant.is_finite() || determinant.abs() > LEAF_PLANE_DERIV_EPS {
+                            let delta_source = (-plane_residual * tangent[1] + gradient_time * pseudo_residual) / determinant;
+                            let delta_time = (-gradient_source * pseudo_residual + plane_residual * tangent[0]) / determinant;
+                            if delta_source.is_finite() && delta_time.is_finite() {
+                                // Damped step with a monotone-residual-decrease requirement, mirroring the event solver. Cheap samples steer only; a candidate that does not reduce the (cheap) residual is rejected so the iterate cannot wander on badly-shifted data — it falls through to exact evaluation at the current point instead.
+                                let scaled_residual = (plane_residual / plane_tol.max(1e-14))
+                                    .hypot(pseudo_residual / plane_tol.max(1e-14));
+                                let mut damping = 1.0;
+                                let mut stepped = false;
+                                for _ in 0..8 {
+                                    let candidate_source = source_s + damping * delta_source;
+                                    let candidate_time = time + damping * delta_time;
+                                    if candidate_time < 0.0 || candidate_time > max_time + 1e-12 {
+                                        damping *= 0.5;
+                                        continue;
+                                    }
+                                    if cache.cheap_follow(candidate_source, candidate_time)
+                                        || cache.cheap_sample(candidate_source, candidate_time)
+                                    {
+                                        let cplane = cache.plane_residual(base_point, plane_normal);
+                                        let cpseudo = (candidate_source - predictor[0]) * tangent[0]
+                                            + (candidate_time - predictor[1]) * tangent[1];
+                                        let cand_res = (cplane / plane_tol.max(1e-14))
+                                            .hypot(cpseudo / plane_tol.max(1e-14));
+                                        if cand_res.is_finite() && cand_res < scaled_residual {
+                                            source_s = candidate_source;
+                                            time = candidate_time;
+                                            stepped = true;
+                                            break;
+                                        }
+                                    }
+                                    damping *= 0.5;
+                                }
+                                if stepped {
+                                    continue; // Cheap step accepted — next iteration re-evaluates there.
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let sample = evaluate_leaf_continuation_sample(
             system,
             ring,
@@ -6585,10 +7708,14 @@ fn correct_leaf_continuation_predictor(
             source_s,
             time,
             sigma,
-            dt,
+            steering_dt,
             max_steps_per_leaf,
             max_time,
+            1, // WalkCorrector (probe)
         )?;
+        if let Some(c) = cache.as_mut() {
+            c.set_cursor(source_s, time, &sample.point, &sample.point_source_derivative);
+        }
         let pseudo_residual =
             (source_s - predictor[0]) * tangent[0] + (time - predictor[1]) * tangent[1];
         if sample.plane_residual.abs() <= plane_tol && pseudo_residual.abs() <= plane_tol {
@@ -6636,10 +7763,70 @@ fn solve_leaf_distance_event(
     max_time: f64,
     plane_tol: f64,
     distance_tol: f64,
+    mut cache: Option<&mut LeafTrajectoryCache>,
+    phase: u8,
 ) -> Result<LeafContinuationSample, LeafFailureKind> {
     let mut source_s = initial_source_s;
     let mut time = initial_time;
-    for _ in 0..LEAF_CONTINUATION_EVENT_MAX_ITERS {
+    for iteration in 0..LEAF_CONTINUATION_EVENT_MAX_ITERS {
+        // Cheap direction estimate from the trajectory cache; acceptance is always decided on a fresh exact integration.
+        if let Some(cache) = cache.as_mut() {
+            if iteration < LEAF_CHEAP_MAX_ITERS {
+                if cache.cheap_follow(source_s, time) || cache.cheap_sample(source_s, time) {
+                    let plane_residual = cache.plane_residual(base_point, plane_normal);
+                    let radial_distance = cache.radial_distance(base_point);
+                    let distance_residual = radial_distance - leaf_delta;
+                    if !(plane_residual.abs() <= plane_tol && distance_residual.abs() <= distance_tol) {
+                        if radial_distance > NORM_EPS {
+                            cache.time_derivative();
+                            let offset_dot_sderiv = cache.offset_dot_sderiv(base_point);
+                            let offset_dot_tderiv = cache.offset_dot_tderiv(base_point);
+                            let plane_source = cache.gradient_source(plane_normal);
+                            let plane_time = cache.gradient_time(plane_normal);
+                            let distance_source = offset_dot_sderiv / radial_distance;
+                            let distance_time = offset_dot_tderiv / radial_distance;
+                            let determinant = plane_source * distance_time - plane_time * distance_source;
+                            if !determinant.is_finite() || determinant.abs() > LEAF_PLANE_DERIV_EPS {
+                                let delta_source = (-plane_residual * distance_time + plane_time * distance_residual) / determinant;
+                                let delta_time = (-plane_source * distance_residual + plane_residual * distance_source) / determinant;
+                                if delta_source.is_finite() && delta_time.is_finite() {
+                                    let scaled_residual = (plane_residual / plane_tol.max(1e-14))
+                                        .hypot(distance_residual / distance_tol.max(1e-14));
+                                    let mut accepted = false;
+                                    let mut damping = 1.0;
+                                    for _ in 0..8 {
+                                        let candidate_source = source_s + damping * delta_source;
+                                        let candidate_time = time + damping * delta_time;
+                                        if candidate_time < 0.0 || candidate_time > max_time + 1e-12 {
+                                            damping *= 0.5;
+                                            continue;
+                                        }
+                                        if cache.cheap_follow(candidate_source, candidate_time)
+                                            || cache.cheap_sample(candidate_source, candidate_time)
+                                        {
+                                            let cplane = cache.plane_residual(base_point, plane_normal);
+                                            let cradial = cache.radial_distance(base_point);
+                                            let candidate_residual = (cplane / plane_tol.max(1e-14))
+                                                .hypot((cradial - leaf_delta) / distance_tol.max(1e-14));
+                                            if candidate_residual.is_finite() && candidate_residual < scaled_residual {
+                                                source_s = candidate_source;
+                                                time = candidate_time;
+                                                accepted = true;
+                                                break;
+                                            }
+                                        }
+                                        damping *= 0.5;
+                                    }
+                                    if accepted {
+                                        continue; // Cheap step accepted — next iteration re-evaluates there.
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let sample = evaluate_leaf_continuation_sample(
             system,
             ring,
@@ -6652,12 +7839,22 @@ fn solve_leaf_distance_event(
             dt,
             max_steps_per_leaf,
             max_time,
-        )?;
+            phase,
+        )
+        .map_err(|kind| {
+            record_event_outcome(false, 5, iteration);
+            kind
+        })?;
+        if let Some(c) = cache.as_mut() {
+            c.set_cursor(source_s, time, &sample.point, &sample.point_source_derivative);
+        }
         let distance_residual = sample.radial_distance - leaf_delta;
         if sample.plane_residual.abs() <= plane_tol && distance_residual.abs() <= distance_tol {
+            record_event_outcome(true, 0, iteration);
             return Ok(sample);
         }
         if sample.radial_distance <= NORM_EPS {
+            record_event_outcome(false, 0, iteration);
             return Err(LeafFailureKind::PlaneRootNotBracketed);
         }
         let offset = subtract(&sample.point, base_point);
@@ -6668,6 +7865,7 @@ fn solve_leaf_distance_event(
         let distance_time = dot(&offset, &sample.point_time_derivative) / sample.radial_distance;
         let determinant = plane_source * distance_time - plane_time * distance_source;
         if !determinant.is_finite() || determinant.abs() <= LEAF_PLANE_DERIV_EPS {
+            record_event_outcome(false, 1, iteration);
             return Err(LeafFailureKind::PlaneRootNotBracketed);
         }
         let delta_source =
@@ -6676,6 +7874,7 @@ fn solve_leaf_distance_event(
             + sample.plane_residual * distance_source)
             / determinant;
         if !delta_source.is_finite() || !delta_time.is_finite() {
+            record_event_outcome(false, 2, iteration);
             return Err(LeafFailureKind::PlaneRootNotBracketed);
         }
 
@@ -6687,6 +7886,29 @@ fn solve_leaf_distance_event(
             let candidate_source = source_s + damping * delta_source;
             let candidate_time = time + damping * delta_time;
             if candidate_time < 0.0 || candidate_time > max_time + 1e-12 {
+                damping *= 0.5;
+                continue;
+            }
+            // Cheap pre-filter: a first-order estimate that does not reduce the residual
+            // skips this damping level's full re-integration. Acceptance below is still
+            // decided on strict data, so accepted vertices are unchanged when it passes.
+            // Only cursor-follow answers here: unlike checkpoint sampling it never rebases
+            // or kills the cache, and unanswerable candidates fall through to the strict
+            // evaluation as before.
+            let cheap_rejects = if let Some(c) = cache.as_mut() {
+                if c.cheap_follow(candidate_source, candidate_time) {
+                    let cplane = c.plane_residual(base_point, plane_normal);
+                    let cradial = c.radial_distance(base_point);
+                    let cand_res = (cplane / plane_tol.max(1e-14))
+                        .hypot((cradial - leaf_delta) / distance_tol.max(1e-14));
+                    !(cand_res.is_finite() && cand_res < scaled_residual)
+                } else {
+                    false // Follow cannot answer — fall through to the strict evaluation.
+                }
+            } else {
+                false
+            };
+            if cheap_rejects {
                 damping *= 0.5;
                 continue;
             }
@@ -6702,7 +7924,20 @@ fn solve_leaf_distance_event(
                 dt,
                 max_steps_per_leaf,
                 max_time,
-            )?;
+                phase,
+            )
+            .map_err(|kind| {
+                record_event_outcome(false, 5, iteration);
+                kind
+            })?;
+            if let Some(c) = cache.as_mut() {
+                c.set_cursor(
+                    candidate_source,
+                    candidate_time,
+                    &candidate.point,
+                    &candidate.point_source_derivative,
+                );
+            }
             let candidate_residual = (candidate.plane_residual / plane_tol.max(1e-14))
                 .hypot((candidate.radial_distance - leaf_delta) / distance_tol.max(1e-14));
             if candidate_residual.is_finite() && candidate_residual < scaled_residual {
@@ -6714,9 +7949,11 @@ fn solve_leaf_distance_event(
             damping *= 0.5;
         }
         if !accepted {
+            record_event_outcome(false, 3, iteration);
             return Err(LeafFailureKind::PlaneRootNotBracketed);
         }
     }
+    record_event_outcome(false, 4, LEAF_CONTINUATION_EVENT_MAX_ITERS - 1);
     Err(LeafFailureKind::PlaneRootNotBracketed)
 }
 
@@ -6733,6 +7970,7 @@ fn shoot_leaf_point(
     max_steps_per_leaf: usize,
     max_time: f64,
     _center: Option<&[f64]>,
+    walk_recorder: &mut Vec<WalkPoint>,
 ) -> Result<LeafHit, LeafFailure> {
     if ring.is_empty() || dt <= 0.0 || max_time <= 0.0 {
         return Err(LeafFailure {
@@ -6742,24 +7980,17 @@ fn shoot_leaf_point(
             last_tau: 0.0,
         });
     }
-    let leaf_normal = leaf_plane_normal(tangent).ok_or(LeafFailure {
+    let (leaf_normal, signed_direction) = leaf_plane_and_direction(tangent, outward, base_point.len()).ok_or(LeafFailure {
         kind: LeafFailureKind::PlaneSolveNoConvergence,
         last_time: 0.0,
         last_segment: 0,
         last_tau: 0.0,
     })?;
-    let signed_direction = normalize(outward.to_vec()).unwrap_or_else(|_| {
-        canonical_orthogonal_unit(tangent).unwrap_or_else(|_| {
-            let mut fallback = vec![0.0; base_point.len()];
-            if let Some(first) = fallback.first_mut() {
-                *first = 1.0;
-            }
-            fallback
-        })
-    });
     let plane_tol = (leaf_delta * 1e-8).max(1e-10);
     let distance_tol = (leaf_delta * 1e-8).max(1e-10);
     let outward_tol = (leaf_delta * 1e-6).max(1e-10);
+    let mut cache = LeafTrajectoryCache::new(system, ring, base_s, sigma, dt, max_time, 0.1 * leaf_delta);
+    LEAF_CTX.with(|c| c.set((0, 0)));
     let mut current = evaluate_leaf_continuation_sample(
         system,
         ring,
@@ -6772,6 +8003,7 @@ fn shoot_leaf_point(
         dt,
         max_steps_per_leaf,
         max_time,
+        0, // Init0 (probe)
     )
     .map_err(|kind| LeafFailure {
         kind,
@@ -6779,6 +8011,15 @@ fn shoot_leaf_point(
         last_segment: 0,
         last_tau: 0.0,
     })?;
+    if let Some(c) = cache.as_mut() {
+        c.set_cursor(base_s, 0.0, &current.point, &current.point_source_derivative);
+    }
+    walk_recorder.clear();
+    walk_recorder.push(WalkPoint {
+        source_s: base_s,
+        time: 0.0,
+        radial_distance: current.radial_distance,
+    });
     let mut continuation_tangent =
         leaf_continuation_tangent(&current, &leaf_normal, None).ok_or(LeafFailure {
             kind: LeafFailureKind::PlaneSolveNoConvergence,
@@ -6790,6 +8031,152 @@ fn shoot_leaf_point(
     let mut last_failure_kind = LeafFailureKind::NoFirstHitWithinMaxTime;
     let max_attempts = max_steps_per_leaf.max(64).saturating_mul(8);
 
+    // Pre-scan: integrate the reference trajectory X(t; base_s) step by step, recording
+    // checkpoints in `walk_recorder`, until its radial distance first crosses leaf_delta.
+    // The continuation walk below would otherwise re-integrate 0..t_k at every accepted
+    // step just to discover where this crossing is, so when the pre-scan brackets it we
+    // resolve the distance event directly from that seed instead of marching from t=0.
+    let pre_scan_seed = {
+        let mut seed: Option<(f64, usize)> = None; // (time_seed, crossing checkpoint index)
+        if let Some(cache_ref) = cache.as_mut() {
+            let n = base_point.len();
+            let stride = 1 + 2 * n;
+            let mut t_prev = 0.0_f64;
+            let mut r_prev = 0.0_f64; // |X(0; base_s) - base_point| is exactly zero.
+            'scan: while seed.is_none() && cache_ref.end_t < max_time - 1e-15 {
+                let prev_count = cache_ref.checkpoints.len() / stride;
+                if !cache_ref.extend_to((cache_ref.end_t + dt).min(max_time)) {
+                    break;
+                }
+                for k in prev_count..(cache_ref.checkpoints.len() / stride) {
+                    let t_k = cache_ref.checkpoints[k * stride];
+                    let mut sq = 0.0_f64;
+                    for i in 0..n {
+                        let d = cache_ref.checkpoints[k * stride + 1 + i] - base_point[i];
+                        sq += d * d;
+                    }
+                    let r_k = sq.sqrt();
+                    walk_recorder.push(WalkPoint {
+                        source_s: base_s,
+                        time: t_k,
+                        radial_distance: r_k,
+                    });
+                    if r_prev < leaf_delta && r_k >= leaf_delta {
+                        // Only outward crossings are usable seeds. Spiraling flows cross the
+                        // sphere repeatedly near the base point, and Newton from a seed at an
+                        // inward crossing converges to that root, which the outward guard then
+                        // rejects — wasting the direct attempt before falling back to the walk.
+                        let mut outward_dot = 0.0_f64;
+                        for i in 0..n {
+                            outward_dot += (cache_ref.checkpoints[k * stride + 1 + i] - base_point[i])
+                                * signed_direction[i];
+                        }
+                        if outward_dot > 0.0 {
+                            let linear_seed = t_prev
+                                + ((leaf_delta - r_prev) / (r_k - r_prev).max(NORM_EPS)).clamp(0.0, 1.0) * (t_k - t_prev);
+                            // Quadratic refinement using the checkpoint before the bracket; falls back to linear when unavailable or degenerate.
+                            let quad_seed = if walk_recorder.len() >= 3 {
+                                let pm = &walk_recorder[walk_recorder.len() - 3];
+                                quadratic_crossing_time(pm.time, pm.radial_distance, t_prev, r_prev, t_k, r_k, leaf_delta)
+                            } else {
+                                None
+                            };
+                            seed = Some((quad_seed.unwrap_or(linear_seed), k));
+                        } else {
+                            // Inward crossing: stop scanning. Any later outward crossing (if one exists) is far enough away that the continuation walk below finds it at comparable cost, while scanning to max_time would waste O(max_time/dt) dual-RK4 steps per leaf.
+                            break 'scan;
+                        }
+                    } else {
+                        t_prev = t_k;
+                        r_prev = r_k;
+                    }
+                }
+            }
+        }
+        seed
+    };
+    record_prescan_outcome(
+        pre_scan_seed.is_some(),
+        cache.as_ref().map(|c| c.dead).unwrap_or(false),
+        cache.is_some(),
+    );
+    if let Some((time_seed, k_cross)) = pre_scan_seed {
+        // Seed Newton in s using cached reference-trajectory data. At t ≈ time_seed the radial
+        // distance is already ~leaf_delta (pre-scan bracket), so only the plane residual needs
+        // correcting; it is linear in s to first order via ∂X/∂s, giving one damped Newton step
+        // for free from checkpoint data. Guarded fallback keeps the legacy base_s seed when the
+        // correction is ill-conditioned or unavailable.
+        let mut source_seed = base_s;
+        if let Some(cache_ref) = cache.as_ref() {
+            let n = base_point.len();
+            let stride = 1 + 2 * n;
+            let kp = k_cross.saturating_sub(1);
+            if k_cross * stride + 2 * n < cache_ref.checkpoints.len() {
+                let t0 = cache_ref.checkpoints[kp * stride];
+                let t1 = cache_ref.checkpoints[k_cross * stride];
+                let a = if (t1 - t0).abs() > NORM_EPS {
+                    ((time_seed - t0) / (t1 - t0)).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                let mut plane_res = 0.0_f64;
+                let mut normal_sderiv = 0.0_f64;
+                for i in 0..n {
+                    let x0 = cache_ref.checkpoints[kp * stride + 1 + i];
+                    let x1 = cache_ref.checkpoints[k_cross * stride + 1 + i];
+                    let w0 = cache_ref.checkpoints[kp * stride + 1 + n + i];
+                    let w1 = cache_ref.checkpoints[k_cross * stride + 1 + n + i];
+                    plane_res += leaf_normal[i] * (x0 + a * (x1 - x0) - base_point[i]);
+                    normal_sderiv += leaf_normal[i] * (w0 + a * (w1 - w0));
+                }
+                if normal_sderiv.abs() > LEAF_PLANE_DERIV_EPS {
+                    let ds = (-plane_res / normal_sderiv).clamp(-LEAF_TAYLOR_S_MAX, LEAF_TAYLOR_S_MAX);
+                    source_seed = base_s + ds;
+                }
+            }
+        }
+        match solve_leaf_distance_event(
+            system,
+            ring,
+            base_point,
+            &leaf_normal,
+            &signed_direction,
+            source_seed,
+            time_seed,
+            leaf_delta,
+            sigma,
+            dt,
+            max_steps_per_leaf,
+            max_time,
+            plane_tol,
+            distance_tol,
+            cache.as_mut(),
+            2, // EventInit (probe)
+        ) {
+            Ok(hit)
+                if hit.outward_distance >= -outward_tol
+                    && hit.plane_residual.abs() <= plane_tol
+                    && (hit.radial_distance - leaf_delta).abs() <= distance_tol =>
+            {
+                let solved_source_s = hit.source_s.rem_euclid(1.0);
+                let (solved_source, _) = sample_ring_parameter_with_derivative(ring, solved_source_s);
+                record_leaf_finish(0, true);
+                return Ok(LeafHit {
+                    point: hit.point,
+                    tau_hit: hit.time,
+                    base_anchor: solved_source_s,
+                    in_anchor: solved_source,
+                });
+            }
+            Ok(hit) => {
+                // Converged to a non-outward root; fall back to the continuation walk.
+                let ds = (hit.source_s - base_s).rem_euclid(1.0);
+                record_direct_guard_reject(hit.time, ds.min(1.0 - ds));
+            }
+            _ => {} // No usable root from the pre-scan seed; fall back to the continuation walk.
+        }
+    }
+    let mut walk_steps = 0usize;
     for _ in 0..max_attempts {
         if current.time >= max_time - 1e-12 {
             break;
@@ -6801,6 +8188,10 @@ fn shoot_leaf_point(
         if predictor[1] < 0.0 || predictor[1] > max_time + 1e-12 {
             continuation_step *= 0.5;
             if continuation_step < LEAF_CONTINUATION_MIN_STEP {
+                // The walk exhausted its time domain without an accepted event.
+                // Report that, not a stale transient corrector failure, so the
+                // local-delta shrinker can retry with a smaller target distance.
+                last_failure_kind = LeafFailureKind::NoFirstHitWithinMaxTime;
                 break;
             }
             continue;
@@ -6818,6 +8209,7 @@ fn shoot_leaf_point(
             max_steps_per_leaf,
             max_time,
             plane_tol,
+            cache.as_mut(),
         ) {
             Ok(next) => next,
             Err(reason) => {
@@ -6856,6 +8248,8 @@ fn shoot_leaf_point(
                 max_time,
                 plane_tol,
                 distance_tol,
+                cache.as_mut(),
+                3, // EventWalk (probe)
             ) {
                 Ok(hit)
                     if hit.outward_distance >= -outward_tol
@@ -6865,6 +8259,9 @@ fn shoot_leaf_point(
                     let solved_source_s = hit.source_s.rem_euclid(1.0);
                     let (solved_source, _) =
                         sample_ring_parameter_with_derivative(ring, solved_source_s);
+                    WALK_STEPS_SUM.fetch_add(walk_steps as u64, std::sync::atomic::Ordering::Relaxed);
+                    WALK_BRACKETS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    record_leaf_finish(if pre_scan_seed.is_some() { 2 } else { 1 }, true);
                     return Ok(LeafHit {
                         point: hit.point,
                         tau_hit: hit.time,
@@ -6887,7 +8284,13 @@ fn shoot_leaf_point(
             }
             continue;
         };
+        walk_recorder.push(WalkPoint {
+            source_s: next.source_s,
+            time: next.time,
+            radial_distance: next.radial_distance,
+        });
         current = next;
+        walk_steps += 1;
         continuation_tangent = next_tangent;
         if corrector_iterations <= 4 {
             continuation_step =
@@ -6897,6 +8300,7 @@ fn shoot_leaf_point(
         }
     }
     let (last_segment, last_tau) = uniform_s_to_segment_tau(ring.len(), current.source_s);
+    record_leaf_finish(if pre_scan_seed.is_some() { 2 } else { 1 }, false);
     Err(LeafFailure {
         kind: if current.time >= max_time - 1e-12 {
             LeafFailureKind::NoFirstHitWithinMaxTime
@@ -6907,6 +8311,194 @@ fn shoot_leaf_point(
         last_segment,
         last_tau,
     })
+}
+
+/// Plane normal and outward direction for a leaf shot from `base_point`, derived
+/// from the ring tangent and requested outward hint with the same fallbacks as
+/// [`shoot_leaf_point`].
+fn leaf_plane_and_direction(tangent: &[f64], outward: &[f64], dim: usize) -> Option<(Vec<f64>, Vec<f64>)> {
+    let leaf_normal = leaf_plane_normal(tangent)?;
+    let signed_direction = normalize(outward.to_vec()).unwrap_or_else(|_| {
+        canonical_orthogonal_unit(tangent).unwrap_or_else(|_| {
+            let mut fallback = vec![0.0; dim];
+            if let Some(first) = fallback.first_mut() {
+                *first = 1.0;
+            }
+            fallback
+        })
+    });
+    Some((leaf_normal, signed_direction))
+}
+
+/// Time at which the quadratic Lagrange interpolant through three consecutive samples
+/// `(t0,r0)`, `(t1,r1)`, `(t2,r2)` equals `target`, restricted to the bracket `[t1, t2]`
+/// where a sign change of `r - target` is known. Returns `None` when times are not strictly
+/// increasing or no root lies in that bracket; callers fall back to linear interpolation.
+fn quadratic_crossing_time(
+    t0: f64,
+    r0: f64,
+    t1: f64,
+    r1: f64,
+    t2: f64,
+    r2: f64,
+    target: f64,
+) -> Option<f64> {
+    if !(t0 < t1 && t1 < t2) || !r0.is_finite() || !r1.is_finite() || !r2.is_finite() {
+        return None;
+    }
+    let d1 = (r1 - r0) / (t1 - t0);
+    let d2 = ((r2 - r1) / (t2 - t1) - d1) / (t2 - t0);
+    // P(t) = r0 + d1 (t - t0) + d2 (t - t0)(t - t1); solve P(t) = target.
+    let a = d2;
+    let b = d1 - d2 * (t0 + t1);
+    let c = r0 - target - d1 * t0 + d2 * t0 * t1;
+    let root = if a.abs() <= 1e-30 {
+        if b.abs() <= NORM_EPS {
+            return None;
+        }
+        -c / b
+    } else {
+        let disc = b * b - 4.0 * a * c;
+        if !(disc >= 0.0) {
+            return None;
+        }
+        let sq = disc.sqrt();
+        let ra = (-b + sq) / (2.0 * a);
+        let rb = (-b - sq) / (2.0 * a);
+        if ra >= t1 && ra <= t2 {
+            ra
+        } else if rb >= t1 && rb <= t2 {
+            rb
+        } else {
+            return None;
+        }
+    };
+    if root.is_finite() {
+        Some(root.clamp(t1, t2))
+    } else {
+        None
+    }
+}
+
+/// Resolve the leaf distance event for a smaller target delta by reusing the walk
+/// recorded during an earlier (larger-delta) attempt instead of re-integrating from
+/// t=0. The continuation path is independent of the target distance, so when radial
+/// distance along the recorded walk is monotone up to its first crossing, that
+/// crossing brackets the same first hit a fresh walk would find. Returns `None` when
+/// no usable bracket exists and the caller must fall back to a full shoot.
+fn try_seeded_leaf_event(
+    system: &EquationSystem,
+    ring: &[Vec<f64>],
+    base_point: &[f64],
+    tangent: &[f64],
+    outward: &[f64],
+    leaf_delta: f64,
+    sigma: f64,
+    dt: f64,
+    max_steps_per_leaf: usize,
+    max_time: f64,
+    recorded_walk: &[WalkPoint],
+) -> Option<LeafHit> {
+    let (leaf_normal, signed_direction) = leaf_plane_and_direction(tangent, outward, base_point.len())?;
+    let plane_tol = (leaf_delta * 1e-8).max(1e-10);
+    let distance_tol = (leaf_delta * 1e-8).max(1e-10);
+    let outward_tol = (leaf_delta * 1e-6).max(1e-10);
+    // Find the first pair of consecutive accepted points bracketing a crossing of
+    // leaf_delta. Require radial distance to be non-decreasing up to that point so
+    // this is the same first hit a fresh walk would find; otherwise fall back to a
+    // full shoot.
+    let mut bracket: Option<(usize, usize)> = None;
+    for k in 1..recorded_walk.len() {
+        let prev = &recorded_walk[k - 1];
+        let next = &recorded_walk[k];
+        if (prev.radial_distance - leaf_delta) * (next.radial_distance - leaf_delta) <= 0.0
+            && next.radial_distance > NORM_EPS
+        {
+            let monotone_tol = (leaf_delta * 1e-6).max(1e-12);
+            let mut monotone = true;
+            for j in 1..=k {
+                if recorded_walk[j].radial_distance + monotone_tol < recorded_walk[j - 1].radial_distance {
+                    monotone = false;
+                    break;
+                }
+            }
+            if !monotone {
+                return None;
+            }
+            bracket = Some((k - 1, k));
+            break;
+        }
+    }
+    let (i0, i1) = bracket?;
+    let p0 = &recorded_walk[i0];
+    let p1 = &recorded_walk[i1];
+    let denominator = p1.radial_distance - p0.radial_distance;
+    let alpha = if denominator.abs() <= NORM_EPS {
+        0.5
+    } else {
+        ((leaf_delta - p0.radial_distance) / denominator).clamp(0.0, 1.0)
+    };
+    let source_seed = p0.source_s + alpha * (p1.source_s - p0.source_s);
+    // Quadratic refinement of the time seed using the point before the bracket; radial distance is monotone up to here so the fit is well-behaved.
+    let linear_time_seed = p0.time + alpha * (p1.time - p0.time);
+    let time_seed = if i0 >= 1 {
+        let pm = &recorded_walk[i0 - 1];
+        quadratic_crossing_time(
+            pm.time,
+            pm.radial_distance,
+            p0.time,
+            p0.radial_distance,
+            p1.time,
+            p1.radial_distance,
+            leaf_delta,
+        )
+        .unwrap_or(linear_time_seed)
+    } else {
+        linear_time_seed
+    };
+    let mut cache = LeafTrajectoryCache::new(
+        system,
+        ring,
+        recorded_walk[0].source_s,
+        sigma,
+        dt,
+        max_time,
+        0.1 * leaf_delta,
+    );
+    match solve_leaf_distance_event(
+        system,
+        ring,
+        base_point,
+        &leaf_normal,
+        &signed_direction,
+        source_seed,
+        time_seed,
+        leaf_delta,
+        sigma,
+        dt,
+        max_steps_per_leaf,
+        max_time,
+        plane_tol,
+        distance_tol,
+        cache.as_mut(),
+        3, // EventWalk retry (probe)
+    ) {
+        Ok(hit)
+            if hit.outward_distance >= -outward_tol
+                && hit.plane_residual.abs() <= plane_tol
+                && (hit.radial_distance - leaf_delta).abs() <= distance_tol =>
+        {
+            let solved_source_s = hit.source_s.rem_euclid(1.0);
+            let (solved_source, _) = sample_ring_parameter_with_derivative(ring, solved_source_s);
+            Some(LeafHit {
+                point: hit.point,
+                tau_hit: hit.time,
+                base_anchor: solved_source_s,
+                in_anchor: solved_source,
+            })
+        }
+        _ => None,
+    }
 }
 
 fn integrate_state_and_variational(
@@ -6948,6 +8540,102 @@ fn integrate_state_and_variational(
         t += h;
     }
     Some((state, phi))
+}
+
+/// Integrates the flow together with a single directional variational vector.
+/// Propagates `w(t) = phi(t) * v` under `dw/dt = sigma * J(t) * w` with
+/// `w(0) = v`, using one forward-mode (dual) evaluation per RK4 stage instead
+/// of forming the full Jacobian and multiplying it by the variational matrix.
+/// The state trajectory is bit-identical to [`integrate_state_and_variational`]
+/// (same step grid, same value source); only the transported derivative differs
+/// from `phi(T) * v` by rounding-level terms.
+fn integrate_state_and_directional(
+    system: &EquationSystem,
+    initial_state: &[f64],
+    direction: &[f64],
+    tau: f64,
+    sigma: f64,
+    dt: f64,
+    max_steps: usize,
+    max_time: f64,
+) -> Option<(Vec<f64>, Vec<f64>)> {
+    let n = initial_state.len();
+    if n == 0 || direction.len() != n {
+        return None;
+    }
+    let clamped_tau = tau.clamp(0.0, max_time);
+    let mut state = initial_state.to_vec();
+    let mut w = direction.to_vec();
+    if clamped_tau <= 0.0 {
+        return Some((state, w));
+    }
+    let max_steps = max_steps.max(2);
+    let h_min = (clamped_tau / (max_steps as f64)).max(1e-12);
+    let h_max = (clamped_tau / 2.0).max(h_min);
+    let nominal_h = dt.max(1e-9).clamp(h_min, h_max);
+    // One contiguous scratch region per call: [dual_state | dual_out] and
+    // [stage_state | k0..k2 | m0..m2], so the step loop touches two cache-hot
+    // buffers instead of eleven scattered small heap allocations.
+    let mut dual_buf = vec![Dual::new(0.0, 0.0); 2 * n];
+    let mut f64_buf = vec![0.0; 7 * n];
+    let (dual_state, dual_out) = dual_buf.split_at_mut(n);
+    let (stage_state, rest) = f64_buf.split_at_mut(n);
+    let (k0, rest) = rest.split_at_mut(n);
+    let (k1, rest) = rest.split_at_mut(n);
+    let (k2, rest) = rest.split_at_mut(n);
+    let (m0, rest) = rest.split_at_mut(n);
+    let (m1, rest) = rest.split_at_mut(n);
+    let (m2, _rest) = rest.split_at_mut(n);
+    let dual_context = Dual::new(0.0, 0.0);
+    let mut evaluator = system.dual_evaluator();
+    let mut t = 0.0;
+    while t + 1e-15 < clamped_tau {
+        let h = (clamped_tau - t).min(nominal_h);
+        for i in 0..n {
+            dual_state[i] = Dual::new(state[i], w[i]);
+        }
+        evaluator.apply(dual_context, dual_state, dual_out);
+        for i in 0..n {
+            k0[i] = dual_out[i].val * sigma;
+            m0[i] = dual_out[i].eps * sigma;
+            stage_state[i] = state[i] + 0.5 * h * k0[i];
+        }
+        for i in 0..n {
+            dual_state[i] = Dual::new(stage_state[i], w[i] + 0.5 * h * m0[i]);
+        }
+        evaluator.apply(dual_context, dual_state, dual_out);
+        for i in 0..n {
+            k1[i] = dual_out[i].val * sigma;
+            m1[i] = dual_out[i].eps * sigma;
+            stage_state[i] = state[i] + 0.5 * h * k1[i];
+        }
+        for i in 0..n {
+            dual_state[i] = Dual::new(stage_state[i], w[i] + 0.5 * h * m1[i]);
+        }
+        evaluator.apply(dual_context, dual_state, dual_out);
+        for i in 0..n {
+            k2[i] = dual_out[i].val * sigma;
+            m2[i] = dual_out[i].eps * sigma;
+            stage_state[i] = state[i] + h * k2[i];
+        }
+        for i in 0..n {
+            dual_state[i] = Dual::new(stage_state[i], w[i] + h * m2[i]);
+        }
+        evaluator.apply(dual_context, dual_state, dual_out);
+        for i in 0..n {
+            let k3 = dual_out[i].val * sigma;
+            state[i] += h * (k0[i] + 2.0 * k1[i] + 2.0 * k2[i] + k3) / 6.0;
+        }
+        for i in 0..n {
+            let m3 = dual_out[i].eps * sigma;
+            w[i] += h * (m0[i] + 2.0 * m1[i] + 2.0 * m2[i] + m3) / 6.0;
+        }
+        if state.iter().any(|value| !value.is_finite()) || w.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        t += h;
+    }
+    Some((state, w))
 }
 
 struct StateVariationalRk4Workspace {
@@ -13068,6 +14756,7 @@ mod tests {
                 150,
                 1.0,
                 Some(&equilibrium),
+                &mut Vec::new(),
             )
             .ok()
             .map(|hit| (base.clone(), outward, hit))
@@ -13120,6 +14809,7 @@ mod tests {
                 150,
                 1.0,
                 Some(&equilibrium),
+                &mut Vec::new(),
             );
             if point.is_ok() {
                 success += 1;
@@ -13147,7 +14837,7 @@ mod tests {
         let outward = vec![1.0, 0.0, 0.0];
 
         let failure = match shoot_leaf_point(
-            &system, &ring, &base, 0.0, &tangent, &outward, 0.8, 1.0, 0.01, 2_000, 2.0, None,
+            &system, &ring, &base, 0.0, &tangent, &outward, 0.8, 1.0, 0.01, 2_000, 2.0, None, &mut Vec::new(),
         ) {
             Ok(_) => panic!("the local plane-intersection branch ends before distance 0.8"),
             Err(failure) => failure,
@@ -13189,6 +14879,7 @@ mod tests {
             2_000,
             2.0,
             None,
+            &mut Vec::new(),
         )
         .expect("a smaller local leaf step should remain available");
         assert!(achieved_delta < 0.8 && achieved_delta >= 0.2);
@@ -13385,6 +15076,7 @@ mod tests {
                 .expect("basis");
         let ring = build_equilibrium_initial_ring(&equilibrium, &basis.e1, &basis.e2, 1e-3, 48);
         let prev_in_anchors = vec![equilibrium.to_vec(); ring.len()];
+        let mut walks = vec![Vec::new(); ring.len()];
         let solve = build_next_ring(
             &system,
             &ring,
@@ -13395,6 +15087,7 @@ mod tests {
             0.01,
             150,
             2.0,
+            &mut walks[..],
         )
         .expect("next ring");
         assert_eq!(solve.points.len(), solve.base_anchors.len());
@@ -13424,7 +15117,7 @@ mod tests {
         let outward = vec![1.0, 0.0, 0.0];
 
         let hit = shoot_leaf_point(
-            &system, &ring, base, base_s, &tangent, &outward, 0.1, 1.0, 1e-3, 2000, 1.0, None,
+            &system, &ring, base, base_s, &tangent, &outward, 0.1, 1.0, 1e-3, 2000, 1.0, None, &mut Vec::new(),
         )
         .expect("rotating radial leaf hit");
 
@@ -13449,6 +15142,7 @@ mod tests {
             vec![0.0, -1.0, 0.0],
         ];
         let prev_in_anchors = vec![vec![0.0, 0.0, 0.0]; prev_ring.len()];
+        let mut walks = vec![Vec::new(); prev_ring.len()];
         let failure = build_next_ring(
             &system,
             &prev_ring,
@@ -13459,6 +15153,7 @@ mod tests {
             1e-2,
             8,
             0.2,
+            &mut walks[..],
         )
         .expect_err("stationary flow should report unsolved leaves");
         assert_eq!(failure.solved_points, 0);
