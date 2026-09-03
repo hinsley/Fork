@@ -245,19 +245,19 @@ export function init_fork_thread_pool() {
 }
 
 /**
+ * @param {number} receiver
+ */
+export function wbg_rayon_start_worker(receiver) {
+    wasm.wbg_rayon_start_worker(receiver);
+}
+
+/**
  * @param {number} num_threads
  * @returns {Promise<any>}
  */
 export function initThreadPool(num_threads) {
     const ret = wasm.initThreadPool(num_threads);
     return ret;
-}
-
-/**
- * @param {number} receiver
- */
-export function wbg_rayon_start_worker(receiver) {
-    wasm.wbg_rayon_start_worker(receiver);
 }
 
 const WasmCodim1CurveExtensionRunnerFinalization = (typeof FinalizationRegistry === 'undefined')

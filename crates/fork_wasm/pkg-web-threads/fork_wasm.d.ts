@@ -1,8 +1,8 @@
 /* tslint:disable */
 /* eslint-disable */
 export function init_fork_thread_pool(): Promise<any>;
-export function initThreadPool(num_threads: number): Promise<any>;
 export function wbg_rayon_start_worker(receiver: number): void;
+export function initThreadPool(num_threads: number): Promise<any>;
 export class WasmCodim1CurveExtensionRunner {
   free(): void;
   [Symbol.dispose](): void;
