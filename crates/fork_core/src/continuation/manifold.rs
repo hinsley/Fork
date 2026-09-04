@@ -4580,7 +4580,7 @@ fn grow_surface_from_geodesic_seed(
         let mut used_delta = current_leaf_delta;
         let mut last_failure: Option<(SurfaceTerminationReason, String)> = None;
         for attempt in 0..LEAF_REFINE_ATTEMPTS {
-            let t_bnr = std::time::Instant::now();
+            let t_bnr = manifold_profile_enabled().then(std::time::Instant::now);
             reported_leaf_delta = used_delta;
             solver_diagnostics.ring_attempts += 1;
             let raw_next = match build_next_ring(
@@ -4637,13 +4637,13 @@ fn grow_surface_from_geodesic_seed(
                     break;
                 }
             };
-            if manifold_profile_enabled() {
+            if let Some(t) = &t_bnr {
                 let (scalls, stime_ns) = sample_counters();
                 eprintln!(
-                    "bnr ring={} attempt={} dt={:.4}s scalls={} stime={:.4}",
+                    "bnr ring={} attempt={} dt={:.4}s scalls={}stime={:.4}",
                     ring_index,
                     attempt,
-                    t_bnr.elapsed().as_secs_f64(),
+                    t.elapsed().as_secs_f64(),
                     scalls,
                     stime_ns as f64 / 1e9
                 );
@@ -4693,7 +4693,7 @@ fn grow_surface_from_geodesic_seed(
                 }
             }
 
-            let t_ars = std::time::Instant::now();
+            let t_ars = manifold_profile_enabled().then(std::time::Instant::now);
             let next = match adapt_ring_spacing(
                 system,
                 prev,
@@ -4746,12 +4746,12 @@ fn grow_surface_from_geodesic_seed(
                     break;
                 }
             };
-            if manifold_profile_enabled() {
+            if let Some(t) = &t_ars {
                 eprintln!(
                     "ars ring={} attempt={} dt={:.4}s",
                     ring_index,
                     attempt,
-                    t_ars.elapsed().as_secs_f64()
+                    t.elapsed().as_secs_f64()
                 );
             }
             let adapted_quality = evaluate_ring_quality(&next.points);
@@ -5484,7 +5484,7 @@ fn build_next_ring(
     let mut hits = vec![None; m];
     let mut hit_deltas = vec![leaf_delta; m];
     let mut failures: Vec<(usize, LeafFailure)> = Vec::new();
-    let t_shoot = std::time::Instant::now();
+    let t_shoot = manifold_profile_enabled().then(std::time::Instant::now);
     #[cfg(feature = "parallel")]
     let results: Vec<(Result<(LeafHit, f64), LeafFailure>, Vec<WalkPoint>)> = {
         // EquationSystem holds RefCell scratch stacks and is not Sync, so the
@@ -5501,7 +5501,7 @@ fn build_next_ring(
             .zip(recorders.into_par_iter())
             .enumerate()
             .map(|(i, (task_system, mut walk_recorder))| {
-                let t_leaf = std::time::Instant::now();
+                let t_leaf = manifold_profile_enabled().then(std::time::Instant::now);
                 let result = shoot_ring_leaf(
                     &task_system,
                     prev_ring,
@@ -5515,21 +5515,23 @@ fn build_next_ring(
                     max_time,
                     &mut walk_recorder,
                 );
-                if manifold_profile_enabled() && t_leaf.elapsed().as_millis() >= 2 {
-                    let status = match &result {
-                        Ok(_) => "ok",
-                        Err(f) => f.kind.as_str(),
-                    };
-                    let (lcalls, lns) = LEAF_LAST.with(|l| l.get());
-                    eprintln!(
-                        "slowleaf ring={} i={} dt={:.4}s {} calls={} ode_s={:.2}",
-                        ring_seq,
-                        i,
-                        t_leaf.elapsed().as_secs_f64(),
-                        status,
-                        lcalls,
-                        lns as f64 / 1e9
-                    );
+                if let Some(t) = &t_leaf {
+                    if t.elapsed().as_millis() >= 2 {
+                        let status = match &result {
+                            Ok(_) => "ok",
+                            Err(f) => f.kind.as_str(),
+                        };
+                        let (lcalls, lns) = LEAF_LAST.with(|l| l.get());
+                        eprintln!(
+                            "slowleaf ring={} i={} dt={:.4}s {} calls={} ode_s={:.2}",
+                            ring_seq,
+                            i,
+                            t.elapsed().as_secs_f64(),
+                            status,
+                            lcalls,
+                            lns as f64 / 1e9
+                        );
+                    }
                 }
                 (result, walk_recorder)
             })
@@ -5556,8 +5558,8 @@ fn build_next_ring(
         })
         .collect();
 
-    if manifold_profile_enabled() {
-        eprintln!("bnr m={} shoot={:.4}s", m, t_shoot.elapsed().as_secs_f64());
+    if let Some(t) = &t_shoot {
+        eprintln!("bnr m={} shoot={:.4}s", m, t.elapsed().as_secs_f64());
     }
 
     for (i, (result, recorder)) in results.into_iter().enumerate() {
