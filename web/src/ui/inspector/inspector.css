@@ -162,6 +162,7 @@
   background: transparent;
   color: var(--text-muted);
   font: inherit;
+  font-size: 14px;
   text-align: left;
   cursor: pointer;
 }
