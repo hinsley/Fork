@@ -278,6 +278,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                   </InspectorSubDisclosure>
                   {equilibriumError ? <div className="field-error">{equilibriumError}</div> : null}
                   <button
+                    className="inspector-primary-action"
                     onClick={handleSolveEquilibrium}
                     disabled={runDisabled || Boolean(autonomousAnalysisError)}
                     data-testid="equilibrium-solve-submit"
@@ -865,6 +866,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         <div className="field-error">{continuationError}</div>
                       ) : null}
                       <button
+                        className="inspector-primary-action"
                         onClick={handleCreateEquilibriumBranch}
                         disabled={runDisabled || Boolean(autonomousAnalysisError)}
                         data-testid="equilibrium-branch-submit"
@@ -1380,6 +1382,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         <div className="field-error">{equilibriumManifoldError}</div>
                       ) : null}
                       <button
+                        className="inspector-primary-action"
                         onClick={handleCreateEquilibriumManifold}
                         disabled={runDisabled || Boolean(autonomousAnalysisError)}
                         data-testid="equilibrium-manifold-submit"

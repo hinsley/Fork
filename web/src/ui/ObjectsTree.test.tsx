@@ -1400,7 +1400,7 @@ describe('ObjectsTree', () => {
     expect(branchDepth).toBeGreaterThan(parentDepth)
   })
 
-  it('shows parenthetical labels for continuation branches', () => {
+  it('keeps continuation types in accessible labels and separate metadata', () => {
     const demo = createDemoSystem()
     const periodDoubling = createPeriodDoublingSystem()
     const limitCycleBranchId = Object.keys(periodDoubling.system.branches)[0]
@@ -1424,8 +1424,8 @@ describe('ObjectsTree', () => {
       />
     )
 
-    expect(screen.getByTestId(`object-tree-node-${demo.branchNodeId}`)).toHaveTextContent(
-      'eq_branch (equilibrium)'
+    expect(screen.getByTestId(`object-tree-node-${demo.branchNodeId}`)).toHaveAccessibleName(
+      'Branch: eq_branch (equilibrium)'
     )
 
     render(
@@ -1443,8 +1443,8 @@ describe('ObjectsTree', () => {
       />
     )
 
-    expect(screen.getByTestId(`object-tree-node-${limitCycleBranchId}`)).toHaveTextContent(
-      'lc_pd_mu (limit cycle)'
+    expect(screen.getByTestId(`object-tree-node-${limitCycleBranchId}`)).toHaveAccessibleName(
+      'Branch: lc_pd_mu (limit cycle)'
     )
   })
 
@@ -1489,8 +1489,8 @@ describe('ObjectsTree', () => {
       />
     )
 
-    expect(screen.getByTestId(`object-tree-node-${demo.branchNodeId}`)).toHaveTextContent(
-      'eq_branch (equilibrium manifold (2d, ring build failed))'
+    expect(screen.getByTestId(`object-tree-node-${demo.branchNodeId}`)).toHaveAccessibleName(
+      'Branch: eq_branch (equilibrium manifold (2d, ring build failed))'
     )
   })
 

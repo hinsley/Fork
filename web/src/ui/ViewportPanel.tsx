@@ -8,6 +8,7 @@ import {
   useState,
 } from 'react'
 import type { Data, Layout } from 'plotly.js'
+import { Icon } from './Icon'
 import type {
   AnalysisViewport,
   AxisRange,
@@ -81,7 +82,7 @@ import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
 import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
 import { appendMathJaxWrappedSuffix } from '../utils/mathText'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
-import { clampMenuX } from './contextMenu'
+import { clampMenuX, clampMenuY } from './contextMenu'
 import {
   insertPeriodicLineBreaks,
   normalizePeriodicVariables,
@@ -8079,8 +8080,9 @@ export function ViewportPanel({
     const rect = createMenuRef.current.getBoundingClientRect()
     if (!rect.width) return
     const clampedX = clampMenuX(createMenu.x, rect.width)
-    if (clampedX === createMenu.x) return
-    setCreateMenu((prev) => (prev ? { ...prev, x: clampedX } : prev))
+    const clampedY = clampMenuY(createMenu.y, rect.height)
+    if (clampedX === createMenu.x && clampedY === createMenu.y) return
+    setCreateMenu((prev) => (prev ? { ...prev, x: clampedX, y: clampedY } : prev))
   }, [createMenu])
 
   useLayoutEffect(() => {
@@ -8088,8 +8090,9 @@ export function ViewportPanel({
     const rect = nodeContextMenuRef.current.getBoundingClientRect()
     if (!rect.width) return
     const clampedX = clampMenuX(nodeContextMenu.x, rect.width)
-    if (clampedX === nodeContextMenu.x) return
-    setNodeContextMenu((prev) => (prev ? { ...prev, x: clampedX } : prev))
+    const clampedY = clampMenuY(nodeContextMenu.y, rect.height)
+    if (clampedX === nodeContextMenu.x && clampedY === nodeContextMenu.y) return
+    setNodeContextMenu((prev) => (prev ? { ...prev, x: clampedX, y: clampedY } : prev))
   }, [nodeContextMenu])
 
   const openCreateMenu = (event: React.MouseEvent, targetId: string | null) => {
@@ -8205,6 +8208,7 @@ export function ViewportPanel({
     return (
       <>
         <div className="empty-state viewport-empty">
+          <Icon name="plot" className="viewport-empty__icon" />
           <p>No viewports yet.</p>
           <div className="viewport-insert viewport-insert--empty">
             <button
@@ -8213,7 +8217,7 @@ export function ViewportPanel({
               aria-label="Add viewport"
               data-testid="viewport-insert-empty"
             >
-              +
+              <Icon name="plus" /> Add viewport
             </button>
           </div>
         </div>

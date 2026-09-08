@@ -273,7 +273,7 @@ function NormalFormWorkflowContent({
         {eligible ? (
           <button
             type="button"
-            className="primary"
+            className="inspector-primary-action"
             disabled={runDisabled || (isPeriodicSource && !hasPersistentMesh)}
             data-testid="compute-normal-form"
             onClick={() =>
@@ -352,7 +352,7 @@ function NormalFormWorkflowContent({
           </label>
           <button
             type="button"
-            className="primary"
+            className="inspector-primary-action"
             data-testid="switch-periodic-bp"
             disabled={runDisabled || !hasPersistentMesh}
             onClick={handlePeriodicSwitch}
@@ -433,7 +433,7 @@ function NormalFormWorkflowContent({
           </label>
           <button
             type="button"
-            className="primary"
+            className="inspector-primary-action"
             data-testid="switch-equilibrium-codim2"
             disabled={runDisabled}
             onClick={handleCodim2Switch}

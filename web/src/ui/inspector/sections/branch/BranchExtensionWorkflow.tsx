@@ -181,6 +181,7 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
                         <div className="field-error">{branchExtensionError}</div>
                       ) : null}
                       <button
+                        className="inspector-primary-action"
                         onClick={handleExtendBranch}
                         disabled={runDisabled || !canExtendBranch}
                         data-testid="branch-extend-submit"

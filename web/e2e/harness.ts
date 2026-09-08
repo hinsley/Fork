@@ -109,7 +109,7 @@ export class ForkHarness {
     const pattern = new RegExp(`^${escapeRegex(label)}(?:\\s|\\(|$)`, 'i')
     await this.page
       .locator('[data-testid^="object-tree-node-"]')
-      .filter({ hasText: pattern })
+      .and(this.page.getByRole('button', { name: pattern }))
       .first()
       .click()
   }

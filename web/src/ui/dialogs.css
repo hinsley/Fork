@@ -1,0 +1,377 @@
+.dialog.dialog--workspace {
+  padding: 0;
+  border: 1px solid var(--panel-border-strong);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+
+.dialog.dialog--workspace .dialog__header {
+  gap: 16px;
+  margin: 0;
+  padding: 17px 20px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.dialog.dialog--workspace .dialog__header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.dialog.dialog--workspace .dialog__context {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.dialog.dialog--workspace button {
+  font-size: 13px;
+}
+
+.dialog.dialog--workspace .dialog__close {
+  flex: 0 0 auto;
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+}
+
+.dialog.dialog--workspace .dialog__close:hover {
+  background: var(--button-bg-hover);
+  color: var(--text);
+}
+
+.dialog.dialog--workspace .dialog__primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast, #062019);
+  font-weight: 650;
+}
+
+.dialog.dialog--workspace .dialog__primary:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+
+.dialog.dialog--workspace button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.dialog.dialog--systems {
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+}
+
+.dialog--systems .dialog__section {
+  margin: 0;
+  padding: 20px;
+}
+
+.dialog--systems .system-library__create {
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.dialog--systems .system-library__create label,
+.dialog--systems .system-library__section-heading h3 {
+  display: block;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.dialog--systems .system-library__create label {
+  margin-bottom: 8px;
+}
+
+.dialog--systems .dialog__row {
+  gap: 8px;
+}
+
+.dialog--systems .dialog__row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--panel-border);
+  font-size: 13px;
+}
+
+.dialog--systems .dialog__row button {
+  min-height: 34px;
+  padding-inline: 16px;
+}
+
+.system-library__section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -4px 0 12px;
+}
+
+.dialog--systems .dialog__list {
+  gap: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.dialog--systems .dialog__list-row {
+  gap: 12px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 0;
+  background: var(--panel);
+}
+
+.dialog--systems .dialog__list-row + .dialog__list-row {
+  border-top: 1px solid var(--panel-border);
+}
+
+.dialog--systems .dialog__list-title {
+  min-width: 0;
+}
+
+.dialog--systems .dialog__list-title .system-library__open {
+  flex: 1;
+  min-width: 0;
+  padding-left: 2px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog--systems .dialog__list-title .system-library__open:hover {
+  color: var(--accent);
+}
+
+.dialog--systems .dialog__list-type {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.dialog--systems .dialog__list-actions {
+  gap: 3px;
+}
+
+.dialog--systems .dialog__list-actions button,
+.dialog--systems .system-library__import {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.dialog--systems .dialog__list-actions .system-library__delete:hover {
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  color: var(--danger);
+}
+
+.dialog--systems .empty-state {
+  margin: 0;
+  padding: 26px 12px;
+  border: 1px dashed var(--panel-border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.dialog.dialog--workspace.export-choice-dialog {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.export-choice-dialog .export-choice-dialog__options {
+  gap: 10px;
+  margin: 0;
+  padding: 20px;
+}
+
+.dialog.export-choice-dialog .export-choice-dialog__option {
+  min-height: 92px;
+  align-content: center;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--panel-raised);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.dialog.export-choice-dialog .export-choice-dialog__option-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dialog.dialog--workspace.dialog--system-settings {
+  width: min(1100px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+}
+
+.dialog.dialog--workspace.embed-dialog {
+  width: min(1180px, calc(100vw - 32px));
+  height: min(860px, calc(100dvh - 40px));
+  max-height: calc(100dvh - 40px);
+  overflow: hidden;
+}
+
+.dialog.embed-dialog .dialog__header {
+  flex: 0 0 auto;
+}
+
+.dialog.embed-dialog .embed-dialog__body {
+  flex: 1;
+  grid-template-columns: minmax(300px, 0.8fr) minmax(360px, 1.2fr);
+  gap: 24px;
+  padding: 20px;
+}
+
+.dialog.embed-dialog h3 {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dialog.embed-dialog .embed-dialog__viewport-list {
+  gap: 5px;
+  margin-bottom: 20px;
+}
+
+.dialog.embed-dialog .embed-dialog__viewport-list label {
+  padding: 9px 10px;
+  background: var(--panel-raised);
+  cursor: pointer;
+}
+
+.dialog.embed-dialog .embed-dialog__viewport-list label:has(input:checked) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--panel-border));
+  background: var(--accent-soft);
+}
+
+.dialog.embed-dialog input[type='checkbox'] {
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  min-height: 14px;
+  margin: 1px 0 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.dialog.embed-dialog .embed-dialog__field {
+  margin-bottom: 14px;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.dialog.embed-dialog .embed-dialog__field input,
+.dialog.embed-dialog .embed-dialog__field select {
+  min-height: 34px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  font-size: 13px;
+}
+
+.dialog.embed-dialog .embed-dialog__bundle-option {
+  margin: 4px 0 20px;
+  padding: 12px;
+  background: var(--panel-raised);
+}
+
+.dialog.embed-dialog .embed-dialog__bundle-option strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.dialog.embed-dialog .embed-dialog__bundle-option small {
+  font-size: 12px;
+}
+
+.dialog.embed-dialog .embed-dialog__experimental {
+  display: inline;
+  margin-left: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.dialog.embed-dialog textarea {
+  min-height: 100px;
+  padding: 10px;
+  border: 1px solid var(--panel-border);
+  background: var(--input-bg);
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.dialog.embed-dialog .embed-dialog__field input:focus-visible,
+.dialog.embed-dialog .embed-dialog__field select:focus-visible,
+.dialog.embed-dialog textarea:focus-visible {
+  border-color: var(--accent);
+}
+
+.dialog.embed-dialog .embed-dialog__actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dialog.embed-dialog .embed-dialog__actions button {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.dialog.embed-dialog .embed-dialog__preview-frame {
+  border-radius: 8px;
+}
+
+@media (max-width: 850px) {
+  .dialog.embed-dialog .embed-dialog__body {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .dialog.dialog--workspace .dialog__header,
+  .dialog--systems .dialog__section,
+  .export-choice-dialog .export-choice-dialog__options,
+  .dialog.embed-dialog .embed-dialog__body {
+    padding: 16px;
+  }
+
+  .dialog--systems .dialog__list-row {
+    gap: 3px;
+  }
+
+  .dialog--systems .dialog__list-actions button {
+    padding-inline: 5px;
+    font-size: 12px;
+  }
+
+}

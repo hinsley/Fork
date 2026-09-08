@@ -388,6 +388,7 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                             <div className="field-error">{homoclinicFromLargeCycleError}</div>
                           ) : null}
                           <button
+                            className="inspector-primary-action"
                             onClick={handleCreateHomoclinicFromLargeCycle}
                             disabled={
                               runDisabled ||

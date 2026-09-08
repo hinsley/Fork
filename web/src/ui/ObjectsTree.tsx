@@ -15,7 +15,7 @@ import type { ReorderPlacement } from '../system/model'
 import { hasCustomObjectParams } from '../system/parameters'
 import { formatEquilibriumLabel } from '../system/labels'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
-import { clampMenuX } from './contextMenu'
+import { clampMenuX, clampMenuY } from './contextMenu'
 
 export type ObjectsTreeHandle = {
   openCreateMenu: (position: { x: number; y: number }) => void
@@ -267,8 +267,9 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       const rect = createMenuRef.current.getBoundingClientRect()
       if (!rect.width) return
       const clampedX = clampMenuX(createMenu.x, rect.width)
-      if (clampedX === createMenu.x) return
-      setCreateMenu((prev) => (prev ? { ...prev, x: clampedX } : prev))
+      const clampedY = clampMenuY(createMenu.y, rect.height)
+      if (clampedX === createMenu.x && clampedY === createMenu.y) return
+      setCreateMenu((prev) => (prev ? { ...prev, x: clampedX, y: clampedY } : prev))
     }, [createMenu])
 
     useLayoutEffect(() => {
@@ -276,8 +277,9 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       const rect = nodeContextMenuRef.current.getBoundingClientRect()
       if (!rect.width) return
       const clampedX = clampMenuX(nodeContextMenu.x, rect.width)
-      if (clampedX === nodeContextMenu.x) return
-      setNodeContextMenu((prev) => (prev ? { ...prev, x: clampedX } : prev))
+      const clampedY = clampMenuY(nodeContextMenu.y, rect.height)
+      if (clampedX === nodeContextMenu.x && clampedY === nodeContextMenu.y) return
+      setNodeContextMenu((prev) => (prev ? { ...prev, x: clampedX, y: clampedY } : prev))
     }, [nodeContextMenu])
 
     useLayoutEffect(() => {
@@ -924,6 +926,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
                 event.stopPropagation()
                 onSelect(nodeId)
               }}
+              aria-label={getNodeLabel(node, system)}
+              aria-current={isSelected ? 'true' : undefined}
               data-testid={`object-tree-node-${nodeId}`}
             >
               {isEditing ? (
@@ -940,7 +944,18 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               ) : (
                 <span className="tree-node__label-content">
                   <span className="tree-node__label-text">
-                    {getNodeLabel(node, system)}
+                    <span className="tree-node__name">{node.name}</span>
+                    {node.kind !== 'folder' ? (
+                      <span className="tree-node__kind">
+                        {getNodeLabel(node, system).slice(
+                          (node.kind === 'branch' ? 'Branch: '.length : 0) + node.name.length
+                        ).trim().replace(/^\(|\)$/g, '')}
+                        {node.kind === 'branch' &&
+                        ['equilibrium', 'limit_cycle', 'forced_periodic_response'].includes(
+                          system.branches[nodeId]?.branchType ?? ''
+                        ) ? ' branch' : ''}
+                      </span>
+                    ) : null}
                   </span>
                   {hasCustomObjectParams(system.config, customParameters) ? (
                     <span

@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { SystemSummary } from '../system/types'
 import { validateSystemName } from '../state/systemValidation'
 import { normalizeDisplayName } from '../utils/naming'
 import { confirmDelete } from './confirmDelete'
+import './dialogs.css'
 
 type SystemDialogProps = {
   open: boolean
@@ -30,6 +31,7 @@ export function SystemDialog({
   const [name, setName] = useState('NewSystem')
   const [nameError, setNameError] = useState<string | null>(null)
   const [exportTargetId, setExportTargetId] = useState<string | null>(null)
+  const importInputRef = useRef<HTMLInputElement>(null)
   const exportTarget = systems.find((system) => system.id === exportTargetId) ?? null
 
   const handleCreate = () => {
@@ -42,37 +44,64 @@ export function SystemDialog({
   if (!open) return null
 
   return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true">
-      <div className="dialog">
+    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="systems-title">
+      <div className="dialog dialog--workspace dialog--systems">
         <header className="dialog__header">
-          <h2>Systems</h2>
-          <button onClick={onClose} aria-label="Close dialog">
+          <h2 id="systems-title">Systems</h2>
+          <button className="dialog__close" onClick={onClose} aria-label="Close dialog">
             ✕
           </button>
         </header>
-        <section className="dialog__section">
-          <h3>Create New</h3>
-          <div className="dialog__row">
-            <input
-              value={name}
-              onChange={(event) => {
-                const nextName = event.target.value
-                setName(nextName)
-                if (nameError) {
-                  setNameError(validateSystemName(nextName))
-                }
-              }}
-              data-testid="system-name-input"
-              aria-invalid={Boolean(nameError)}
-            />
-            <button onClick={handleCreate} data-testid="create-system">
-              Create
-            </button>
-          </div>
-          {nameError ? <div className="field-error">{nameError}</div> : null}
+        <section className="dialog__section system-library__create">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              handleCreate()
+            }}
+          >
+            <label htmlFor="new-system-name">New system</label>
+            <div className="dialog__row">
+              <input
+                id="new-system-name"
+                value={name}
+                onChange={(event) => {
+                  const nextName = event.target.value
+                  setName(nextName)
+                  if (nameError) {
+                    setNameError(validateSystemName(nextName))
+                  }
+                }}
+                data-testid="system-name-input"
+                aria-invalid={Boolean(nameError)}
+                aria-describedby={nameError ? 'new-system-name-error' : undefined}
+              />
+              <button className="dialog__primary" type="submit" data-testid="create-system">
+                Create
+              </button>
+            </div>
+          </form>
+          {nameError ? <div className="field-error" id="new-system-name-error" role="alert">{nameError}</div> : null}
         </section>
-        <section className="dialog__section">
-          <h3>Open Existing</h3>
+        <section className="dialog__section system-library__saved">
+          <div className="system-library__section-heading">
+            <h3>Saved systems</h3>
+            <button className="system-library__import" onClick={() => importInputRef.current?.click()}>
+              Import ZIP
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".zip,application/zip"
+              aria-label="Import system archive"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) onImportSystem(file)
+                event.currentTarget.value = ''
+              }}
+              data-testid="import-system"
+            />
+          </div>
           {systems.length === 0 ? (
             <p className="empty-state">No saved systems yet.</p>
           ) : (
@@ -80,7 +109,9 @@ export function SystemDialog({
               {systems.map((system) => (
                 <div key={system.id} className="dialog__list-row">
                   <div className="dialog__list-title">
-                    <button onClick={() => onOpenSystem(system.id)}>{system.name}</button>
+                    <button className="system-library__open" onClick={() => onOpenSystem(system.id)} title={`Open ${system.name}`}>
+                      {system.name}
+                    </button>
                     <span className="dialog__list-type">
                       {system.type === 'map' ? 'Map' : 'Flow'}
                     </span>
@@ -88,6 +119,8 @@ export function SystemDialog({
                   <div className="dialog__list-actions">
                     <button onClick={() => setExportTargetId(system.id)}>Export</button>
                     <button
+                      className="system-library__delete"
+                      title={`Delete ${system.name}`}
                       onClick={() => {
                         if (confirmDelete({ name: system.name, kind: 'System' })) {
                           onDeleteSystem(system.id)
@@ -102,29 +135,15 @@ export function SystemDialog({
             </div>
           )}
         </section>
-        <section className="dialog__section">
-          <h3>Import</h3>
-          <input
-            type="file"
-            accept=".zip,application/zip"
-            onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) onImportSystem(file)
-              event.currentTarget.value = ''
-            }}
-            data-testid="import-system"
-          />
-        </section>
       </div>
       {exportTarget ? (
-        <div className="dialog-backdrop export-choice-backdrop" role="dialog" aria-modal="true">
-          <div className="dialog export-choice-dialog" data-testid="export-choice-dialog">
+        <div className="dialog-backdrop export-choice-backdrop" role="dialog" aria-modal="true" aria-labelledby="export-choice-title">
+          <div className="dialog dialog--workspace export-choice-dialog" data-testid="export-choice-dialog">
             <header className="dialog__header">
               <div>
-                <h2>Export {exportTarget.name}</h2>
-                <p>Choose how you want to share this system.</p>
+                <h2 id="export-choice-title">Export {exportTarget.name}</h2>
               </div>
-              <button onClick={() => setExportTargetId(null)} aria-label="Close export choices">
+              <button className="dialog__close" onClick={() => setExportTargetId(null)} aria-label="Close export choices">
                 ✕
               </button>
             </header>
@@ -138,7 +157,7 @@ export function SystemDialog({
                 }}
               >
                 <span className="export-choice-dialog__option-title">Create embed</span>
-                <span>Export selected viewports as a standalone Plotly page.</span>
+                <span>Selected viewports · HTML</span>
               </button>
               <button
                 className="export-choice-dialog__option"
@@ -148,8 +167,8 @@ export function SystemDialog({
                   onExportSystem(exportTarget.id)
                 }}
               >
-                <span className="export-choice-dialog__option-title">Download ZIP archive</span>
-                <span>Save the complete system for backup or import into Fork.</span>
+                <span className="export-choice-dialog__option-title">Download ZIP</span>
+                <span>Complete system · Reimportable</span>
               </button>
             </div>
           </div>

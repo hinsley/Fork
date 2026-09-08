@@ -118,6 +118,8 @@ export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[]
                 className="inspector-action-row"
                 onClick={() => focus.openWorkflow(entry.id)}
                 disabled={entry.disabled}
+                title={entry.description}
+                aria-description={entry.description}
                 data-testid={`action-${entry.id}`}
                 key={entry.id}
               >
@@ -126,7 +128,7 @@ export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[]
                     <span>{entry.label}</span>
                     {entry.tag ? <span className="tree-node__tag">{entry.tag}</span> : null}
                   </strong>
-                  <small>{entry.description}</small>
+                  {entry.disabled ? <small>{entry.description}</small> : null}
                 </span>
                 <span aria-hidden="true">›</span>
               </button>
@@ -148,8 +150,8 @@ export function WorkflowFocusToolbar({
   const entry = entries.find((candidate) => candidate.id === focus.activeWorkflow)
   return (
     <div className="inspector-workflow-toolbar" data-testid="inspector-workflow-focus">
-      <button type="button" onClick={focus.closeWorkflow} data-testid="inspector-workflow-back">
-        ← Back
+      <button type="button" onClick={focus.closeWorkflow} aria-label="Back" title="Back" data-testid="inspector-workflow-back">
+        <span aria-hidden="true">←</span>
       </button>
       <div>
         <span>{entry?.group ?? 'Action'}</span>

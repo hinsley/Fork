@@ -41,11 +41,11 @@ describe('App home', () => {
     expect(screen.queryByTestId('workspace')).toBeNull()
     expect(
       screen.getByText(
-        'Dynamical systems analysis and numerical bifurcation continuation toolkit'
+        'Dynamical systems & bifurcation analysis'
       )
     ).toBeInTheDocument()
-    expect(screen.getByTestId('open-systems-empty')).toHaveTextContent('Systems menu')
-    expect(screen.getByRole('link', { name: 'Documentation and tutorials' })).toHaveAttribute(
+    expect(screen.getByTestId('open-systems-empty')).toHaveTextContent('Open a system')
+    expect(screen.getByRole('link', { name: 'Documentation' })).toHaveAttribute(
       'href',
       'https://github.com/hinsley/Fork/tree/main/tutorial'
     )

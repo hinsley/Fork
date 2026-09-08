@@ -398,6 +398,7 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                             <div className="field-error">{homoclinicFromHomoclinicError}</div>
                           ) : null}
                           <button
+                            className="inspector-primary-action"
                             onClick={handleCreateHomoclinicFromHomoclinic}
                             disabled={
                               runDisabled ||

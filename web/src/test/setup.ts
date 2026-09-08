@@ -35,6 +35,22 @@ Object.defineProperty(globalThis, 'localStorage', {
 
 enableDeterministicMode()
 
+// jsdom does not scroll elements; update their offsets for inspector navigation tests.
+if (!HTMLElement.prototype.scrollTo) {
+  HTMLElement.prototype.scrollTo = function (
+    optionsOrX: ScrollToOptions | number = {},
+    y?: number
+  ) {
+    if (typeof optionsOrX === 'number') {
+      this.scrollLeft = optionsOrX
+      this.scrollTop = y ?? 0
+    } else {
+      this.scrollLeft = optionsOrX.left ?? this.scrollLeft
+      this.scrollTop = optionsOrX.top ?? this.scrollTop
+    }
+  }
+}
+
 vi.mock('../viewports/plotly/plotlyAdapter', () => ({
   renderPlot: vi.fn((container: HTMLElement, data: unknown[], layout: object) => {
     Object.assign(container, { data, layout })

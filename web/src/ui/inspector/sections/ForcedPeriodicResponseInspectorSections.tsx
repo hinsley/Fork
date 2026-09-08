@@ -183,6 +183,7 @@ export function ForcedPeriodicResponseInspectorSections({
             <div className="field-error">{forcedPeriodicResponseError}</div>
           ) : null}
           <button
+            className="inspector-primary-action"
             onClick={handleSolveForcedPeriodicResponse}
             disabled={runDisabled || !forcing || Boolean(scope.currentFrozenEquationContext)}
             data-testid="forced-response-solve-submit"
@@ -327,6 +328,7 @@ export function ForcedPeriodicResponseInspectorSections({
             </label>
             {continuationError ? <div className="field-error">{continuationError}</div> : null}
             <button
+              className="inspector-primary-action"
               onClick={handleCreateForcedPeriodicResponseBranch}
               disabled={
                 continuationParameterLabels.length === 0 ||

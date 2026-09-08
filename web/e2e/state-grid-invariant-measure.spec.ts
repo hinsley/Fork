@@ -108,7 +108,7 @@ test('State Grid creates a separately rendered and persisted invariant-measure o
   expect(trace).toMatchObject({
     pointCount: occupiedSize,
     massCount: occupiedSize,
-    markerSize: 4,
+    markerSize: 6,
   })
   expect(trace?.uniqueOpacities).toBeGreaterThan(1)
   expect(trace?.massSum).toBeCloseTo(1, 10)

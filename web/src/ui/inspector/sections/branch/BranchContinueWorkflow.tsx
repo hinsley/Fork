@@ -215,6 +215,7 @@ export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionCon
                         <div className="field-error">{branchContinuationError}</div>
                       ) : null}
                       <button
+                        className="inspector-primary-action"
                         onClick={handleCreateBranchFromPoint}
                         disabled={
                           runDisabled ||

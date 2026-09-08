@@ -35,10 +35,11 @@ test('system string import replaces the variable and parameter setup', async ({ 
   await expect(page.getByTestId('system-eq-0')).toHaveValue('alpha * u')
   await expect(page.getByTestId('system-param-0')).toHaveValue('alpha')
   await expect(page.getByTestId('system-param-value-0')).toHaveValue('0.25')
-  await expect(page.getByRole('status')).toContainText('Apply changes to save')
+  const importStatus = page.getByTestId('system-settings-dialog').getByRole('status')
+  await expect(importStatus).toContainText('Apply changes to save')
 
   await page.getByTestId('system-apply').click()
-  await expect(page.getByRole('status')).toHaveCount(0)
+  await expect(importStatus).toHaveCount(0)
 
   await page.getByTestId('close-system-settings').click()
   await page.getByTestId('open-system-settings').click()

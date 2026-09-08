@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { createHarness } from './harness'
 
-test('inspector Action rows use dark theme button surfaces', async ({ page }) => {
+test('inspector Action rows use dark theme text and hover surfaces', async ({ page }) => {
   const harness = createHarness(page)
   await harness.goto({ deterministic: false, mock: true })
 
@@ -30,15 +30,13 @@ test('inspector Action rows use dark theme button surfaces', async ({ page }) =>
       background: style.backgroundColor,
       border: style.borderTopColor,
       text: style.color,
-      expectedBackground: resolveColor('--button-bg'),
       expectedHover: resolveColor('--button-bg-hover'),
-      expectedBorder: resolveColor('--panel-border'),
       expectedText: resolveColor('--text'),
     }
   })
 
-  expect(colors.background).toBe(colors.expectedBackground)
-  expect(colors.border).toBe(colors.expectedBorder)
+  expect(colors.background).toBe('rgba(0, 0, 0, 0)')
+  expect(colors.border).toBe('rgba(0, 0, 0, 0)')
   expect(colors.text).toBe(colors.expectedText)
 
   await action.hover()

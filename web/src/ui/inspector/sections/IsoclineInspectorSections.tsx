@@ -340,6 +340,7 @@ export function IsoclineInspectorSections({
                 ) : null}
                 {isoclineError ? <div className="field-error">{isoclineError}</div> : null}
                 <button
+                  className="inspector-primary-action"
                   type="button"
                   onClick={() => void handleComputeIsocline()}
                   disabled={isoclineComputing}

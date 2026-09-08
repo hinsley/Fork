@@ -440,7 +440,7 @@ function InvariantMeasureEigenmodeAnalysis({
       ) : null}
       <button
         type="button"
-        className="primary"
+        className="inspector-primary-action"
         onClick={() => void runAnalysis()}
         disabled={running || !stationaryConverged || !requestValid}
         data-testid="invariant-eigenmode-compute"

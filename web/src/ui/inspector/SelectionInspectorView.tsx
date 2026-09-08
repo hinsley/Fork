@@ -219,8 +219,11 @@ export function SelectionInspectorView({
           >
             {!workflowFocus?.activeWorkflow ? (
               <div className="inspector-section inspector-entity-header">
+                <div className="inspector-meta">
+                  <span>{selectionTypeLabel}</span>
+                </div>
                 <label>
-                  Name
+                  <span className="inspector-entity-header__name-label">Name</span>
                   <input
                     value={selectionNameDraft}
                     onChange={(event) => setSelectionNameDraft(event.target.value)}
@@ -240,10 +243,7 @@ export function SelectionInspectorView({
                     data-testid="inspector-name"
                   />
                 </label>
-                <div className="inspector-meta">
-                  <span>{selectionTypeLabel}</span>
-                  {summary?.detail ? <span>{summary.detail}</span> : null}
-                </div>
+                {summary?.detail ? <div className="inspector-meta">{summary.detail}</div> : null}
               </div>
             ) : null}
 
@@ -971,6 +971,7 @@ export function SelectionInspectorView({
                       </label>
                       <div className="inspector-inline-actions">
                         <button
+                          className="inspector-primary-action"
                           type="button"
                           onClick={() => void handleComputeLimitCycleFloquetModes()}
                           disabled={runDisabled}
@@ -1190,7 +1191,7 @@ export function SelectionInspectorView({
             <BranchInspectorSections scope={scope} />
           </div>
         ) : (
-          <p className="empty-state">Select a node to inspect details.</p>
+          <p className="empty-state">Select an item to inspect.</p>
         )}
       </div>
     )

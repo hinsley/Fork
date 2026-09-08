@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Icon } from './Icon'
 
 type ToolbarProps = {
   systemName: string | null
@@ -97,11 +98,16 @@ export function Toolbar({
       }
     }
 
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSettingsOpen(false)
+    }
     if (settingsOpen) {
       window.addEventListener('pointerdown', handlePointer)
+      window.addEventListener('keydown', handleKey)
     }
     return () => {
       window.removeEventListener('pointerdown', handlePointer)
+      window.removeEventListener('keydown', handleKey)
     }
   }, [settingsOpen])
 
@@ -115,23 +121,25 @@ export function Toolbar({
           aria-label="Go to Fork home"
           data-testid="go-home"
         >
+          <Icon name="fork" />
           <span className="toolbar__logo">Fork</span>
         </button>
         <span className="toolbar__divider" aria-hidden="true" />
-        <span className="toolbar__system">
-          <span className="toolbar__system-label">System</span>
-          <span className="toolbar__system-name">{systemName ?? 'None selected'}</span>
-        </span>
-      </div>
-      <div className="toolbar__actions">
         <button
-          className="toolbar__button toolbar__button--primary"
+          className="toolbar__system-switch"
           onClick={onOpenSystems}
+          aria-label={systemName ? `Systems: ${systemName}` : 'Systems'}
+          title="Open systems"
           data-testid="open-systems"
         >
-          <span aria-hidden="true">⌘</span>
-          Systems
+          <Icon name="systems" />
+          <span className="toolbar__system-name">{systemName ?? 'Systems'}</span>
+          <Icon name="chevron-down" />
         </button>
+      </div>
+      <div className="toolbar__actions">
+        <a className="toolbar__docs" href="https://github.com/hinsley/Fork/tree/main/tutorial"
+          target="_blank" rel="noreferrer">Docs <Icon name="external" /></a>
         <div className="toolbar__settings" ref={settingsRef}>
           <button
             className="toolbar__button"
@@ -139,9 +147,10 @@ export function Toolbar({
             aria-expanded={settingsOpen}
             aria-haspopup="menu"
             data-testid="open-settings"
+            aria-label="Settings"
+            title="Settings"
           >
-            <span aria-hidden="true">◐</span>
-            Settings
+            <Icon name="settings" />
           </button>
           {settingsOpen ? (
             <div className="toolbar__settings-panel" role="menu">
@@ -170,6 +179,15 @@ export function Toolbar({
                   </button>
                 </div>
               </div>
+              <button
+                className="toolbar__button toolbar__button--support"
+                onClick={() => {
+                  window.open('https://patreon.com/ForkDynamics', '_blank', 'noopener,noreferrer')
+                }}
+                data-testid="open-patreon"
+              >
+                Patreon
+              </button>
               <div className="settings-row">
                 <button
                   className="settings-reset"
@@ -186,17 +204,8 @@ export function Toolbar({
             </div>
           ) : null}
         </div>
-        <button
-          className="toolbar__button toolbar__button--support"
-          onClick={() => {
-            window.open('https://patreon.com/ForkDynamics', '_blank', 'noopener,noreferrer')
-          }}
-          data-testid="open-patreon"
-        >
-          Patreon
-        </button>
       </div>
-      <div className="toolbar__status">
+      <div className={`toolbar__status${busy || progress ? ' toolbar__status--active' : ''}`} role="status">
         {progress ? (
           <div className="toolbar__progress">
             <div className="toolbar__progress-header">
@@ -314,7 +323,7 @@ export function Toolbar({
         ) : (
           <span className={`toolbar__ready${busy ? ' toolbar__ready--busy' : ''}`}>
             <span className="toolbar__ready-dot" aria-hidden="true" />
-            {busy ? 'Computing…' : 'Ready'}
+            {busy ? 'Computing…' : <span className="sr-only">Ready</span>}
           </span>
         )}
       </div>

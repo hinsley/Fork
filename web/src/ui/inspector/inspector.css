@@ -1,23 +1,53 @@
-/* Inspector session and workflow navigation */
 .inspector-entity-header {
   position: sticky;
   z-index: 4;
   top: 0;
-  padding: 10px;
-  border: 1px solid var(--panel-border);
-  border-radius: 9px;
-  background: var(--panel-raised);
-  box-shadow: var(--shadow-soft);
+  padding: 2px 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--panel-border);
+  border-radius: 0;
+  background: var(--panel);
+  box-shadow: none;
+}
+
+.inspector-entity-header__name-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.inspector-entity-header input:not([type]) {
+  min-height: 32px;
+  padding: 3px 5px;
+  margin-left: -5px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.inspector-entity-header input:not([type]):hover {
+  border-color: var(--panel-border);
+}
+
+.inspector-entity-header .inspector-meta {
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .inspector-actions {
   display: grid;
-  gap: 12px;
-  margin-bottom: 14px;
-  padding: 11px;
-  border: 1px solid var(--panel-border);
-  border-radius: 9px;
-  background: var(--panel-raised);
+  gap: 18px;
+  margin-bottom: 20px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .inspector-browser {
@@ -105,24 +135,28 @@
 .inspector-actions__group h4,
 .inspector-workflow-toolbar > div span {
   color: var(--text-faint);
-  font-size: 0.58rem;
-  font-weight: 720;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
 }
 
 .inspector-actions__group {
   display: grid;
-  gap: 5px;
+  gap: 2px;
+}
+
+.inspector-actions__group h4 {
+  padding: 0 8px 4px;
 }
 
 .inspector-action-row {
   display: flex;
-  min-height: 48px;
-  padding: 8px 10px;
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  background: var(--button-bg);
+  min-height: 36px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
   color: var(--text);
   align-items: center;
   justify-content: space-between;
@@ -135,18 +169,23 @@
 }
 
 .inspector-action-row:hover {
-  border-color: var(--panel-border-strong);
+  border-color: transparent;
   background: var(--button-bg-hover);
 }
 
 .inspector-action-row:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.65;
 }
 
 .inspector-action-row:disabled:hover {
-  border-color: var(--panel-border);
-  background: var(--button-bg);
+  border-color: transparent;
+  background: transparent;
+}
+
+.inspector-action-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .inspector-action-row > span:first-child {
@@ -156,7 +195,8 @@
 
 .inspector-action-row strong {
   color: var(--text);
-  font-size: 0.72rem;
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .inspector-action-row__title {
@@ -167,14 +207,14 @@
 
 .inspector-action-row small {
   color: var(--text-muted);
-  font-size: 0.63rem;
+  font-size: 11px;
   font-weight: 450;
   line-height: 1.35;
 }
 
 .inspector-action-row > span:last-child {
-  color: var(--accent);
-  font-size: 1.15rem;
+  color: var(--text-faint);
+  font-size: 18px;
 }
 
 .inspector-workflow-toolbar {
@@ -184,13 +224,25 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding: 8px;
-  border: 1px solid var(--panel-border-strong);
-  border-radius: 9px;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 0 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--panel-border);
+  border-radius: 0;
   background: var(--panel);
-  box-shadow: var(--shadow-soft);
+  box-shadow: none;
+}
+
+.inspector-workflow-toolbar > button {
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
 }
 
 .inspector-workflow-toolbar > div {
@@ -201,7 +253,8 @@
 
 .inspector-workflow-toolbar > div strong {
   overflow: hidden;
-  font-size: 0.7rem;
+  font-size: 14px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -228,6 +281,302 @@
 }
 
 .inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] {
+  margin-top: 0;
+  padding-top: 0;
+  border: 0;
+  background: transparent;
+}
+
+.inspector-browser > .inspector-group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.inspector-browser .inspector-disclosure__summary {
+  min-height: 36px;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.inspector-browser .inspector-disclosure__content {
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.inspector-browser .inspector-subheading,
+.inspector-browser .inspector-divider {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.system-editor {
+  background: var(--panel);
+}
+
+.system-editor__scroll {
+  padding: 0 24px 20px;
+}
+
+.system-editor__string-tools {
+  gap: 10px;
+  margin: 0;
+  padding: 0 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--panel-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.system-editor__string-tools-copy strong {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.system-editor__string-tools-actions button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  background: transparent;
+  font-size: 12px;
+}
+
+.system-editor .system-editor__card {
+  gap: 16px;
+  padding: 20px 0;
+  border: 0;
+  border-bottom: 1px solid var(--panel-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.system-editor__card-header {
+  align-items: center;
+  gap: 12px;
+}
+
+.system-editor .system-editor__section-toggle {
+  align-items: center;
+}
+
+.system-editor__section-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.system-editor__counts {
+  gap: 12px;
+}
+
+.system-editor__counts span {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 11px;
+}
+
+.system-editor__field > span:first-child,
+.system-editor__mobile-label,
+.system-editor__table-head,
+.system-editor__string-import label > span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.system-editor__model-grid {
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 1fr) minmax(120px, 0.5fr);
+}
+
+.system-editor__model-grid--map {
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 1fr);
+}
+
+.system-editor .system-type-switch {
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+}
+
+.system-editor .system-type-switch button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  align-content: center;
+  text-align: center;
+}
+
+.system-editor .system-type-switch button strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.system-editor .system-type-switch button.is-active {
   border-color: var(--panel-border-strong);
   background: var(--panel-raised);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.system-editor__workspace {
+  gap: 24px;
+  margin-top: 0;
+}
+
+.system-editor__add-button,
+.system-editor__parameter-tools button {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.system-editor__expression-reference {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 12px;
+}
+
+.system-editor__expression-reference summary {
+  color: var(--text-muted);
+  font-weight: 450;
+}
+
+.system-editor__expression-reference code,
+.system-editor__string-import p,
+.system-editor__string-import code,
+.system-editor__string-feedback {
+  font-size: 11px;
+}
+
+.system-editor__variable-list,
+.system-editor__parameter-list {
+  gap: 8px;
+}
+
+.system-editor__variable-row,
+.system-editor__parameter-row {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  align-items: start;
+}
+
+.system-editor__table-head {
+  padding: 0;
+}
+
+.system-editor__equation-input,
+.system-editor .periodic-control__toggle {
+  border-radius: 5px;
+}
+
+.system-editor__equation-input > span,
+.system-editor .system-editor__equation-input textarea,
+.system-editor .system-editor__string-import textarea {
+  font-size: 12px;
+}
+
+.system-editor .periodic-control__toggle {
+  padding: 0 5px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 11px;
+}
+
+.system-editor__remove-button {
+  font-size: 11px;
+}
+
+.system-editor__empty {
+  padding: 12px 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 12px;
+  text-align: left;
+}
+
+.system-editor__footer {
+  min-height: 60px;
+  padding: 12px 24px;
+  background: var(--panel);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.system-editor__status {
+  font-size: 12px;
+}
+
+.system-editor__apply {
+  min-width: 126px;
+  min-height: 34px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.inspector-panel button.inspector-primary-action {
+  min-height: 34px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.inspector-panel button.inspector-primary-action:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+}
+
+.inspector-panel button.inspector-primary-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.inspector-panel button.inspector-primary-action:disabled {
+  border-color: var(--panel-border);
+  background: var(--panel-raised);
+  color: var(--text-faint);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (max-width: 980px) {
+  .system-editor__model-grid,
+  .system-editor__model-grid--map {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .system-editor__scroll {
+    padding: 0 16px 16px;
+  }
+
+  .system-editor__workspace {
+    gap: 0;
+  }
+
+  .system-editor__model-grid,
+  .system-editor__model-grid--map {
+    grid-template-columns: 1fr;
+  }
+
+  .system-editor__footer {
+    padding: 12px 16px;
+  }
 }

@@ -316,6 +316,7 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
                             <div className="field-error">{homotopySaddleFromEquilibriumError}</div>
                           ) : null}
                           <button
+                            className="inspector-primary-action"
                             onClick={handleCreateHomotopySaddleFromEquilibrium}
                             disabled={
                               runDisabled ||

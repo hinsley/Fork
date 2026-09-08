@@ -134,7 +134,7 @@ test('bundled export renders under restrictive CSP without network dependencies'
   await page.getByRole('button', { name: 'Export' }).click()
   await page.getByRole('button', { name: 'Create embed' }).click()
   await page.getByRole('checkbox', {
-    name: 'Bundle dependencies (Experimental)',
+    name: /^Bundle dependencies/,
   }).check()
 
   const downloadButton = page.getByTestId('download-embed-html')
@@ -219,7 +219,7 @@ test('bundled 3D export falls back to its captured camera without WebGL', async 
     .click()
   await page.getByRole('button', { name: 'Create embed' }).click()
   await page.getByRole('checkbox', {
-    name: 'Bundle dependencies (Experimental)',
+    name: /^Bundle dependencies/,
   }).check()
 
   const downloadButton = page.getByTestId('download-embed-html')

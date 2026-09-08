@@ -280,6 +280,7 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                             <div className="field-error">{homoclinicFromHomotopySaddleError}</div>
                           ) : null}
                           <button
+                            className="inspector-primary-action"
                             onClick={handleCreateHomoclinicFromHomotopySaddle}
                             disabled={
                               runDisabled ||

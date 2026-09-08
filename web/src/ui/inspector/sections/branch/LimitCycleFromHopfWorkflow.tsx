@@ -311,6 +311,7 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                             <div className="field-error">{limitCycleFromHopfError}</div>
                           ) : null}
                           <button
+                            className="inspector-primary-action"
                             onClick={handleCreateLimitCycleFromHopf}
                             disabled={
                               runDisabled ||

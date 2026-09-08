@@ -8,20 +8,29 @@ test('object tree native drag reorders with a live preview', async ({ page }) =>
 
   const originalBranch = page
     .locator('[data-testid^="object-tree-row-"]')
-    .filter({ hasText: 'Branch: eq_branch (equilibrium)' })
+    .filter({
+      has: page.getByRole('button', { name: 'Branch: eq_branch (equilibrium)', exact: true }),
+    })
     .first()
+  await expect(originalBranch.locator('.tree-node__name')).toHaveText('eq_branch')
+  await expect(originalBranch.locator('.tree-node__kind')).toHaveText('equilibrium branch')
   await originalBranch.click({ button: 'right' })
   await page.getByTestId('object-context-duplicate').click()
 
   const copiedBranch = page
     .locator('[data-testid^="object-tree-row-"]')
-    .filter({ hasText: 'Branch: eq_branch_copy (equilibrium)' })
+    .filter({
+      has: page.getByRole('button', { name: 'Branch: eq_branch_copy (equilibrium)', exact: true }),
+    })
   await expect(copiedBranch).toHaveCount(1)
 
   const branchLabels = async () =>
     await page.locator('[data-testid^="object-tree-row-"]').evaluateAll((rows) =>
       rows
-        .map((row) => row.textContent?.trim() ?? '')
+        .map(
+          (row) =>
+            row.querySelector('[data-testid^="object-tree-node-"]')?.getAttribute('aria-label') ?? ''
+        )
         .filter((label) => label.startsWith('Branch:'))
     )
 
@@ -65,7 +74,10 @@ test('object tree native drag appends root objects from bottom whitespace', asyn
   const objectLabels = async () =>
     await page.locator('[data-testid^="object-tree-row-"]').evaluateAll((rows) =>
       rows
-        .map((row) => row.textContent?.trim() ?? '')
+        .map(
+          (row) =>
+            row.querySelector('[data-testid^="object-tree-node-"]')?.getAttribute('aria-label') ?? ''
+        )
         .filter((label) => label.startsWith('Orbit_'))
     )
 
@@ -73,7 +85,7 @@ test('object tree native drag appends root objects from bottom whitespace', asyn
 
   const source = page
     .locator('[data-testid^="object-tree-row-"]')
-    .filter({ hasText: 'Orbit_1 (orbit)' })
+    .filter({ has: page.getByRole('button', { name: 'Orbit_1 (orbit)', exact: true }) })
   const sourceBox = await source.boundingBox()
   const panelBox = await page.getByTestId('objects-panel').boundingBox()
   if (!sourceBox || !panelBox) {
@@ -104,7 +116,10 @@ test('object tree native drag prepends root objects from space above the tree', 
   const objectLabels = async () =>
     await page.locator('[data-testid^="object-tree-row-"]').evaluateAll((rows) =>
       rows
-        .map((row) => row.textContent?.trim() ?? '')
+        .map(
+          (row) =>
+            row.querySelector('[data-testid^="object-tree-node-"]')?.getAttribute('aria-label') ?? ''
+        )
         .filter((label) => label.startsWith('Orbit_'))
     )
 
@@ -112,7 +127,7 @@ test('object tree native drag prepends root objects from space above the tree', 
 
   const source = page
     .locator('[data-testid^="object-tree-row-"]')
-    .filter({ hasText: 'Orbit_2 (orbit)' })
+    .filter({ has: page.getByRole('button', { name: 'Orbit_2 (orbit)', exact: true }) })
   const sourceBox = await source.boundingBox()
   const panelBox = await page.getByTestId('objects-panel').boundingBox()
   if (!sourceBox || !panelBox) {

@@ -25,14 +25,14 @@ export function SystemSettingsDialog({
       aria-labelledby="system-settings-title"
       data-testid="system-settings-dialog"
     >
-      <div className="dialog dialog--system-settings">
+      <div className="dialog dialog--workspace dialog--system-settings">
         <header className="dialog__header system-settings-dialog__header">
           <div className="system-settings-dialog__heading">
-            <span className="system-settings-dialog__eyebrow">Model configuration</span>
-            <h2 id="system-settings-title">System settings: {system.config.name}</h2>
-            <p>Define the dynamics, parameters, and numerical method for this system.</p>
+            <h2 id="system-settings-title">System settings</h2>
+            <span className="dialog__context">{system.config.name}</span>
           </div>
           <button
+            className="dialog__close"
             onClick={onClose}
             aria-label="Close system settings"
             data-testid="close-system-settings"

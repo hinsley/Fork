@@ -251,6 +251,7 @@ export function LimitCycleCodim1CurveWorkflow({
           <div className="field-error">{limitCycleCodim1CurveError}</div>
         ) : null}
         <button
+          className="inspector-primary-action"
           onClick={handleCreateLimitCycleCodim1Curve}
           disabled={
             runDisabled ||

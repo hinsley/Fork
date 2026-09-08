@@ -224,7 +224,8 @@ drawn above it, with a visible legend for the two layers.
 
 - `web/src/viewports/plotly/plotlyTheme.ts`: `resolvePlotlyThemeTokens()` is
   used to set `paper_bgcolor`, `plot_bgcolor`, and text/annotation/legend font
-  colors in Plotly layouts.
+  colors in Plotly layouts. Its fallback colors match the light and dark CSS
+  themes; standalone HTML exports use the same palette.
 
 ## Test-only hooks (non-runtime)
 

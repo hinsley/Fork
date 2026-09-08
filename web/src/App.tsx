@@ -3,6 +3,7 @@ import './App.css'
 import './ui/inspector/inspector.css'
 import { useAppContext } from './state/appContext'
 import { Panel } from './ui/Panel'
+import { Icon } from './ui/Icon'
 import { ObjectsTree, type ObjectsTreeHandle } from './ui/ObjectsTree'
 import { InspectorPanel } from './ui/InspectorPanel'
 import { ViewportPanel } from './ui/ViewportPanel'
@@ -339,11 +340,12 @@ function App() {
       {!system ? (
         <main className="empty-workspace">
           <div className="empty-card">
+            <Icon name="fork" className="empty-card__mark" />
             <h1>Fork Dynamics</h1>
-            <p>Dynamical systems analysis and numerical bifurcation continuation toolkit</p>
+            <p>Dynamical systems & bifurcation analysis</p>
             <div className="empty-card__actions">
               <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
-                Systems menu
+                Open a system
               </button>
               <a
                 className="empty-card__resource-link"
@@ -351,7 +353,7 @@ function App() {
                 target="_blank"
                 rel="noreferrer"
               >
-                Documentation and tutorials
+                Documentation
               </a>
             </div>
           </div>
@@ -374,7 +376,7 @@ function App() {
               actions={
                 <div className="panel-actions">
                   <button onClick={openCreateObjectMenu} data-testid="create-object-button">
-                    <span aria-hidden="true">＋</span> Object
+                    <Icon name="plus" /> Object
                   </button>
                   <button
                     onClick={createRootFolder}
@@ -382,7 +384,7 @@ function App() {
                     aria-label="Create Folder"
                     data-testid="create-folder-button"
                   >
-                    <span aria-hidden="true">📁</span> Folder
+                    <Icon name="folder" />
                   </button>
                 </div>
               }
@@ -469,8 +471,9 @@ function App() {
               testId="inspector-panel"
               showToggle={false}
               actions={
-                <button onClick={openSystemSettings} data-testid="open-system-settings">
-                  <span aria-hidden="true">⚙</span> System Settings
+                <button onClick={openSystemSettings} data-testid="open-system-settings"
+                  aria-label="System Settings" title="System Settings">
+                  <Icon name="settings" />
                 </button>
               }
             >

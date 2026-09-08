@@ -60,7 +60,7 @@ test('Henon two-cycle stable manifold phases initialize and extend at one physic
   await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 60_000 })
   for (const name of names) {
     await expect(
-      page.locator('[data-testid^="object-tree-node-"]').filter({ hasText: `Branch: ${name}` })
+      page.getByRole('button', { name: new RegExp(`^Branch: ${name}\\s`) })
     ).toBeVisible()
   }
   await expectGroupArclength(page, names, 2)

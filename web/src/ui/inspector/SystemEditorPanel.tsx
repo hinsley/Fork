@@ -182,6 +182,10 @@ function ExpressionLanguageReference({ systemType }: { systemType: 'flow' | 'map
       <summary>Expression syntax and functions</summary>
       <div className="system-editor__expression-reference-body">
         <p>
+          Names may contain spaces. Wrap names that are not plain identifiers in backticks
+          when using them in equations.
+        </p>
+        <p>
           Use variable and parameter names with <code>+</code>, <code>-</code>, <code>*</code>,{' '}
           <code>/</code>, <code>^</code>, parentheses, and scientific notation such as{' '}
           <code>1e-3</code>.
@@ -380,7 +384,6 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
             <button type="button" className="system-editor__section-toggle" aria-expanded={sections.model} onClick={() => toggle('model')} data-testid="system-toggle-model">
               <span aria-hidden="true">{sections.model ? '▾' : '▸'}</span>
               <span className="system-editor__section-copy">
-                <span className="system-editor__eyebrow">Definition</span>
                 <span className="system-editor__section-title">Model</span>
               </span>
             </button>
@@ -388,10 +391,6 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
           </header>
           {sections.model ? (
             <div className="system-editor__card-body">
-              <p className="system-editor__helper">
-                Names may contain spaces. Use backticks around names that are not plain
-                identifiers, including names with spaces, when you use them in an equation.
-              </p>
               <div className={`system-editor__model-grid system-editor__model-grid--${draft.type}`}>
                 <label className="system-editor__field system-editor__field--name">
                   <span>System name</span>
@@ -401,8 +400,8 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
                 <div className="system-editor__field system-editor__field--type">
                   <span>System type</span>
                   <div className="system-type-switch" role="group" aria-label="System type" data-testid="system-type">
-                    <button type="button" className={draft.type === 'flow' ? 'is-active' : undefined} aria-pressed={draft.type === 'flow'} onClick={() => setType('flow')} data-testid="system-type-flow"><strong>Flow</strong><span>ODE · continuous time</span></button>
-                    <button type="button" className={draft.type === 'map' ? 'is-active' : undefined} aria-pressed={draft.type === 'map'} onClick={() => setType('map')} data-testid="system-type-map"><strong>Discrete map</strong><span>Iterated update</span></button>
+                    <button type="button" className={draft.type === 'flow' ? 'is-active' : undefined} aria-pressed={draft.type === 'flow'} title="Ordinary differential equations in continuous time" onClick={() => setType('flow')} data-testid="system-type-flow"><strong>Flow</strong></button>
+                    <button type="button" className={draft.type === 'map' ? 'is-active' : undefined} aria-pressed={draft.type === 'map'} title="Discrete iterations of a state update" onClick={() => setType('map')} data-testid="system-type-map"><strong>Discrete map</strong></button>
                   </div>
                 </div>
                 {draft.type === 'flow' ? (
@@ -461,7 +460,7 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
             <header className="system-editor__card-header">
               <button type="button" className="system-editor__section-toggle" aria-expanded={sections.variables} onClick={() => toggle('variables')} data-testid="system-toggle-variables">
                 <span aria-hidden="true">{sections.variables ? '▾' : '▸'}</span>
-                <span className="system-editor__section-copy"><span className="system-editor__eyebrow">State space</span><span className="system-editor__section-title">Variables and equations</span></span>
+                <span className="system-editor__section-copy"><span className="system-editor__section-title">Variables and equations</span></span>
               </button>
               <button type="button" className="system-editor__add-button" onClick={() => setDraft((previous) => ({ ...previous, varNames: [...previous.varNames, `x${previous.varNames.length + 1}`], equations: [...previous.equations, ''], periodicVariables: [...previous.periodicVariables, { enabled: false, period: String(DEFAULT_VARIABLE_PERIOD) }] }))} data-testid="system-add-variable">+ Variable</button>
             </header>
@@ -497,13 +496,13 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
 
           <section className={`inspector-section system-editor__card system-editor__parameters${sections.parameters ? '' : ' is-collapsed'}`}>
             <header className="system-editor__card-header">
-              <button type="button" className="system-editor__section-toggle" aria-expanded={sections.parameters} onClick={() => toggle('parameters')} data-testid="system-toggle-parameters"><span aria-hidden="true">{sections.parameters ? '▾' : '▸'}</span><span className="system-editor__section-copy"><span className="system-editor__eyebrow">Constants</span><span className="system-editor__section-title">Parameters</span></span></button>
+              <button type="button" className="system-editor__section-toggle" aria-expanded={sections.parameters} onClick={() => toggle('parameters')} data-testid="system-toggle-parameters"><span aria-hidden="true">{sections.parameters ? '▾' : '▸'}</span><span className="system-editor__section-copy"><span className="system-editor__section-title">Parameters</span></span></button>
               <button type="button" className="system-editor__add-button" onClick={() => setDraft((previous) => ({ ...previous, paramNames: [...previous.paramNames, `p${previous.paramNames.length + 1}`], params: [...previous.params, '0'] }))} data-testid="system-add-parameter">+ Parameter</button>
             </header>
             {sections.parameters ? (
               <div className="system-editor__card-body">
                 <div className="system-editor__parameter-tools"><button type="button" className="inspector-inline-button" onClick={() => void copyText(formatValues(draft.params))} disabled={draft.paramNames.length === 0}>Copy values</button><button type="button" className="inspector-inline-button" onClick={() => void pasteParameters()} disabled={draft.paramNames.length === 0}>Paste values</button></div>
-                {draft.paramNames.length > 0 ? <div className="inspector-list system-editor__parameter-list">{draft.paramNames.map((name, index) => <div className="system-editor__parameter-row" key={`parameter-${index}`}><label className="system-editor__compact-field"><span className="system-editor__mobile-label">Parameter</span><input value={name} onChange={(event) => setDraft((previous) => ({ ...previous, paramNames: previous.paramNames.map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-param-${index}`} /></label><label className="system-editor__compact-field"><span className="system-editor__mobile-label">Value</span><input type="text" inputMode="text" placeholder="e.g. tau / 4" value={draft.params[index] ?? ''} onChange={(event) => setDraft((previous) => ({ ...previous, params: adjustArray(previous.params, previous.paramNames.length, () => '0').map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-param-value-${index}`} /></label><button type="button" className="system-editor__remove-button" onClick={() => setDraft((previous) => ({ ...previous, paramNames: previous.paramNames.filter((_, current) => current !== index), params: previous.params.filter((_, current) => current !== index) }))} data-testid={`system-remove-param-${index}`}>Remove</button></div>)}</div> : <div className="system-editor__empty">No parameters defined. Add one when an equation needs a named constant.</div>}
+                {draft.paramNames.length > 0 ? <div className="inspector-list system-editor__parameter-list">{draft.paramNames.map((name, index) => <div className="system-editor__parameter-row" key={`parameter-${index}`}><label className="system-editor__compact-field"><span className="system-editor__mobile-label">Parameter</span><input value={name} onChange={(event) => setDraft((previous) => ({ ...previous, paramNames: previous.paramNames.map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-param-${index}`} /></label><label className="system-editor__compact-field"><span className="system-editor__mobile-label">Value</span><input type="text" inputMode="text" placeholder="e.g. tau / 4" value={draft.params[index] ?? ''} onChange={(event) => setDraft((previous) => ({ ...previous, params: adjustArray(previous.params, previous.paramNames.length, () => '0').map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-param-value-${index}`} /></label><button type="button" className="system-editor__remove-button" onClick={() => setDraft((previous) => ({ ...previous, paramNames: previous.paramNames.filter((_, current) => current !== index), params: previous.params.filter((_, current) => current !== index) }))} data-testid={`system-remove-param-${index}`}>Remove</button></div>)}</div> : <div className="system-editor__empty">No parameters.</div>}
               </div>
             ) : null}
           </section>
@@ -513,9 +512,9 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
         <div className="system-editor__status" aria-live="polite">
           {state.message ? <div className="field-error">{state.message}</div> : null}
           {state.validating ? <div className="field-warning">Validating equations…</div> : null}
-          {!state.message && !state.validating ? <span>{dirty ? 'Apply changes to use this configuration.' : 'System settings are up to date.'}</span> : null}
+          {!state.message && !state.validating && dirty ? <span>Unsaved changes</span> : null}
         </div>
-        <button className="system-editor__apply" onClick={() => void apply()} disabled={state.validating || !dirty} data-testid="system-apply">Apply changes</button>
+        <button className="system-editor__apply inspector-primary-action" onClick={() => void apply()} disabled={state.validating || !dirty} data-testid="system-apply">Apply changes</button>
       </footer>
     </div>
   )

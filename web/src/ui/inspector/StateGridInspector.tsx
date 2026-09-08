@@ -484,16 +484,16 @@ export function StateGridInspector({
           <span className="inspector-metrics__value">{formatCount(integrationWork)}</span>
         </div>
       </div>
-      <p
-        className={workloadLevel === 'large' ? 'inspector-error' : 'inspector-help'}
-        data-testid="state-grid-workload-warning"
-      >
-        {workloadLevel === 'large'
-          ? 'Large Cartesian product. Runtime and memory pressure grow exponentially with state dimension.'
-          : workloadLevel === 'moderate'
-            ? 'Moderate Cartesian product. Increasing one resolution multiplies the full workload.'
-            : 'The Cartesian product is currently small.'}
-      </p>
+      {workloadLevel !== 'small' ? (
+        <p
+          className={workloadLevel === 'large' ? 'inspector-error' : 'inspector-help'}
+          data-testid="state-grid-workload-warning"
+        >
+          {workloadLevel === 'large'
+            ? 'Large Cartesian product. Runtime and memory pressure grow exponentially with state dimension.'
+            : 'Moderate Cartesian product. Increasing one resolution multiplies the full workload.'}
+        </p>
+      ) : null}
     </>
   )
 
@@ -511,8 +511,12 @@ export function StateGridInspector({
       >
         {!workflowFocus?.activeWorkflow ? (
           <div className="inspector-section inspector-entity-header">
+            <div className="inspector-meta">
+              <span>State Grid</span>
+              <span>{isMap ? 'Discrete map' : 'Flow'}</span>
+            </div>
             <label>
-              Name
+              <span className="inspector-entity-header__name-label">Name</span>
               <input
                 value={nameDraft}
                 onChange={(event) => setNameDraft(event.target.value)}
@@ -523,10 +527,6 @@ export function StateGridInspector({
                 data-testid="state-grid-name"
               />
             </label>
-            <div className="inspector-meta">
-              <span>State Grid</span>
-              <span>{isMap ? 'Discrete map' : 'Flow'}</span>
-            </div>
           </div>
         ) : null}
 
@@ -588,13 +588,15 @@ export function StateGridInspector({
 
         {!workflowFocus?.activeWorkflow ? (
           <section className="inspector-section" data-testid="state-grid-summary">
-            <h3 className="inspector-subheading">State Grid</h3>
-            <p className="inspector-help">
-              A bounded regular Cartesian grid in the full state space. Resolution is the number of
-              cell-center samples on each coordinate. A State Space scene previews all{' '}
-              {formatCount(totalPoints)} cell centers with equal weight and the selected Appearance.
-            </p>
             {workloadSummary}
+            <details className="inspector-disclosure">
+              <summary className="inspector-disclosure__summary">Sampling</summary>
+              <p className="inspector-help">
+                A bounded regular Cartesian grid in the full state space. Resolution is the number of
+                cell-center samples on each coordinate. A State Space scene previews all{' '}
+                {formatCount(totalPoints)} cell centers with equal weight and the selected Appearance.
+              </p>
+            </details>
           </section>
         ) : null}
 
@@ -825,6 +827,7 @@ export function StateGridInspector({
         </label>
         <div className="inspector-inline-actions">
           <button
+            className="inspector-primary-action"
             type="button"
             onClick={() => void run()}
             disabled={running || !Number.isFinite(totalPoints)}
@@ -1027,6 +1030,7 @@ export function StateGridInspector({
           </p>
           <div className="inspector-inline-actions">
             <button
+              className="inspector-primary-action"
               type="button"
               onClick={() => void runTransferOperator()}
               disabled={running || !onComputeTransferOperator || !Number.isFinite(totalPoints)}

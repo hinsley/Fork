@@ -154,6 +154,7 @@ export function OrbitInspectorSections({
                   ) : null}
                   {orbitError ? <div className="field-error">{orbitError}</div> : null}
                   <button
+                    className="inspector-primary-action"
                     onClick={handleRunOrbit}
                     disabled={runDisabled}
                     data-testid="orbit-run-submit"
@@ -168,8 +169,7 @@ export function OrbitInspectorSections({
                     >
                       <strong>Orbit ready</strong>
                       <span>
-                        {orbit.data.length.toLocaleString()} points are available in the State
-                        Space viewport and Orbit Data.
+                        {orbit.data.length.toLocaleString()} points
                       </span>
                     </div>
                   ) : null}
@@ -469,6 +469,7 @@ export function OrbitInspectorSections({
                   </label>
                   {lyapunovError ? <div className="field-error">{lyapunovError}</div> : null}
                   <button
+                    className="inspector-primary-action"
                     onClick={handleComputeLyapunov}
                     disabled={runDisabled}
                     data-testid="lyapunov-submit"
@@ -579,6 +580,7 @@ export function OrbitInspectorSections({
                   </label>
                   {covariantError ? <div className="field-error">{covariantError}</div> : null}
                   <button
+                    className="inspector-primary-action"
                     onClick={handleComputeCovariant}
                     disabled={runDisabled}
                     data-testid="clv-submit"
@@ -983,6 +985,7 @@ export function OrbitInspectorSections({
                         <div className="field-error">{limitCycleFromOrbitError}</div>
                       ) : null}
                       <button
+                        className="inspector-primary-action"
                         onClick={handleCreateLimitCycleFromOrbit}
                         disabled={
                           runDisabled ||
@@ -1397,6 +1400,7 @@ export function OrbitInspectorSections({
                           <div className="field-error">{heteroclinicFromOrbitError}</div>
                         ) : null}
                         <button
+                          className="inspector-primary-action"
                           onClick={handleCreateHeteroclinicFromOrbit}
                           disabled={runDisabled}
                           data-testid="heteroclinic-from-orbit-submit"

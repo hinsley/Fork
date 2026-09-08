@@ -228,6 +228,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             <div className="field-error">{foldCurveError}</div>
                           ) : null}
                           <button
+                            className="inspector-primary-action"
                             onClick={handleCreateFoldCurve}
                             disabled={
                               runDisabled ||
@@ -418,6 +419,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             <div className="field-error">{hopfCurveError}</div>
                           ) : null}
                           <button
+                            className="inspector-primary-action"
                             onClick={handleCreateHopfCurve}
                             disabled={
                               runDisabled ||
@@ -608,6 +610,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             <div className="field-error">{nsCurveError}</div>
                           ) : null}
                           <button
+                            className="inspector-primary-action"
                             onClick={handleCreateNSCurve}
                             disabled={
                               runDisabled ||

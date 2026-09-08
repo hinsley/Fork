@@ -72,9 +72,7 @@ export function SystemStringTools({
     <section className="system-editor__string-tools" aria-label="System string tools">
       <div className="system-editor__string-tools-summary">
         <div className="system-editor__string-tools-copy">
-          <span className="system-editor__eyebrow">Text tools</span>
           <strong>System string</strong>
-          <span>Move variables, equations, and parameter values as plain text.</span>
         </div>
         <div className="system-editor__string-tools-actions">
           <button
@@ -82,19 +80,22 @@ export function SystemStringTools({
             className="inspector-inline-button"
             onClick={openImport}
             aria-expanded={importOpen}
+            aria-label="Import system string"
+            title="Import variables, equations, and parameter values from text"
             data-testid="import-system-string"
           >
-            Import system string
+            Import
           </button>
           <button
             type="button"
             className="inspector-inline-button"
             onClick={() => void copySystemString()}
             disabled={!canCopy}
-            title={canCopy ? undefined : 'Fix the current draft before copying it.'}
+            aria-label="Copy system string"
+            title={canCopy ? 'Copy variables, equations, and parameter values as text' : 'Fix the current draft before copying it.'}
             data-testid="copy-system-string"
           >
-            Copy system string
+            Copy
           </button>
         </div>
       </div>
@@ -118,8 +119,7 @@ export function SystemStringTools({
           </label>
           <p>
             Use one <code>name&apos; = equation</code> or{' '}
-            <code>name = numeric value</code> entry per line. Blank lines and surrounding
-            spaces are ignored.
+            <code>name = numeric value</code> entry per line.
           </p>
           <div className="system-editor__string-import-actions">
             <button type="button" onClick={closeImport}>
@@ -127,7 +127,7 @@ export function SystemStringTools({
             </button>
             <button
               type="button"
-              className="system-editor__string-replace"
+              className="system-editor__string-replace inspector-primary-action"
               onClick={replaceFromSystemString}
               data-testid="replace-from-system-string"
             >

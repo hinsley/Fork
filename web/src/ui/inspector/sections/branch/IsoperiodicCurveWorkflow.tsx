@@ -266,6 +266,7 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                         <div className="field-error">{isoperiodicCurveError}</div>
                       ) : null}
                       <button
+                        className="inspector-primary-action"
                         onClick={handleCreateIsoperiodicCurve}
                         disabled={
                           runDisabled ||

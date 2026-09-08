@@ -284,6 +284,7 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
                           <div className="field-error">{limitCycleFromPDError}</div>
                         ) : null}
                         <button
+                          className="inspector-primary-action"
                           onClick={
                             systemDraft.type === 'map'
                               ? handleCreateCycleFromPD

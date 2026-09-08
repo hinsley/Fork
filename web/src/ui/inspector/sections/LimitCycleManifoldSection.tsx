@@ -295,6 +295,7 @@ export function LimitCycleManifoldSection({
                       <div className="field-error">{limitCycleManifoldError}</div>
                     ) : null}
                     <button
+                      className="inspector-primary-action"
                       onClick={handleCreateLimitCycleManifold}
                       disabled={runDisabled || systemDraft.type === 'map'}
                       data-testid="limit-cycle-manifold-submit"

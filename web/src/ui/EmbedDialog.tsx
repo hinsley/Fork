@@ -166,14 +166,14 @@ function EmbedDialogContent({
   }
 
   return (
-    <div className="dialog-backdrop embed-dialog-backdrop" role="dialog" aria-modal="true">
-      <div className="dialog embed-dialog" data-testid="embed-dialog">
+    <div className="dialog-backdrop embed-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="embed-dialog-title">
+      <div className="dialog dialog--workspace embed-dialog" data-testid="embed-dialog">
         <header className="dialog__header">
           <div>
-            <h2>Embed {system.name}</h2>
-            <p>Export selected viewports as a standalone Plotly HTML page.</p>
+            <h2 id="embed-dialog-title">Create embed</h2>
+            <span className="dialog__context">{system.name}</span>
           </div>
-          <button onClick={onClose} aria-label="Close embed dialog">✕</button>
+          <button className="dialog__close" onClick={onClose} aria-label="Close embed dialog">✕</button>
         </header>
 
         <div className="embed-dialog__body">
@@ -275,24 +275,26 @@ function EmbedDialogContent({
                 }}
               />
               <span>
-                <strong>Bundle dependencies (Experimental)</strong>
+                <strong>Bundle dependencies <span className="embed-dialog__experimental">Experimental</span></strong>
                 <small>
-                  Package dependencies, convert 2D GPU traces to SVG, and add static 3D
+                  Includes dependencies, converts 2D GPU traces to SVG, and adds static 3D
                   fallbacks for restrictive hosts.
                 </small>
               </span>
             </label>
 
-            <h3>Embed code</h3>
+            <h3 id="embed-code-label">Embed code</h3>
             <textarea
               ref={markupRef}
               readOnly
               value={markup}
-              rows={8}
+              rows={5}
               data-testid="embed-code"
+              aria-labelledby="embed-code-label"
             />
             <div className="embed-dialog__actions">
               <button
+                className="dialog__primary"
                 onClick={() => void downloadHtml()}
                 disabled={!allReady || isBundling}
                 data-testid="download-embed-html"
@@ -300,7 +302,6 @@ function EmbedDialogContent({
                 {isBundling ? 'Bundling dependencies…' : 'Download embed HTML'}
               </button>
               <button
-                className="toolbar__button toolbar__button--primary"
                 onClick={() => void copyMarkup()}
                 disabled={selectedIds.length === 0}
               >

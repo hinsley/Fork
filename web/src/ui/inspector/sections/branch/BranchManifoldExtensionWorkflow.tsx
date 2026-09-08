@@ -160,6 +160,7 @@ export function BranchManifoldExtensionWorkflow({ scope }: { scope: InspectorSel
                         </div>
                       ) : null}
                       <button
+                        className="inspector-primary-action"
                         onClick={
                           isSurfaceManifoldBranch
                             ? handleExtendManifold2D
