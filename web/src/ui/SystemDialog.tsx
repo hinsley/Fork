@@ -44,7 +44,15 @@ export function SystemDialog({
   if (!open) return null
 
   return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="systems-title">
+    <div
+      className="dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="systems-title"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
       <div className="dialog dialog--workspace dialog--systems">
         <header className="dialog__header">
           <h2 id="systems-title">Systems</h2>

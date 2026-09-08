@@ -143,6 +143,10 @@
   border-top: 1px solid var(--panel-border);
 }
 
+.dialog--systems .dialog__list-row:hover {
+  background: var(--button-bg-hover);
+}
+
 .dialog--systems .dialog__list-title {
   min-width: 0;
 }
@@ -159,10 +163,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.dialog--systems .dialog__list-title .system-library__open:hover {
-  color: var(--accent);
 }
 
 .dialog--systems .dialog__list-type {
