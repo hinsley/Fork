@@ -140,6 +140,10 @@ export function Toolbar({
       <div className="toolbar__actions">
         <a className="toolbar__docs" href="https://github.com/hinsley/Fork/tree/main/tutorial"
           target="_blank" rel="noreferrer">Docs <Icon name="external" /></a>
+        <a className="toolbar__docs" href="https://patreon.com/ForkDynamics"
+          target="_blank" rel="noopener noreferrer" data-testid="open-patreon">
+          Patreon <Icon name="external" />
+        </a>
         <div className="toolbar__settings" ref={settingsRef}>
           <button
             className="toolbar__button"
@@ -179,15 +183,6 @@ export function Toolbar({
                   </button>
                 </div>
               </div>
-              <button
-                className="toolbar__button toolbar__button--support"
-                onClick={() => {
-                  window.open('https://patreon.com/ForkDynamics', '_blank', 'noopener,noreferrer')
-                }}
-                data-testid="open-patreon"
-              >
-                Patreon
-              </button>
               <div className="settings-row">
                 <button
                   className="settings-reset"
