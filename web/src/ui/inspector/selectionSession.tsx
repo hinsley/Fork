@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useReducer, useState, type ReactNode } from 'react'
 import { isDeterministicMode } from '../../utils/determinism'
 import {
   isWorkflowId,
@@ -24,6 +24,12 @@ export function WorkflowFocusProvider({
   children: ReactNode
   onActiveWorkflowChange?: () => void
 }) {
+  const [collapsedActionGroups, setCollapsedActionGroups] = useState<
+    Partial<Record<WorkflowActionEntry['group'], boolean>>
+  >({})
+  const toggleActionGroup = useCallback((group: WorkflowActionEntry['group']) => {
+    setCollapsedActionGroups((previous) => ({ ...previous, [group]: !previous[group] }))
+  }, [])
   const [state, dispatch] = useReducer(selectionSessionReducer, {
     activeWorkflow: null,
     navigationDirection: null,
@@ -67,8 +73,10 @@ export function WorkflowFocusProvider({
       ...state,
       openWorkflow: (workflow) => navigate(workflow),
       closeWorkflow: () => navigate(null),
+      collapsedActionGroups,
+      toggleActionGroup,
     }),
-    [navigate, state]
+    [collapsedActionGroups, navigate, state, toggleActionGroup]
   )
   return <WorkflowFocusContext.Provider value={value}>{children}</WorkflowFocusContext.Provider>
 }
@@ -94,6 +102,7 @@ export function InspectorSubDisclosure({
 
 export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[] }) {
   const focus = useWorkflowFocus()
+  const listId = useId()
   if (!focus || focus.activeWorkflow || entries.length === 0) return null
 
   const groups = [
@@ -109,30 +118,45 @@ export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[]
       {groups.map((group) => {
         const groupEntries = entries.filter((entry) => entry.group === group)
         if (groupEntries.length === 0) return null
+        const expanded = !focus.collapsedActionGroups[group]
+        const contentId = `${listId}-${group}`
         return (
           <div className="inspector-actions__group" key={group}>
-            <h4>{group}</h4>
-            {groupEntries.map((entry) => (
+            <h4>
               <button
                 type="button"
-                className="inspector-action-row"
-                onClick={() => focus.openWorkflow(entry.id)}
-                disabled={entry.disabled}
-                title={entry.description}
-                aria-description={entry.description}
-                data-testid={`action-${entry.id}`}
-                key={entry.id}
+                className="inspector-actions__toggle"
+                aria-expanded={expanded}
+                aria-controls={contentId}
+                onClick={() => focus.toggleActionGroup(group)}
               >
-                <span>
-                  <strong className="inspector-action-row__title">
-                    <span>{entry.label}</span>
-                    {entry.tag ? <span className="tree-node__tag">{entry.tag}</span> : null}
-                  </strong>
-                  {entry.disabled ? <small>{entry.description}</small> : null}
-                </span>
-                <span aria-hidden="true">›</span>
+                <span className="inspector-actions__chevron" aria-hidden="true">›</span>
+                {group}
               </button>
-            ))}
+            </h4>
+            <div className="inspector-actions__items" id={contentId} hidden={!expanded}>
+              {groupEntries.map((entry) => (
+                <button
+                  type="button"
+                  className="inspector-action-row"
+                  onClick={() => focus.openWorkflow(entry.id)}
+                  disabled={entry.disabled}
+                  title={entry.description}
+                  aria-description={entry.description}
+                  data-testid={`action-${entry.id}`}
+                  key={entry.id}
+                >
+                  <span>
+                    <strong className="inspector-action-row__title">
+                      <span>{entry.label}</span>
+                      {entry.tag ? <span className="tree-node__tag">{entry.tag}</span> : null}
+                    </strong>
+                    {entry.disabled ? <small>{entry.description}</small> : null}
+                  </span>
+                  <span aria-hidden="true">›</span>
+                </button>
+              ))}
+            </div>
           </div>
         )
       })}

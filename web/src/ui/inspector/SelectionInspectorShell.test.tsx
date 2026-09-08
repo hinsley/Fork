@@ -136,7 +136,7 @@ describe('selection inspector workflow shell', () => {
     expect(actions).toHaveTextContent('Configure')
     expect(actions).toHaveTextContent('Frozen Variables')
     expect(actions).toHaveTextContent('Parameters')
-    expect(within(actions).getAllByRole('button')[0]).toHaveTextContent('Appearance')
+    expect(within(actions).getAllByTestId(/^action-/)[0]).toHaveTextContent('Appearance')
     expect(actions).not.toHaveTextContent('Modify appearance')
     expect(within(actions).getByRole('heading', { name: 'Continuation' })).toBeVisible()
     expect(screen.getByTestId('action-limit-cycle-toggle')).toBeVisible()

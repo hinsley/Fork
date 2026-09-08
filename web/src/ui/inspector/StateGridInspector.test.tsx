@@ -121,7 +121,7 @@ describe('StateGridInspector', () => {
 
     const configureGroup = screen.getByText('Configure').closest('.inspector-actions__group')
     expect(
-      Array.from(configureGroup?.querySelectorAll('button') ?? []).map((button) =>
+      Array.from(configureGroup?.querySelectorAll('[data-testid^="action-"]') ?? []).map((button) =>
         button.getAttribute('data-testid')
       )
     ).toEqual([
