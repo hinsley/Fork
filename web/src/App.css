@@ -1415,15 +1415,6 @@
   height: 24px;
 }
 
-.viewport-insert::before {
-  content: '';
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  height: 1px;
-  background: var(--panel-border);
-}
-
 .viewport-insert__button {
   position: relative;
   z-index: 1;
@@ -1528,17 +1519,6 @@
   transform: translate(-50%, -50%);
   border-radius: 999px;
   background: var(--panel-border-strong, var(--panel-border));
-}
-
-.viewport-resize-handle::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 52px;
-  height: 1px;
-  transform: translate(-50%, -50%);
-  background: color-mix(in srgb, var(--text-muted) 42%, transparent);
 }
 
 .viewport-resize-handle:hover {
