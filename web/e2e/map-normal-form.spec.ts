@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 async function selectMapBranchPoint(page: Page) {
   const harness = createHarness(page)
@@ -15,7 +15,7 @@ async function selectMapBranchPoint(page: Page) {
   await expect(branchPoint).toBeVisible({ timeout: 30_000 })
   await branchPoint.click()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-normal-form-workflow-toggle').click()
+  await clickInspectorAction(page, 'action-normal-form-workflow-toggle')
 }
 
 test('computes and persists a real map branch-point normal form in the Inspector', async ({
@@ -49,10 +49,10 @@ test('computes and persists a real map branch-point normal form in the Inspector
 
   await harness.createEquilibrium()
   await harness.selectTreeNode('Fixed_point_1')
-  await page.getByTestId('action-equilibrium-solver-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-submit').click()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-equilibrium-continuation-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-continuation-toggle')
   await page.getByTestId('equilibrium-branch-name').fill('map_pitchfork_points')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('mu')
   await page.getByTestId('equilibrium-branch-step-size').fill('0.025')

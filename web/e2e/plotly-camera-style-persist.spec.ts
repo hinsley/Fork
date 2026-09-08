@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test('3D camera persists across style updates', async ({ page }) => {
   test.setTimeout(60_000)
@@ -334,7 +334,7 @@ test('3D camera persists across style updates', async ({ page }) => {
   expect(distance(rotatedCam, defaultCam)).toBeGreaterThan(0.2)
   await assertNoPlotlyErrors('camera rotate')
 
-  await page.getByTestId('action-appearance-toggle').click()
+  await clickInspectorAction(page, 'action-appearance-toggle')
   const lineWidthInput = page.getByTestId('inspector-line-width')
   const perfBeforeFirst = await readPerf()
   await startAfterplotCapture(6)

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test('plain inspector checkbox labels align without changing multi-column control rows', async ({
   page,
@@ -10,7 +10,7 @@ test('plain inspector checkbox labels align without changing multi-column contro
   await harness.createEquilibrium()
   await harness.solveEquilibrium()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-equilibrium-data-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-data-toggle')
   await harness.openDisclosure('equilibrium-data-eigenpairs-toggle')
 
   const plainCheckbox = page.getByTestId('equilibrium-eigenvector-enabled')

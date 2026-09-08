@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 const systemName = 'Adaptive_Collocation_E2E'
 const branchName = 'adaptive_cycle_branch'
@@ -36,7 +36,7 @@ test('persists a real-WASM adaptive collocation report and exact final mesh', as
 
   await harness.createOrbit()
   await harness.selectTreeNode('Orbit_1')
-  await page.getByTestId('action-orbit-run-toggle').click()
+  await clickInspectorAction(page, 'action-orbit-run-toggle')
   await page.getByTestId('orbit-run-duration').fill('20')
   await page.getByTestId('orbit-run-dt').fill('0.02')
   await page.getByTestId('orbit-run-ic-0').fill('1')
@@ -44,7 +44,7 @@ test('persists a real-WASM adaptive collocation report and exact final mesh', as
   await page.getByTestId('orbit-run-submit').click()
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-limit-cycle-toggle').click()
+  await clickInspectorAction(page, 'action-limit-cycle-toggle')
   await page.getByTestId('limit-cycle-from-orbit-name').fill('adaptive_cycle')
   await page.getByTestId('limit-cycle-from-orbit-branch-name').fill(branchName)
   await page.getByTestId('limit-cycle-from-orbit-parameter').selectOption('mu')

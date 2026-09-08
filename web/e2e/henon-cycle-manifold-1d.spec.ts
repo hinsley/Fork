@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 async function readArclength(page: Page): Promise<number> {
   const row = page.locator('.inspector-metrics__row', {
@@ -33,7 +33,7 @@ test('Henon two-cycle stable manifold phases initialize and extend at one physic
   await harness.createEquilibrium()
   await harness.selectTreeNode('Fixed_point_1')
 
-  await page.getByTestId('action-equilibrium-solver-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-guess-0').fill('-0.4758000511750577')
   await page.getByTestId('equilibrium-solve-guess-1').fill('0.2927400153525173')
   await page.getByTestId('equilibrium-solve-cycle-length').fill('2')
@@ -41,7 +41,7 @@ test('Henon two-cycle stable manifold phases initialize and extend at one physic
   await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible({ timeout: 30_000 })
 
-  await page.getByTestId('action-equilibrium-manifold-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-manifold-toggle')
   await page.getByTestId('equilibrium-manifold-name').fill('henon_equal_stable')
   await page.getByTestId('equilibrium-manifold-stability').selectOption('Stable')
   await page.getByTestId('equilibrium-manifold-direction').selectOption('Both')
@@ -66,7 +66,7 @@ test('Henon two-cycle stable manifold phases initialize and extend at one physic
   await expectGroupArclength(page, names, 2)
 
   await harness.selectTreeNode(`Branch: ${names[0]}`)
-  await page.getByTestId('action-manifold-extend-toggle').click()
+  await clickInspectorAction(page, 'action-manifold-extend-toggle')
   await page.getByTestId('manifold-extend-arclength').fill('2')
   await page.getByTestId('manifold-extend-max-points').fill('2000')
   await page.getByTestId('manifold-extend-max-iterations').fill('64')

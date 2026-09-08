@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test('continues a real map Neimark-Sacker curve in two parameters', async ({ page }) => {
   test.setTimeout(120_000)
@@ -34,10 +34,10 @@ test('continues a real map Neimark-Sacker curve in two parameters', async ({ pag
 
   await harness.createEquilibrium()
   await harness.selectTreeNode('Fixed_point_1')
-  await page.getByTestId('action-equilibrium-solver-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-submit').click()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-equilibrium-continuation-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-continuation-toggle')
   await page.getByTestId('equilibrium-branch-name').fill('fixed_points_ns')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('p1')
   await page.getByTestId('equilibrium-branch-step-size').fill('0.05')
@@ -63,7 +63,7 @@ test('continues a real map Neimark-Sacker curve in two parameters', async ({ pag
   await expect(nsPoint).toBeVisible({ timeout: 20_000 })
   await nsPoint.click()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-codim1-curve-toggle').click()
+  await clickInspectorAction(page, 'action-codim1-curve-toggle')
 
   await page.getByTestId('ns-curve-name').fill('map_ns_curve')
   await page.getByTestId('ns-curve-param2').selectOption('p2')

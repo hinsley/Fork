@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 async function addParameter(page: Page, index: number, name: string, value: string) {
   await page.getByTestId('system-add-parameter').click()
@@ -19,7 +19,7 @@ async function createForcedResponse(page: Page) {
   await page.getByTestId('create-object-button').click()
   await page.getByTestId('create-object-menu').waitFor()
   await page.getByTestId('create-forced-periodic-response').click()
-  await page.getByTestId('action-forced-response-solver-toggle').click()
+  await clickInspectorAction(page, 'action-forced-response-solver-toggle')
 }
 
 test('solves a real-WASM time-forced flow and preserves autonomous guards', async ({ page }) => {
@@ -41,7 +41,7 @@ test('solves a real-WASM time-forced flow and preserves autonomous guards', asyn
   await page.getByTestId('forced-response-period-steps').fill('120')
   await page.getByTestId('forced-response-solve-submit').click()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-forced-response-data-toggle').click()
+  await clickInspectorAction(page, 'action-forced-response-data-toggle')
   await expect(page.getByText('Forcing period', { exact: true })).toBeVisible({
     timeout: 20_000,
   })
@@ -49,10 +49,10 @@ test('solves a real-WASM time-forced flow and preserves autonomous guards', asyn
   await expect(page.getByText(/μ1 =/)).toBeVisible()
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-forced-response-continuation-toggle').click()
+  await clickInspectorAction(page, 'action-forced-response-continuation-toggle')
   await page.getByLabel('Max points').fill('3')
   await page.getByTestId('forced-response-branch-submit').click()
-  await page.getByTestId('action-branch-points-toggle').click()
+  await clickInspectorAction(page, 'action-branch-points-toggle')
   await page.getByTestId('branch-point-prev').click()
   await expect(page.getByTestId('branch-point-render-lc')).toHaveText(
     'Render Forced Response Here'
@@ -61,7 +61,7 @@ test('solves a real-WASM time-forced flow and preserves autonomous guards', asyn
   await expect(page.getByTestId('branch-point-render-lc')).toHaveCount(0)
 
   await harness.createEquilibrium()
-  await page.getByTestId('action-equilibrium-solver-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await expect(
     page.getByTestId('autonomous-workflow-warning')
   ).toHaveText(
@@ -70,10 +70,10 @@ test('solves a real-WASM time-forced flow and preserves autonomous guards', asyn
   await expect(page.getByTestId('equilibrium-solve-submit')).toBeDisabled()
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-frozen-variables-toggle').click()
+  await clickInspectorAction(page, 'action-frozen-variables-toggle')
   await page.getByTestId('frozen-equation-context-toggle').check()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-equilibrium-solver-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await expect(page.getByTestId('equilibrium-solve-submit')).toBeEnabled()
 })
 
@@ -96,7 +96,7 @@ test('solves a real-WASM period-two iteration-forced map', async ({ page }) => {
   await page.getByTestId('forced-response-phase').fill('1')
   await page.getByTestId('forced-response-solve-submit').click()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-forced-response-data-toggle').click()
+  await clickInspectorAction(page, 'action-forced-response-data-toggle')
   await expect(page.getByText('Forcing period', { exact: true })).toBeVisible({
     timeout: 20_000,
   })

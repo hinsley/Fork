@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test('branch to a period-doubled limit cycle', async ({ page }) => {
   test.setTimeout(60_000)
@@ -14,7 +14,7 @@ test('branch to a period-doubled limit cycle', async ({ page }) => {
   await page.getByTestId('branch-bifurcation-1').click()
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-limit-cycle-from-pd-toggle').click()
+  await clickInspectorAction(page, 'action-limit-cycle-from-pd-toggle')
   await expect(page.getByTestId('inspector-workflow-advanced')).toHaveCount(0)
   await expect(page.getByTestId('limit-cycle-from-pd-amplitude')).toBeVisible()
   await page.getByTestId('limit-cycle-from-pd-name').fill('lc_pd_branch_obj')

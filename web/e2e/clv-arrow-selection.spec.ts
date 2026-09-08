@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 type PlotlyTrace = {
   type?: string
@@ -24,7 +24,7 @@ test('clicking a CLV arrow selects the orbit', async ({ page }) => {
 
   await expect(page.getByText('No orbit samples stored yet.')).toHaveCount(0)
 
-  await page.getByTestId('action-oseledets-toggle').click()
+  await clickInspectorAction(page, 'action-oseledets-toggle')
   await page.getByTestId('clv-submit').click()
   await expect(page.getByText('Covariant Lyapunov vectors not computed yet.')).toHaveCount(0)
 

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test('continue limit cycle from a hopf-curve branch point', async ({ page }) => {
   test.setTimeout(150_000)
@@ -34,11 +34,11 @@ test('continue limit cycle from a hopf-curve branch point', async ({ page }) => 
   ).toBeVisible()
   await harness.selectTreeNode('Equilibrium_1')
 
-  await page.getByTestId('action-equilibrium-solver-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-submit').click()
   await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible()
-  await page.getByTestId('action-equilibrium-continuation-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-continuation-toggle')
   await page.getByTestId('equilibrium-branch-name').fill('eq_hopf_curve')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('p1')
   await page.getByTestId('equilibrium-branch-step-size').fill('0.05')
@@ -63,7 +63,7 @@ test('continue limit cycle from a hopf-curve branch point', async ({ page }) => 
   await expect(page.getByText('Stability: Hopf')).toBeVisible()
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-codim1-curve-toggle').click()
+  await clickInspectorAction(page, 'action-codim1-curve-toggle')
   await page.getByTestId('hopf-curve-name').fill('hopf_curve_lc')
   await page.getByTestId('hopf-curve-param2').selectOption('p2')
   await page.getByTestId('hopf-curve-step-size').fill('0.02')
@@ -87,7 +87,7 @@ test('continue limit cycle from a hopf-curve branch point', async ({ page }) => 
   await page.getByTestId('branch-point-jump').click()
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-limit-cycle-from-hopf-toggle').click()
+  await clickInspectorAction(page, 'action-limit-cycle-from-hopf-toggle')
   await page.getByTestId('limit-cycle-from-hopf-name').fill('lc_hopf_curve')
   await page.getByTestId('limit-cycle-from-hopf-branch-name').fill('lc_hopf_curve_branch')
   await page.getByTestId('limit-cycle-from-hopf-parameter').selectOption('p2')

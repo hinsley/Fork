@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test('logistic map continuation reports local map bifurcations only', async ({ page }) => {
   test.setTimeout(120_000)
@@ -10,13 +10,13 @@ test('logistic map continuation reports local map bifurcations only', async ({ p
 
   await harness.createEquilibrium()
   await harness.selectTreeNode('Fixed_point_1')
-  await page.getByTestId('action-equilibrium-solver-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-guess-0').fill('0.5')
   await page.getByTestId('equilibrium-solve-submit').click()
   await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible()
 
-  await page.getByTestId('action-equilibrium-continuation-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-continuation-toggle')
   await page.getByTestId('equilibrium-branch-name').fill('period_1_fixed_points')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('r')
   await page.getByTestId('equilibrium-branch-direction').selectOption('backward')

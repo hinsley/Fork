@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 const fixture = 'homoclinic-product'
 const systemName = 'Homoclinic_Product_E2E'
@@ -55,7 +55,7 @@ test('creates, renders, reloads, and extends a homoclinic branch with HBK diagno
   await page.getByTestId('branch-point-jump').click()
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-homoclinic-from-large-cycle-toggle').click()
+  await clickInspectorAction(page, 'action-homoclinic-from-large-cycle-toggle')
   await page.getByTestId('homoclinic-from-large-cycle-name').fill(homoclinicBranchName)
   await page.getByTestId('homoclinic-from-large-cycle-param1').selectOption('mu')
   await page.getByTestId('homoclinic-from-large-cycle-param2').selectOption('nu')
@@ -98,7 +98,7 @@ test('creates, renders, reloads, and extends a homoclinic branch with HBK diagno
   await expect(reloadedDiagnostics).toContainText('NNS · Neutral saddle')
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-branch-extend-toggle').click()
+  await clickInspectorAction(page, 'action-branch-extend-toggle')
   await page.getByTestId('branch-extend-max-steps').fill('2')
   await page.getByTestId('branch-extend-step-size').fill('0.002')
   await page.getByTestId('branch-extend-submit').click()

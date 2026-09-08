@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test('inspector child contexts animate forward and backward within the panel', async ({ page }) => {
   const harness = createHarness(page)
@@ -35,7 +35,7 @@ test('inspector child contexts animate forward and backward within the panel', a
   })
 
   await expect(page.getByTestId('inspector-name')).toBeVisible()
-  await page.getByTestId('action-orbit-run-toggle').click()
+  await clickInspectorAction(page, 'action-orbit-run-toggle')
   await expect(page.getByTestId('inspector-workflow-back')).toBeVisible()
   await expect(page.getByTestId('inspector-name')).toHaveCount(0)
   await expect(panel).toHaveAttribute('data-navigation-phase', 'idle')

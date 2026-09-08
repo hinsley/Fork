@@ -12,6 +12,7 @@ test('inspector Action rows use dark theme text and hover surfaces', async ({ pa
   await harness.openSystem('Lorenz')
   await harness.createOrbit()
 
+  await page.getByRole('button', { name: 'Configure', exact: true }).click()
   const action = page.locator('.inspector-action-row').first()
   await expect(action).toBeVisible()
 

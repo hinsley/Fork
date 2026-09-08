@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test('continues a detected cycle fold as a real LPC curve', async ({ page }) => {
   test.setTimeout(150_000)
@@ -28,7 +28,7 @@ test('continues a detected cycle fold as a real LPC curve', async ({ page }) => 
 
   await harness.createOrbit()
   await harness.selectTreeNode('Orbit_1')
-  await page.getByTestId('action-orbit-run-toggle').click()
+  await clickInspectorAction(page, 'action-orbit-run-toggle')
   await page.getByTestId('orbit-run-duration').fill('20')
   await page.getByTestId('orbit-run-dt').fill('0.02')
   await page.getByTestId('orbit-run-ic-0').fill('0.6324555320336759')
@@ -36,7 +36,7 @@ test('continues a detected cycle fold as a real LPC curve', async ({ page }) => 
   await page.getByTestId('orbit-run-submit').click()
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-limit-cycle-toggle').click()
+  await clickInspectorAction(page, 'action-limit-cycle-toggle')
   await page.getByTestId('limit-cycle-from-orbit-name').fill('lc_bautin')
   await page.getByTestId('limit-cycle-from-orbit-branch-name').fill('lc_bautin_mu')
   await page.getByTestId('limit-cycle-from-orbit-parameter').selectOption('mu')
@@ -65,7 +65,7 @@ test('continues a detected cycle fold as a real LPC curve', async ({ page }) => 
   await expect(cycleFold).toBeVisible({ timeout: 30_000 })
   await cycleFold.click()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-limit-cycle-codim1-curve-toggle').click()
+  await clickInspectorAction(page, 'action-limit-cycle-codim1-curve-toggle')
 
   await page.getByTestId('limit-cycle-codim1-curve-name').fill('lpc_bautin')
   await page.getByTestId('limit-cycle-codim1-curve-param2').selectOption('beta')

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 async function readMetricValue(page: Page, label: string): Promise<string> {
   const row = page.locator('.inspector-metrics__row', {
@@ -34,7 +34,7 @@ test('lorenz 2D stable manifold adaptive defaults produce nontrivial growth', as
   await harness.solveEquilibrium()
   await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible({ timeout: 20_000 })
-  await page.getByTestId('action-equilibrium-manifold-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-manifold-toggle')
   await page.getByTestId('equilibrium-manifold-name').fill('lorenz_eqm2d_e2e')
   await expect(page.getByTestId('equilibrium-manifold-mode')).toHaveValue('surface_2d')
   await expect(page.getByTestId('equilibrium-manifold2d-profile')).toHaveValue('adaptive_global')

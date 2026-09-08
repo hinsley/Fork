@@ -1448,6 +1448,8 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
+    expect(screen.getByTestId('action-equilibrium-solver-toggle')).not.toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Compute' }))
     expect(screen.getByTestId('action-equilibrium-solver-toggle')).toBeVisible()
     expect(screen.queryByTestId('action-equilibrium-data-toggle')).toBeNull()
     expect(screen.queryByTestId('action-equilibrium-continuation-toggle')).toBeNull()
@@ -1484,6 +1486,13 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
+    for (const group of ['Compute', 'Inspect', 'Continuation', 'Manifolds']) {
+      const toggle = within(screen.getByTestId('inspector-actions')).getByRole('button', {
+        name: group,
+      })
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      fireEvent.click(toggle)
+    }
     for (const actionTestId of [
       'action-equilibrium-solver-toggle',
       'action-equilibrium-data-toggle',

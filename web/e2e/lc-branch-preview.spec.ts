@@ -1,5 +1,5 @@
 import { test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 type PlotlyTrace = {
   name?: string
@@ -88,11 +88,11 @@ test('limit cycle rendering uses the limit cycle object color', async ({ page })
   await harness.openDisclosure('branch-points-toggle')
   await page.getByTestId('branch-point-render-lc').click()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-appearance-toggle').click()
+  await clickInspectorAction(page, 'action-appearance-toggle')
   await page.getByTestId('inspector-color').fill('#0000ff')
 
   await harness.selectTreeNode('LC_PD (limit cycle)')
-  await page.getByTestId('action-appearance-toggle').click()
+  await clickInspectorAction(page, 'action-appearance-toggle')
   await page.getByTestId('inspector-color').fill('#ff0000')
 
   await page.waitForFunction(() => {

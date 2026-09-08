@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test.describe.configure({ mode: 'serial' })
 // Each test drives real wasm computations (orbit settling, entropy runs over
@@ -32,12 +32,12 @@ async function returnToWorkflowOverview(page: Page) {
 
 async function openStateGridSetup(page: Page) {
   await returnToWorkflowOverview(page)
-  await page.getByTestId('action-state-grid-setup-toggle').click()
+  await clickInspectorAction(page, 'action-state-grid-setup-toggle')
 }
 
 async function openExpansionEntropy(page: Page) {
   await returnToWorkflowOverview(page)
-  await page.getByTestId('action-state-grid-entropy-toggle').click()
+  await clickInspectorAction(page, 'action-state-grid-entropy-toggle')
 }
 
 /**

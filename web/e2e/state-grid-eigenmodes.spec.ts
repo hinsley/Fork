@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -151,7 +151,7 @@ async function runEigenmodeCase(
   await page.getByTestId('create-object-button').click()
   await page.getByTestId('create-object-menu').waitFor()
   await page.getByTestId('create-state-grid').click()
-  await page.getByTestId('action-state-grid-setup-toggle').click()
+  await clickInspectorAction(page, 'action-state-grid-setup-toggle')
   for (const axis of options.axes) {
     await page.getByTestId(`state-grid-${axis.name}-min`).fill(String(axis.min))
     await page.getByTestId(`state-grid-${axis.name}-max`).fill(String(axis.max))
@@ -160,7 +160,7 @@ async function runEigenmodeCase(
       .fill(String(axis.resolution))
   }
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-state-grid-transfer-toggle').click()
+  await clickInspectorAction(page, 'action-state-grid-transfer-toggle')
   for (const [index, axis] of options.axes.entries()) {
     await page
       .getByTestId(`state-grid-transfer-starting-point-${index}`)
@@ -184,12 +184,12 @@ async function runEigenmodeCase(
     timeout: 60_000,
   })
   const appearanceColor = '#000000'
-  await page.getByTestId('action-appearance-toggle').click()
+  await clickInspectorAction(page, 'action-appearance-toggle')
   await page.getByTestId('inspector-color').fill(appearanceColor)
   await page.getByTestId('inspector-color-opacity').fill('80')
   await page.getByTestId('inspector-point-size').fill('7')
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-invariant-measure-data-toggle').click()
+  await clickInspectorAction(page, 'action-invariant-measure-data-toggle')
   await expect(page.getByTestId('invariant-measure-convergence-status')).toHaveText(
     'Converged'
   )
@@ -256,7 +256,7 @@ async function runEigenmodeCase(
 
   const updatedPointSize = 11
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-appearance-toggle').click()
+  await clickInspectorAction(page, 'action-appearance-toggle')
   await page.getByTestId('inspector-point-size').fill(String(updatedPointSize))
   for (const scenePlot of scenePlots) {
     await expect.poll(async () => {
@@ -272,7 +272,7 @@ async function runEigenmodeCase(
     })
   }
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-invariant-measure-data-toggle').click()
+  await clickInspectorAction(page, 'action-invariant-measure-data-toggle')
 
   await page.getByTestId('invariant-eigenmode-hide').click()
   for (const scenePlot of scenePlots) {

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test('continue hopf curve from detected hopf point', async ({ page }) => {
   test.setTimeout(90_000)
@@ -34,11 +34,11 @@ test('continue hopf curve from detected hopf point', async ({ page }) => {
   ).toBeVisible()
   await harness.selectTreeNode('Equilibrium_1')
 
-  await page.getByTestId('action-equilibrium-solver-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-submit').click()
   await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible()
-  await page.getByTestId('action-equilibrium-continuation-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-continuation-toggle')
   await page.getByTestId('equilibrium-branch-name').fill('eq_hopf_branch')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('p1')
   await page.getByTestId('equilibrium-branch-step-size').fill('0.05')
@@ -63,7 +63,7 @@ test('continue hopf curve from detected hopf point', async ({ page }) => {
   await expect(page.getByText('Stability: Hopf')).toBeVisible()
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-codim1-curve-toggle').click()
+  await clickInspectorAction(page, 'action-codim1-curve-toggle')
   await page.getByTestId('hopf-curve-name').fill('hopf_curve_e2e')
   await page.getByTestId('hopf-curve-param2').selectOption('p2')
   await page.getByTestId('hopf-curve-step-size').fill('0.02')

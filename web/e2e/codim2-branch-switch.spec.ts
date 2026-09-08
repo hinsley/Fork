@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test('switches a generalized-Hopf point to an LPC curve', async ({ page }) => {
   test.setTimeout(180_000)
@@ -26,10 +26,10 @@ test('switches a generalized-Hopf point to an LPC curve', async ({ page }) => {
 
   await harness.createEquilibrium()
   await harness.selectTreeNode('Equilibrium_1')
-  await page.getByTestId('action-equilibrium-solver-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-submit').click()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-equilibrium-continuation-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-continuation-toggle')
   await page.getByTestId('equilibrium-branch-name').fill('eq_codim2')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('mu')
   await page.getByTestId('equilibrium-branch-step-size').fill('0.05')
@@ -40,7 +40,7 @@ test('switches a generalized-Hopf point to an LPC curve', async ({ page }) => {
   await harness.openDisclosure('branch-points-toggle')
   await page.locator('[data-testid^="branch-bifurcation-"]').first().click()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-codim1-curve-toggle').click()
+  await clickInspectorAction(page, 'action-codim1-curve-toggle')
   await page.getByTestId('hopf-curve-name').fill('hopf_codim2')
   await page.getByTestId('hopf-curve-param2').selectOption('beta')
   await page.getByTestId('hopf-curve-step-size').fill('0.02')
@@ -69,7 +69,7 @@ test('switches a generalized-Hopf point to an LPC curve', async ({ page }) => {
     // 60 seconds when the full Playwright suite runs five solver workers.
     timeout: 90_000,
   })
-  await page.getByTestId('action-branch-summary-toggle').click()
+  await clickInspectorAction(page, 'action-branch-summary-toggle')
   await expect(page.getByText('Switched from')).toBeVisible()
   await expect(page.getByText('GeneralizedHopf')).toBeVisible()
 })

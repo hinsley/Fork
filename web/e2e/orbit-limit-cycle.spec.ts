@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test('continue limit cycle from orbit data', async ({ page }) => {
   test.setTimeout(150_000)
@@ -31,7 +31,7 @@ test('continue limit cycle from orbit data', async ({ page }) => {
   ).toBeVisible()
   await harness.selectTreeNode('Orbit_1')
 
-  await page.getByTestId('action-orbit-run-toggle').click()
+  await clickInspectorAction(page, 'action-orbit-run-toggle')
   await page.getByTestId('orbit-run-duration').fill('60')
   await page.getByTestId('orbit-run-dt').fill('0.02')
   await page.getByTestId('orbit-run-ic-0').fill('1')
@@ -41,7 +41,7 @@ test('continue limit cycle from orbit data', async ({ page }) => {
   await expect(page.getByText('No orbit samples stored yet.')).toHaveCount(0)
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-limit-cycle-toggle').click()
+  await clickInspectorAction(page, 'action-limit-cycle-toggle')
   await page.getByTestId('limit-cycle-from-orbit-name').fill('lc_orbit_mu')
   await page.getByTestId('limit-cycle-from-orbit-branch-name').fill('lc_orbit_branch')
   await page.getByTestId('limit-cycle-from-orbit-parameter').selectOption('mu')

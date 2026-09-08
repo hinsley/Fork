@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 type CycleCurveFixture = {
   systemName: string
@@ -38,7 +38,7 @@ async function createCrossingLimitCycle(page: Page, branchName: string) {
   const harness = createHarness(page)
   await harness.createOrbit()
   await harness.selectTreeNode('Orbit_1')
-  await page.getByTestId('action-orbit-run-toggle').click()
+  await clickInspectorAction(page, 'action-orbit-run-toggle')
   await page.getByTestId('orbit-run-duration').fill('20')
   await page.getByTestId('orbit-run-dt').fill('0.02')
   await page.getByTestId('orbit-run-ic-0').fill('1')
@@ -48,7 +48,7 @@ async function createCrossingLimitCycle(page: Page, branchName: string) {
   await page.getByTestId('orbit-run-submit').click()
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-limit-cycle-toggle').click()
+  await clickInspectorAction(page, 'action-limit-cycle-toggle')
   await page.getByTestId('limit-cycle-from-orbit-name').fill(`${branchName}_object`)
   await page.getByTestId('limit-cycle-from-orbit-branch-name').fill(branchName)
   await page.getByTestId('limit-cycle-from-orbit-parameter').selectOption('mu')
@@ -80,7 +80,7 @@ async function continueDetectedCycleCurve(page: Page, fixture: CycleCurveFixture
   await expect(bifurcation).toBeVisible({ timeout: 40_000 })
   await bifurcation.click()
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-limit-cycle-codim1-curve-toggle').click()
+  await clickInspectorAction(page, 'action-limit-cycle-codim1-curve-toggle')
 
   await page.getByTestId('limit-cycle-codim1-curve-name').fill(fixture.curveName)
   await page.getByTestId('limit-cycle-codim1-curve-param2').selectOption('beta')

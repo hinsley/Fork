@@ -10,6 +10,20 @@ function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+export async function revealInspectorAction(page: Page, actionId: string): Promise<Locator> {
+  const action = page.getByTestId(actionId)
+  await action.waitFor({ state: 'attached' })
+  const toggle = action.locator('..').locator('..').getByRole('button', { expanded: false })
+  if (await toggle.count()) await toggle.click()
+  await action.waitFor({ state: 'visible' })
+  return action
+}
+
+export async function clickInspectorAction(page: Page, actionId: string) {
+  const action = await revealInspectorAction(page, actionId)
+  await action.click()
+}
+
 /**
  * Page object for driving the Fork web UI in deterministic test mode.
  */
@@ -69,8 +83,8 @@ export class ForkHarness {
   async openDisclosure(testId: string) {
     const summary = this.page.getByTestId(testId)
     const action = this.page.getByTestId(`action-${testId}`)
-    if (await action.isVisible()) {
-      await action.click()
+    if (await action.count()) {
+      await clickInspectorAction(this.page, `action-${testId}`)
       await expect(summary.locator('..')).toHaveJSProperty('open', true)
       return
     }
@@ -95,13 +109,13 @@ export class ForkHarness {
   }
 
   async runOrbit() {
-    await this.page.getByTestId('action-orbit-run-toggle').click()
+    await clickInspectorAction(this.page, 'action-orbit-run-toggle')
     await this.page.getByTestId('orbit-run-submit').click()
     await this.page.getByTestId('inspector-workflow-back').click()
   }
 
   async solveEquilibrium() {
-    await this.page.getByTestId('action-equilibrium-solver-toggle').click()
+    await clickInspectorAction(this.page, 'action-equilibrium-solver-toggle')
     await this.page.getByTestId('equilibrium-solve-submit').click()
   }
 

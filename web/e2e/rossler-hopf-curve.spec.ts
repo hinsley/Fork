@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 test('rossler hopf curve continuation', async ({ page }) => {
   test.setTimeout(120_000)
@@ -24,7 +24,7 @@ test('rossler hopf curve continuation', async ({ page }) => {
   ).toBeVisible()
   await harness.selectTreeNode('Equilibrium_1')
 
-  await page.getByTestId('action-equilibrium-solver-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-guess-0').fill('0.1')
   await page.getByTestId('equilibrium-solve-guess-1').fill('-0.3')
   await page.getByTestId('equilibrium-solve-guess-2').fill('0.3')
@@ -33,7 +33,7 @@ test('rossler hopf curve continuation', async ({ page }) => {
   await page.getByTestId('equilibrium-solve-submit').click()
   await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible()
-  await page.getByTestId('action-equilibrium-continuation-toggle').click()
+  await clickInspectorAction(page, 'action-equilibrium-continuation-toggle')
   await page.getByTestId('equilibrium-branch-name').fill('eq_rossler_c')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('c')
   await page.getByTestId('equilibrium-branch-direction').selectOption('backward')
@@ -67,7 +67,7 @@ test('rossler hopf curve continuation', async ({ page }) => {
   expect(hopfFound).toBeTruthy()
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-codim1-curve-toggle').click()
+  await clickInspectorAction(page, 'action-codim1-curve-toggle')
   await page.getByTestId('hopf-curve-name').fill('hopf_curve_rossler')
   await page.getByTestId('hopf-curve-param2').selectOption('b')
   await page.getByTestId('hopf-curve-step-size').fill('0.02')

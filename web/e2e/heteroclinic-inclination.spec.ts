@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 const fixtures = [
   {
@@ -79,7 +79,7 @@ async function createSeedObjects(
   await harness.createOrbit()
   await page.getByTestId('inspector-name').fill('ConnectionOrbit')
   await page.getByTestId('inspector-name').press('Enter')
-  await page.getByTestId('action-orbit-run-toggle').click()
+  await clickInspectorAction(page, 'action-orbit-run-toggle')
   await page.getByTestId('orbit-run-ic-0').fill('-0.9999092042625951')
   for (let index = 1; index < dimension; index += 1) {
     await page.getByTestId(`orbit-run-ic-${index}`).fill('0')
@@ -96,7 +96,7 @@ async function createSeedObjects(
     await harness.createEquilibrium()
     await page.getByTestId('inspector-name').fill(name)
     await page.getByTestId('inspector-name').press('Enter')
-    await page.getByTestId('action-equilibrium-solver-toggle').click()
+    await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
     await page.getByTestId('equilibrium-solve-guess-0').fill(x)
     for (let index = 1; index < dimension; index += 1) {
       await page.getByTestId(`equilibrium-solve-guess-${index}`).fill('0')
@@ -123,7 +123,7 @@ for (const fixture of fixtures) {
     await createSeedObjects(page, harness, fixture.variables.length)
 
     await harness.selectTreeNode('ConnectionOrbit')
-    await page.getByTestId('action-heteroclinic-from-orbit-toggle').click()
+    await clickInspectorAction(page, 'action-heteroclinic-from-orbit-toggle')
     await page.getByTestId('heteroclinic-from-orbit-name').fill(branchName)
     await page.getByTestId('heteroclinic-source-equilibrium').selectOption({ label: 'SourceEq' })
     await page.getByTestId('heteroclinic-target-equilibrium').selectOption({ label: 'TargetEq' })
@@ -175,7 +175,7 @@ for (const fixture of fixtures) {
     await harness.openSystem(systemName)
     await harness.selectTreeNode(branchLabel)
     await expect(page.getByText(new RegExp(`heteroclinic curve · ${count} points`, 'i'))).toBeVisible()
-    await page.getByTestId('action-branch-extend-toggle').click()
+    await clickInspectorAction(page, 'action-branch-extend-toggle')
     await page.getByTestId('branch-extend-max-steps').fill('1')
     await page.getByTestId('branch-extend-step-size').fill('0.001')
     await page.getByTestId('branch-extend-submit').click()

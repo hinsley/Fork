@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { createHarness } from './harness'
+import { clickInspectorAction, createHarness } from './harness'
 
 async function plotHasTrace(plot: Locator, name: string): Promise<boolean> {
   return await plot.evaluate((element, traceName) => {
@@ -47,7 +47,7 @@ async function readMeasureTrace(plot: Locator, name: string) {
 }
 
 async function openStateGridWorkflow(page: Page, workflow: string) {
-  await page.getByTestId(`action-${workflow}`).click()
+  await clickInspectorAction(page, `action-${workflow}`)
 }
 
 test('State Grid creates a separately rendered and persisted invariant-measure object', async ({
@@ -86,7 +86,7 @@ test('State Grid creates a separately rendered and persisted invariant-measure o
     page.getByRole('button', { name: 'State_Grid_1 (state grid)', exact: true })
   ).toBeVisible()
 
-  await page.getByTestId('action-invariant-measure-data-toggle').click()
+  await clickInspectorAction(page, 'action-invariant-measure-data-toggle')
   await expect(page.getByTestId('invariant-measure-source')).toHaveText('State_Grid_1')
   await expect(page.getByTestId('invariant-measure-residual')).not.toHaveText('NaN')
   const coverText = await page.getByTestId('invariant-measure-cover-size').innerText()
@@ -115,7 +115,7 @@ test('State Grid creates a separately rendered and persisted invariant-measure o
   expect(trace?.hoverTemplate).toContain('mass=')
 
   await page.getByTestId('inspector-workflow-back').click()
-  await page.getByTestId('action-appearance-toggle').click()
+  await clickInspectorAction(page, 'action-appearance-toggle')
   await page.getByTestId('inspector-visibility').click()
   await expect.poll(() => plotHasTrace(plot, measureName)).toBe(false)
   await page.getByTestId('inspector-visibility').click()
@@ -175,7 +175,7 @@ test('State Grid creates a sampled flow-map measure for an autonomous flow', asy
   await expect(page.getByTestId('inspector-name')).toHaveValue(measureName, {
     timeout: 30_000,
   })
-  await page.getByTestId('action-invariant-measure-data-toggle').click()
+  await clickInspectorAction(page, 'action-invariant-measure-data-toggle')
   await expect(page.getByTestId('invariant-measure-data-section')).toContainText(
     'fixed-time sampled flow map'
   )

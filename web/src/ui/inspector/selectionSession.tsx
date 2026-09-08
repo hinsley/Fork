@@ -28,7 +28,7 @@ export function WorkflowFocusProvider({
     Partial<Record<WorkflowActionEntry['group'], boolean>>
   >({})
   const toggleActionGroup = useCallback((group: WorkflowActionEntry['group']) => {
-    setCollapsedActionGroups((previous) => ({ ...previous, [group]: !previous[group] }))
+    setCollapsedActionGroups((previous) => ({ ...previous, [group]: !(previous[group] ?? true) }))
   }, [])
   const [state, dispatch] = useReducer(selectionSessionReducer, {
     activeWorkflow: null,
@@ -118,7 +118,7 @@ export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[]
       {groups.map((group) => {
         const groupEntries = entries.filter((entry) => entry.group === group)
         if (groupEntries.length === 0) return null
-        const expanded = !focus.collapsedActionGroups[group]
+        const expanded = focus.collapsedActionGroups[group] === false
         const contentId = `${listId}-${group}`
         return (
           <div className="inspector-actions__group" key={group}>

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { addObject, createSystem } from '../../system/model'
@@ -139,6 +139,9 @@ describe('selection inspector workflow shell', () => {
     expect(within(actions).getAllByTestId(/^action-/)[0]).toHaveTextContent('Appearance')
     expect(actions).not.toHaveTextContent('Modify appearance')
     expect(within(actions).getByRole('heading', { name: 'Continuation' })).toBeVisible()
+    expect(screen.getByTestId('action-limit-cycle-toggle')).not.toBeVisible()
+    expect(screen.getByRole('button', { name: 'Continuation' })).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(screen.getByRole('button', { name: 'Continuation' }))
     expect(screen.getByTestId('action-limit-cycle-toggle')).toBeVisible()
     expect(screen.getByTestId('action-heteroclinic-from-orbit-toggle')).toHaveTextContent(
       'Heteroclinic connection'
@@ -176,6 +179,8 @@ describe('selection inspector workflow shell', () => {
     const actions = screen.getByTestId('inspector-actions')
     expect(within(actions).getByRole('heading', { name: 'Inspect' })).toBeVisible()
     expect(screen.getByTestId('action-orbit-data-toggle')).toHaveTextContent('View Data')
+    expect(screen.getByTestId('action-orbit-run-toggle')).not.toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Compute' }))
     expect(screen.getByTestId('action-orbit-run-toggle')).toBeVisible()
     expect(screen.getByTestId('action-oseledets-toggle')).toBeVisible()
     expect(screen.queryByTestId('action-limit-cycle-toggle')).toBeNull()
@@ -186,6 +191,7 @@ describe('selection inspector workflow shell', () => {
       )
     }
 
+    await user.click(screen.getByRole('button', { name: 'Inspect' }))
     await user.click(screen.getByTestId('action-orbit-data-toggle'))
     expect(screen.getByTestId('inspector-workflow-focus')).toHaveTextContent('View Data')
     expect(screen.getByTestId('orbit-data-summary-toggle')).toBeVisible()
