@@ -1,3 +1,4 @@
+import type { Data } from 'plotly.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 type PlotlyMock = {
@@ -214,4 +215,38 @@ it('updates only the streaming 3D renderer and preserves static buffers, bounds,
   expect(reactSpy).not.toHaveBeenCalled()
   expect(relayoutSpy).not.toHaveBeenCalled()
   expect(redraw).toHaveBeenCalledOnce()
+})
+
+it('expands continuous 3D bounds without replotting static objects or changing the camera', async () => {
+  vi.resetModules()
+  vi.unmock('./plotlyAdapter')
+  const { reactSpy, relayoutSpy } = mockPlotly()
+  const { updateStreamingTraces, expandedParticleRange } = await loadAdapter()
+  expect(expandedParticleRange([-1, 1], -0.5, 0.5)).toBeNull()
+  expect(expandedParticleRange([1, -1], -2, 3)).toEqual([3.75, -2.75])
+  const camera = { eye: { x: 2, y: 1, z: 1 } }
+  const axis = () => ({ range: [-1, 1], d2l: (value: number) => value, autorange: true })
+  const fullSceneLayout = { camera, xaxis: axis(), yaxis: axis(), zaxis: axis(), aspectmode: 'manual' }
+  const bounds = [[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]]
+  const renderer = { update: vi.fn() }
+  const scene = { dataScale: [0.5, 0.5, 0.5], fullSceneLayout,
+    traces: { particles: renderer },
+    glplot: { bounds, redraw: vi.fn(), setBounds: vi.fn((index: number, range: { min: number; max: number }) => {
+      bounds[0][index] = range.min
+      bounds[1][index] = range.max
+    }) } }
+  const initial = { uid: 'particles', type: 'scatter3d', x: [0], y: [0], z: [0] }
+  const container = Object.assign(document.createElement('div'), {
+    data: [initial], _fullData: [{ ...initial }], _fullLayout: { scene: { ...fullSceneLayout, _scene: scene } },
+    layout: { scene: {} },
+  })
+  await updateStreamingTraces(container, [{ uid: 'particles', type: 'scatter3d', x: [4], y: [0], z: [0],
+    meta: { particleMode: 'continuous' } } as Data])
+  expect(bounds[1][0]).toBeGreaterThanOrEqual(2)
+  expect(bounds[1][1]).toBe(0.5)
+  expect(scene.glplot.setBounds).toHaveBeenCalledOnce()
+  expect(fullSceneLayout.camera).toBe(camera)
+  expect(relayoutSpy).not.toHaveBeenCalled()
+  expect(reactSpy).not.toHaveBeenCalled()
+  expect(container.layout.scene).toMatchObject({ xaxis: { autorange: false } })
 })

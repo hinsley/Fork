@@ -550,7 +550,75 @@ export function purgePlot(container: HTMLElement) {
 type StreamingTrace = Data & { _length?: number; _input?: Data; scene?: string }
 type StreamingScene = {
   traces?: Record<string, { update: (trace: StreamingTrace) => void }>
-  glplot?: { redraw: () => void }
+  dataScale?: number[]
+  fullSceneLayout?: Record<string, unknown>
+  glplot?: {
+    redraw: () => void
+    bounds?: number[][]
+    setBounds?: (axis: number, bounds: { min: number; max: number }) => void
+    setAspectratio?: (ratio: { x: number; y: number; z: number }) => void
+  }
+}
+
+export function expandedParticleRange(range: number[], minimum: number, maximum: number): number[] | null {
+  const low = Math.min(range[0], range[1])
+  const high = Math.max(range[0], range[1])
+  if (![low, high, minimum, maximum].every(Number.isFinite) ||
+    (minimum >= low && maximum <= high)) return null
+  const padding = Math.max(high - low, maximum - minimum, Number.EPSILON) * 0.15
+  const nextLow = minimum < low ? minimum - padding : low
+  const nextHigh = maximum > high ? maximum + padding : high
+  if (!Number.isFinite(nextLow) || !Number.isFinite(nextHigh)) return null
+  return range[0] > range[1] ? [nextHigh, nextLow] : [nextLow, nextHigh]
+}
+
+function isContinuousParticleTrace(trace: Data): boolean {
+  const meta = 'meta' in trace ? trace.meta : undefined
+  return Boolean(meta && typeof meta === 'object' && 'particleMode' in meta && meta.particleMode === 'continuous')
+}
+
+function expandParticleScene(scene: StreamingScene, trace: Data, inputLayout?: Record<string, unknown>) {
+  if (!isContinuousParticleTrace(trace) || !scene.glplot?.setBounds ||
+    !scene.glplot.bounds || !scene.dataScale || !scene.fullSceneLayout) return
+  let changed = false
+  for (const [index, coordinate] of (['x', 'y', 'z'] as const).entries()) {
+    const values = coordinate in trace ? (trace as { x?: number[]; y?: number[]; z?: number[] })[coordinate] : undefined
+    if (!values) continue
+    const axisKey = `${coordinate}axis`
+    const axis = scene.fullSceneLayout[axisKey] as { d2l: (value: number) => number; range: number[]; autorange: boolean }
+    const scale = scene.dataScale[index]
+    if (!axis?.d2l || !Number.isFinite(scale) || scale <= 0) continue
+    let minimum = Infinity
+    let maximum = -Infinity
+    for (const value of values) {
+      const converted = axis.d2l(value)
+      if (!Number.isFinite(converted)) continue
+      minimum = Math.min(minimum, converted)
+      maximum = Math.max(maximum, converted)
+    }
+    const range = [scene.glplot.bounds[0][index] / scale, scene.glplot.bounds[1][index] / scale]
+    const expanded = expandedParticleRange(range, minimum, maximum)
+    if (!expanded) continue
+    axis.range = expanded
+    axis.autorange = false
+    if (inputLayout) inputLayout[axisKey] = { ...(inputLayout[axisKey] as object), range: [...expanded], autorange: false }
+    scene.glplot.setBounds(index, { min: expanded[0] * scale, max: expanded[1] * scale })
+    changed = true
+  }
+  const mode = scene.fullSceneLayout.aspectmode
+  if (changed && (mode === 'auto' || mode === 'data') && scene.glplot.setAspectratio) {
+    const spans = scene.dataScale.map((scale, index) =>
+      Math.abs(scene.glplot!.bounds![1][index] - scene.glplot!.bounds![0][index]) / scale)
+    if (!spans.every((span) => Number.isFinite(span) && span > 0)) return
+    const maximum = Math.max(...spans)
+    const minimum = Math.min(...spans)
+    const mean = Math.exp(spans.reduce((sum, span) => sum + Math.log(span), 0) / spans.length)
+    const ratio = mode === 'auto' && maximum / minimum > 4 ? [1, 1, 1] : spans.map((span) => span / mean)
+    const aspectratio = { x: ratio[0], y: ratio[1], z: ratio[2] }
+    scene.fullSceneLayout.aspectratio = aspectratio
+    if (inputLayout) inputLayout.aspectratio = { ...aspectratio }
+    scene.glplot.setAspectratio(aspectratio)
+  }
 }
 
 /** Update particle buffers without rebuilding scene bounds or resetting its camera. */
@@ -559,6 +627,7 @@ export async function updateStreamingTraces(container: HTMLElement, updates: Dat
     data?: Data[]
     _fullData?: StreamingTrace[]
     _fullLayout?: Record<string, unknown>
+    layout?: Record<string, unknown>
   }
   const entries = updates.flatMap((update) => {
     const index = plot.data?.findIndex((trace) => 'uid' in trace && 'uid' in update && trace.uid === update.uid) ?? -1
@@ -586,6 +655,7 @@ export async function updateStreamingTraces(container: HTMLElement, updates: Dat
     })
     plot.data![index] = update
     renderer.update(full)
+    expandParticleScene(scene, update, plot.layout?.[full.scene ?? 'scene'] as Record<string, unknown> | undefined)
     redraw.add(scene)
   }
   redraw.forEach((scene) => scene.glplot!.redraw())
@@ -600,6 +670,30 @@ export async function updateStreamingTraces(container: HTMLElement, updates: Dat
     if (axis.autorange && axis.range) {
       ranges[`${key}.range`] = [...axis.range]
       ranges[`${key}.autorange`] = false
+    }
+  }
+  for (const { update, full } of fallback) {
+    if (!isContinuousParticleTrace(update)) continue
+    for (const coordinate of ['x', 'y'] as const) {
+      const axisReference = (full as { xaxis?: string; yaxis?: string })[`${coordinate}axis`] ?? coordinate
+      const key = axisReference.replace(coordinate, `${coordinate}axis`)
+      const axis = plot._fullLayout?.[key] as { range?: number[]; d2r?: (value: number) => number } | undefined
+      const values = (update as { x?: number[]; y?: number[] })[coordinate]
+      if (!axis?.range || !values) continue
+      let minimum = Infinity
+      let maximum = -Infinity
+      for (const value of values) {
+        const converted = axis.d2r ? axis.d2r(value) : value
+        if (!Number.isFinite(converted)) continue
+        minimum = Math.min(minimum, converted)
+        maximum = Math.max(maximum, converted)
+      }
+      const range = (ranges[`${key}.range`] as number[] | undefined) ?? axis.range
+      const expanded = expandedParticleRange(range, minimum, maximum)
+      if (expanded) {
+        ranges[`${key}.range`] = expanded
+        ranges[`${key}.autorange`] = false
+      }
     }
   }
   if (Object.keys(ranges).length && Plotly.relayout) await Plotly.relayout(container, ranges)

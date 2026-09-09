@@ -2676,7 +2676,7 @@ export function AppProvider({
       type: 'particles', name: `${grid.name}_Particles_${suffix}`,
       systemName: current.config.name, sourceStateGridId: gridId,
       sourceStateGridName: grid.name, createdAt: new Date().toISOString(),
-      settings: { count: 250, speed: 1, lifetime: 8, integrationStep: 0.01,
+      settings: { mode: 'bounded', resetRevision: 0, speed: 1, lifetime: 8, integrationStep: 0.01,
         trailLength: 8, playing: true },
     })
     const next = created.system
@@ -2694,7 +2694,8 @@ export function AppProvider({
   const updateParticleObject = useCallback((id: string, settings: ParticleObject['settings']) => {
     const current = latestSystemRef.current ?? state.system
     if (current?.objects[id]?.type !== 'particles') return
-    if (!Number.isInteger(settings.count) || settings.count < 1 || settings.count > 2000 ||
+    if ((settings.mode !== undefined && settings.mode !== 'bounded' && settings.mode !== 'continuous') ||
+      (settings.resetRevision !== undefined && (!Number.isSafeInteger(settings.resetRevision) || settings.resetRevision < 0)) ||
       !Number.isFinite(settings.speed) || settings.speed < 0.01 || settings.speed > 10 ||
       !Number.isFinite(settings.lifetime) || settings.lifetime < 0.1 || settings.lifetime > 1000 ||
       !Number.isFinite(settings.integrationStep) || settings.integrationStep < 0.001 || settings.integrationStep > 0.1 ||

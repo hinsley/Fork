@@ -3659,3 +3659,16 @@
     animation: none;
   }
 }
+
+
+.particle-appearance-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.particle-appearance-control input {
+  min-width: 0;
+  width: 100%;
+}

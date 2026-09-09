@@ -266,3 +266,25 @@ autoranged Cartesian ranges first. Frame writes are serialized and coalesced to
 the latest frame while a normal render is in progress; live frames never rebind
 Plotly event handlers or reapply the saved camera. The dense-scene browser test
 checks zero static trace updates/scene plots during live camera rotation.
+
+### Grid seeding and continuous evolution
+
+Particle population now equals the Cartesian product of the source grid's free
+axes; cell-center order matches `buildSceneTraces`. Legacy independent particle
+counts are ignored. Bounded mode resets each particle to its own grid center on
+expiry or escape. Continuous mode has no lifetime expiry or boundary reset;
+`Reset to grid` restarts the cloud and simulation time in either mode. Frozen
+variables and parameter overrides still come from the source grid. Grids above
+100,000 seeds report an error asking for lower source resolutions rather than
+silently sampling fewer points. Numerically nonfinite continuous trajectories
+stop at their last finite state with a visible notice.
+
+Continuous traces carry `meta.particleMode = 'continuous'`. The adapter expands
+only exceeded ranges, with 15% padding. In 3D it calls the existing scene's
+`glplot.setBounds` using its existing `dataScale`, updates layout ranges for
+subsequent normal renders, and updates the aspect ratio for auto/data mode.
+Plotly's existing scene render/tick routine refreshes ticks from the new GPU
+bounds. Static coordinate buffers and the camera remain untouched. Cartesian
+plots use explicit expanded ranges with public `relayout`. Bounded-mode frames
+keep their existing fixed-range behavior. Numeric and slider inputs share the
+same size/trail settings.

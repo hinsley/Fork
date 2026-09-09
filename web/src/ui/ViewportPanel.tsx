@@ -7747,6 +7747,7 @@ function ViewportTile({
                 {mapFunctionUnavailableReason}
               </div>
             ) : null}
+            {particles.warning ? <p className="inspector-help" role="status">Particles: {particles.warning}</p> : null}
             {particles.error ? <p className="inspector-error" role="alert">Particles: {particles.error}</p> : null}
             {analysis ? (
               <AnalysisViewportPlot

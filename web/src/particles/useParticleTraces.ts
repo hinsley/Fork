@@ -105,7 +105,7 @@ export function useParticleTraces(system: System, scene: Scene | undefined,
       const colors: string[] = []
       const sizes: number[] = []
       for (const particle of frame.particles) {
-        const fade = Math.min(1, particle.age / (object.settings.lifetime * 0.08),
+        const fade = object.settings.mode === 'continuous' ? 1 : Math.min(1, particle.age / (object.settings.lifetime * 0.08),
           Math.max(0, (object.settings.lifetime - particle.age) / (object.settings.lifetime * 0.2)))
         particle.trail.slice(0, object.settings.trailLength).reverse().forEach((point, index, trail) => {
           points.push(point)
@@ -126,8 +126,12 @@ export function useParticleTraces(system: System, scene: Scene | undefined,
         ...(projection.axisCount === 3 ? { z: points.map((point) => coordinate(point, 2)) } : {}),
         marker: { color: colors, size: sizes, line: { width: 0 } },
         hoverinfo: 'skip', showlegend: false,
+        meta: { particleMode: object.settings.mode ?? 'bounded', particleSeeds: frame.particles.length },
       } as Data]
     })
   }, [appearanceKey, inputKey, projectionKey, result])
-  return { traces, error: result.key === inputKey ? result.error : undefined }
+  const stoppedCount = result.key === inputKey
+    ? result.frames.reduce((count, frame) => count + frame.particles.filter((particle) => particle.stopped).length, 0) : 0
+  return { traces, error: result.key === inputKey ? result.error : undefined,
+    warning: stoppedCount ? `${stoppedCount} trajectories stopped at their last finite position because integration became nonfinite.` : undefined }
 }

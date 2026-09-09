@@ -1173,7 +1173,8 @@ export interface InvariantMeasureObject {
 }
 
 export interface ParticleSettings {
-  count: number
+  mode?: 'bounded' | 'continuous'
+  resetRevision?: number
   speed: number
   lifetime: number
   integrationStep: number

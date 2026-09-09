@@ -88,11 +88,12 @@ test('live particles leave dense scene bounds and static buffers alone while rot
     await page.getByTestId(`state-grid-${axis}-max`).fill(max)
     await page.getByTestId(`state-grid-${axis}-resolution`).fill('25')
   }
-  await page.getByTestId('inspector-workflow-back').click()
+  await page.getByTestId('create-object-button').click()
+  await page.getByTestId('create-state-grid').click()
   await clickInspectorAction(page, 'action-state-grid-particles-toggle')
   await page.getByTestId('state-grid-create-particles').click()
   const plot = page.locator('[data-testid^="plotly-viewport-"]').first()
-  await expect.poll(async () => (await readParticles(plot))?.x.length ?? 0).toBeGreaterThan(250)
+  await expect.poll(async () => (await readParticles(plot))?.x.length ?? 0).toBeGreaterThan(125)
   await plot.evaluate((element) => {
     const target = element as unknown as {
       _fullLayout: { scene: { _scene: {
@@ -140,9 +141,93 @@ test('live particles leave dense scene bounds and static buffers alone while rot
     _fullLayout: { scene: { _scene: { getCamera: () => unknown } } }
   })._fullLayout.scene._scene.getCamera())
   expect(camera).toEqual(stats.currentCamera)
-  await harness.selectTreeNode('State_Grid_1_Particles_1')
+  await harness.selectTreeNode('State_Grid_2_Particles_1')
   await clickInspectorAction(page, 'action-appearance-toggle')
   await expect(page.getByTestId('particles-opacity')).toBeVisible()
   await expect(page.getByTestId('particles-speed')).not.toBeVisible()
   await page.screenshot({ path: 'test-results/particles-live-rotation.png' })
+})
+
+for (const dimension of [2, 3]) test(`grid-seeded continuous particles escape and expand a ${dimension}D view`, async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const harness = createHarness(page)
+  await harness.goto({ mock: false })
+  if (dimension === 3) await harness.openSystem('Lorenz')
+  else await harness.createSystem('Particle_Translation')
+  await page.getByTestId('open-system-settings').click()
+  for (let index = 0; index < dimension; index++) await page.getByTestId(`system-eq-${index}`).fill(index === 0 ? '10' : '0')
+  await page.getByTestId('system-apply').click()
+  await expect(page.getByText('Validating equations…')).toBeHidden()
+  await expect(page.getByTestId('system-errors')).toHaveCount(0)
+  await page.getByTestId('close-system-settings').click()
+  await harness.createScene()
+  await page.getByTestId('create-object-button').click()
+  await page.getByTestId('create-state-grid').click()
+  await clickInspectorAction(page, 'action-state-grid-particles-toggle')
+  await page.getByTestId('state-grid-create-particles').click()
+  await clickInspectorAction(page, 'action-appearance-toggle')
+  await page.getByTestId('particles-trailLength-number').fill('0')
+  await expect(page.getByTestId('particles-trailLength')).toHaveValue('0')
+  await page.getByTestId('particles-pointSize-number').fill('7.5')
+  await expect(page.getByTestId('particles-pointSize')).toHaveValue('7.5')
+  await page.getByTestId('particles-pointSize').fill('5')
+  await expect(page.getByTestId('particles-pointSize-number')).toHaveValue('5')
+  await page.getByTestId('inspector-workflow-back').click()
+  await clickInspectorAction(page, 'action-particles-animation-toggle')
+  await expect(page.getByTestId('particles-count')).toHaveCount(0)
+  await page.getByTestId('particles-lifetime').fill('0.1')
+  await page.getByTestId('particles-mode').selectOption('continuous')
+  await expect(page.getByTestId('particles-lifetime')).toHaveCount(0)
+  await page.getByTestId('particles-play').click()
+  await page.getByTestId('particles-reset').click()
+  const plot = page.locator('[data-testid^="plotly-viewport-"]').first()
+  const seeds = await plot.evaluate((element) => {
+    const data = (element as unknown as { data: Array<{ name: string; x: number[]; y: number[]; z?: number[] }> }).data
+    const grid = data.find((trace) => trace.name === 'State_Grid_1')!
+    return { x: grid.x, y: grid.y, z: grid.z }
+  })
+  await expect.poll(async () => (await readParticles(plot))?.x).toEqual(seeds.x)
+  expect((await readParticles(plot))?.y).toEqual(seeds.y)
+  expect(seeds.x).toHaveLength(5 ** dimension)
+  if (dimension === 3) {
+    expect((await readParticles(plot))?.z).toEqual(seeds.z)
+    await plot.evaluate((element) => {
+      const scene = (element as unknown as { _fullLayout: { scene: { _scene: { plot: (...args: unknown[]) => unknown } } } })._fullLayout.scene._scene
+      const stats = { plots: 0 }
+      Object.assign(element, { expansionStats: stats })
+      const original = scene.plot
+      scene.plot = function (...args) { stats.plots++; return original.apply(this, args) }
+    })
+  }
+  await page.getByTestId('particles-play').click()
+  await expect.poll(async () => Math.max(...((await readParticles(plot))?.x ?? [-Infinity]))).toBeGreaterThan(2.5)
+  if (dimension === 3) await plot.evaluate((element) => {
+    (element as unknown as { expansionStats: { plots: number } }).expansionStats.plots = 0
+  })
+  await expect.poll(async () => Math.min(...((await readParticles(plot))?.x ?? [-Infinity]))).toBeGreaterThan(4)
+  if (dimension === 3) expect(await plot.evaluate((element) =>
+    (element as unknown as { expansionStats: { plots: number } }).expansionStats.plots)).toBe(0)
+  await page.screenshot({ path: `test-results/particles-continuous-live-${dimension}d.png` })
+  await page.getByTestId('particles-play').click()
+  await page.waitForTimeout(150)
+  const evolved = await readParticles(plot)
+  expect(evolved!.x).toHaveLength(seeds.x.length)
+  expect(evolved!.y).toEqual(seeds.y)
+  expect(Math.max(...evolved!.x) - Math.min(...evolved!.x)).toBeCloseTo(3.2, 5)
+  const extent = await plot.evaluate((element, dim) => {
+    const target = element as unknown as {
+      expansionStats?: { plots: number }
+      _fullLayout: { xaxis: { range: number[] }; scene: { _scene: { dataScale: number[]; glplot: { bounds: number[][] } } } }
+    }
+    if (dim === 2) return { max: target._fullLayout.xaxis.range[1], plots: 0 }
+    const scene = target._fullLayout.scene._scene
+    return { max: scene.glplot.bounds[1][0] / scene.dataScale[0], plots: target.expansionStats!.plots }
+  }, dimension)
+  expect(extent.max).toBeGreaterThanOrEqual(Math.max(...evolved!.x))
+  await page.screenshot({ path: `test-results/particles-continuous-${dimension}d.png` })
+  await page.getByTestId('particles-reset').click()
+  await expect.poll(async () => (await readParticles(plot))?.x).toEqual(seeds.x)
+  await page.getByTestId('particles-mode').selectOption('bounded')
+  await expect.poll(async () => (await readParticles(plot))?.x).toEqual(seeds.x)
 })
