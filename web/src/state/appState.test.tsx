@@ -5,7 +5,7 @@ import { AppProvider } from './appState'
 import { useAppContext } from './appContext'
 import { MockForkCoreClient } from '../compute/mockClient'
 import { MemorySystemStore } from '../system/store'
-import { addBranch, addObject, addScene, createSystem } from '../system/model'
+import { addBranch, addObject, addScene, createSystem, duplicateNode, removeNode, normalizeSystem } from '../system/model'
 import {
   createLimitCycleManifoldSystem,
   createPeriodDoublingSystem,
@@ -6277,5 +6277,37 @@ describe('appState equilibrium manifold actions', () => {
       kind: 'Fold',
       quadratic_coefficient: -1,
     }))
+  })
+})
+
+
+describe('State Grid particles', () => {
+  it('creates a flow-only child with independent settings and a scene', async () => {
+    const fixture = createConfiguredStateGridSystem('flow')
+    const { getContext } = setupApp(fixture.system)
+    act(() => getContext().actions.createParticleObject(fixture.nodeId))
+    const system = getContext().state.system!
+    const id = system.ui.selectedNodeId!
+    const particles = system.objects[id]
+    expect(particles.type).toBe('particles')
+    expect(system.nodes[id].parentId).toBe(fixture.nodeId)
+    expect(system.nodes[fixture.nodeId].children).toContain(id)
+    expect(system.rootIds).not.toContain(id)
+    expect(system.scenes).toHaveLength(1)
+    if (particles.type !== 'particles') throw new Error('Expected particles')
+    act(() => getContext().actions.updateParticleObject(id, { ...particles.settings, playing: false, speed: 2 }))
+    expect(getContext().state.system!.objects[id]).toMatchObject({ settings: { playing: false, speed: 2 } })
+    const duplicated = duplicateNode(system, fixture.nodeId)!
+    const copiedGrid = duplicated.system.nodes[duplicated.nodeId]
+    const copiedParticles = duplicated.system.objects[copiedGrid.children[0]]
+    expect(copiedParticles).toMatchObject({ type: 'particles', sourceStateGridId: copiedGrid.id })
+    expect(normalizeSystem(duplicated.system).nodes[copiedGrid.children[0]].parentId).toBe(copiedGrid.id)
+    const deleted = removeNode(duplicated.system, copiedGrid.id)
+    expect(deleted.objects[copiedGrid.children[0]]).toBeUndefined()
+    expect(deleted.objects[id]).toBeDefined()
+    const map = createConfiguredStateGridSystem('map')
+    const mapApp = setupApp(map.system)
+    act(() => mapApp.getContext().actions.createParticleObject(map.nodeId))
+    expect(Object.values(mapApp.getContext().state.system!.objects).some((object) => object.type === 'particles')).toBe(false)
   })
 })

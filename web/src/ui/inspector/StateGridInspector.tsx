@@ -27,6 +27,7 @@ type StateGridInspectorProps = {
   system: System
   nodeId: string
   object: StateGridObject
+  onCreateParticles?: (id: string) => void
   onRename: (id: string, name: string) => void
   onUpdate: (
     id: string,
@@ -92,6 +93,7 @@ export function StateGridInspector({
   system,
   nodeId,
   object,
+  onCreateParticles,
   onRename,
   onUpdate,
   onCompute,
@@ -169,6 +171,8 @@ export function StateGridInspector({
         result.dynamicsType !== system.config.type)
   )
   const workflowActions: WorkflowActionEntry[] = [
+    ...(isFlow ? [{ id: 'state-grid-particles-toggle' as const, group: 'Compute' as const,
+      label: 'Particles', description: 'Animate particles inside this grid.' }] : []),
     {
       id: 'appearance-toggle',
       group: 'Configure',
@@ -766,6 +770,16 @@ export function StateGridInspector({
         </div>
           </section>
         </InspectorDisclosure>
+
+        {isFlow ? <InspectorDisclosure title="Particles" testId="state-grid-particles-toggle"
+          actionOnly={actionOnly} defaultOpen={!workflowFocus}>
+          <section className="inspector-section">
+            <p className="inspector-help">Animate the flow inside this grid. Particles inherit its bounds, parameters, and frozen variables.</p>
+            <button className="inspector-primary-action" type="button"
+              disabled={!onCreateParticles} onClick={() => onCreateParticles?.(nodeId)}
+              data-testid="state-grid-create-particles">Create particles</button>
+          </section>
+        </InspectorDisclosure> : null}
 
         <InspectorDisclosure
           title="Expansion entropy"

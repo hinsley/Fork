@@ -129,6 +129,7 @@ function getNodeLabel(node: TreeNode, system: System) {
     return `${node.name} (forced periodic response)`
   }
   if (node.objectType === 'isocline') return `${node.name} (isocline)`
+  if (node.objectType === 'particles') return `${node.name} (particles)`
   if (node.objectType === 'state_grid') return `${node.name} (state grid)`
   if (node.objectType === 'invariant_measure') return `${node.name} (invariant measure)`
   if (node.objectType === 'orbit') return `${node.name} (orbit)`

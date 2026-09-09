@@ -763,6 +763,7 @@ export function canMoveNodeIntoParent(
   if (node.kind !== 'object' && node.kind !== 'branch' && node.kind !== 'folder') {
     return false
   }
+  if (node.objectType === 'particles' && parentId !== node.parentId) return false
   if (parentId === nodeId) return false
   if (parentId && getAncestorIds(nodes, parentId).includes(nodeId)) return false
 
@@ -1212,7 +1213,7 @@ export function duplicateNode(
 
   idMap.forEach((newId) => {
     const object = next.objects[newId]
-    if (!object || object.type !== 'invariant_measure') return
+    if (!object || (object.type !== 'invariant_measure' && object.type !== 'particles')) return
     const sourceStateGridId = idMap.get(object.sourceStateGridId) ?? object.sourceStateGridId
     object.sourceStateGridId = sourceStateGridId
     const sourceStateGrid = next.objects[sourceStateGridId]

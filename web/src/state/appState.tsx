@@ -59,6 +59,7 @@ import type {
   SystemSummary,
   Scene,
   StateGridObject,
+  ParticleObject,
   SubsystemSnapshot,
   SystemConfig,
   TreeNode,
@@ -74,6 +75,7 @@ import {
   addBifurcationDiagram,
   addBranch,
   addObject,
+  isNodeEffectivelyVisible,
   addScene,
   duplicateNode as duplicateSystemNode,
   mergeLoadedEntities,
@@ -407,6 +409,12 @@ function collectVisibleEntityIds(system: System): { objectIds: string[]; branchI
     if (node.expanded) {
       stack.push(...node.children)
     }
+  }
+  // Particle children remain visible in scenes when their grid is collapsed in the tree.
+  for (const node of Object.values(system.nodes)) {
+    if (node.objectType !== 'particles' || !isNodeEffectivelyVisible(system.nodes, node.id)) continue
+    objectIds.add(node.id)
+    if (node.parentId && system.index.objects[node.parentId]) objectIds.add(node.parentId)
   }
   return {
     objectIds: [...objectIds],
@@ -2074,6 +2082,8 @@ export type AppActions = {
     nodeId: string,
     update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
   ) => void
+  createParticleObject: (gridId: string) => void
+  updateParticleObject: (id: string, settings: ParticleObject['settings']) => void
   updateStateGridObject: (
     nodeId: string,
     update: Partial<Omit<StateGridObject, 'type' | 'name' | 'systemName'>>
@@ -2653,6 +2663,47 @@ export function AppProvider({
     },
     [scheduleSystemSave, state.system]
   )
+
+  const createParticleObject = useCallback((gridId: string) => {
+    const current = latestSystemRef.current ?? state.system
+    if (!current || current.config.type !== 'flow') return
+    const grid = current.objects[gridId]
+    if (grid?.type !== 'state_grid') return
+    const names = new Set(Object.values(current.index.objects).map((item) => item.name))
+    let suffix = 1
+    while (names.has(`${grid.name}_Particles_${suffix}`)) suffix += 1
+    const created = addObject(current, {
+      type: 'particles', name: `${grid.name}_Particles_${suffix}`,
+      systemName: current.config.name, sourceStateGridId: gridId,
+      sourceStateGridName: grid.name, createdAt: new Date().toISOString(),
+      settings: { count: 250, speed: 1, lifetime: 8, integrationStep: 0.01,
+        trailLength: 8, playing: true },
+    })
+    const next = created.system
+    next.rootIds = next.rootIds.filter((id) => id !== created.nodeId)
+    next.nodes[created.nodeId].parentId = gridId
+    next.nodes[gridId].children.push(created.nodeId)
+    next.nodes[gridId].expanded = true
+    const selected = selectNode(ensureStateSpaceScene(updateNodeRender(next, created.nodeId,
+      { color: '#38bdf8', pointSize: 4, opacity: 0.85 })), created.nodeId)
+    latestSystemRef.current = selected
+    dispatch({ type: 'SET_SYSTEM', system: selected })
+    scheduleSystemSave(selected)
+  }, [scheduleSystemSave, state.system])
+
+  const updateParticleObject = useCallback((id: string, settings: ParticleObject['settings']) => {
+    const current = latestSystemRef.current ?? state.system
+    if (current?.objects[id]?.type !== 'particles') return
+    if (!Number.isInteger(settings.count) || settings.count < 1 || settings.count > 2000 ||
+      !Number.isFinite(settings.speed) || settings.speed < 0.01 || settings.speed > 10 ||
+      !Number.isFinite(settings.lifetime) || settings.lifetime < 0.1 || settings.lifetime > 1000 ||
+      !Number.isFinite(settings.integrationStep) || settings.integrationStep < 0.001 || settings.integrationStep > 0.1 ||
+      !Number.isInteger(settings.trailLength) || settings.trailLength < 0 || settings.trailLength > 24) return
+    const next = updateObject(current, id, { settings } as Partial<ParticleObject>)
+    latestSystemRef.current = next
+    dispatch({ type: 'SET_SYSTEM', system: next })
+    scheduleSystemSave(next)
+  }, [scheduleSystemSave, state.system])
 
   const updateStateGridObjectAction = useCallback(
     (
@@ -10210,6 +10261,8 @@ export function AppProvider({
       updateObjectFrozenVariables: updateObjectFrozenVariablesAction,
       updateObjectFrozenEquationContext: updateObjectFrozenEquationContextAction,
       updateIsoclineObject: updateIsoclineObjectAction,
+      createParticleObject,
+      updateParticleObject,
       updateStateGridObject: updateStateGridObjectAction,
       updateInvariantMeasureObject: updateInvariantMeasureObjectAction,
       updateScene: updateSceneAction,
@@ -10344,6 +10397,8 @@ export function AppProvider({
       updateObjectFrozenVariablesAction,
       updateObjectFrozenEquationContextAction,
       updateIsoclineObjectAction,
+      createParticleObject,
+      updateParticleObject,
       updateStateGridObjectAction,
       updateInvariantMeasureObjectAction,
       updateSceneAction,

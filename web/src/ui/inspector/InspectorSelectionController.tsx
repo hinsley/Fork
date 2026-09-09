@@ -1,3 +1,4 @@
+import { ParticleInspector } from './ParticleInspector'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type {
@@ -26,6 +27,7 @@ import type {
   OrbitObject,
   Scene,
   StateGridObject,
+  ParticleObject,
   System,
   SystemConfig,
   TreeNode,
@@ -215,6 +217,8 @@ type InspectorDetailsPanelProps = {
     request: IsoclineComputeRequest,
     opts?: { signal?: AbortSignal; silent?: boolean }
   ) => Promise<unknown>
+  onCreateParticles?: (gridId: string) => void
+  onUpdateParticles?: (id: string, settings: ParticleObject['settings']) => void
   onUpdateStateGridObject?: (
     id: string,
     update: Partial<Omit<StateGridObject, 'type' | 'name' | 'systemName'>>
@@ -2024,6 +2028,12 @@ function InspectorSelectionSession(props: InspectorDetailsPanelProps) {
   const selectedObject = props.selectedNodeId
     ? props.system.objects[props.selectedNodeId]
     : undefined
+  if (props.selectedNodeId && selectedObject?.type === 'particles') {
+    return <ParticleInspector system={props.system} nodeId={props.selectedNodeId}
+      object={selectedObject} onUpdate={props.onUpdateParticles}
+      onRename={props.onRename} onUpdateRender={props.onUpdateRender}
+      onToggleVisibility={props.onToggleVisibility} />
+  }
   if (
     props.selectedNodeId &&
     selectedObject?.type === 'state_grid' &&
@@ -2037,6 +2047,7 @@ function InspectorSelectionSession(props: InspectorDetailsPanelProps) {
         object={selectedObject}
         onRename={props.onRename}
         onUpdate={props.onUpdateStateGridObject}
+        onCreateParticles={props.onCreateParticles}
         onCompute={props.onComputeExpansionEntropy}
         onComputeTransferOperator={props.onComputeTransferOperator}
         onUpdateObjectParams={props.onUpdateObjectParams}

@@ -1172,6 +1172,26 @@ export interface InvariantMeasureObject {
   createdAt: string
 }
 
+export interface ParticleSettings {
+  count: number
+  speed: number
+  lifetime: number
+  integrationStep: number
+  trailLength: number
+  playing: boolean
+}
+
+export interface ParticleObject {
+  type: 'particles'
+  id?: string
+  name: string
+  systemName: string
+  sourceStateGridId: string
+  sourceStateGridName: string
+  settings: ParticleSettings
+  createdAt: string
+}
+
 export interface StateGridObject {
   type: 'state_grid'
   id?: string
@@ -1204,6 +1224,7 @@ export type AnalysisObject =
   | LimitCycleObject
   | IsoclineObject
   | StateGridObject
+  | ParticleObject
   | InvariantMeasureObject
   | ContinuationObject
 

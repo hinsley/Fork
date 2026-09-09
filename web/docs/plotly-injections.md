@@ -241,3 +241,15 @@ drawn above it, with a visible legend for the two layers.
   appears inside the viewport.
 - `web/src/test/setup.ts`: mocks `plotlyAdapter` to avoid loading Plotly during
   unit tests.
+
+## Realtime State Grid particles
+
+`web/src/particles/useParticleTraces.ts` supplies animated `scattergl` (1D/2D) and
+`scatter3d` traces to `ViewportTile` in `ViewportPanel.tsx`. A dedicated worker uses
+the existing `WasmSystem` solver with the source grid's reduced subsystem and
+parameter overrides. Frames are requested after the previous reply, at most about
+30 times per second, with a bounded 0.1-second catch-up after inactivity. Collapsed
+viewports and invisible particle children do not run workers. Scene projections,
+persisted cameras, and manual scene selections apply to particle traces. Trail
+markers fade toward their oldest point; particle heads fade near birth and expiry.
+Particle frames are transient; only the child object settings are stored.

@@ -1,3 +1,4 @@
+import { useParticleTraces } from '../particles/useParticleTraces'
 import {
   Fragment,
   useCallback,
@@ -7615,10 +7616,15 @@ function ViewportTile({
     )
   }, [branchPointSelection, scene, sceneProjection, systemConfig.varNames, traceSystem])
 
+  const particles = useParticleTraces(system, scene,
+    scene ? resolveSceneCandidateIds(traceSystem, scene, sceneTraceSelectedNodeId) : [],
+    !isCollapsed)
+  const animatedData = useMemo(() => [...sceneTraces, ...particles.traces], [sceneTraces, particles.traces])
+
   const data = useMemo(() => {
     if (scene) {
-      if (limitCyclePreviewTraces.length === 0) return sceneTraces
-      return [...sceneTraces, ...limitCyclePreviewTraces]
+      if (limitCyclePreviewTraces.length === 0) return animatedData
+      return [...animatedData, ...limitCyclePreviewTraces]
     }
     if (diagram) return diagramTraceState?.traces ?? EMPTY_TRACES
     return EMPTY_TRACES
@@ -7627,7 +7633,7 @@ function ViewportTile({
     diagramTraceState,
     limitCyclePreviewTraces,
     scene,
-    sceneTraces,
+    animatedData,
   ])
 
   const label = scene ? 'State Space' : analysis ? 'Event Map' : 'Bifurcation Diagram'
@@ -7742,6 +7748,7 @@ function ViewportTile({
                 {mapFunctionUnavailableReason}
               </div>
             ) : null}
+            {particles.error ? <p className="inspector-error" role="alert">Particles: {particles.error}</p> : null}
             {analysis ? (
               <AnalysisViewportPlot
                 system={system}
