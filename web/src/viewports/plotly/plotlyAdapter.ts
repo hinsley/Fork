@@ -3,6 +3,7 @@ import { ensureMathJaxReady, preloadMathJax } from './mathJaxLoader'
 import { containsMathJaxMarkup, normalizeMathJaxForPlotly } from '../../utils/mathText'
 
 type PlotlyModule = {
+  restyle?: (container: HTMLElement, update: Record<string, unknown>, indices: number[]) => MaybePromise<void>
   relayout?: (container: HTMLElement, update: Record<string, unknown>) => MaybePromise<void>
   react: (
     container: HTMLElement,
@@ -543,4 +544,69 @@ export async function capturePlotImage(container: HTMLElement): Promise<string> 
 export function purgePlot(container: HTMLElement) {
   if (!plotlyModule) return
   plotlyModule.purge(container)
+}
+
+
+type StreamingTrace = Data & { _length?: number; _input?: Data; scene?: string }
+type StreamingScene = {
+  traces?: Record<string, { update: (trace: StreamingTrace) => void }>
+  glplot?: { redraw: () => void }
+}
+
+/** Update particle buffers without rebuilding scene bounds or resetting its camera. */
+export async function updateStreamingTraces(container: HTMLElement, updates: Data[]) {
+  const plot = container as HTMLElement & {
+    data?: Data[]
+    _fullData?: StreamingTrace[]
+    _fullLayout?: Record<string, unknown>
+  }
+  const entries = updates.flatMap((update) => {
+    const index = plot.data?.findIndex((trace) => 'uid' in trace && 'uid' in update && trace.uid === update.uid) ?? -1
+    const full = plot._fullData?.[index]
+    if (index < 0 || !full) return []
+    const layout = plot._fullLayout?.[full.scene ?? 'scene'] as { _scene?: StreamingScene } | undefined
+    const scene = layout?._scene
+    const renderer = update.type === 'scatter3d' ? scene?.traces?.[update.uid!] : undefined
+    return [{ update, index, full, scene, renderer }]
+  })
+  const redraw = new Set<StreamingScene>()
+  const fallback: typeof entries = []
+  for (const entry of entries) {
+    const { update, index, full, scene, renderer } = entry
+    if (!renderer?.update || !scene?.glplot?.redraw) {
+      fallback.push(entry)
+      continue
+    }
+    // Keep Plotly's defaults and coordinate conversions; replace only this trace's data.
+    Object.assign(full, update, {
+      marker: { ...('marker' in full ? full.marker : {}), ...('marker' in update ? update.marker : {}),
+        line: { ...('marker' in full ? full.marker?.line : {}), ...('marker' in update ? update.marker?.line : {}) } },
+      _length: 'x' in update ? update.x?.length ?? 0 : 0,
+      _input: update,
+    })
+    plot.data![index] = update
+    renderer.update(full)
+    redraw.add(scene)
+  }
+  redraw.forEach((scene) => scene.glplot!.redraw())
+  if (!fallback.length) return
+  const Plotly = await loadPlotly()
+  if (!Plotly.restyle) throw new Error('Streaming trace updates are unavailable.')
+  // Cartesian restyles must not autorange every other object for each particle frame.
+  const ranges: Record<string, unknown> = {}
+  for (const key of Object.keys(plot._fullLayout ?? {})) {
+    if (!/^[xy]axis[0-9]*$/.test(key)) continue
+    const axis = plot._fullLayout![key] as { autorange?: boolean; range?: number[] }
+    if (axis.autorange && axis.range) {
+      ranges[`${key}.range`] = [...axis.range]
+      ranges[`${key}.autorange`] = false
+    }
+  }
+  if (Object.keys(ranges).length && Plotly.relayout) await Plotly.relayout(container, ranges)
+  await Plotly.restyle(container, {
+    x: fallback.map(({ update }) => 'x' in update ? update.x : undefined),
+    y: fallback.map(({ update }) => 'y' in update ? update.y : undefined),
+    z: fallback.map(({ update }) => 'z' in update ? update.z : undefined),
+    marker: fallback.map(({ update }) => 'marker' in update ? update.marker : undefined),
+  }, fallback.map(({ index }) => index))
 }

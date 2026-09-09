@@ -6,6 +6,7 @@ import {
   preloadPlotly,
   purgePlot,
   renderPlot,
+  updateStreamingTraces,
 } from './plotlyAdapter'
 import { usePlotViewport, type PlotlyRelayoutEvent } from './usePlotViewport'
 import {
@@ -128,9 +129,12 @@ function clearPlotlyRelayout(
   relayoutHandlerRef.current = null
 }
 
+const EMPTY_STREAMING_DATA: Data[] = []
+
 export function PlotlyViewport({
   plotId,
   data,
+  streamingData = EMPTY_STREAMING_DATA,
   layout,
   viewRevision = 0,
   persistView = false,
@@ -144,6 +148,7 @@ export function PlotlyViewport({
 }: {
   plotId: string
   data: Data[]
+  streamingData?: Data[]
   layout: Partial<Layout>
   viewRevision?: number | string
   persistView?: boolean
@@ -165,6 +170,10 @@ export function PlotlyViewport({
   const clickHandlerRef = useRef<((event: PlotlyClickEvent) => void) | null>(null)
   const relayoutHandlerRef = useRef<((event: PlotlyRelayoutEvent) => void) | null>(null)
   const renderInFlightRef = useRef(false)
+  const streamInFlightRef = useRef(false)
+  const streamingRef = useRef(streamingData)
+  const streamingTopology = streamingData.map((trace) => `${'uid' in trace ? trace.uid : ''}:${trace.type}`).join('|')
+  useEffect(() => { streamingRef.current = streamingData }, [streamingData])
   const { uirevision, onRelayout, onPlotReady } = usePlotViewport(plotId, {
     containerRef,
     viewRevision,
@@ -216,7 +225,7 @@ export function PlotlyViewport({
       setError(null)
       setLoading(!isPlotlyLoaded())
       try {
-        await renderPlot(node, data, layoutWithUirevision, { signal: controller.signal })
+        await renderPlot(node, [...data, ...streamingRef.current], layoutWithUirevision, { signal: controller.signal })
         if (controller.signal.aborted) return
         setLoading(false)
         bindPlotlyClick(node, onPointClickRef, clickHandlerRef)
@@ -253,7 +262,31 @@ export function PlotlyViewport({
     return () => {
       controller.abort()
     }
-  }, [captureEnabled, captureStaticFallback, data, layoutWithUirevision, plotId])
+  }, [captureEnabled, captureStaticFallback, data, layoutWithUirevision, plotId, streamingTopology])
+
+  useEffect(() => {
+    if (!streamingData.length) return
+    let disposed = false
+    let request = 0
+    const flush = async () => {
+      const node = containerRef.current
+      if (disposed || !node) return
+      if (renderInFlightRef.current || streamInFlightRef.current) {
+        request = requestAnimationFrame(() => void flush())
+        return
+      }
+      streamInFlightRef.current = true
+      try {
+        await updateStreamingTraces(node, streamingRef.current)
+      } catch (reason) {
+        if (!disposed) setError(reason instanceof Error ? reason.message : String(reason))
+      } finally {
+        streamInFlightRef.current = false
+      }
+    }
+    request = requestAnimationFrame(() => void flush())
+    return () => { disposed = true; cancelAnimationFrame(request) }
+  }, [streamingData, streamingTopology, data, layoutWithUirevision])
 
   useEffect(() => {
     const node = containerRef.current
@@ -271,7 +304,7 @@ export function PlotlyViewport({
         className="plotly-viewport__canvas"
         ref={containerRef}
         data-testid={testId}
-        data-trace-count={data.length}
+        data-trace-count={data.length + streamingData.length}
       />
       {loading ? <div className="plotly-viewport__overlay">Loading viewport…</div> : null}
       {error ? <div className="plotly-viewport__overlay is-error">{error}</div> : null}

@@ -5,6 +5,7 @@ export const WORKFLOW_IDS = [
   'state-grid-entropy-toggle',
   'state-grid-transfer-toggle',
   'state-grid-particles-toggle',
+  'particles-animation-toggle',
   'invariant-measure-data-toggle',
   'appearance-toggle',
   'orbit-run-toggle',

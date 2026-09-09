@@ -253,3 +253,16 @@ viewports and invisible particle children do not run workers. Scene projections,
 persisted cameras, and manual scene selections apply to particle traces. Trail
 markers fade toward their oldest point; particle heads fade near birth and expiry.
 Particle frames are transient; only the child object settings are stored.
+
+Particle frames now enter `PlotlyViewport` through `streamingData`, separately from
+static scene data. Only trace membership/type changes trigger a normal render.
+`plotlyAdapter.updateStreamingTraces` uses the bundled Plotly 2.35.3 scatter3d
+renderer at `_fullLayout[scene]._scene.traces[uid].update(fullTrace)`, followed by
+`glplot.redraw()`. It preserves supplied defaults, axis conversions, data scaling,
+static GPU buffers, bounds, and the live camera. It also updates `data`/`_fullData`
+for figure capture. This private touchpoint is capability-checked: Cartesian
+traces (and incompatible 3D renderers) use public `restyle`, freezing currently
+autoranged Cartesian ranges first. Frame writes are serialized and coalesced to
+the latest frame while a normal render is in progress; live frames never rebind
+Plotly event handlers or reapply the saved camera. The dense-scene browser test
+checks zero static trace updates/scene plots during live camera rotation.

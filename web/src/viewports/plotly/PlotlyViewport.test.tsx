@@ -6,6 +6,7 @@ import {
   purgePlot,
   relayoutPlot,
   renderPlot,
+  updateStreamingTraces,
 } from './plotlyAdapter'
 
 describe('PlotlyViewport', () => {
@@ -191,4 +192,21 @@ describe('PlotlyViewport', () => {
     })
     expect(capturePlotImage).toHaveBeenCalledTimes(1)
   })
+})
+
+
+it('streams particle frames without rendering the static plot or rebinding its view', async () => {
+  vi.clearAllMocks()
+  const data = [{ type: 'scatter3d' as const, uid: 'static', x: [0], y: [0], z: [0] }]
+  const layout = { scene: { aspectmode: 'data' as const } }
+  const frame = { type: 'scatter3d' as const, uid: 'particles', x: [1], y: [1], z: [1] }
+  const { rerender } = render(<PlotlyViewport plotId="stream" data={data} layout={layout} streamingData={[frame]} />)
+  await waitFor(() => expect(updateStreamingTraces).toHaveBeenCalled())
+  const initialRenders = vi.mocked(renderPlot).mock.calls.length
+  vi.mocked(updateStreamingTraces).mockClear()
+  rerender(<PlotlyViewport plotId="stream" data={data} layout={layout}
+    streamingData={[{ ...frame, x: [2] }]} />)
+  await waitFor(() => expect(updateStreamingTraces).toHaveBeenCalled())
+  expect(renderPlot).toHaveBeenCalledTimes(initialRenders)
+  expect(updateStreamingTraces).toHaveBeenLastCalledWith(expect.any(HTMLElement), [expect.objectContaining({ x: [2] })])
 })

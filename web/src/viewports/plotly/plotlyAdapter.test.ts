@@ -184,3 +184,34 @@ describe('plotlyAdapter camera guard', () => {
     })
   })
 })
+
+it('updates only the streaming 3D renderer and preserves static buffers, bounds, and camera', async () => {
+  vi.resetModules()
+  vi.unmock('./plotlyAdapter')
+  const { reactSpy, relayoutSpy } = mockPlotly()
+  const { updateStreamingTraces } = await loadAdapter()
+  const staticUpdate = vi.fn()
+  const particleUpdate = vi.fn()
+  const redraw = vi.fn()
+  const staticTrace = { uid: 'grid', type: 'scatter3d', x: [0, 1] }
+  const initial = { uid: 'particles', type: 'scatter3d', x: [0], y: [0], z: [0],
+    marker: { size: [4], line: { color: 'black', width: 0 }, opacity: 1 }, projection: {} }
+  const scene = { camera: { eye: { x: 2, y: 1, z: 1 } }, xaxis: { range: [-10, 10] },
+    _scene: { traces: { grid: { update: staticUpdate }, particles: { update: particleUpdate } }, glplot: { redraw } } }
+  const container = Object.assign(document.createElement('div'), {
+    data: [staticTrace, initial], _fullData: [staticTrace, { ...initial }], _fullLayout: { scene },
+  })
+  await updateStreamingTraces(container, [{ uid: 'particles', type: 'scatter3d', x: [1, 2], y: [2, 3], z: [3, 4],
+    marker: { color: ['blue', 'blue'], line: { width: 0 } } }])
+  expect(particleUpdate).toHaveBeenCalledOnce()
+  expect(particleUpdate).toHaveBeenCalledWith(expect.objectContaining({ _length: 2,
+    marker: expect.objectContaining({ opacity: 1, line: { color: 'black', width: 0 } }) }))
+  expect(staticUpdate).not.toHaveBeenCalled()
+  expect(container.data[0]).toBe(staticTrace)
+  expect(container._fullData[0]).toBe(staticTrace)
+  expect(scene.camera.eye).toEqual({ x: 2, y: 1, z: 1 })
+  expect(scene.xaxis.range).toEqual([-10, 10])
+  expect(reactSpy).not.toHaveBeenCalled()
+  expect(relayoutSpy).not.toHaveBeenCalled()
+  expect(redraw).toHaveBeenCalledOnce()
+})

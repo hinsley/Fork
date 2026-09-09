@@ -7619,12 +7619,11 @@ function ViewportTile({
   const particles = useParticleTraces(system, scene,
     scene ? resolveSceneCandidateIds(traceSystem, scene, sceneTraceSelectedNodeId) : [],
     !isCollapsed)
-  const animatedData = useMemo(() => [...sceneTraces, ...particles.traces], [sceneTraces, particles.traces])
 
   const data = useMemo(() => {
     if (scene) {
-      if (limitCyclePreviewTraces.length === 0) return animatedData
-      return [...animatedData, ...limitCyclePreviewTraces]
+      if (limitCyclePreviewTraces.length === 0) return sceneTraces
+      return [...sceneTraces, ...limitCyclePreviewTraces]
     }
     if (diagram) return diagramTraceState?.traces ?? EMPTY_TRACES
     return EMPTY_TRACES
@@ -7633,7 +7632,7 @@ function ViewportTile({
     diagramTraceState,
     limitCyclePreviewTraces,
     scene,
-    animatedData,
+    sceneTraces,
   ])
 
   const label = scene ? 'State Space' : analysis ? 'Event Map' : 'Bifurcation Diagram'
@@ -7766,6 +7765,7 @@ function ViewportTile({
               <PlotlyViewport
                 plotId={node.id}
                 data={data}
+                streamingData={particles.traces}
                 layout={layout}
                 viewRevision={viewRevision}
                 persistView

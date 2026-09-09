@@ -56,6 +56,7 @@ vi.mock('../viewports/plotly/plotlyAdapter', () => ({
     Object.assign(container, { data, layout })
     return Promise.resolve()
   }),
+  updateStreamingTraces: vi.fn(() => Promise.resolve()),
   purgePlot: vi.fn(),
   preloadPlotly: vi.fn(),
   isPlotlyLoaded: vi.fn(() => true),

@@ -36,6 +36,8 @@ for (const storage of ['opfs', 'indexeddb']) test(`flow grid particles animate, 
   await expect.poll(async () => (await readParticles(plot))?.x.length ?? 0).toBeGreaterThan(250)
   const initial = await readParticles(plot)
   await expect.poll(async () => (await readParticles(plot))?.x[0]).not.toBe(initial?.x[0])
+  await clickInspectorAction(page, 'action-particles-animation-toggle')
+  await expect(page.getByTestId('particles-speed')).toBeVisible()
   await page.getByTestId('particles-speed').fill('2')
   await page.getByTestId('particles-lifetime').fill('3')
   await page.getByTestId('particles-play').click()
@@ -52,6 +54,8 @@ for (const storage of ['opfs', 'indexeddb']) test(`flow grid particles animate, 
   await page.reload()
   await harness.openSystem('Lorenz')
   await harness.selectTreeNode('State_Grid_1_Particles_1')
+  await clickInspectorAction(page, 'action-particles-animation-toggle')
+  await expect(page.getByTestId('particles-speed')).toBeVisible()
   await expect(page.getByTestId('particles-speed')).toHaveValue('2')
   await expect(page.getByTestId('particles-lifetime')).toHaveValue('3')
   await expect(page.getByTestId('particles-play')).toHaveText('Play')
@@ -67,4 +71,78 @@ test('map grids do not offer particles', async ({ page }) => {
   await page.getByTestId('create-object-button').click()
   await page.getByTestId('create-state-grid').click()
   await expect(page.getByTestId('action-state-grid-particles-toggle')).toHaveCount(0)
+})
+
+test('live particles leave dense scene bounds and static buffers alone while rotating', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const harness = createHarness(page)
+  await harness.goto({ mock: false })
+  await harness.openSystem('Lorenz')
+  await harness.createScene()
+  await page.getByTestId('create-object-button').click()
+  await page.getByTestId('create-state-grid').click()
+  await clickInspectorAction(page, 'action-state-grid-setup-toggle')
+  for (const [axis, min, max] of [['x', '-30', '30'], ['y', '-30', '30'], ['z', '0', '55']]) {
+    await page.getByTestId(`state-grid-${axis}-min`).fill(min)
+    await page.getByTestId(`state-grid-${axis}-max`).fill(max)
+    await page.getByTestId(`state-grid-${axis}-resolution`).fill('25')
+  }
+  await page.getByTestId('inspector-workflow-back').click()
+  await clickInspectorAction(page, 'action-state-grid-particles-toggle')
+  await page.getByTestId('state-grid-create-particles').click()
+  const plot = page.locator('[data-testid^="plotly-viewport-"]').first()
+  await expect.poll(async () => (await readParticles(plot))?.x.length ?? 0).toBeGreaterThan(250)
+  await plot.evaluate((element) => {
+    const target = element as unknown as {
+      _fullLayout: { scene: { _scene: {
+        plot: (...args: unknown[]) => unknown
+        traces: Record<string, { data: { name: string }; update: (...args: unknown[]) => unknown }>
+        getCamera: () => unknown
+      }; xaxis: { range: number[] }; yaxis: { range: number[] }; zaxis: { range: number[] } } }
+    }
+    const scene = target._fullLayout.scene._scene
+    const stats = { scenePlots: 0, staticUpdates: 0, particleUpdates: 0, camera: scene.getCamera(),
+      ranges: [target._fullLayout.scene.xaxis.range, target._fullLayout.scene.yaxis.range, target._fullLayout.scene.zaxis.range] }
+    Object.assign(element, { particleStats: stats })
+    const originalPlot = scene.plot
+    scene.plot = function (...args) { stats.scenePlots++; return originalPlot.apply(this, args) }
+    for (const trace of Object.values(scene.traces)) {
+      const update = trace.update
+      trace.update = function (...args) {
+        if (trace.data.name.includes('_Particles_')) stats.particleUpdates++
+        else stats.staticUpdates++
+        return update.apply(this, args)
+      }
+    }
+  })
+  const bounds = (await plot.boundingBox())!
+  await page.mouse.move(bounds.x + bounds.width * 0.55, bounds.y + bounds.height * 0.5)
+  await page.mouse.down()
+  await page.mouse.move(bounds.x + bounds.width * 0.72, bounds.y + bounds.height * 0.65, { steps: 20 })
+  await page.mouse.up()
+  await page.waitForTimeout(1000)
+  const stats = await plot.evaluate((element) => {
+    const target = element as unknown as {
+      particleStats: { scenePlots: number; staticUpdates: number; particleUpdates: number; camera: unknown; ranges: number[][] }
+      _fullLayout: { scene: { _scene: { getCamera: () => unknown }; xaxis: { range: number[] }; yaxis: { range: number[] }; zaxis: { range: number[] } } }
+    }
+    return { ...target.particleStats, currentCamera: target._fullLayout.scene._scene.getCamera(),
+      currentRanges: [target._fullLayout.scene.xaxis.range, target._fullLayout.scene.yaxis.range, target._fullLayout.scene.zaxis.range] }
+  })
+  expect(stats.scenePlots).toBe(0)
+  expect(stats.staticUpdates).toBe(0)
+  expect(stats.particleUpdates).toBeGreaterThan(5)
+  expect(stats.currentRanges).toEqual(stats.ranges)
+  expect(stats.currentCamera).not.toEqual(stats.camera)
+  await page.waitForTimeout(400)
+  const camera = await plot.evaluate((element) => (element as unknown as {
+    _fullLayout: { scene: { _scene: { getCamera: () => unknown } } }
+  })._fullLayout.scene._scene.getCamera())
+  expect(camera).toEqual(stats.currentCamera)
+  await harness.selectTreeNode('State_Grid_1_Particles_1')
+  await clickInspectorAction(page, 'action-appearance-toggle')
+  await expect(page.getByTestId('particles-opacity')).toBeVisible()
+  await expect(page.getByTestId('particles-speed')).not.toBeVisible()
+  await page.screenshot({ path: 'test-results/particles-live-rotation.png' })
 })
