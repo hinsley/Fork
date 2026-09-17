@@ -1,3 +1,4 @@
+import { formatError } from '../format';
 /**
  * Branch Extension Module
  * 
@@ -141,7 +142,7 @@ async function extendEquilibriumManifold1D(
     {
       id: 'targetArclength',
       label: 'Additional arclength',
-      section: 'Extension Settings',
+      section: 'Setup',
       getDisplay: () => formatUnset(targetArclengthInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -156,7 +157,7 @@ async function extendEquilibriumManifold1D(
       ? [{
           id: 'integrationDt',
           label: 'Integration dt',
-          section: 'Extension Settings',
+          section: 'Setup',
           getDisplay: () => formatUnset(integrationDtInput),
           edit: async () => {
             const { value } = await inquirer.prompt({
@@ -171,7 +172,7 @@ async function extendEquilibriumManifold1D(
     {
       id: 'maxSteps',
       label: 'Max integration steps',
-      section: 'Resource Limits',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -185,7 +186,7 @@ async function extendEquilibriumManifold1D(
     {
       id: 'maxPoints',
       label: 'Max points to add',
-      section: 'Resource Limits',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxPointsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -200,7 +201,7 @@ async function extendEquilibriumManifold1D(
       ? [{
           id: 'maxIterations',
           label: 'Max map iterations',
-          section: 'Resource Limits',
+          section: 'Resource limits',
           getDisplay: () => formatUnset(maxIterationsInput),
           edit: async () => {
             const { value } = await inquirer.prompt({
@@ -214,7 +215,7 @@ async function extendEquilibriumManifold1D(
       : [{
           id: 'maxTime',
           label: 'Max integration time',
-          section: 'Resource Limits',
+          section: 'Resource limits',
           getDisplay: () => formatUnset(maxTimeInput),
           edit: async () => {
             const { value } = await inquirer.prompt({
@@ -324,7 +325,7 @@ async function extendEquilibriumManifold1D(
     printSuccess(`Manifold extension successful! Total points: ${branch.data.points.length}`);
     return await inspectBranch(sysName, branch);
   } catch (error) {
-    printError(`Manifold Extension Failed: ${error}`);
+    printError(`Manifold Extension Failed: ${formatError(error)}`);
     return;
   }
 }
@@ -375,7 +376,7 @@ async function extendManifold2D(
     {
       id: 'targetArclength',
       label: 'Additional arclength',
-      section: 'Extension Settings',
+      section: 'Setup',
       getDisplay: () => formatUnset(targetArclengthInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -389,7 +390,7 @@ async function extendManifold2D(
     {
       id: 'integrationDt',
       label: 'Integration dt',
-      section: 'Extension Settings',
+      section: 'Setup',
       getDisplay: () => formatUnset(integrationDtInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -403,7 +404,7 @@ async function extendManifold2D(
     {
       id: 'maxSteps',
       label: 'Max integration/BVP steps',
-      section: 'Resource Limits',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -417,7 +418,7 @@ async function extendManifold2D(
     {
       id: 'maxRings',
       label: 'Max rings to add',
-      section: 'Resource Limits',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxRingsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -431,7 +432,7 @@ async function extendManifold2D(
     {
       id: 'maxVertices',
       label: 'Max vertices to add',
-      section: 'Resource Limits',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxVerticesInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -445,7 +446,7 @@ async function extendManifold2D(
     {
       id: 'maxTime',
       label: 'Max integration time',
-      section: 'Resource Limits',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxTimeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -524,7 +525,7 @@ async function extendManifold2D(
     printSuccess(`Manifold extension successful! Total points: ${branch.data.points.length}`);
     return await inspectBranch(sysName, branch);
   } catch (error) {
-    printError(`Manifold Extension Failed: ${error}`);
+    printError(`Manifold Extension Failed: ${formatError(error)}`);
     return;
   }
 }
@@ -597,7 +598,7 @@ export async function extendBranch(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Extension Settings',
+      section: 'Setup',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -617,7 +618,7 @@ export async function extendBranch(
     {
       id: 'maxSteps',
       label: 'Max points to add',
-      section: 'Extension Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -631,7 +632,7 @@ export async function extendBranch(
     {
       id: 'stepSize',
       label: 'Step size',
-      section: 'Extension Settings',
+      section: 'Setup',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -651,7 +652,7 @@ export async function extendBranch(
     entries.push({
       id: 'useDenseSolve',
       label: 'Use dense solve (slower)',
-      section: 'Extension Settings',
+      section: 'Setup',
       getDisplay: () => (useDenseSolve ? 'Yes' : 'No'),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -823,7 +824,7 @@ export async function extendBranch(
     return await inspectBranch(sysName, branch);
 
   } catch (e) {
-    printError(`Extension Failed: ${e}`);
+    printError(`Extension Failed: ${formatError(e)}`);
     return;
   }
 }

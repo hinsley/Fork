@@ -97,7 +97,7 @@ impl WasmEqManifold1DRunner {
                 settings,
                 &self.periodicity,
             )
-            .map_err(|e| JsValue::from_str(&format!("1D manifold computation failed: {}", e)))?;
+            .map_err(|e| crate::diagnostics::error_to_js(e.context("1D manifold computation failed")))?;
             self.result.extend(branches);
             self.next_direction += 1;
         }

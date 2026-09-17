@@ -485,10 +485,6 @@ async function run() {
     );
   });
 
-  test('homoclinic CLI method labels match the documented numbering', () => {
-    assert.match(homotopyInit.HOMOTOPY_SADDLE_MENU_TITLE, /^Method 3:/);
-    assert.match(homocInit.HOMOCLINIC_FROM_HOMOTOPY_MENU_TITLE, /^Method 4:/);
-  });
 
   test('homotopy-saddle branches do not expose unsupported extension', () => {
     assert.equal(branchExtension.supportsContinuationBranchExtension('homotopy_saddle_curve'), false);

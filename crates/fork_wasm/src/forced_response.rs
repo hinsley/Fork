@@ -172,7 +172,7 @@ impl WasmSystem {
             &self.periodicity,
         )
         .map_err(|error| {
-            JsValue::from_str(&format!("Forced periodic response solve failed: {error}"))
+            crate::diagnostics::error_to_js(error.context("Forced periodic response solve failed"))
         })?;
         to_value(&result)
             .map_err(|error| JsValue::from_str(&format!("Serialization error: {error}")))

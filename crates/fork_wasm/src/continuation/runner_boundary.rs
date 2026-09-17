@@ -20,7 +20,7 @@ impl fmt::Display for RunnerHandleError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotInitialized => formatter.write_str("Runner not initialized"),
-            Self::Step(error) => write!(formatter, "Continuation step failed: {error}"),
+            Self::Step(error) => write!(formatter, "Continuation step failed: {error:#}"),
         }
     }
 }
@@ -106,7 +106,10 @@ impl<P: ContinuationProblem> RunnerHandle<P> {
 }
 
 pub(crate) fn runner_error_to_js(error: RunnerHandleError) -> JsValue {
-    JsValue::from_str(&error.to_string())
+    match error {
+        RunnerHandleError::Step(error) => crate::diagnostics::error_to_js(error.context("Continuation step failed")),
+        RunnerHandleError::NotInitialized => JsValue::from_str("Runner not initialized"),
+    }
 }
 
 pub(crate) struct OwnedContinuationRunner<P: ContinuationProblem + 'static> {
@@ -129,10 +132,10 @@ impl<P: ContinuationProblem + 'static> OwnedContinuationRunner<P> {
     {
         let mut system = Box::new(system);
         let problem = build_problem(static_system_ref(&mut system)).map_err(|err| {
-            JsValue::from_str(&format!("Failed to create {problem_label} problem: {err}"))
+            crate::diagnostics::error_to_js(err.context(format!("Failed to create {problem_label} problem")))
         })?;
         let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
-            .map_err(|err| JsValue::from_str(&format!("Continuation init failed: {err}")))?;
+            .map_err(|err| crate::diagnostics::error_to_js(err.context("Continuation init failed")))?;
 
         Ok(Self {
             runner: RunnerHandle::new(runner),

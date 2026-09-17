@@ -37,6 +37,7 @@ import {
 import { formatBifurcationType, formatEquilibriumLabel } from '../labels';
 import {
   initiateLCBranchFromPoint,
+  initiateLCFromHopf,
   initiateLCFromPD,
   initiateLimitCycleManifold2DFromPoint
 } from './initiate-lc';
@@ -1132,7 +1133,11 @@ export async function showPointDetails(
   }
 
   // Build action menu based on branch type and point type
-  const choices: any[] = [];
+  const choices: Array<{ name: string; value: string } | inquirer.Separator> = [];
+  const compute: Array<{ name: string; value: string }> = [];
+  const continuation: Array<{ name: string; value: string }> = [];
+  const manifolds: Array<{ name: string; value: string }> = [];
+  const bifurcations: Array<{ name: string; value: string }> = [];
   const adjacentPeriodicCurveSwitches = new Map<
     string,
     PeriodicCodim2CurveAction
@@ -1146,7 +1151,7 @@ export async function showPointDetails(
     (sysConfig.type === 'flow' &&
       (pt.codim2?.type === 'ZeroHopf' || pt.codim2?.type === 'DoubleHopf'));
   if (normalFormEligible) {
-    choices.push({ name: 'Compute Normal Form', value: 'COMPUTE_NORMAL_FORM' });
+    compute.push({ name: 'Compute normal form', value: 'COMPUTE_NORMAL_FORM' });
   }
   if (
     branchType === 'limit_cycle' &&
@@ -1155,111 +1160,116 @@ export async function showPointDetails(
     (pt.normal_form.normal_form.kind === 'Transcritical' ||
       pt.normal_form.normal_form.kind === 'Pitchfork')
   ) {
-    choices.push({ name: 'Correct & Continue Secondary Periodic Branch', value: 'SWITCH_PERIODIC_BP' });
+    bifurcations.push({ name: 'Correct and continue secondary periodic branch', value: 'SWITCH_PERIODIC_BP' });
   }
 
   if (pt.codim2?.refined && !pt.codim2.candidate) {
     if (pt.codim2.type === 'GeneralizedHopf') {
-      choices.push({ name: 'Switch to LPC Curve', value: 'SWITCH_CODIM2_LPC' });
+      bifurcations.push({ name: 'Switch to LPC curve', value: 'SWITCH_CODIM2_LPC' });
     } else if (pt.codim2.type === 'BogdanovTakens') {
-      choices.push({ name: 'Switch to Fold Curve', value: 'SWITCH_CODIM2_FOLD' });
-      choices.push({ name: 'Switch to Hopf Curve', value: 'SWITCH_CODIM2_HOPF' });
-      choices.push({ name: 'Switch to Homoclinic Branch', value: 'SWITCH_CODIM2_HOMOCLINIC' });
+      bifurcations.push({ name: 'Switch to Fold curve', value: 'SWITCH_CODIM2_FOLD' });
+      bifurcations.push({ name: 'Switch to Hopf curve', value: 'SWITCH_CODIM2_HOPF' });
+      bifurcations.push({ name: 'Switch to homoclinic branch', value: 'SWITCH_CODIM2_HOMOCLINIC' });
     } else if (pt.codim2.type === 'ZeroHopf') {
-      choices.push({ name: 'Switch to Fold Curve', value: 'SWITCH_CODIM2_FOLD' });
-      choices.push({ name: 'Switch to Hopf Curve', value: 'SWITCH_CODIM2_HOPF' });
+      bifurcations.push({ name: 'Switch to Fold curve', value: 'SWITCH_CODIM2_FOLD' });
+      bifurcations.push({ name: 'Switch to Hopf curve', value: 'SWITCH_CODIM2_HOPF' });
       const nsSwitch = pt.codim2.branch_switches?.find(
         (entry) => entry.target === 'NeimarkSacker'
       );
       if (!nsSwitch || nsSwitch.available) {
-        choices.push({ name: 'Switch to Periodic NS Curve', value: 'SWITCH_CODIM2_NS' });
+        bifurcations.push({ name: 'Switch to periodic NS curve', value: 'SWITCH_CODIM2_NS' });
       }
     } else if (pt.codim2.type === 'DoubleHopf') {
-      choices.push({ name: 'Switch to Hopf Curve', value: 'SWITCH_CODIM2_HOPF' });
-      choices.push({ name: 'Switch to Periodic NS Curve', value: 'SWITCH_CODIM2_NS' });
+      bifurcations.push({ name: 'Switch to Hopf curve', value: 'SWITCH_CODIM2_HOPF' });
+      bifurcations.push({ name: 'Switch to periodic NS curve', value: 'SWITCH_CODIM2_NS' });
     }
   }
 
   for (const curveAction of periodicCodim2CurveActionsForPoint(branchType, pt)) {
     adjacentPeriodicCurveSwitches.set(curveAction.action, curveAction);
-    choices.push({ name: curveAction.label, value: curveAction.action });
+    bifurcations.push({ name: curveAction.label, value: curveAction.action });
   }
 
   if (branchType === 'equilibrium') {
-    // For equilibrium branches, always offer to create a new equilibrium branch
-    choices.push({ name: `Create New ${equilibriumLabel} Branch`, value: 'NEW_EQ_BRANCH' });
-    choices.push({
-      name: `Compute 1D ${equilibriumLabel} Manifold`,
+    continuation.push({ name: 'Continue from point', value: 'NEW_EQ_BRANCH' });
+    manifolds.push({
+      name: `Compute 1D ${equilibriumLabel.toLowerCase()} manifold`,
       value: 'RUN_EQ_MANIFOLD_1D'
     });
     if (sysConfig.type === 'flow') {
       if (sysConfig.equations.length >= 3) {
-        choices.push({
-          name: 'Compute 2D Equilibrium Manifold',
+        manifolds.push({
+          name: 'Compute 2D equilibrium manifold',
           value: 'RUN_EQ_MANIFOLD_2D'
         });
       }
-      choices.push({
-        name: 'Continue Homotopy-Saddle (Method 3)',
+      continuation.push({
+        name: 'Continue homotopy saddle from equilibrium',
         value: 'CONTINUE_HOMOTOPY_SADDLE'
       });
     }
 
-    // For Hopf points, offer Hopf curve continuation
-    if (pt.stability === 'Hopf') {
-      choices.push({ name: 'Continue Hopf Curve (2-parameter)', value: 'CONTINUE_HOPF_CURVE' });
+    if (sysConfig.type === 'flow' && pt.stability === 'Hopf') {
+      bifurcations.push({ name: 'Create limit cycle from Hopf', value: 'NEW_LC_FROM_HOPF' });
+      bifurcations.push({ name: 'Continue Hopf curve (2-parameter)', value: 'CONTINUE_HOPF_CURVE' });
     }
 
     // For Fold points, offer fold curve continuation
     if (pt.stability === 'Fold') {
-      choices.push({ name: 'Continue Fold Curve (2-parameter)', value: 'CONTINUE_FOLD_CURVE' });
+      bifurcations.push({ name: 'Continue Fold curve (2-parameter)', value: 'CONTINUE_FOLD_CURVE' });
     }
 
     if (sysConfig.type === 'map' && pt.stability === 'PeriodDoubling') {
-      choices.push({ name: 'Branch to Period-Doubled Cycle', value: 'BRANCH_PD_CYCLE' });
+      bifurcations.push({ name: 'Branch to period-doubled cycle', value: 'BRANCH_PD_CYCLE' });
     }
   } else if (branchType === 'limit_cycle') {
-    // For limit cycle branches, offer to create a new limit cycle branch
-    choices.push({ name: 'Create New Limit Cycle Branch', value: 'NEW_LC_BRANCH' });
-    choices.push({ name: 'Continue Isoperiodic Curve', value: 'CONTINUE_ISOPERIODIC_CURVE' });
+    continuation.push({ name: 'Continue from point', value: 'NEW_LC_BRANCH' });
+    continuation.push({ name: 'Continue isoperiodic curve', value: 'CONTINUE_ISOPERIODIC_CURVE' });
     if (sysConfig.type === 'flow' && sysConfig.equations.length >= 3) {
-      choices.push({ name: 'Compute 2D Limit-Cycle Manifold', value: 'RUN_LC_MANIFOLD_2D' });
+      manifolds.push({ name: 'Compute 2D limit-cycle manifold', value: 'RUN_LC_MANIFOLD_2D' });
     }
-    choices.push({
-      name: 'Continue Homoclinic Curve (Method 1)',
+    continuation.push({
+      name: 'Continue homoclinic curve from large cycle',
       value: 'CONTINUE_HOMOCLINIC_FROM_LC'
     });
 
     // For Period Doubling points, offer to branch to double period or continue PD curve
     if (pt.stability === 'PeriodDoubling') {
-      choices.push({ name: 'Branch to Period-Doubled Limit Cycle', value: 'BRANCH_PD' });
-      choices.push({ name: 'Continue PD Curve (2-parameter)', value: 'CONTINUE_PD_CURVE' });
+      bifurcations.push({ name: 'Branch to period-doubled limit cycle', value: 'BRANCH_PD' });
+      bifurcations.push({ name: 'Continue PD curve (2-parameter)', value: 'CONTINUE_PD_CURVE' });
     }
 
     // For Cycle Fold (LPC) points, offer LPC curve continuation
     if (pt.stability === 'CycleFold') {
-      choices.push({ name: 'Continue LPC Curve (2-parameter)', value: 'CONTINUE_LPC_CURVE' });
+      bifurcations.push({ name: 'Continue LPC curve (2-parameter)', value: 'CONTINUE_LPC_CURVE' });
     }
 
     // For Neimark-Sacker points, offer NS curve continuation
     if (pt.stability === 'NeimarkSacker') {
-      choices.push({ name: 'Continue NS Curve (2-parameter)', value: 'CONTINUE_NS_CURVE' });
+      bifurcations.push({ name: 'Continue NS curve (2-parameter)', value: 'CONTINUE_NS_CURVE' });
     }
   } else if (branchType === 'isoperiodic_curve') {
-    choices.push({ name: 'Continue from Point', value: 'CONTINUE_ISOPERIODIC_CURVE' });
+    continuation.push({ name: 'Continue from point', value: 'CONTINUE_ISOPERIODIC_CURVE' });
   } else if (branchType === 'homoclinic_curve') {
-    choices.push({
-      name: 'Continue Homoclinic Curve (Method 2)',
+    continuation.push({
+      name: 'Restart homoclinic branch from point',
       value: 'CONTINUE_HOMOCLINIC_FROM_HOMOCLINIC'
     });
   } else if (branchType === 'homotopy_saddle_curve') {
     const stage = (branch.data.branch_type as any)?.stage;
     if (stage === 'StageD') {
-      choices.push({
-        name: 'Continue Homoclinic Curve (Method 4)',
+      continuation.push({
+        name: 'Continue homoclinic curve from homotopy saddle',
         value: 'CONTINUE_HOMOCLINIC_FROM_HOMOTOPY'
       });
     }
+  }
+
+  for (const [label, actions] of [
+    ['Compute', compute], ['Continuation', continuation],
+    ['Manifolds', manifolds], ['Bifurcations', bifurcations]
+  ] as const) {
+    if (actions.length > 0) choices.push(new inquirer.Separator(`== ${label} ==`), ...actions);
   }
 
   choices.push(new inquirer.Separator());
@@ -1274,6 +1284,17 @@ export async function showPointDetails(
     choices,
     pageSize: MENU_PAGE_SIZE
   });
+
+  if (action === 'NEW_LC_FROM_HOPF') {
+    const newBranch = await initiateLCFromHopf(sysName, branch, pt, arrayIdx);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
+  }
 
   if (action === 'NEW_EQ_BRANCH') {
     const newBranch = await initiateEquilibriumBranchFromPoint(sysName, branch, pt);

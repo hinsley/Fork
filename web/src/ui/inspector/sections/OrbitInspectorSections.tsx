@@ -89,7 +89,7 @@ export function OrbitInspectorSections({
             <>
               <InspectorDisclosure
                 key={`${selectionKey}-orbit-run`}
-                title="Orbit Simulation"
+                title="Run orbit"
                 testId="orbit-run-toggle"
                 defaultOpen={false}
                 actionOnly
@@ -190,7 +190,7 @@ export function OrbitInspectorSections({
               {orbit.data.length > 0 ? (
                 <InspectorDisclosure
                 key={`${selectionKey}-orbit-data`}
-                title="Orbit Data"
+                title="Inspect data"
                 testId="orbit-data-toggle"
                 actionOnly
               >
@@ -402,7 +402,7 @@ export function OrbitInspectorSections({
               {orbit.data.length >= 2 ? (
                 <InspectorDisclosure
                 key={`${selectionKey}-oseledets`}
-                title="Lyapunov Analysis"
+                title="Lyapunov analysis"
                 testId="oseledets-toggle"
                 defaultOpen={false}
                 actionOnly
@@ -715,7 +715,7 @@ export function OrbitInspectorSections({
               {!isDiscreteMap && orbit.data.length > 0 ? (
                 <InspectorDisclosure
                   key={`${selectionKey}-limit-cycle`}
-                  title="Limit Cycle"
+                  title="Limit cycle from orbit"
                   testId="limit-cycle-toggle"
                   defaultOpen={false}
                   actionOnly
@@ -1001,10 +1001,10 @@ export function OrbitInspectorSections({
                   </div>
                 </InspectorDisclosure>
               ) : null}
-              {!isDiscreteMap ? (
+              {!isDiscreteMap && orbit.data.length > 0 ? (
                 <InspectorDisclosure
                   key={`${selectionKey}-heteroclinic-from-orbit`}
-                  title="Heteroclinic Connection"
+                  title="Heteroclinic connection"
                   testId="heteroclinic-from-orbit-toggle"
                   defaultOpen={false}
                   actionOnly

@@ -25,7 +25,7 @@ export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionCon
 {showBranchContinueFromPoint ? (
                   <InspectorDisclosure
                     key={`${selectionKey}-branch-continue`}
-                    title="Continue from Point"
+                    title="Continue from point"
                     testId="branch-continue-toggle"
                     defaultOpen={false}
                     actionOnly

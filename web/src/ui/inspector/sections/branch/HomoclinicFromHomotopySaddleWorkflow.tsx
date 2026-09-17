@@ -24,7 +24,7 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
 {showHomoclinicFromHomotopySaddle ? (
                   <InspectorDisclosure
                     key={`${selectionKey}-homoclinic-homotopy-saddle`}
-                    title="Homoclinic from Homotopy-Saddle"
+                    title="Homoclinic from homotopy saddle"
                     testId="homoclinic-from-homotopy-saddle-toggle"
                     defaultOpen={false}
                     actionOnly

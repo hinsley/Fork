@@ -1,3 +1,15 @@
+export interface CalculationDiagnostic {
+  kind: string;
+  message: string;
+  suggestion?: string;
+  iterations?: number;
+  max_iterations?: number;
+  residual_norm?: number;
+  tolerance?: number;
+  step_size?: number;
+  min_step_size?: number;
+}
+
 export interface PeriodicVariableConfig {
   enabled: boolean;
   period: number;
@@ -84,6 +96,7 @@ export interface EquilibriumRunSummary {
   success: boolean;
   residual_norm?: number;
   iterations?: number;
+  diagnostic?: CalculationDiagnostic;
 }
 
 export interface EquilibriumObject {
@@ -660,6 +673,7 @@ export interface ContinuationBranchData {
   resume_state?: ContinuationResumeState;
   manifold_geometry?: ManifoldGeometry;
   collocation_adaptation?: CollocationAdaptationReport;
+  termination?: CalculationDiagnostic;
   normal_form_provenance?: NormalFormProvenance;
   codim2_seed?: {
     source_type: 'GeneralizedHopf' | 'BogdanovTakens' | 'ZeroHopf' | 'DoubleHopf';

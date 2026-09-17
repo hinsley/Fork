@@ -41,6 +41,48 @@ function requiredProps(system: System, selectedNodeId: string) {
 }
 
 describe('selection inspector workflow shell', () => {
+  it('keeps a failed latest attempt separate from the stored successful solution', async () => {
+    const user = userEvent.setup()
+    const base = createSystem({ name: 'Failed_Attempt' })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq',
+      systemName: base.name,
+      solution: {
+        state: base.config.varNames.map(() => 0),
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [],
+      },
+      lastRun: {
+        timestamp: '2026-09-16T12:00:00Z',
+        success: false,
+        diagnostic: {
+          kind: 'iteration_limit',
+          message: 'Newton correction did not converge.',
+          iterations: 20,
+          max_iterations: 20,
+          residual_norm: 0.25,
+          tolerance: 1e-8,
+          suggestion: 'Choose a closer initial guess.',
+        },
+      },
+    }
+    const added = addObject(base, equilibrium)
+    render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
+    await user.click(within(screen.getByTestId('inspector-actions')).getByRole('button', { name: 'Compute' }))
+    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
+    expect(screen.getByTestId('calculation-diagnostic')).toBeVisible()
+    expect(screen.getByText('Newton correction did not converge.')).toBeVisible()
+    expect(screen.getByText('Choose a closer initial guess.')).toBeVisible()
+    expect(screen.getByTestId('calculation-diagnostic-metrics')).toHaveTextContent('Residual 2.50e-1')
+    expect(screen.getByText(/previous successful solution is unchanged/)).toBeVisible()
+    await user.click(screen.getByTestId('inspector-workflow-back'))
+    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
+    expect(screen.getByTestId('calculation-diagnostic')).toBeVisible()
+  })
+
   it('opens solved equilibrium data from the Inspect action', async () => {
     const user = userEvent.setup()
     const base = createSystem({
@@ -73,7 +115,7 @@ describe('selection inspector workflow shell', () => {
 
     const actions = screen.getByTestId('inspector-actions')
     expect(within(actions).getByRole('heading', { name: 'Inspect' })).toBeVisible()
-    expect(screen.getByTestId('action-equilibrium-data-toggle')).toHaveTextContent('View Data')
+    await user.click(within(actions).getByRole('button', { name: 'Inspect' }))
 
     await user.click(screen.getByTestId('action-equilibrium-data-toggle'))
 
@@ -104,15 +146,15 @@ describe('selection inspector workflow shell', () => {
     expect(
       parameterLabel.compareDocumentPosition(parameterCopy) & Node.DOCUMENT_POSITION_FOLLOWING
     ).not.toBe(0)
-    expect(screen.getByRole('heading', { name: 'Residual and iterations' })).not.toBeVisible()
-    expect(screen.getByRole('heading', { name: 'Last solver attempt' })).not.toBeVisible()
+    expect(screen.getByTestId('equilibrium-solve-submit')).not.toBeVisible()
     expect(screen.queryByTestId('inspector-workflow-advanced')).toBeNull()
 
     await user.click(screen.getByTestId('inspector-workflow-back'))
+    await user.click(within(screen.getByTestId('inspector-actions')).getByRole('button', { name: 'Compute' }))
     await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
 
-    expect(screen.getByRole('heading', { name: 'Residual and iterations' })).toBeVisible()
-    expect(screen.getByRole('heading', { name: 'Last solver attempt' })).toBeVisible()
+    expect(screen.getByTestId('equilibrium-solve-submit')).toBeVisible()
+    expect(screen.getByTestId('equilibrium-data-coordinates-toggle')).not.toBeVisible()
     expect(screen.queryByText('Cached solver parameters')).toBeNull()
   })
 
@@ -178,7 +220,6 @@ describe('selection inspector workflow shell', () => {
 
     const actions = screen.getByTestId('inspector-actions')
     expect(within(actions).getByRole('heading', { name: 'Inspect' })).toBeVisible()
-    expect(screen.getByTestId('action-orbit-data-toggle')).toHaveTextContent('View Data')
     expect(screen.getByTestId('action-orbit-run-toggle')).not.toBeVisible()
     await user.click(screen.getByRole('button', { name: 'Compute' }))
     expect(screen.getByTestId('action-orbit-run-toggle')).toBeVisible()
@@ -193,7 +234,6 @@ describe('selection inspector workflow shell', () => {
 
     await user.click(screen.getByRole('button', { name: 'Inspect' }))
     await user.click(screen.getByTestId('action-orbit-data-toggle'))
-    expect(screen.getByTestId('inspector-workflow-focus')).toHaveTextContent('View Data')
     expect(screen.getByTestId('orbit-data-summary-toggle')).toBeVisible()
     await user.click(screen.getByTestId('inspector-workflow-back'))
     await user.click(screen.getByTestId('action-orbit-run-toggle'))

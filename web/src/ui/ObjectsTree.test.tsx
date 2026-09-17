@@ -433,9 +433,8 @@ describe('ObjectsTree', () => {
     expect(onCreateFolder).toHaveBeenCalledWith(objectNodeId)
 
     fireEvent.contextMenu(screen.getByTestId(`object-tree-row-${withFolder.nodeId}`))
-    expect(screen.getByTestId('object-context-create-folder')).toHaveTextContent(
-      'Create Subfolder'
-    )
+    await user.click(screen.getByTestId('object-context-create-folder'))
+    expect(onCreateFolder).toHaveBeenLastCalledWith(withFolder.nodeId)
   })
 
   it('reorders child nodes before a sibling drop boundary when drag data is protected', () => {

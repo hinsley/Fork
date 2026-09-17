@@ -18,11 +18,23 @@ export function DiagramInspectorSections({
     onUpdateBifurcationDiagram,
     parseAxisValue,
     setDiagramSearch,
+    system,
   } = scope
+  const selectedEntriesById = new Map(diagramSelectedEntries.map((entry) => [entry.id, entry]))
+  const displayedEntries = [
+    ...diagramSelectedIds.map((id) => selectedEntriesById.get(id) ?? {
+      id,
+      name: system.nodes[id]?.name ?? id,
+      type: 'Unavailable branch — uncheck to remove',
+      points: null,
+      visible: true,
+    }),
+    ...diagramFilteredBranches.filter((entry) => !diagramSelectedSet.has(entry.id)),
+  ]
   return <>
 {diagram ? (
             <div className="inspector-section">
-              <h3>Bifurcation Diagram</h3>
+              <h3>Bifurcation diagram</h3>
               {axisOptions.length > 0 ? (
                 <>
                   <label>
@@ -69,7 +81,7 @@ export function DiagramInspectorSections({
                   Add parameters or state space variables to configure axes.
                 </p>
               )}
-              {branchEntries.length > 0 ? (
+              {branchEntries.length > 0 || diagramSelectedIds.length > 0 ? (
                 <div className="inspector-subsection">
                   <h4 className="inspector-subheading">Displayed branches</h4>
                   <label>
@@ -81,45 +93,15 @@ export function DiagramInspectorSections({
                       data-testid="diagram-branch-search"
                     />
                   </label>
-                  {diagramSelectedEntries.length > 0 ? (
-                    <div className="scene-object-selected">
-                      {diagramSelectedEntries.map((entry) => (
-                        <div
-                          className="scene-object-selected__row"
-                          key={`diagram-sel-${entry.id}`}
-                        >
-                          <div className="scene-object-selected__info">
-                            <span>{entry.name}</span>
-                            <span className="scene-object-selected__meta">
-                              {entry.type} · {entry.points} points
-                              {entry.visible ? '' : ' · hidden'}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            className="scene-object-selected__remove"
-                            onClick={() => {
-                              const next = diagramSelectedIds.filter((id) => id !== entry.id)
-                              onUpdateBifurcationDiagram(diagram.id, {
-                                selectedBranchIds: next,
-                              })
-                            }}
-                            aria-label={`Remove ${entry.name} from diagram`}
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
+                  {diagramSelectedIds.length === 0 ? (
                     <p className="empty-state">
                       No branches selected yet. Showing all visible branches by default. Use
-                      the list below to add branches to this diagram.
+                      the list below to select branches for this diagram.
                     </p>
-                  )}
-                  {diagramFilteredBranches.length > 0 ? (
+                  ) : null}
+                  {displayedEntries.length > 0 ? (
                     <div className="scene-object-list">
-                      {diagramFilteredBranches.map((entry) => {
+                      {displayedEntries.map((entry) => {
                         const checked = diagramSelectedSet.has(entry.id)
                         return (
                           <label
@@ -140,7 +122,7 @@ export function DiagramInspectorSections({
                             />
                             <span className="scene-object-row__name">{entry.name}</span>
                             <span className="scene-object-row__meta">
-                              {entry.type} · {entry.points} points
+                              {entry.type}{entry.points === null ? '' : ` · ${entry.points} points`}
                               {entry.visible ? '' : ' · hidden'}
                             </span>
                           </label>

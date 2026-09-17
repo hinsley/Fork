@@ -1,3 +1,4 @@
+import { normalizeCalculationDiagnostic } from '../compute/calculationError'
 import type {
   ContinuationBranchData,
   ContinuationEndpointSeed,
@@ -488,6 +489,7 @@ export function normalizeBranchEigenvalues(
   const stateDimension = options?.stateDimension
   return {
     ...data,
+    termination: normalizeCalculationDiagnostic(data.termination),
     points: data.points.map((point) => {
       const inferredParam2 =
         typeof stateDimension === 'number' && Number.isFinite(stateDimension)

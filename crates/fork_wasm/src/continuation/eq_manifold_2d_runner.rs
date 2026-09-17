@@ -49,7 +49,7 @@ impl WasmEqManifold2DRunner {
         system.set_maps(compiler.param_map, compiler.var_map);
 
         let branch = continue_manifold_eq_2d(&mut system, &equilibrium_state, settings)
-            .map_err(|e| JsValue::from_str(&format!("2D manifold computation failed: {}", e)))?;
+            .map_err(|e| crate::diagnostics::error_to_js(e.context("2D manifold computation failed")))?;
         let points = branch.points.len();
         let rings = match branch.manifold_geometry.as_ref() {
             Some(ManifoldGeometry::Surface(surface)) => surface.ring_offsets.len(),

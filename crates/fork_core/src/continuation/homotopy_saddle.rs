@@ -21,22 +21,20 @@ pub fn continue_homotopy_saddle_curve(
     if settings.max_steps == 0 {
         bail!("Homotopy-saddle continuation requires max_steps > 0");
     }
-    let mut branch = ContinuationBranch {
-        points: vec![state_to_point(&setup)],
-        bifurcations: Vec::new(),
-        indices: vec![0],
-        branch_type: BranchType::HomotopySaddleCurve {
-            ntst: setup.setup.ntst,
-            ncol: setup.setup.ncol,
-            param1_name: setup.setup.param1_name.clone(),
-            param2_name: setup.setup.param2_name.clone(),
-            stage: setup.stage,
-        },
-        upoldp: None,
-        homoc_context: None,
-        resume_state: None,
-        manifold_geometry: None,
-    };
+    let mut branch = ContinuationBranch { termination: None, points: vec![state_to_point(&setup)],
+    bifurcations: Vec::new(),
+    indices: vec![0],
+    branch_type: BranchType::HomotopySaddleCurve {
+        ntst: setup.setup.ntst,
+        ncol: setup.setup.ncol,
+        param1_name: setup.setup.param1_name.clone(),
+        param2_name: setup.setup.param2_name.clone(),
+        stage: setup.stage,
+    },
+    upoldp: None,
+    homoc_context: None,
+    resume_state: None,
+    manifold_geometry: None, };
 
     let sign = if forward { 1.0 } else { -1.0 };
     let mut logical_index: i32 = 0;

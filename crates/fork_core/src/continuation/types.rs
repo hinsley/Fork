@@ -798,6 +798,9 @@ pub enum HomoclinicDiscretization {
 /// A complete continuation branch containing multiple points.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContinuationBranch {
+    /// Numerical early stop; absent when the requested run completed normally.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub termination: Option<crate::diagnostics::CalculationDiagnostic>,
     pub points: Vec<ContinuationPoint>,
     /// Indices of points where bifurcation was detected
     pub bifurcations: Vec<usize>,

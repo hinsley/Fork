@@ -1,3 +1,5 @@
+import { InspectorSubDisclosure } from '../../selectionSession'
+
 export function PeriodicLinearSolverField({
   useDenseSolve,
   onChange,
@@ -8,8 +10,7 @@ export function PeriodicLinearSolverField({
   testId: string
 }) {
   return (
-    <>
-      <h4 className="inspector-subheading">Linear solve</h4>
+    <InspectorSubDisclosure title="Linear solve" testId={`${testId}-toggle`}>
       <label>
         <input
           type="checkbox"
@@ -23,6 +24,6 @@ export function PeriodicLinearSolverField({
         Unchecked uses the structured periodic corrector. If it fails, enable this option
         and rerun. Initialization and diagnostics are unchanged.
       </span>
-    </>
+    </InspectorSubDisclosure>
   )
 }

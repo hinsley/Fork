@@ -651,11 +651,7 @@ pub fn solve_forced_response(
 
     while residual_norm > newton.tolerance {
         if iterations >= newton.max_steps {
-            bail!(
-                "Forced-response Newton solver failed to converge in {} steps (||P(x)-x|| = {})",
-                newton.max_steps,
-                residual_norm
-            );
+            return Err(crate::diagnostics::CalculationDiagnostic::numerical("iteration_limit", "Forced-response Newton solve", iterations, newton.max_steps, residual_norm, newton.tolerance).into());
         }
         let mut jacobian = map.state_jacobian(&state)?;
         for index in 0..dim {
@@ -664,7 +660,7 @@ pub fn solve_forced_response(
         let delta = jacobian
             .lu()
             .solve(&DVector::from_column_slice(&residual))
-            .context("Failed to solve the forced-response Newton system")?;
+            .with_context(|| crate::diagnostics::CalculationDiagnostic::numerical("singular_jacobian", "Forced-response Newton solve", iterations, newton.max_steps, residual_norm, newton.tolerance))?;
         for index in 0..dim {
             state[index] -= newton.damping * delta[index];
         }

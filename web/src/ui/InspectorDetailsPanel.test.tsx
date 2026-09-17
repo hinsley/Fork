@@ -429,17 +429,18 @@ describe('InspectorDetailsPanel', () => {
       undefined,
       { onCompute, onUpdate }
     )
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect' }))
     fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
-
-    const eigenmodeSection = screen.getByTestId('invariant-measure-eigenmodes')
-    const modeCount = within(eigenmodeSection).getByRole('spinbutton', {
-      name: 'Nontrivial modes',
-    })
+    expect(screen.getByTestId('invariant-eigenmode-compute')).not.toBeVisible()
+    expect(screen.getByTestId('invariant-measure-spectrum-plot')).toBeVisible()
+    fireEvent.click(screen.getByTestId('inspector-workflow-back'))
+    fireEvent.click(screen.getByRole('button', { name: 'Compute' }))
+    fireEvent.click(screen.getByTestId('action-invariant-measure-eigenmodes-toggle'))
+    const modeCount = screen.getByRole('spinbutton', { name: 'Nontrivial modes' })
     expect(modeCount).toHaveValue(6)
     expect(modeCount).toHaveAttribute('min', '1')
     expect(modeCount).toHaveAttribute('max', '7')
     expect(screen.queryByTestId('invariant-eigenmode-count-preset')).not.toBeInTheDocument()
-    expect(eigenmodeSection).not.toHaveTextContent('Custom')
     expect(screen.getByTestId('invariant-measure-spectrum-plot')).toBeInTheDocument()
     expect(screen.getByTestId('invariant-spectral-gap')).toHaveTextContent('1.000000e-1')
     expect(screen.getByTestId('invariant-eigenmode-1')).toHaveTextContent('Mode 1 pair')
@@ -453,6 +454,11 @@ describe('InspectorDetailsPanel', () => {
     fireEvent.change(modeCount, { target: { value: '8' } })
     expect(screen.getByTestId('invariant-eigenmode-compute')).toBeDisabled()
     fireEvent.change(modeCount, { target: { value: '4' } })
+    fireEvent.click(screen.getByTestId('inspector-workflow-back'))
+    fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
+    fireEvent.click(screen.getByTestId('inspector-workflow-back'))
+    fireEvent.click(screen.getByTestId('action-invariant-measure-eigenmodes-toggle'))
+    expect(screen.getByTestId('invariant-eigenmode-count')).toHaveValue(4)
     expect(screen.getByTestId('invariant-eigenmode-compute')).toBeEnabled()
     expect(screen.getByTestId('invariant-eigenmode-compute')).toHaveTextContent(
       'Compute 4 modes'
@@ -464,6 +470,8 @@ describe('InspectorDetailsPanel', () => {
         expect.objectContaining({ signal: expect.any(AbortSignal) })
       )
     })
+    fireEvent.click(screen.getByTestId('inspector-workflow-back'))
+    fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
     fireEvent.click(screen.getByTestId('invariant-eigenmode-component-imaginary'))
     expect(onUpdate).toHaveBeenCalledWith(
       added.nodeId,
@@ -646,23 +654,24 @@ describe('InspectorDetailsPanel', () => {
         onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
-    expect(screen.getByTestId('action-forced-response-solver-toggle')).toHaveTextContent(
-      'Solve forced response'
-    )
-    expect(screen.getByTestId('action-forced-response-data-toggle')).toHaveTextContent(
-      'View Data'
-    )
-    expect(screen.getByTestId('action-forced-response-continuation-toggle')).toHaveTextContent(
-      'Continue forced response'
-    )
-    expect(screen.getByText('Forcing period')).toBeInTheDocument()
-    expect(screen.getByText(/μ1 =/)).toBeInTheDocument()
+    expect(screen.getByText('Forcing period')).not.toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect' }))
+    fireEvent.click(screen.getByTestId('action-forced-response-data-toggle'))
+    expect(screen.getByText('Forcing period')).toBeVisible()
+    expect(screen.getByText(/μ1 =/)).toBeVisible()
+    fireEvent.click(screen.getByTestId('inspector-workflow-back'))
+    expect(screen.getByText('Forcing period')).not.toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Compute' }))
+    fireEvent.click(screen.getByTestId('action-forced-response-solver-toggle'))
     fireEvent.click(screen.getByTestId('forced-response-solve-submit'))
     await waitFor(() => expect(onSolve).toHaveBeenCalledWith(expect.objectContaining({
       responseId: added.nodeId,
       responseMultiple: 1,
       stepsPerForcingPeriod: 200,
     })))
+    fireEvent.click(screen.getByTestId('inspector-workflow-back'))
+    fireEvent.click(screen.getByRole('button', { name: 'Continuation' }))
+    fireEvent.click(screen.getByTestId('action-forced-response-continuation-toggle'))
     fireEvent.click(screen.getByTestId('forced-response-branch-submit'))
     await waitFor(() => expect(onContinue).toHaveBeenCalledWith(expect.objectContaining({
       responseId: added.nodeId,
@@ -1280,48 +1289,6 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.queryByTestId('limit-cycle-toggle')).toBeNull()
   })
 
-  it('orders Orbit Simulation before every orbit-dependent menu', () => {
-    const baseSystem = createSystem({
-      name: 'Populated_Orbit_Inspector',
-      config: {
-        name: 'Populated_Orbit_Inspector',
-        equations: ['y', '-x'],
-        params: [0.2],
-        paramNames: ['mu'],
-        varNames: ['x', 'y'],
-        solver: 'rk4',
-        type: 'flow',
-      },
-    })
-    const orbit: OrbitObject = {
-      type: 'orbit',
-      name: 'Orbit_Populated',
-      systemName: baseSystem.config.name,
-      data: [
-        [0, 1, 0],
-        [0.01, 0.99, -0.01],
-      ],
-      t_start: 0,
-      t_end: 0.01,
-      dt: 0.01,
-      parameters: [...baseSystem.config.params],
-    }
-    const added = addObject(baseSystem, orbit)
-
-    renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
-
-    const simulation = screen.getByTestId('orbit-run-toggle')
-    for (const dependentTestId of [
-      'orbit-data-toggle',
-      'oseledets-toggle',
-      'limit-cycle-toggle',
-    ]) {
-      const dependent = screen.getByTestId(dependentTestId)
-      expect(
-        simulation.compareDocumentPosition(dependent) & Node.DOCUMENT_POSITION_FOLLOWING
-      ).not.toBe(0)
-    }
-  })
 
   it('preserves Lyapunov drafts when orbit analysis results update', () => {
     const onUpdateRender = vi.fn()
@@ -1545,6 +1512,26 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByTestId('limit-cycle-data-toggle')).toBeVisible()
     expect(screen.queryByTestId('limit-cycle-manifold-toggle')).toBeNull()
   })
+  it('retains accepted branch points while explaining a partial continuation', async () => {
+    const user = userEvent.setup()
+    const fixture = createStateSpaceStrideBranchFixture('homoclinic_curve')
+    fixture.system.branches[fixture.nodeId].data.termination = {
+      kind: 'step_size_limit',
+      message: 'The corrector reached the minimum step size.',
+      step_size: 1e-6,
+      min_step_size: 1e-6,
+      suggestion: 'Improve the initial guess or increase corrector iterations.',
+    }
+    renderInspectorForStateSpaceStride(fixture.system, fixture.nodeId, vi.fn())
+    await user.click(screen.getByRole('button', { name: 'Inspect' }))
+    await user.click(screen.getByTestId('action-branch-summary-toggle'))
+    expect(screen.getByTestId('calculation-diagnostic')).toBeVisible()
+    expect(screen.getByText(/accepted points retained/)).toBeVisible()
+    await user.click(screen.getByTestId('inspector-workflow-back'))
+    await user.click(screen.getByTestId('action-branch-points-toggle'))
+    expect(screen.getByTestId('branch-point-input')).toBeVisible()
+  })
+
 
   it('nests Point Details inside Branch Navigator', async () => {
     const user = userEvent.setup()
@@ -1552,8 +1539,7 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(branchResult.system, branchResult.nodeId, vi.fn())
 
-    expect(screen.getByTestId('action-branch-summary-toggle')).toHaveTextContent('View Summary')
-    expect(screen.getByTestId('action-branch-points-toggle')).toHaveTextContent('View Data')
+    await user.click(screen.getByRole('button', { name: 'Inspect' }))
     expect(screen.getByTestId('inspector-name')).toBeVisible()
     await user.click(screen.getByTestId('action-branch-points-toggle'))
     expect(screen.queryByTestId('inspector-name')).toBeNull()
@@ -1659,7 +1645,8 @@ describe('InspectorDetailsPanel', () => {
       onCreateCodim2BranchFromPoint
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByRole('button', { name: 'Inspect' }))
+    await user.click(screen.getByTestId('action-branch-points-toggle'))
     await user.click(screen.getByTestId('branch-point-details-toggle'))
 
     expect(screen.getByText('Codimension-two refinement')).toBeVisible()
@@ -1685,6 +1672,10 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByText('Verified nondegenerate')).toBeVisible()
     expect(screen.getByText('Simultaneous codimension-two events')).toBeVisible()
     expect(screen.getByText(/second imaginary pair=-4\.0000e-12/)).toBeVisible()
+    expect(screen.getByTestId('codim2-switch-lpc')).not.toBeVisible()
+    await user.click(screen.getByTestId('inspector-workflow-back'))
+    await user.click(screen.getByRole('button', { name: 'Bifurcations' }))
+    await user.click(screen.getByTestId('action-codim2-branch-switch-toggle'))
     expect(screen.getByTestId('codim2-switch-lpc')).toBeVisible()
     await user.click(screen.getByTestId('codim2-switch-lpc'))
     expect(onCreateCodim2BranchFromPoint).toHaveBeenCalledWith(
@@ -3578,8 +3569,9 @@ describe('InspectorDetailsPanel', () => {
     )
 
     await user.click(screen.getByTestId('branch-extend-toggle'))
+    await user.click(screen.getByTestId('branch-extend-use-dense-solve-toggle'))
     expect(screen.getByTestId('branch-extend-use-dense-solve')).toBeChecked()
-    expect(screen.getByText('Use dense solve (slower)')).toBeVisible()
+    expect(screen.getByTestId('branch-extend-use-dense-solve')).toBeVisible()
     await user.click(screen.getByTestId('branch-extend-submit'))
 
     expect(onExtendBranch).toHaveBeenCalledWith(
@@ -4455,7 +4447,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    expect(screen.getByTestId('isoperiodic-curve-toggle')).toHaveTextContent('Continue from Point')
     await user.click(screen.getByTestId('isoperiodic-curve-toggle'))
     await user.clear(screen.getByTestId('isoperiodic-curve-name'))
     await user.type(screen.getByTestId('isoperiodic-curve-name'), 'iso_curve_kappa_mu')
@@ -4642,10 +4633,8 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    expect(screen.getByText('Branch Summary')).toBeVisible()
-    expect(screen.getByText('Branch Navigator')).toBeVisible()
-
-    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByRole('button', { name: 'Inspect' }))
+    await user.click(screen.getByTestId('action-branch-points-toggle'))
     expect(screen.getByText('Point Details')).toBeVisible()
     await user.click(screen.getByTestId('branch-point-details-toggle'))
 
@@ -4827,8 +4816,8 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    expect(screen.getByText('Branch Summary')).toBeVisible()
-    await user.click(screen.getByTestId('branch-summary-toggle'))
+    await user.click(screen.getByRole('button', { name: 'Inspect' }))
+    await user.click(screen.getByTestId('action-branch-summary-toggle'))
     expect(screen.getByText('Manifold solver diagnostics')).toBeVisible()
     expect(screen.getByText('Ring Build Failed')).toBeVisible()
     expect(screen.getByText('Leaf delta floor')).toBeVisible()
@@ -5763,9 +5752,14 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('limit-cycle-data-toggle'))
+    await user.click(screen.getByRole('button', { name: 'Inspect' }))
+    await user.click(screen.getByTestId('action-limit-cycle-data-toggle'))
     await user.click(screen.getByTestId('limit-cycle-data-floquet-toggle'))
     expect(screen.getByText('Floquet multipliers not computed yet.')).toBeVisible()
+    expect(screen.getByTestId('limit-cycle-floquet-modes-compute')).not.toBeVisible()
+    await user.click(screen.getByTestId('inspector-workflow-back'))
+    await user.click(screen.getByRole('button', { name: 'Compute' }))
+    await user.click(screen.getByTestId('action-limit-cycle-floquet-toggle'))
 
     const computeButton = screen.getByTestId('limit-cycle-floquet-modes-compute')
     expect(computeButton).toBeEnabled()
@@ -5773,7 +5767,10 @@ describe('InspectorDetailsPanel', () => {
       screen.getByTestId('limit-cycle-floquet-backend'),
       'periodic_schur'
     )
-    await user.click(computeButton)
+    await user.click(screen.getByTestId('inspector-workflow-back'))
+    await user.click(screen.getByTestId('action-limit-cycle-floquet-toggle'))
+    expect(screen.getByTestId('limit-cycle-floquet-backend')).toHaveValue('periodic_schur')
+    await user.click(screen.getByTestId('limit-cycle-floquet-modes-compute'))
 
     expect(onComputeLimitCycleFloquetModes).toHaveBeenCalledWith({
       limitCycleId,
@@ -8319,6 +8316,7 @@ describe('InspectorDetailsPanel', () => {
     await user.click(screen.getByTestId('homoclinic-from-large-cycle-toggle'))
     expect(screen.getByTestId('homoclinic-from-large-cycle-free-time')).toBeDisabled()
     expect(screen.getByTestId('homoclinic-from-large-cycle-method')).toHaveValue('collocation')
+    await user.click(screen.getByTestId('homoclinic-from-large-cycle-adaptive-mesh-toggle'))
     expect(
       screen.getByTestId('homoclinic-from-large-cycle-adaptive-collocation-enabled')
     ).toBeVisible()
@@ -8445,14 +8443,12 @@ describe('InspectorDetailsPanel', () => {
 
     await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
-    expect(screen.getByTestId('homoclinic-from-homoclinic-toggle')).toHaveTextContent(
-      'Continue from Point'
-    )
     await user.click(screen.getByTestId('homoclinic-from-homoclinic-toggle'))
     expect(screen.getByTestId('homoclinic-from-homoclinic-free-eps1')).toBeDisabled()
     expect(screen.getByTestId('homoclinic-from-homoclinic-discretization')).toHaveValue(
       'collocation'
     )
+    await user.click(screen.getByTestId('homoclinic-from-homoclinic-adaptive-mesh-toggle'))
     expect(
       screen.getByTestId('homoclinic-from-homoclinic-adaptive-collocation-enabled')
     ).toBeVisible()

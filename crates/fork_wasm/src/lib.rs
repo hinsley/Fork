@@ -8,6 +8,7 @@
 
 mod analysis;
 mod continuation;
+mod diagnostics;
 mod equilibrium;
 mod event_series;
 mod expansion_entropy;

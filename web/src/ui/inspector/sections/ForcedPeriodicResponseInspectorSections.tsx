@@ -61,7 +61,7 @@ export function ForcedPeriodicResponseInspectorSections({
 
       <InspectorDisclosure
         key={`${selectionKey}-forced-response-solver`}
-        title="Forced Response Solver"
+        title="Solve forced response"
         testId="forced-response-solver-toggle"
         defaultOpen
         actionOnly
@@ -196,9 +196,9 @@ export function ForcedPeriodicResponseInspectorSections({
       {solution ? (
         <InspectorDisclosure
           key={`${selectionKey}-forced-response-data`}
-          title="Forced Response Data"
+          title="Inspect data"
           testId="forced-response-data-toggle"
-          defaultOpen
+          actionOnly
         >
           <div className="inspector-section">
             {forcedPeriodicResponseStale ? (
@@ -248,7 +248,7 @@ export function ForcedPeriodicResponseInspectorSections({
       {solution ? (
         <InspectorDisclosure
           key={`${selectionKey}-forced-response-continuation`}
-          title="Forced Response Continuation"
+          title="Continue forced response"
           testId="forced-response-continuation-toggle"
           actionOnly
         >

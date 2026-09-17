@@ -1,3 +1,4 @@
+import { formatError } from '../format';
 /**
  * Codim-1 Curve Continuation Module
  * 
@@ -294,7 +295,7 @@ export async function initiateFoldCurve(
     {
       id: 'param2',
       label: 'Second parameter',
-      section: 'Two-Parameter Setup',
+      section: 'Setup',
       getDisplay: () => `${param2Name} = ${param2Value}`,
       edit: async () => {
         const choices = paramNames
@@ -319,7 +320,7 @@ export async function initiateFoldCurve(
     {
       id: 'curveName',
       label: 'Curve name',
-      section: 'Output Settings',
+      section: 'Output',
       getDisplay: () => curveName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -335,7 +336,7 @@ export async function initiateFoldCurve(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -355,7 +356,7 @@ export async function initiateFoldCurve(
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -369,7 +370,7 @@ export async function initiateFoldCurve(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Continuation Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -383,7 +384,7 @@ export async function initiateFoldCurve(
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -397,7 +398,7 @@ export async function initiateFoldCurve(
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -527,7 +528,7 @@ export async function initiateFoldCurve(
     return newBranch;
 
   } catch (e) {
-    printError(`Fold Curve Continuation Failed: ${e}`);
+    printError(`Fold Curve Continuation Failed: ${formatError(e)}`);
     return null;
   }
 }
@@ -590,7 +591,7 @@ export async function initiateHopfCurve(
     {
       id: 'param2',
       label: 'Second parameter',
-      section: 'Two-Parameter Setup',
+      section: 'Setup',
       getDisplay: () => `${param2Name} = ${param2Value}`,
       edit: async () => {
         const choices = paramNames
@@ -615,7 +616,7 @@ export async function initiateHopfCurve(
     {
       id: 'hopfFreq',
       label: 'Hopf frequency (ω)',
-      section: 'Two-Parameter Setup',
+      section: 'Setup',
       getDisplay: () => hopfOmega.toFixed(6),
       edit: async () => {
         printInfo(`Hopf frequency extracted from eigenvalues: ω = ${hopfOmega.toFixed(6)}`);
@@ -625,7 +626,7 @@ export async function initiateHopfCurve(
     {
       id: 'curveName',
       label: 'Curve name',
-      section: 'Output Settings',
+      section: 'Output',
       getDisplay: () => curveName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -641,7 +642,7 @@ export async function initiateHopfCurve(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -661,7 +662,7 @@ export async function initiateHopfCurve(
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -675,7 +676,7 @@ export async function initiateHopfCurve(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Continuation Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -689,7 +690,7 @@ export async function initiateHopfCurve(
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -703,7 +704,7 @@ export async function initiateHopfCurve(
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -847,7 +848,7 @@ export async function initiateHopfCurve(
     return newBranch;
 
   } catch (e) {
-    printError(`Hopf Curve Continuation Failed: ${e}`);
+    printError(`Hopf Curve Continuation Failed: ${formatError(e)}`);
     return null;
   }
 }
@@ -881,7 +882,7 @@ export async function initiateLPCCurve(
       sysConfig.varNames.length
     );
   } catch (error) {
-    printError(`LPC curve requires a valid periodic source point: ${error}`);
+    printError(`LPC curve requires a valid periodic source point: ${formatError(error)}`);
     return null;
   }
   const { ntst, ncol, normalizedMesh, param1Name, param1Value } = source;
@@ -907,7 +908,7 @@ export async function initiateLPCCurve(
     ...(source.adjacentSwitch ? [] : [{
       id: 'param2',
       label: 'Second parameter',
-      section: 'Two-Parameter Setup',
+      section: 'Setup',
       getDisplay: () => `${param2Name} = ${param2Value}`,
       edit: async () => {
         const choices = paramNames
@@ -932,7 +933,7 @@ export async function initiateLPCCurve(
     {
       id: 'curveName',
       label: 'Curve name',
-      section: 'Output Settings',
+      section: 'Output',
       getDisplay: () => curveName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -948,7 +949,7 @@ export async function initiateLPCCurve(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -968,7 +969,7 @@ export async function initiateLPCCurve(
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -982,7 +983,7 @@ export async function initiateLPCCurve(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Continuation Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -996,7 +997,7 @@ export async function initiateLPCCurve(
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1010,7 +1011,7 @@ export async function initiateLPCCurve(
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1143,7 +1144,7 @@ export async function initiateLPCCurve(
     return newBranch;
 
   } catch (e) {
-    printError(`LPC Curve Continuation Failed: ${e}`);
+    printError(`LPC Curve Continuation Failed: ${formatError(e)}`);
     return null;
   }
 }
@@ -1240,7 +1241,7 @@ export async function initiateIsoperiodicCurve(
     {
       id: 'param1',
       label: 'First parameter',
-      section: 'Two-Parameter Setup',
+      section: 'Setup',
       getDisplay: () => `${param1Name} = ${param1Value}`,
       edit: async () => {
         const choices = paramNames.map(p => {
@@ -1268,7 +1269,7 @@ export async function initiateIsoperiodicCurve(
     {
       id: 'param2',
       label: 'Second parameter',
-      section: 'Two-Parameter Setup',
+      section: 'Setup',
       getDisplay: () => `${param2Name} = ${param2Value}`,
       edit: async () => {
         const choices = paramNames
@@ -1293,7 +1294,7 @@ export async function initiateIsoperiodicCurve(
     {
       id: 'curveName',
       label: 'Curve name',
-      section: 'Output Settings',
+      section: 'Output',
       getDisplay: () => curveName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1309,7 +1310,7 @@ export async function initiateIsoperiodicCurve(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1329,7 +1330,7 @@ export async function initiateIsoperiodicCurve(
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1343,7 +1344,7 @@ export async function initiateIsoperiodicCurve(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Continuation Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1357,7 +1358,7 @@ export async function initiateIsoperiodicCurve(
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1371,7 +1372,7 @@ export async function initiateIsoperiodicCurve(
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1515,7 +1516,7 @@ export async function initiateIsoperiodicCurve(
     return newBranch;
 
   } catch (e) {
-    printError(`Isoperiodic Curve Continuation Failed: ${e}`);
+    printError(`Isoperiodic Curve Continuation Failed: ${formatError(e)}`);
     return null;
   }
 }
@@ -1549,7 +1550,7 @@ export async function initiatePDCurve(
       sysConfig.varNames.length
     );
   } catch (error) {
-    printError(`PD curve requires a valid periodic source point: ${error}`);
+    printError(`PD curve requires a valid periodic source point: ${formatError(error)}`);
     return null;
   }
   const { ntst, ncol, normalizedMesh, param1Name, param1Value } = source;
@@ -1575,7 +1576,7 @@ export async function initiatePDCurve(
     ...(source.adjacentSwitch ? [] : [{
       id: 'param2',
       label: 'Second parameter',
-      section: 'Two-Parameter Setup',
+      section: 'Setup',
       getDisplay: () => `${param2Name} = ${param2Value}`,
       edit: async () => {
         const choices = paramNames
@@ -1600,7 +1601,7 @@ export async function initiatePDCurve(
     {
       id: 'curveName',
       label: 'Curve name',
-      section: 'Output Settings',
+      section: 'Output',
       getDisplay: () => curveName || '(required)',
       edit: async () => {
         // Get existing branches for uniqueness check
@@ -1625,7 +1626,7 @@ export async function initiatePDCurve(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1645,7 +1646,7 @@ export async function initiatePDCurve(
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1659,7 +1660,7 @@ export async function initiatePDCurve(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Continuation Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1673,7 +1674,7 @@ export async function initiatePDCurve(
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1687,7 +1688,7 @@ export async function initiatePDCurve(
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1827,7 +1828,7 @@ export async function initiatePDCurve(
     return newBranch;
 
   } catch (e) {
-    printError(`PD Curve Continuation Failed: ${e}`);
+    printError(`PD Curve Continuation Failed: ${formatError(e)}`);
     return null;
   }
 }
@@ -1862,7 +1863,7 @@ export async function initiateNSCurve(
       sysConfig.varNames.length
     );
   } catch (error) {
-    printError(`NS curve requires a valid periodic source point: ${error}`);
+    printError(`NS curve requires a valid periodic source point: ${formatError(error)}`);
     return null;
   }
   const { ntst, ncol, normalizedMesh, param1Name, param1Value } = source;
@@ -1911,7 +1912,7 @@ export async function initiateNSCurve(
     ...(source.adjacentSwitch ? [] : [{
       id: 'param2',
       label: 'Second parameter',
-      section: 'Two-Parameter Setup',
+      section: 'Setup',
       getDisplay: () => `${param2Name} = ${param2Value}`,
       edit: async () => {
         const choices = paramNames
@@ -1936,7 +1937,7 @@ export async function initiateNSCurve(
     {
       id: 'curveName',
       label: 'Curve name',
-      section: 'Output Settings',
+      section: 'Output',
       getDisplay: () => curveName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1952,7 +1953,7 @@ export async function initiateNSCurve(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1972,7 +1973,7 @@ export async function initiateNSCurve(
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1986,7 +1987,7 @@ export async function initiateNSCurve(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Continuation Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -2000,7 +2001,7 @@ export async function initiateNSCurve(
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -2014,7 +2015,7 @@ export async function initiateNSCurve(
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -2147,7 +2148,7 @@ export async function initiateNSCurve(
     return newBranch;
 
   } catch (e) {
-    printError(`NS Curve Continuation Failed: ${e}`);
+    printError(`NS Curve Continuation Failed: ${formatError(e)}`);
     return null;
   }
 }

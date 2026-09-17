@@ -23,7 +23,7 @@ export function LimitCycleManifoldSection({
 {limitCycle && limitCycleDisplayMultipliers.length > 0 ? (
             <InspectorDisclosure
               key={`${selectionKey}-limit-cycle-manifold`}
-              title="Invariant Manifolds"
+              title="Limit-cycle manifold"
               testId="limit-cycle-manifold-toggle"
               defaultOpen={false}
               actionOnly

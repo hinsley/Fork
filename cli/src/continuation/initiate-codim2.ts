@@ -1,3 +1,4 @@
+import { formatError } from '../format';
 import inquirer from 'inquirer';
 import { printError, printInfo, printSuccess } from '../format';
 import type { NormalFormProvenance } from '../normal-form-types';
@@ -386,7 +387,7 @@ export async function initiateCodim2Branch(
     return newBranch;
   } catch (error) {
     printInfo('Codimension-two predictor stopped before creating a branch.');
-    printError(String(error));
+    printError(formatError(error));
     return null;
   }
 }

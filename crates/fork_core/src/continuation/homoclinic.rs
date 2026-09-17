@@ -2080,24 +2080,22 @@ mod tests {
             tangent[0] = 1.0;
             let mut diagnostics = problem.diagnostics(&accepted).expect("initial diagnostics");
             let stale_cycle = vec![vec![-999.0; problem.dim()]];
-            let mut branch = ContinuationBranch {
-                points: vec![ContinuationPoint {
-                    state: packed,
-                    param_value: accepted[0],
-                    stability: BifurcationType::None,
-                    eigenvalues: diagnostics.eigenvalues.clone(),
-                    cycle_points: Some(stale_cycle.clone()),
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                }],
-                bifurcations: Vec::new(),
-                indices: vec![0],
-                branch_type: BranchType::default(),
-                upoldp: None,
-                homoc_context: None,
-                resume_state: None,
-                manifold_geometry: None,
-            };
+            let mut branch = ContinuationBranch { termination: None, points: vec![ContinuationPoint {
+                state: packed,
+                param_value: accepted[0],
+                stability: BifurcationType::None,
+                eigenvalues: diagnostics.eigenvalues.clone(),
+                cycle_points: Some(stale_cycle.clone()),
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            }],
+            bifurcations: Vec::new(),
+            indices: vec![0],
+            branch_type: BranchType::default(),
+            upoldp: None,
+            homoc_context: None,
+            resume_state: None,
+            manifold_geometry: None, };
             let mut events = None;
             let mut heteroclinic_events = None;
 

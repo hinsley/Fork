@@ -1,3 +1,4 @@
+import { formatError } from '../format';
 /**
  * Limit Cycle Initiation from Orbit Module
  * 
@@ -116,7 +117,7 @@ export async function initiateLCFromOrbit(
     {
       id: 'limitCycleObjectName',
       label: 'Limit cycle object name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => limitCycleObjectName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -140,7 +141,7 @@ export async function initiateLCFromOrbit(
     {
       id: 'branchName',
       label: 'Branch name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => branchName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -162,7 +163,7 @@ export async function initiateLCFromOrbit(
     {
       id: 'parameter',
       label: 'Continuation parameter',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => selectedParamName,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -182,7 +183,7 @@ export async function initiateLCFromOrbit(
     {
       id: 'tolerance',
       label: 'Cycle detection tolerance',
-      section: 'Cycle Detection',
+      section: 'Initialization',
       getDisplay: () => formatUnset(toleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -196,7 +197,7 @@ export async function initiateLCFromOrbit(
     {
       id: 'ntst',
       label: 'Mesh intervals (ntst)',
-      section: 'Collocation Mesh',
+      section: 'Mesh',
       getDisplay: () => formatUnset(ntstInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -210,7 +211,7 @@ export async function initiateLCFromOrbit(
     {
       id: 'ncol',
       label: 'Collocation points (ncol)',
-      section: 'Collocation Mesh',
+      section: 'Mesh',
       getDisplay: () => formatUnset(ncolInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -224,7 +225,7 @@ export async function initiateLCFromOrbit(
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -238,7 +239,7 @@ export async function initiateLCFromOrbit(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Predictor Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -252,7 +253,7 @@ export async function initiateLCFromOrbit(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -272,7 +273,7 @@ export async function initiateLCFromOrbit(
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -286,7 +287,7 @@ export async function initiateLCFromOrbit(
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -300,7 +301,7 @@ export async function initiateLCFromOrbit(
     {
       id: 'useDenseSolve',
       label: 'Use dense solve (slower)',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => (useDenseSolve ? 'Yes' : 'No'),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -317,7 +318,7 @@ export async function initiateLCFromOrbit(
   entries.push(...collocationAdaptivityEntries(adaptivityInputs));
 
   while (true) {
-    const result = await runConfigMenu('Initiate Limit Cycle from Orbit', entries);
+    const result = await runConfigMenu('Create limit cycle from orbit', entries);
     if (result === 'back') {
       return null;
     }
@@ -469,7 +470,7 @@ export async function initiateLCFromOrbit(
     return newBranch;
 
   } catch (e) {
-    printError(`Limit Cycle Initialization Failed: ${e}`);
+    printError(`Limit Cycle Initialization Failed: ${formatError(e)}`);
     return null;
   }
 }

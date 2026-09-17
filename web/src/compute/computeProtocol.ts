@@ -1,3 +1,4 @@
+import type { CalculationDiagnostic } from '../system/types'
 import type { ContinuationProgress, ForkCoreClient } from './ForkCoreClient'
 
 export type ComputeOperationKind = Exclude<keyof ForkCoreClient, 'close' | 'cancelAll'>
@@ -119,6 +120,7 @@ export type WorkerErrorResponse = {
   id: string
   ok: false
   error: string
+  diagnostic?: CalculationDiagnostic
   aborted?: boolean
 }
 

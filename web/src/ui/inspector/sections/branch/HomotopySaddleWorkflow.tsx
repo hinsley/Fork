@@ -24,7 +24,7 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
 {showHomotopySaddleFromEquilibrium ? (
                   <InspectorDisclosure
                     key={`${selectionKey}-homotopy-saddle-equilibrium`}
-                    title="Homotopy-Saddle from Equilibrium"
+                    title="Homotopy-saddle continuation"
                     testId="homotopy-saddle-from-equilibrium-toggle"
                     defaultOpen={false}
                     actionOnly

@@ -1,3 +1,4 @@
+import { formatError } from '../format';
 /**
  * Branch Creation Module
  * 
@@ -138,7 +139,7 @@ export async function createEquilibriumBranchForObject(
     {
       id: 'parameter',
       label: 'Continuation parameter',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => selectedParamName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -155,7 +156,7 @@ export async function createEquilibriumBranchForObject(
     {
       id: 'branchName',
       label: 'Branch name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => formatUnset(branchName),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -176,7 +177,7 @@ export async function createEquilibriumBranchForObject(
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -190,7 +191,7 @@ export async function createEquilibriumBranchForObject(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Predictor Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -204,7 +205,7 @@ export async function createEquilibriumBranchForObject(
     {
       id: 'minStep',
       label: 'Min step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(minStepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -218,7 +219,7 @@ export async function createEquilibriumBranchForObject(
     {
       id: 'maxStep',
       label: 'Max step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(maxStepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -232,7 +233,7 @@ export async function createEquilibriumBranchForObject(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -252,7 +253,7 @@ export async function createEquilibriumBranchForObject(
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -266,7 +267,7 @@ export async function createEquilibriumBranchForObject(
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -280,7 +281,7 @@ export async function createEquilibriumBranchForObject(
     {
       id: 'stepTolerance',
       label: 'Step tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(stepToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -381,7 +382,7 @@ export async function createEquilibriumBranchForObject(
     console.log(chalk.green(`Continuation successful! Generated ${branchData.points.length} points.`));
     return await inspectBranch(sysName, branch);
   } catch (e) {
-    console.error(chalk.red("Continuation Failed:"), e);
+    console.error(chalk.red("Continuation Failed:"), formatError(e));
     return;
   }
 }
@@ -446,7 +447,7 @@ export async function createLimitCycleBranchForObject(
     {
       id: 'parameter',
       label: 'Continuation parameter',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => selectedParamName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -463,7 +464,7 @@ export async function createLimitCycleBranchForObject(
     {
       id: 'branchName',
       label: 'Branch name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => formatUnset(branchName),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -484,7 +485,7 @@ export async function createLimitCycleBranchForObject(
     {
       id: 'mesh',
       label: 'Discretization (inherited)',
-      section: 'Collocation Mesh',
+      section: 'Mesh',
       getDisplay: () => `${sourceNtst}×${sourceNcol}`,
       edit: async () => {
         console.log(chalk.gray("NTST/NCOL are inherited from the limit cycle object."));
@@ -493,7 +494,7 @@ export async function createLimitCycleBranchForObject(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -513,7 +514,7 @@ export async function createLimitCycleBranchForObject(
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -527,7 +528,7 @@ export async function createLimitCycleBranchForObject(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Predictor Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -541,7 +542,7 @@ export async function createLimitCycleBranchForObject(
     {
       id: 'minStep',
       label: 'Min step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(minStepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -555,7 +556,7 @@ export async function createLimitCycleBranchForObject(
     {
       id: 'maxStep',
       label: 'Max step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(maxStepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -569,7 +570,7 @@ export async function createLimitCycleBranchForObject(
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -583,7 +584,7 @@ export async function createLimitCycleBranchForObject(
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -597,7 +598,7 @@ export async function createLimitCycleBranchForObject(
     {
       id: 'stepTolerance',
       label: 'Step tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(stepToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -714,7 +715,7 @@ export async function createLimitCycleBranchForObject(
     console.log(chalk.green(`Limit cycle continuation successful! Generated ${branchData.points.length} points.`));
     return await inspectBranch(sysName, newBranch);
   } catch (e) {
-    console.error(chalk.red("Limit Cycle Continuation Failed:"), e);
+    console.error(chalk.red("Limit Cycle Continuation Failed:"), formatError(e));
     return;
   }
 }
@@ -821,7 +822,7 @@ async function createEquilibriumBranch(sysName: string) {
     {
       id: 'equilibrium',
       label: `Starting ${equilibriumLabelLower}`,
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => selectedEqName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -841,7 +842,7 @@ async function createEquilibriumBranch(sysName: string) {
     {
       id: 'parameter',
       label: 'Continuation parameter',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => selectedParamName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -858,7 +859,7 @@ async function createEquilibriumBranch(sysName: string) {
     {
       id: 'branchName',
       label: 'Branch name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => formatUnset(branchName),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -880,7 +881,7 @@ async function createEquilibriumBranch(sysName: string) {
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -894,7 +895,7 @@ async function createEquilibriumBranch(sysName: string) {
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Predictor Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -908,7 +909,7 @@ async function createEquilibriumBranch(sysName: string) {
     {
       id: 'minStep',
       label: 'Min step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(minStepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -922,7 +923,7 @@ async function createEquilibriumBranch(sysName: string) {
     {
       id: 'maxStep',
       label: 'Max step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(maxStepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -936,7 +937,7 @@ async function createEquilibriumBranch(sysName: string) {
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -956,7 +957,7 @@ async function createEquilibriumBranch(sysName: string) {
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -977,7 +978,7 @@ async function createEquilibriumBranch(sysName: string) {
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -998,7 +999,7 @@ async function createEquilibriumBranch(sysName: string) {
     {
       id: 'stepTolerance',
       label: 'Step tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(stepToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1112,6 +1113,6 @@ async function createEquilibriumBranch(sysName: string) {
     await inspectBranch(sysName, branch);
 
   } catch (e) {
-    console.error(chalk.red("Continuation Failed:"), e);
+    console.error(chalk.red("Continuation Failed:"), formatError(e));
   }
 }

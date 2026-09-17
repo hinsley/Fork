@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
 import { isSubsystemSnapshotCompatible } from '../../../system/subsystemGateway'
@@ -17,10 +17,8 @@ export function InvariantMeasureInspectorSections({
   scope: InspectorSelectionController
 }) {
   const {
-    InspectorDisclosure,
     formatScientific,
     invariantMeasure,
-    selectionKey,
     system,
   } = scope
 
@@ -63,11 +61,9 @@ export function InvariantMeasureInspectorSections({
     isSubsystemSnapshotCompatible(system.config, result.subsystemSnapshot)
 
   return (
-    <InspectorDisclosure
-      key={`${selectionKey}-invariant-measure-data`}
-      title={massPreserving ? 'Invariant measure data' : 'Finite-box mode data'}
-      testId="invariant-measure-data-toggle"
-      actionOnly
+    <InvariantMeasureEigenmodeAnalysis
+      scope={scope}
+      invariantMeasure={invariantMeasure}
     >
       <div className="inspector-section" data-testid="invariant-measure-data-section">
         <div className="inspector-metrics">
@@ -163,11 +159,6 @@ export function InvariantMeasureInspectorSections({
           </div>
         </div>
 
-        <InvariantMeasureEigenmodeAnalysis
-          scope={scope}
-          invariantMeasure={invariantMeasure}
-          stationaryConverged={stationaryConverged}
-        />
 
         <h4 className="inspector-subheading">Grid snapshot</h4>
         <p className="inspector-help">
@@ -234,20 +225,22 @@ export function InvariantMeasureInspectorSections({
           </p>
         ) : null}
       </div>
-    </InspectorDisclosure>
+    </InvariantMeasureEigenmodeAnalysis>
   )
 }
 
 function InvariantMeasureEigenmodeAnalysis({
   scope,
   invariantMeasure,
-  stationaryConverged,
+  children,
 }: {
   scope: InspectorSelectionController
   invariantMeasure: InvariantMeasureObject
-  stationaryConverged: boolean
+  children: ReactNode
 }) {
   const {
+    InspectorDisclosure,
+    invariantEigenmodeUnavailableReason,
     PlotlyViewport,
     formatComplexValue,
     formatScientific,
@@ -407,15 +400,15 @@ function InvariantMeasureEigenmodeAnalysis({
   }
 
   return (
-    <section
-      className="invariant-eigenmodes"
-      data-testid="invariant-measure-eigenmodes"
+    <>
+    <InspectorDisclosure
+      key={`${selectionKey}-invariant-measure-eigenmodes`}
+      title="Compute eigenmodes"
+      testId="invariant-measure-eigenmodes-toggle"
+      actionOnly
     >
-      <h4 className="inspector-subheading">Sparse eigenmodes</h4>
       <p className="inspector-help">
-        Enter how many selectable nontrivial modes to compute after the stationary solve. A complex
-        conjugate pair is kept together as one oscillatory mode; the stationary mode remains
-        separate.
+        Compute nontrivial modes of the stored transfer operator. Complex conjugate pairs stay together.
       </p>
       <label>
         Nontrivial modes
@@ -442,22 +435,25 @@ function InvariantMeasureEigenmodeAnalysis({
         type="button"
         className="inspector-primary-action"
         onClick={() => void runAnalysis()}
-        disabled={running || !stationaryConverged || !requestValid}
+        disabled={running || Boolean(invariantEigenmodeUnavailableReason) || !requestValid}
         data-testid="invariant-eigenmode-compute"
       >
         {running ? 'Computing modes…' : `Compute ${requestedCount} modes`}
       </button>
-      {!stationaryConverged ? (
-        <p className="inspector-error">
-          Eigenmodes require a converged stationary measure.
-        </p>
-      ) : null}
-      {maxSupported === 0 ? (
-        <p className="inspector-error">
-          This cover has no nontrivial mode.
-        </p>
+      {invariantEigenmodeUnavailableReason ? (
+        <p className="inspector-error">{invariantEigenmodeUnavailableReason}</p>
       ) : null}
       {error ? <p className="inspector-error">{error}</p> : null}
+    </InspectorDisclosure>
+    <InspectorDisclosure
+      key={`${selectionKey}-invariant-measure-data`}
+      title="Inspect data"
+      testId="invariant-measure-data-toggle"
+      actionOnly
+    >
+      {children}
+      <section className="invariant-eigenmodes" data-testid="invariant-measure-eigenmodes">
+      <h4 className="inspector-subheading">Sparse eigenmodes</h4>
       {storedAnalysis && !analysis ? (
         <p className="inspector-error">
           The cached modes refer to an older transfer-operator snapshot and are not displayed.
@@ -585,5 +581,7 @@ function InvariantMeasureEigenmodeAnalysis({
         <p className="empty-state">No sparse eigenmode analysis stored yet.</p>
       )}
     </section>
+    </InspectorDisclosure>
+    </>
   )
 }

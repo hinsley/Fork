@@ -74,7 +74,7 @@ impl WasmCycleManifold2DRunner {
             &floquet_multipliers,
             settings,
         )
-        .map_err(|e| JsValue::from_str(&format!("Cycle manifold computation failed: {}", e)))?;
+        .map_err(|e| crate::diagnostics::error_to_js(e.context("Cycle manifold computation failed")))?;
         let points = branch.points.len();
         let rings = match branch.manifold_geometry.as_ref() {
             Some(ManifoldGeometry::Surface(surface)) => surface.ring_offsets.len(),

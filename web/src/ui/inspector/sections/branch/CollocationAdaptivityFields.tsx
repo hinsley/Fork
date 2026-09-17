@@ -1,4 +1,5 @@
 import type { CollocationAdaptivityDraft } from '../../collocationAdaptivity'
+import { InspectorSubDisclosure } from '../../selectionSession'
 
 export function CollocationAdaptivityFields({
   draft,
@@ -12,8 +13,7 @@ export function CollocationAdaptivityFields({
   const enabled = draft.adaptiveCollocationEnabled ?? true
 
   return (
-    <>
-      <h4 className="inspector-subheading">Adaptive collocation mesh</h4>
+    <InspectorSubDisclosure title="Adaptive collocation mesh" testId={`${testIdPrefix}-adaptive-mesh-toggle`}>
       <label>
         <input
           type="checkbox"
@@ -71,6 +71,6 @@ export function CollocationAdaptivityFields({
           data-testid={`${testIdPrefix}-adaptive-max-mesh-points`}
         />
       </label>
-    </>
+    </InspectorSubDisclosure>
   )
 }

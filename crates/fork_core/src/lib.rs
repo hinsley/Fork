@@ -54,6 +54,7 @@
 pub mod analysis;
 pub mod autodiff;
 pub mod continuation;
+pub mod diagnostics;
 pub mod equation_engine;
 pub mod equilibrium;
 pub mod event_series;

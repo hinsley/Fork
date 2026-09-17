@@ -1,4 +1,5 @@
-import { printProgress, printProgressComplete } from '../format';
+import { formatError, printProgress, printProgressComplete, printWarning } from '../format';
+import type { CollocationAdaptationReport } from '../types';
 import {
   ContinuationBranchData,
   ContinuationProgress,
@@ -27,7 +28,7 @@ function computeBatchSize(maxSteps: number): number {
 type ContinuationRunner<T> = {
   run_steps(batchSize: number): ContinuationProgress;
   get_progress(): ContinuationProgress;
-  get_adaptation_report?(): import('../types').CollocationAdaptationReport;
+  get_adaptation_report?(): CollocationAdaptationReport;
   get_result(): T;
 };
 
@@ -48,8 +49,6 @@ function runContinuationRunnerWithProgress<T>(
     printProgress(progress.current_step, progress.max_steps, label);
   }
 
-  printProgressComplete(label);
-
   // Reports must be captured before `get_result()`, which consumes the Rust
   // runner handle. Preserve them on the same branch payload used by storage.
   const collocationAdaptation = runner.get_adaptation_report?.();
@@ -59,9 +58,19 @@ function runContinuationRunnerWithProgress<T>(
     typeof result === 'object' &&
     result !== null
   ) {
-    (result as { collocation_adaptation?: import('../types').CollocationAdaptationReport })
+    (result as { collocation_adaptation?: CollocationAdaptationReport })
       .collocation_adaptation = collocationAdaptation;
   }
+  const branches = Array.isArray(result) ? result : [result];
+  let stopped = false;
+  for (const branch of branches) {
+    if (branch && typeof branch === 'object' && 'termination' in branch && branch.termination) {
+      if (!stopped) console.log();
+      stopped = true;
+      printWarning(`${label} stopped early; accepted points retained.\n${formatError(branch.termination)}`);
+    }
+  }
+  if (!stopped) printProgressComplete(label);
   return result;
 }
 
@@ -357,7 +366,7 @@ export function runIsoperiodicCurveWithProgress(
 
     return runContinuationRunnerWithProgress(runner, label);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = formatError(error);
     const shouldFallback =
       message.includes('Isoperiodic curve continuation runner is unavailable') ||
       message.includes('WasmIsoperiodicCurveRunner');

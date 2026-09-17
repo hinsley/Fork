@@ -1085,7 +1085,7 @@ fn build_homoclinic_shooting_extension(
             resume_step_size,
             settings,
         )
-        .map_err(|error| JsValue::from_str(&format!("Continuation init failed: {}", error)))?
+        .map_err(|error| crate::diagnostics::error_to_js(error.context("Continuation init failed")))?
     } else {
         if neighbor_idx.is_none() {
             return Err(JsValue::from_str(
@@ -1122,7 +1122,7 @@ fn build_homoclinic_shooting_extension(
             heteroclinic_events: None,
         };
         ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
-            .map_err(|error| JsValue::from_str(&format!("Continuation init failed: {}", error)))?
+            .map_err(|error| crate::diagnostics::error_to_js(error.context("Continuation init failed")))?
     };
     runner.set_branch_type(merge.branch.branch_type.clone());
     runner.set_upoldp(merge.branch.upoldp.clone());
@@ -1417,7 +1417,7 @@ impl WasmContinuationExtensionRunner {
                         resume_step_size,
                         settings,
                     )
-                    .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?
+                    .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation init failed")))?
                 } else {
                     let mut tangent = if let Some(secant) = secant_direction.as_ref() {
                         secant.clone()
@@ -1578,7 +1578,7 @@ impl WasmContinuationExtensionRunner {
                         resume_step_size,
                         settings,
                     )
-                    .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?
+                    .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation init failed")))?
                 } else {
                     let mut tangent = if let Some(secant) = secant_direction.as_ref() {
                         secant.clone()
@@ -2056,7 +2056,7 @@ impl WasmContinuationExtensionRunner {
                         resume_step_size,
                         settings,
                     )
-                    .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?
+                    .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation init failed")))?
                 } else {
                     if neighbor_idx.is_none() {
                         return Err(JsValue::from_str(
@@ -2148,22 +2148,22 @@ impl WasmContinuationExtensionRunner {
         let result = match self.runner.as_mut() {
             Some(ExtensionRunnerKind::Equilibrium { runner, .. }) => runner
                 .run_steps(batch_size as usize)
-                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+                .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation step failed")))?,
             Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => runner
                 .run_steps(batch_size as usize)
-                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+                .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation step failed")))?,
             Some(ExtensionRunnerKind::Homoclinic { runner, .. }) => runner
                 .run_steps(batch_size as usize)
-                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+                .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation step failed")))?,
             Some(ExtensionRunnerKind::Heteroclinic { runner, .. }) => runner
                 .run_steps(batch_size as usize)
-                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+                .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation step failed")))?,
             Some(ExtensionRunnerKind::HeteroclinicShooting { runner, .. }) => runner
                 .run_steps(batch_size as usize)
-                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+                .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation step failed")))?,
             Some(ExtensionRunnerKind::HomoclinicShooting { runner, .. }) => runner
                 .run_steps(batch_size as usize)
-                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+                .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation step failed")))?,
             None => return Err(JsValue::from_str("Runner not initialized")),
         };
 
@@ -2505,6 +2505,7 @@ impl WasmContinuationExtensionRunner {
         if branch.homoc_context.is_none() {
             branch.homoc_context = extension.homoc_context;
         }
+        branch.termination = extension.termination;
 
         Ok(ExtensionBranchResult {
             branch,
@@ -2563,16 +2564,14 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn extension_runner_rejects_empty_branch() {
-        let branch = ContinuationBranch {
-            points: Vec::new(),
-            bifurcations: Vec::new(),
-            indices: Vec::new(),
-            branch_type: BranchType::Equilibrium,
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: Vec::new(),
+        bifurcations: Vec::new(),
+        indices: Vec::new(),
+        branch_type: BranchType::Equilibrium,
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
         let branch_val = to_value(&branch).expect("branch");
 
         let result = WasmContinuationExtensionRunner::new(
@@ -2598,28 +2597,26 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn extension_runner_rejects_limit_cycle_branches_for_map_systems() {
-        let branch = ContinuationBranch {
-            points: vec![ContinuationPoint {
-                state: vec![1.0, 1.0, 2.0],
-                param_value: 0.0,
-                stability: BifurcationType::None,
-                eigenvalues: Vec::new(),
-                cycle_points: None,
-                homoclinic_events: None,
-                heteroclinic_events: None,
-            }],
-            bifurcations: Vec::new(),
-            indices: vec![0],
-            branch_type: BranchType::LimitCycle {
-                ntst: 1,
-                ncol: 1,
-                normalized_mesh: vec![0.0, 1.0],
-            },
-            upoldp: Some(vec![vec![1.0]]),
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: vec![ContinuationPoint {
+            state: vec![1.0, 1.0, 2.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+            homoclinic_events: None,
+            heteroclinic_events: None,
+        }],
+        bifurcations: Vec::new(),
+        indices: vec![0],
+        branch_type: BranchType::LimitCycle {
+            ntst: 1,
+            ncol: 1,
+            normalized_mesh: vec![0.0, 1.0],
+        },
+        upoldp: Some(vec![vec![1.0]]),
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
         let branch_val = to_value(&branch).expect("branch");
 
         let result = WasmContinuationExtensionRunner::new(
@@ -2644,24 +2641,22 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn extension_runner_fills_missing_indices() {
-        let branch = ContinuationBranch {
-            points: vec![ContinuationPoint {
-                state: vec![0.0],
-                param_value: 0.0,
-                stability: BifurcationType::None,
-                eigenvalues: Vec::new(),
-                cycle_points: None,
-                homoclinic_events: None,
-                heteroclinic_events: None,
-            }],
-            bifurcations: Vec::new(),
-            indices: Vec::new(),
-            branch_type: BranchType::Equilibrium,
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: vec![ContinuationPoint {
+            state: vec![0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+            homoclinic_events: None,
+            heteroclinic_events: None,
+        }],
+        bifurcations: Vec::new(),
+        indices: Vec::new(),
+        branch_type: BranchType::Equilibrium,
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
         let branch_val = to_value(&branch).expect("branch");
 
         let mut runner = WasmContinuationExtensionRunner::new(
@@ -2687,35 +2682,33 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn extension_runner_merges_indices_after_step() {
-        let branch = ContinuationBranch {
-            points: vec![
-                ContinuationPoint {
-                    state: vec![1.0],
-                    param_value: 1.0,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-                ContinuationPoint {
-                    state: vec![1.1],
-                    param_value: 1.1,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-            ],
-            bifurcations: Vec::new(),
-            indices: vec![0, 1],
-            branch_type: BranchType::Equilibrium,
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: vec![
+            ContinuationPoint {
+                state: vec![1.0],
+                param_value: 1.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+            ContinuationPoint {
+                state: vec![1.1],
+                param_value: 1.1,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+        ],
+        bifurcations: Vec::new(),
+        indices: vec![0, 1],
+        branch_type: BranchType::Equilibrium,
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
         let branch_val = to_value(&branch).expect("branch");
 
         let mut runner = WasmContinuationExtensionRunner::new(
@@ -2741,43 +2734,41 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn extension_runner_caps_resume_seed_first_step_to_local_scale() {
-        let branch = ContinuationBranch {
-            points: vec![
-                ContinuationPoint {
-                    state: vec![1.0],
-                    param_value: 1.0,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-                ContinuationPoint {
-                    state: vec![1.01],
-                    param_value: 1.01,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-            ],
-            bifurcations: Vec::new(),
-            indices: vec![0, 1],
-            branch_type: BranchType::Equilibrium,
-            upoldp: None,
-            homoc_context: None,
-            resume_state: Some(fork_core::continuation::ContinuationResumeState {
-                min_index_seed: None,
-                max_index_seed: Some(fork_core::continuation::ContinuationEndpointSeed {
-                    endpoint_index: 1,
-                    aug_state: vec![1.01, 1.01],
-                    tangent: vec![1.0, 1.0],
-                    step_size: 0.2,
-                }),
+        let branch = ContinuationBranch { termination: None, points: vec![
+            ContinuationPoint {
+                state: vec![1.0],
+                param_value: 1.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+            ContinuationPoint {
+                state: vec![1.01],
+                param_value: 1.01,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+        ],
+        bifurcations: Vec::new(),
+        indices: vec![0, 1],
+        branch_type: BranchType::Equilibrium,
+        upoldp: None,
+        homoc_context: None,
+        resume_state: Some(fork_core::continuation::ContinuationResumeState {
+            min_index_seed: None,
+            max_index_seed: Some(fork_core::continuation::ContinuationEndpointSeed {
+                endpoint_index: 1,
+                aug_state: vec![1.01, 1.01],
+                tangent: vec![1.0, 1.0],
+                step_size: 0.2,
             }),
-            manifold_geometry: None,
-        };
+        }),
+        manifold_geometry: None, };
         let branch_val = to_value(&branch).expect("branch");
 
         let settings = ContinuationSettings {
@@ -2819,35 +2810,33 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn backward_extension_from_forward_initialized_branch_moves_param_outward_on_min_index_side() {
-        let branch = ContinuationBranch {
-            points: vec![
-                ContinuationPoint {
-                    state: vec![0.2],
-                    param_value: 0.2,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-                ContinuationPoint {
-                    state: vec![0.21],
-                    param_value: 0.21,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-            ],
-            bifurcations: Vec::new(),
-            indices: vec![0, 1],
-            branch_type: BranchType::Equilibrium,
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: vec![
+            ContinuationPoint {
+                state: vec![0.2],
+                param_value: 0.2,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+            ContinuationPoint {
+                state: vec![0.21],
+                param_value: 0.21,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+        ],
+        bifurcations: Vec::new(),
+        indices: vec![0, 1],
+        branch_type: BranchType::Equilibrium,
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
         let branch_val = to_value(&branch).expect("branch");
 
         let mut runner = WasmContinuationExtensionRunner::new(
@@ -2886,44 +2875,42 @@ mod tests {
         // Intentional non-monotonic storage order:
         // array position is [idx 0, idx -1, idx +1]. Endpoint selection must use signed indices,
         // not first/last array position.
-        let branch = ContinuationBranch {
-            points: vec![
-                ContinuationPoint {
-                    state: vec![0.2],
-                    param_value: 0.2,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-                ContinuationPoint {
-                    state: vec![0.1],
-                    param_value: 0.1,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-                ContinuationPoint {
-                    state: vec![0.3],
-                    param_value: 0.3,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-            ],
-            bifurcations: Vec::new(),
-            indices: vec![0, -1, 1],
-            branch_type: BranchType::Equilibrium,
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: vec![
+            ContinuationPoint {
+                state: vec![0.2],
+                param_value: 0.2,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+            ContinuationPoint {
+                state: vec![0.1],
+                param_value: 0.1,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+            ContinuationPoint {
+                state: vec![0.3],
+                param_value: 0.3,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+        ],
+        bifurcations: Vec::new(),
+        indices: vec![0, -1, 1],
+        branch_type: BranchType::Equilibrium,
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
         let branch_val = to_value(&branch).expect("branch");
 
         let mut runner = WasmContinuationExtensionRunner::new(
@@ -2965,36 +2952,34 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn homoclinic_extension_requires_saved_fixed_metadata_when_extras_not_free() {
-        let branch = ContinuationBranch {
-            points: vec![ContinuationPoint {
-                state: vec![0.0],
-                param_value: 0.0,
-                stability: BifurcationType::None,
-                eigenvalues: Vec::new(),
-                cycle_points: None,
-                homoclinic_events: None,
-                heteroclinic_events: None,
-            }],
-            bifurcations: Vec::new(),
-            indices: vec![0],
-            branch_type: BranchType::HomoclinicCurve {
-                ntst: 2,
-                ncol: 1,
-                discretization: fork_core::continuation::HomoclinicDiscretization::Collocation,
-                normalized_mesh: Vec::new(),
-                collocation_adaptivity: Default::default(),
-                collocation_adaptation: None,
-                param1_name: "a".to_string(),
-                param2_name: "b".to_string(),
-                free_time: false,
-                free_eps0: true,
-                free_eps1: true,
-            },
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: vec![ContinuationPoint {
+            state: vec![0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+            homoclinic_events: None,
+            heteroclinic_events: None,
+        }],
+        bifurcations: Vec::new(),
+        indices: vec![0],
+        branch_type: BranchType::HomoclinicCurve {
+            ntst: 2,
+            ncol: 1,
+            discretization: fork_core::continuation::HomoclinicDiscretization::Collocation,
+            normalized_mesh: Vec::new(),
+            collocation_adaptivity: Default::default(),
+            collocation_adaptation: None,
+            param1_name: "a".to_string(),
+            param2_name: "b".to_string(),
+            free_time: false,
+            free_eps0: true,
+            free_eps1: true,
+        },
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
         let branch_val = to_value(&branch).expect("branch");
 
         let result = WasmContinuationExtensionRunner::new(
@@ -3029,48 +3014,46 @@ mod tests {
         // Intentional non-monotonic storage order:
         // ensure endpoint-derived phase data (upoldp/anchor direction inputs) comes from
         // the signed min-index side for backward extension, not from array position.
-        let branch = ContinuationBranch {
-            points: vec![
-                ContinuationPoint {
-                    state: vec![10.0, 100.0, 7.0],
-                    param_value: 0.0,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-                ContinuationPoint {
-                    state: vec![2.0, 20.0, 3.0],
-                    param_value: 0.0,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-                ContinuationPoint {
-                    state: vec![30.0, 300.0, 5.0],
-                    param_value: 0.0,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-            ],
-            bifurcations: Vec::new(),
-            indices: vec![0, -1, 2],
-            branch_type: BranchType::LimitCycle {
-                ntst: 1,
-                ncol: 1,
-                normalized_mesh: vec![0.0, 1.0],
+        let branch = ContinuationBranch { termination: None, points: vec![
+            ContinuationPoint {
+                state: vec![10.0, 100.0, 7.0],
+                param_value: 0.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
             },
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+            ContinuationPoint {
+                state: vec![2.0, 20.0, 3.0],
+                param_value: 0.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+            ContinuationPoint {
+                state: vec![30.0, 300.0, 5.0],
+                param_value: 0.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+        ],
+        bifurcations: Vec::new(),
+        indices: vec![0, -1, 2],
+        branch_type: BranchType::LimitCycle {
+            ntst: 1,
+            ncol: 1,
+            normalized_mesh: vec![0.0, 1.0],
+        },
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
         let branch_val = to_value(&branch).expect("branch");
 
         let mut runner = WasmContinuationExtensionRunner::new(
@@ -3980,32 +3963,30 @@ mod orientation_tests {
 
     #[test]
     fn select_resume_seed_prefers_requested_side_and_validates_dimensions() {
-        let branch = ContinuationBranch {
-            points: vec![ContinuationPoint {
-                state: vec![0.0],
-                param_value: 0.0,
-                stability: BifurcationType::None,
-                eigenvalues: Vec::new(),
-                cycle_points: None,
-                homoclinic_events: None,
-                heteroclinic_events: None,
-            }],
-            bifurcations: Vec::new(),
-            indices: vec![3],
-            branch_type: BranchType::Equilibrium,
-            upoldp: None,
-            homoc_context: None,
-            resume_state: Some(fork_core::continuation::ContinuationResumeState {
-                min_index_seed: None,
-                max_index_seed: Some(fork_core::continuation::ContinuationEndpointSeed {
-                    endpoint_index: 3,
-                    aug_state: vec![0.0, 0.0],
-                    tangent: vec![1.0, 0.0],
-                    step_size: 0.02,
-                }),
+        let branch = ContinuationBranch { termination: None, points: vec![ContinuationPoint {
+            state: vec![0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+            homoclinic_events: None,
+            heteroclinic_events: None,
+        }],
+        bifurcations: Vec::new(),
+        indices: vec![3],
+        branch_type: BranchType::Equilibrium,
+        upoldp: None,
+        homoc_context: None,
+        resume_state: Some(fork_core::continuation::ContinuationResumeState {
+            min_index_seed: None,
+            max_index_seed: Some(fork_core::continuation::ContinuationEndpointSeed {
+                endpoint_index: 3,
+                aug_state: vec![0.0, 0.0],
+                tangent: vec![1.0, 0.0],
+                step_size: 0.02,
             }),
-            manifold_geometry: None,
-        };
+        }),
+        manifold_geometry: None, };
 
         let endpoint_aug = DVector::from_vec(vec![0.0, 0.0]);
         let seed = super::select_resume_seed(&branch, true, 3, &endpoint_aug).expect("seed");

@@ -19,7 +19,26 @@ Impact:
 References:
 ```
 
-### 2026-08-21: Assemble LPC curve Jacobians by bordered adjoint instead of finite differences
+### 2026-09-16: Concise persisted CalculationDiagnostic for numerical failures
+Context:
+Equilibrium/PALC failures reached users as string-only thrown errors, and early-stopped
+continuation branches returned through the success path with no termination reason.
+Decision:
+`fork_core::diagnostics::CalculationDiagnostic` carries `kind`, short `message`, one
+`suggestion`, and optional finite scalars (iterations, max_iterations, residual_norm,
+tolerance, step_size, min_step_size). WASM throws `{message, diagnostic}` envelopes; plain
+errors keep full anyhow chains as strings. Web/CLI normalize both shapes without classifying
+by message text. Failed equilibrium attempts persist `lastRun.diagnostic`; early-stopped
+branches persist `data.termination` and keep their accepted points. Never convert a partial
+branch into an error.
+Why:
+Users must see why a calculation stopped and what to try next without losing valid results.
+Impact:
+`crates/fork_core/src/diagnostics.rs`, `crates/fork_wasm/src/*`, `web/src/compute/*`,
+`web/src/system/types.ts`, `web/src/state/appState.tsx`, `web/src/ui/inspector/`,
+`cli/src/{types,format}.ts`. Extend this shape rather than inventing per-solver error types.
+References:
+`docs/progress-reporting.md`
 Context:
 Profiling the MLfast LPC curve workload showed 77 percent of runtime inside
 `LPCCurveProblem::extended_jacobian`: each of the m+1 finite-difference columns re-ran a full

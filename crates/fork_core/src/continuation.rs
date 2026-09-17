@@ -1,3 +1,4 @@
+use crate::diagnostics::CalculationDiagnostic;
 // NOTE: The submodules in continuation/ (equilibrium, periodic, problem)
 // contain continuation problem implementations.
 
@@ -264,24 +265,22 @@ pub fn continue_with_problem<P: ContinuationProblem>(
     };
     let mut prev_homoclinic_events = initial_homoclinic_events.clone();
     let mut prev_heteroclinic_events = initial_heteroclinic_events.clone();
-    let mut branch = ContinuationBranch {
-        points: vec![ContinuationPoint {
-            state: initial_point.state.clone(),
-            param_value: initial_point.param_value,
-            stability: BifurcationType::None,
-            eigenvalues: initial_diag.eigenvalues,
-            cycle_points: initial_diag.cycle_points.clone(),
-            homoclinic_events: initial_homoclinic_events,
-            heteroclinic_events: initial_heteroclinic_events,
-        }],
-        bifurcations: Vec::new(),
-        indices: vec![0],
-        branch_type: BranchType::default(),
-        upoldp: None,
-        homoc_context: None,
-        resume_state: None,
-        manifold_geometry: None,
-    };
+    let mut branch = ContinuationBranch { termination: None, points: vec![ContinuationPoint {
+        state: initial_point.state.clone(),
+        param_value: initial_point.param_value,
+        stability: BifurcationType::None,
+        eigenvalues: initial_diag.eigenvalues,
+        cycle_points: initial_diag.cycle_points.clone(),
+        homoclinic_events: initial_homoclinic_events,
+        heteroclinic_events: initial_heteroclinic_events,
+    }],
+    bifurcations: Vec::new(),
+    indices: vec![0],
+    branch_type: BranchType::default(),
+    upoldp: None,
+    homoc_context: None,
+    resume_state: None,
+    manifold_geometry: None, };
 
     // Compute initial tangent and orient it based on requested parameter direction.
     let mut prev_tangent = compute_tangent_from_problem(problem, &prev_aug)?;
@@ -316,7 +315,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             settings.step_tolerance,
         )?;
 
-        if let Some(corrected_aug) = corrected_opt {
+        if let Ok(corrected_aug) = corrected_opt {
             if !corrected_aug.iter().all(|v| v.is_finite()) {
                 consecutive_failures += 1;
                 step_size *= 0.5;
@@ -507,6 +506,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             if step_size < settings.min_step_size
                 || consecutive_failures >= MAX_CONSECUTIVE_FAILURES
             {
+                branch.termination = Some(corrected_opt.unwrap_err().at_step(step_size * 2.0, settings.min_step_size));
                 break;
             }
         }
@@ -933,24 +933,22 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
         } else {
             None
         };
-        let branch = ContinuationBranch {
-            points: vec![ContinuationPoint {
-                state: prev_aug.rows(1, dim).iter().cloned().collect(),
-                param_value: prev_aug[0],
-                stability: BifurcationType::None,
-                eigenvalues: initial_diag.eigenvalues.clone(),
-                cycle_points: initial_diag.cycle_points.clone(),
-                homoclinic_events: initial_homoclinic_events.clone(),
-                heteroclinic_events: initial_heteroclinic_events.clone(),
-            }],
-            bifurcations: Vec::new(),
-            indices: vec![0],
-            branch_type: BranchType::default(),
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: vec![ContinuationPoint {
+            state: prev_aug.rows(1, dim).iter().cloned().collect(),
+            param_value: prev_aug[0],
+            stability: BifurcationType::None,
+            eigenvalues: initial_diag.eigenvalues.clone(),
+            cycle_points: initial_diag.cycle_points.clone(),
+            homoclinic_events: initial_homoclinic_events.clone(),
+            heteroclinic_events: initial_heteroclinic_events.clone(),
+        }],
+        bifurcations: Vec::new(),
+        indices: vec![0],
+        branch_type: BranchType::default(),
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
         Ok((
             initial_diag,
             initial_homoclinic_events,
@@ -1214,7 +1212,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             self.settings.step_tolerance,
         )?;
 
-        if let Some(corrected_aug) = corrected_opt {
+        if let Ok(corrected_aug) = corrected_opt {
             if !corrected_aug.iter().all(|v| v.is_finite()) {
                 self.consecutive_failures += 1;
                 self.step_size *= 0.5;
@@ -1428,6 +1426,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             if self.step_size < self.settings.min_step_size
                 || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES
             {
+                self.branch.termination = Some(corrected_opt.unwrap_err().at_step(self.step_size * 2.0, self.settings.min_step_size));
                 return Ok(SingleStepOutcome::Terminated);
             }
         }
@@ -2019,6 +2018,7 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
         }
         branch.resume_state = Some(merged_resume);
     }
+    branch.termination = extension.termination;
 
     Ok(branch)
 }
@@ -2058,24 +2058,22 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
     };
     let mut prev_homoclinic_events = initial_homoclinic_events.clone();
     let mut prev_heteroclinic_events = initial_heteroclinic_events.clone();
-    let mut branch = ContinuationBranch {
-        points: vec![ContinuationPoint {
-            state: initial_point.state.clone(),
-            param_value: initial_point.param_value,
-            stability: BifurcationType::None,
-            eigenvalues: initial_diag.eigenvalues,
-            cycle_points: initial_diag.cycle_points.clone(),
-            homoclinic_events: initial_homoclinic_events,
-            heteroclinic_events: initial_heteroclinic_events,
-        }],
-        bifurcations: Vec::new(),
-        indices: vec![0],
-        branch_type: BranchType::default(),
-        upoldp: None,
-        homoc_context: None,
-        resume_state: None,
-        manifold_geometry: None,
-    };
+    let mut branch = ContinuationBranch { termination: None, points: vec![ContinuationPoint {
+        state: initial_point.state.clone(),
+        param_value: initial_point.param_value,
+        stability: BifurcationType::None,
+        eigenvalues: initial_diag.eigenvalues,
+        cycle_points: initial_diag.cycle_points.clone(),
+        homoclinic_events: initial_homoclinic_events,
+        heteroclinic_events: initial_heteroclinic_events,
+    }],
+    bifurcations: Vec::new(),
+    indices: vec![0],
+    branch_type: BranchType::default(),
+    upoldp: None,
+    homoc_context: None,
+    resume_state: None,
+    manifold_geometry: None, };
 
     // Use provided tangent (already oriented correctly)
     let mut prev_tangent = normalize_tangent_or_compute(problem, &prev_aug, initial_tangent)?;
@@ -2101,7 +2099,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             settings.step_tolerance,
         )?;
 
-        if let Some(corrected_aug) = corrected_opt {
+        if let Ok(corrected_aug) = corrected_opt {
             if !corrected_aug.iter().all(|v| v.is_finite()) {
                 consecutive_failures += 1;
                 step_size *= 0.5;
@@ -2273,6 +2271,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             if step_size < settings.min_step_size
                 || consecutive_failures >= MAX_CONSECUTIVE_FAILURES
             {
+                branch.termination = Some(corrected_opt.unwrap_err().at_step(step_size * 2.0, settings.min_step_size));
                 break;
             }
         }
@@ -2390,8 +2389,8 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
         )?;
 
         let corrected_aug = match corrected {
-            Some(aug) => aug,
-            None => {
+            Ok(aug) => aug,
+            Err(_) => {
                 // Correction failed, try midpoint without correction
                 mid_aug
             }
@@ -2594,7 +2593,7 @@ fn correct_with_problem<P: ContinuationProblem>(
     max_iters: usize,
     residual_tolerance: f64,
     step_tolerance: f64,
-) -> Result<Option<DVector<f64>>> {
+) -> Result<std::result::Result<DVector<f64>, CalculationDiagnostic>> {
     let dim = problem.dimension();
     let mut current = prediction.clone();
 
@@ -2613,7 +2612,7 @@ fn correct_with_problem<P: ContinuationProblem>(
         }
     };
 
-    for _iter in 0..max_iters {
+    for iteration in 0..max_iters {
         // Compute residual F(x)
         let mut residual = DVector::zeros(dim);
         problem.residual(&current, &mut residual)?;
@@ -2622,10 +2621,10 @@ fn correct_with_problem<P: ContinuationProblem>(
 
         // Check convergence: F(x) should be small.
         if res_norm <= residual_tolerance {
-            return Ok(Some(current));
+            return Ok(Ok(current));
         }
         if !res_norm.is_finite() {
-            return Ok(None);
+            return Ok(Err(CalculationDiagnostic::numerical("nonfinite", "Continuation corrector", iteration, max_iters, res_norm, residual_tolerance)));
         }
 
         // Get the extended Jacobian [dF/dp | dF/dx], dim x (dim+1)
@@ -2650,7 +2649,7 @@ fn correct_with_problem<P: ContinuationProblem>(
             let delta_norm = palc_norm(problem, &current, &delta)?;
 
             if !delta_norm.is_finite() {
-                return Ok(None);
+                return Ok(Err(CalculationDiagnostic::numerical("nonfinite", "Continuation corrector", iteration, max_iters, res_norm, residual_tolerance)));
             }
 
             // Damping for large steps
@@ -2669,10 +2668,12 @@ fn correct_with_problem<P: ContinuationProblem>(
                 let mut updated_residual = DVector::zeros(dim);
                 problem.residual(&current, &mut updated_residual)?;
                 let updated_norm = residual_norm(&updated_residual);
-                return Ok((updated_norm <= residual_tolerance).then_some(current));
+                return Ok(if updated_norm <= residual_tolerance { Ok(current) } else {
+                    Err(CalculationDiagnostic::numerical(if updated_norm.is_finite() { "stalled" } else { "nonfinite" }, "Continuation corrector", iteration + 1, max_iters, updated_norm, residual_tolerance))
+                });
             }
         } else {
-            return Ok(None);
+            return Ok(Err(CalculationDiagnostic::numerical("singular_jacobian", "Continuation corrector", iteration, max_iters, res_norm, residual_tolerance)));
         }
     }
 
@@ -2682,9 +2683,9 @@ fn correct_with_problem<P: ContinuationProblem>(
     let final_norm = residual_norm(&final_res);
 
     if final_norm <= residual_tolerance {
-        Ok(Some(current))
+        Ok(Ok(current))
     } else {
-        Ok(None)
+        Ok(Err(CalculationDiagnostic::numerical(if final_norm.is_finite() { "iteration_limit" } else { "nonfinite" }, "Continuation corrector", max_iters, max_iters, final_norm, residual_tolerance)))
     }
 }
 
@@ -2993,24 +2994,22 @@ pub fn continue_parameter(
 
     let initial_diag = compute_point_diagnostics(system, kind, &current_aug, param_index)?;
 
-    let branch = ContinuationBranch {
-        points: vec![ContinuationPoint {
-            state: current_aug.rows(1, dim).iter().cloned().collect(),
-            param_value: current_aug[0],
-            stability: BifurcationType::None,
-            eigenvalues: initial_diag.eigenvalues,
-            cycle_points: initial_diag.cycle_points,
-            homoclinic_events: None,
-            heteroclinic_events: None,
-        }],
-        bifurcations: Vec::new(),
-        indices: vec![0],
-        branch_type: BranchType::Equilibrium,
-        upoldp: None,
-        homoc_context: None,
-        resume_state: None,
-        manifold_geometry: None,
-    };
+    let branch = ContinuationBranch { termination: None, points: vec![ContinuationPoint {
+        state: current_aug.rows(1, dim).iter().cloned().collect(),
+        param_value: current_aug[0],
+        stability: BifurcationType::None,
+        eigenvalues: initial_diag.eigenvalues,
+        cycle_points: initial_diag.cycle_points,
+        homoclinic_events: None,
+        heteroclinic_events: None,
+    }],
+    bifurcations: Vec::new(),
+    indices: vec![0],
+    branch_type: BranchType::Equilibrium,
+    upoldp: None,
+    homoc_context: None,
+    resume_state: None,
+    manifold_geometry: None, };
 
     extend_branch(system, kind, branch, param_index, settings, forward)
 }
@@ -4709,6 +4708,45 @@ mod tests {
         }
     }
 
+    struct FailingCorrectorProblem;
+
+    impl ContinuationProblem for FailingCorrectorProblem {
+        fn dimension(&self) -> usize { 1 }
+        fn residual(&mut self, aug: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            out[0] = if aug[0] > 0.1 { 1.0 } else { aug[1] - aug[0] };
+            Ok(())
+        }
+        fn extended_jacobian(&mut self, _aug: &DVector<f64>) -> Result<DMatrix<f64>> {
+            Ok(DMatrix::from_row_slice(1, 2, &[-1.0, 1.0]))
+        }
+        fn solve_bordered_linear_system(&mut self, _aug: &DVector<f64>, _jac: &DMatrix<f64>, _border: &DVector<f64>, _rhs: &DVector<f64>) -> Result<Option<DVector<f64>>> {
+            Ok(None)
+        }
+        fn diagnostics(&mut self, aug: &DVector<f64>) -> Result<PointDiagnostics> {
+            LinearRelationProblem.diagnostics(aug)
+        }
+    }
+
+    #[test]
+    fn partial_branch_retains_corrector_failure_and_accepted_prefix() {
+        let initial = ContinuationPoint {
+            state: vec![0.0], param_value: 0.0, stability: BifurcationType::None,
+            eigenvalues: Vec::new(), cycle_points: None, homoclinic_events: None, heteroclinic_events: None,
+        };
+        let settings = constant_settings(5);
+        let batch = continue_with_problem(&mut FailingCorrectorProblem, initial.clone(), settings, true).unwrap();
+        let mut runner = ContinuationRunner::new(FailingCorrectorProblem, initial, settings, true).unwrap();
+        runner.run_steps(5).unwrap();
+        for branch in [&batch, runner.branch()] {
+            assert_eq!(branch.points.len(), 2, "rejected iterate must not enter accepted prefix");
+            assert!(branch.points[1].param_value < 0.1);
+            let report = branch.termination.as_ref().expect("partial stop report");
+            assert_eq!(report.kind, "singular_jacobian");
+            assert_eq!(report.residual_norm, Some(1.0));
+            assert_eq!(report.min_step_size, Some(settings.min_step_size));
+        }
+    }
+
     struct SimpleFoldProblem;
 
     impl ContinuationProblem for SimpleFoldProblem {
@@ -6247,35 +6285,33 @@ mod tests {
         };
 
         let mut problem = ZeroResidualProblem::default();
-        let branch = ContinuationBranch {
-            points: vec![
-                ContinuationPoint {
-                    state: vec![0.0],
-                    param_value: 0.0,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-                ContinuationPoint {
-                    state: vec![0.0],
-                    param_value: 0.2,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-            ],
-            bifurcations: Vec::new(),
-            indices: Vec::new(),
-            branch_type: BranchType::default(),
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: vec![
+            ContinuationPoint {
+                state: vec![0.0],
+                param_value: 0.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+            ContinuationPoint {
+                state: vec![0.0],
+                param_value: 0.2,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+        ],
+        bifurcations: Vec::new(),
+        indices: Vec::new(),
+        branch_type: BranchType::default(),
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
 
         let extended = extend_branch_with_problem(&mut problem, branch, settings, true)
             .expect("extend branch with missing indices");
@@ -6457,7 +6493,7 @@ mod tests {
             0.3,
         )
         .expect("loose corrector result");
-        assert!(loose_result.is_none(), "stagnation must not be accepted");
+        assert_eq!(loose_result.unwrap_err().kind, "stalled", "stagnation must not be accepted");
 
         let mut strict = InexactJacobianProblem { residual_calls: 0 };
         let strict_result = correct_with_problem(
@@ -6470,7 +6506,7 @@ mod tests {
             1e-12,
         )
         .expect("strict corrector result");
-        assert!(strict_result.is_none());
+        assert_eq!(strict_result.unwrap_err().kind, "iteration_limit");
         assert!(
             loose.residual_calls < strict.residual_calls,
             "step tolerance should stop a stagnating correction early (loose {}, strict {})",
@@ -6780,43 +6816,41 @@ mod tests {
         };
 
         let mut problem = ZeroResidualProblem::default();
-        let branch = ContinuationBranch {
-            points: vec![
-                ContinuationPoint {
-                    state: vec![0.0],
-                    param_value: 0.0,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-                ContinuationPoint {
-                    state: vec![0.0],
-                    param_value: 1.0,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-            ],
-            bifurcations: Vec::new(),
-            indices: vec![0, 1],
-            branch_type: BranchType::default(),
-            upoldp: None,
-            homoc_context: None,
-            resume_state: Some(ContinuationResumeState {
-                min_index_seed: None,
-                max_index_seed: Some(ContinuationEndpointSeed {
-                    endpoint_index: 1,
-                    aug_state: vec![1.0, 0.0],
-                    tangent: vec![-1.0, 0.0],
-                    step_size: 0.05,
-                }),
+        let branch = ContinuationBranch { termination: None, points: vec![
+            ContinuationPoint {
+                state: vec![0.0],
+                param_value: 0.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+            ContinuationPoint {
+                state: vec![0.0],
+                param_value: 1.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+        ],
+        bifurcations: Vec::new(),
+        indices: vec![0, 1],
+        branch_type: BranchType::default(),
+        upoldp: None,
+        homoc_context: None,
+        resume_state: Some(ContinuationResumeState {
+            min_index_seed: None,
+            max_index_seed: Some(ContinuationEndpointSeed {
+                endpoint_index: 1,
+                aug_state: vec![1.0, 0.0],
+                tangent: vec![-1.0, 0.0],
+                step_size: 0.05,
             }),
-            manifold_geometry: None,
-        };
+        }),
+        manifold_geometry: None, };
 
         let extended = extend_branch_with_problem(&mut problem, branch, settings, true)
             .expect("extension with resume seed");
@@ -6841,46 +6875,44 @@ mod tests {
         };
 
         let mut problem = ZeroResidualProblem::default();
-        let branch = ContinuationBranch {
-            points: vec![
-                ContinuationPoint {
-                    state: vec![0.0],
-                    param_value: 0.0,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-                ContinuationPoint {
-                    state: vec![0.0],
-                    param_value: 1.0,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-            ],
-            bifurcations: Vec::new(),
-            indices: vec![0, 1],
-            branch_type: BranchType::default(),
-            upoldp: None,
-            homoc_context: None,
-            resume_state: Some(ContinuationResumeState {
-                min_index_seed: None,
-                max_index_seed: Some(ContinuationEndpointSeed {
-                    endpoint_index: 1,
-                    // This can arise when the displayed endpoint is a refined
-                    // bifurcation but the saved runner state is the unrefined
-                    // accepted point beyond it.
-                    aug_state: vec![0.9, 0.0],
-                    tangent: vec![-1.0, 0.0],
-                    step_size: 0.05,
-                }),
+        let branch = ContinuationBranch { termination: None, points: vec![
+            ContinuationPoint {
+                state: vec![0.0],
+                param_value: 0.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+            ContinuationPoint {
+                state: vec![0.0],
+                param_value: 1.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+        ],
+        bifurcations: Vec::new(),
+        indices: vec![0, 1],
+        branch_type: BranchType::default(),
+        upoldp: None,
+        homoc_context: None,
+        resume_state: Some(ContinuationResumeState {
+            min_index_seed: None,
+            max_index_seed: Some(ContinuationEndpointSeed {
+                endpoint_index: 1,
+                // This can arise when the displayed endpoint is a refined
+                // bifurcation but the saved runner state is the unrefined
+                // accepted point beyond it.
+                aug_state: vec![0.9, 0.0],
+                tangent: vec![-1.0, 0.0],
+                step_size: 0.05,
             }),
-            manifold_geometry: None,
-        };
+        }),
+        manifold_geometry: None, };
 
         let extended = extend_branch_with_problem(&mut problem, branch, settings, true)
             .expect("secant fallback from the visible endpoint");
@@ -6924,43 +6956,41 @@ mod tests {
         };
 
         let mut problem = LinearRelationProblem::default();
-        let branch = ContinuationBranch {
-            points: vec![
-                ContinuationPoint {
-                    state: vec![1.0],
-                    param_value: 1.0,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-                ContinuationPoint {
-                    state: vec![1.01],
-                    param_value: 1.01,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-            ],
-            bifurcations: Vec::new(),
-            indices: vec![0, 1],
-            branch_type: BranchType::default(),
-            upoldp: None,
-            homoc_context: None,
-            resume_state: Some(ContinuationResumeState {
-                min_index_seed: None,
-                max_index_seed: Some(ContinuationEndpointSeed {
-                    endpoint_index: 1,
-                    aug_state: vec![1.01, 1.01],
-                    tangent: vec![1.0, 1.0],
-                    step_size: 0.2,
-                }),
+        let branch = ContinuationBranch { termination: None, points: vec![
+            ContinuationPoint {
+                state: vec![1.0],
+                param_value: 1.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+            ContinuationPoint {
+                state: vec![1.01],
+                param_value: 1.01,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+        ],
+        bifurcations: Vec::new(),
+        indices: vec![0, 1],
+        branch_type: BranchType::default(),
+        upoldp: None,
+        homoc_context: None,
+        resume_state: Some(ContinuationResumeState {
+            min_index_seed: None,
+            max_index_seed: Some(ContinuationEndpointSeed {
+                endpoint_index: 1,
+                aug_state: vec![1.01, 1.01],
+                tangent: vec![1.0, 1.0],
+                step_size: 0.2,
             }),
-            manifold_geometry: None,
-        };
+        }),
+        manifold_geometry: None, };
 
         let extended =
             extend_branch_with_problem(&mut problem, branch, settings, true).expect("extension");
@@ -6987,35 +7017,33 @@ mod tests {
         };
 
         let mut problem = LinearRelationProblem::default();
-        let branch = ContinuationBranch {
-            points: vec![
-                ContinuationPoint {
-                    state: vec![1.0],
-                    param_value: 1.0,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-                ContinuationPoint {
-                    state: vec![1.01],
-                    param_value: 1.01,
-                    stability: BifurcationType::None,
-                    eigenvalues: Vec::new(),
-                    cycle_points: None,
-                    homoclinic_events: None,
-                    heteroclinic_events: None,
-                },
-            ],
-            bifurcations: Vec::new(),
-            indices: vec![0, 1],
-            branch_type: BranchType::default(),
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: vec![
+            ContinuationPoint {
+                state: vec![1.0],
+                param_value: 1.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+            ContinuationPoint {
+                state: vec![1.01],
+                param_value: 1.01,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+                homoclinic_events: None,
+                heteroclinic_events: None,
+            },
+        ],
+        bifurcations: Vec::new(),
+        indices: vec![0, 1],
+        branch_type: BranchType::default(),
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
 
         let extended =
             extend_branch_with_problem(&mut problem, branch, settings, true).expect("extension");

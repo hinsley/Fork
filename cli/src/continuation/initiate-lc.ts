@@ -1,3 +1,4 @@
+import { formatError } from '../format';
 /**
  * Limit Cycle Initiation Module
  * 
@@ -110,7 +111,7 @@ export async function initiateLCFromHopf(
     {
       id: 'limitCycleObjectName',
       label: 'Limit cycle object name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => limitCycleObjectName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -134,7 +135,7 @@ export async function initiateLCFromHopf(
     {
       id: 'branchName',
       label: 'Branch name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => branchName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -156,7 +157,7 @@ export async function initiateLCFromHopf(
     {
       id: 'amplitude',
       label: 'Initial amplitude',
-      section: 'Hopf Initialization',
+      section: 'Initialization',
       getDisplay: () => formatUnset(amplitudeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -170,7 +171,7 @@ export async function initiateLCFromHopf(
     {
       id: 'ntst',
       label: 'Mesh intervals (ntst)',
-      section: 'Collocation Mesh',
+      section: 'Mesh',
       getDisplay: () => formatUnset(ntstInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -184,7 +185,7 @@ export async function initiateLCFromHopf(
     {
       id: 'ncol',
       label: 'Collocation points (ncol)',
-      section: 'Collocation Mesh',
+      section: 'Mesh',
       getDisplay: () => formatUnset(ncolInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -198,7 +199,7 @@ export async function initiateLCFromHopf(
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -212,7 +213,7 @@ export async function initiateLCFromHopf(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Predictor Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -226,7 +227,7 @@ export async function initiateLCFromHopf(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -246,7 +247,7 @@ export async function initiateLCFromHopf(
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -260,7 +261,7 @@ export async function initiateLCFromHopf(
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -276,7 +277,7 @@ export async function initiateLCFromHopf(
   entries.push(...collocationAdaptivityEntries(adaptivityInputs));
 
   while (true) {
-    const result = await runConfigMenu('Initiate Limit Cycle from Hopf', entries);
+    const result = await runConfigMenu('Create limit cycle from Hopf', entries);
     if (result === 'back') {
       return null;
     }
@@ -421,7 +422,7 @@ export async function initiateLCFromHopf(
     return newBranch;
 
   } catch (e) {
-    console.error(chalk.red("Limit Cycle Continuation Failed:"), e);
+    printError(`Limit cycle continuation failed: ${formatError(e)}`);
     return null;
   }
 }
@@ -492,7 +493,7 @@ export async function initiateLCBranchFromPoint(
     {
       id: 'parameter',
       label: 'Continuation parameter',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => {
         const isSame = selectedParamName === sourceBranch.parameterName;
         return isSame ? `${selectedParamName} (same as source)` : selectedParamName;
@@ -516,7 +517,7 @@ export async function initiateLCBranchFromPoint(
     {
       id: 'branchName',
       label: 'Branch name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => formatUnset(branchName),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -537,7 +538,7 @@ export async function initiateLCBranchFromPoint(
     {
       id: 'mesh',
       label: 'Discretization (inherited)',
-      section: 'Collocation Mesh',
+      section: 'Mesh',
       getDisplay: () => `${sourceNtst}×${sourceNcol}`,
       edit: async () => {
         printInfo("NTST/NCOL are inherited from the source branch for safety.");
@@ -546,7 +547,7 @@ export async function initiateLCBranchFromPoint(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -566,7 +567,7 @@ export async function initiateLCBranchFromPoint(
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -580,7 +581,7 @@ export async function initiateLCBranchFromPoint(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Predictor Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -594,7 +595,7 @@ export async function initiateLCBranchFromPoint(
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -608,7 +609,7 @@ export async function initiateLCBranchFromPoint(
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -746,7 +747,7 @@ export async function initiateLCBranchFromPoint(
     return newBranch;
 
   } catch (e) {
-    printError(`Limit Cycle Continuation Failed: ${e}`);
+    printError(`Limit Cycle Continuation Failed: ${formatError(e)}`);
     return null;
   }
 }
@@ -808,7 +809,7 @@ export async function initiateLCFromPD(
     {
       id: 'limitCycleObjectName',
       label: 'Limit cycle object name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => limitCycleObjectName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -832,7 +833,7 @@ export async function initiateLCFromPD(
     {
       id: 'branchName',
       label: 'Branch name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => branchName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -891,7 +892,7 @@ export async function initiateLCFromPD(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1089,7 +1090,7 @@ export async function initiateLCFromPD(
     return newBranch;
 
   } catch (e) {
-    printError(`PD Branching Failed: ${e}`);
+    printError(`PD Branching Failed: ${formatError(e)}`);
     return null;
   }
 }
@@ -1144,7 +1145,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
     {
       id: 'branchName',
       label: 'Branch name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => formatUnset(branchName),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1158,7 +1159,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
     {
       id: 'stability',
       label: 'Manifold stability',
-      section: 'Manifold Selection',
+      section: 'Setup',
       getDisplay: () => stability,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1177,7 +1178,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
     {
       id: 'floquetIndex',
       label: 'Floquet index (optional)',
-      section: 'Manifold Selection',
+      section: 'Setup',
       getDisplay: () => formatUnset(floquetIndexInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1191,7 +1192,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
     {
       id: 'direction',
       label: 'Floquet sheet direction',
-      section: 'Manifold Selection',
+      section: 'Setup',
       getDisplay: () => manifoldDirection,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1210,7 +1211,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
     {
       id: 'algorithm',
       label: 'Algorithm',
-      section: 'Manifold Selection',
+      section: 'Setup',
       getDisplay: () =>
         manifoldAlgorithm === 'IsochronFibers'
           ? 'Isochron fibers (HKO)'
@@ -1314,7 +1315,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
     {
       id: 'maxSteps',
       label: 'Caps: max steps',
-      section: 'Termination Caps',
+      section: 'Resource limits',
       getDisplay: () => maxStepsInput,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1328,7 +1329,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
     {
       id: 'maxPoints',
       label: 'Caps: max points',
-      section: 'Termination Caps',
+      section: 'Resource limits',
       getDisplay: () => maxPointsInput,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1342,7 +1343,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
     {
       id: 'maxRings',
       label: 'Caps: max rings',
-      section: 'Termination Caps',
+      section: 'Resource limits',
       getDisplay: () => maxRingsInput,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1356,7 +1357,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
     {
       id: 'maxVertices',
       label: 'Caps: max vertices',
-      section: 'Termination Caps',
+      section: 'Resource limits',
       getDisplay: () => maxVerticesInput,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1370,7 +1371,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
     {
       id: 'maxTime',
       label: 'Caps: max time',
-      section: 'Termination Caps',
+      section: 'Resource limits',
       getDisplay: () => maxTimeInput,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1502,7 +1503,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
       printSuccess(`2D limit-cycle manifold saved as "${continuation.name}".`);
       return continuation;
     } catch (e) {
-      printError(`2D limit-cycle manifold failed: ${e}`);
+      printError(`2D limit-cycle manifold failed: ${formatError(e)}`);
       return null;
     }
   }

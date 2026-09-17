@@ -34,7 +34,7 @@ export function collocationAdaptivityEntries(
     {
       id: 'adaptiveCollocationEnabled',
       label: 'Adaptive collocation mesh',
-      section: 'Collocation Adaptivity',
+      section: 'Mesh',
       getDisplay: () => (inputs.enabled ? 'Enabled' : 'Disabled'),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -49,7 +49,7 @@ export function collocationAdaptivityEntries(
     {
       id: 'adaptiveRedistributionEnabled',
       label: 'Redistribute before refinement',
-      section: 'Collocation Adaptivity',
+      section: 'Mesh',
       getDisplay: () => (inputs.redistributionEnabled ? 'Enabled' : 'Disabled'),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -64,7 +64,7 @@ export function collocationAdaptivityEntries(
     {
       id: 'adaptiveDefectTolerance',
       label: 'Defect tolerance',
-      section: 'Collocation Adaptivity',
+      section: 'Mesh',
       getDisplay: () => formatUnset(inputs.defectTolerance),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -84,7 +84,7 @@ export function collocationAdaptivityEntries(
     {
       id: 'adaptiveMaxRefinements',
       label: 'Max mesh adaptations',
-      section: 'Collocation Adaptivity',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(inputs.maxRefinements),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -104,7 +104,7 @@ export function collocationAdaptivityEntries(
     {
       id: 'adaptiveMaxMeshPoints',
       label: 'Max mesh intervals',
-      section: 'Collocation Adaptivity',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(inputs.maxMeshPoints),
       edit: async () => {
         const { value } = await inquirer.prompt({

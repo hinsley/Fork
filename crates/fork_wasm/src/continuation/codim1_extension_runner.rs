@@ -880,22 +880,22 @@ impl WasmCodim1CurveExtensionRunner {
         let result = match self.runner.as_mut() {
             Some(Codim1ExtensionRunnerKind::Fold { runner, .. }) => runner
                 .run_steps(batch_size as usize)
-                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+                .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation step failed")))?,
             Some(Codim1ExtensionRunnerKind::Hopf { runner, .. }) => runner
                 .run_steps(batch_size as usize)
-                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+                .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation step failed")))?,
             Some(Codim1ExtensionRunnerKind::LPC { runner, .. }) => runner
                 .run_steps(batch_size as usize)
-                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+                .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation step failed")))?,
             Some(Codim1ExtensionRunnerKind::Isoperiodic { runner, .. }) => runner
                 .run_steps(batch_size as usize)
-                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+                .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation step failed")))?,
             Some(Codim1ExtensionRunnerKind::PD { runner, .. }) => runner
                 .run_steps(batch_size as usize)
-                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+                .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation step failed")))?,
             Some(Codim1ExtensionRunnerKind::NS { runner, .. }) => runner
                 .run_steps(batch_size as usize)
-                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+                .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation step failed")))?,
             None => return Err(JsValue::from_str("Runner not initialized")),
         };
 

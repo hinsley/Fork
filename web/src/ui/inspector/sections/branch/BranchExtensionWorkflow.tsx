@@ -18,7 +18,7 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
 {canExtendBranch ? (
                   <InspectorDisclosure
                     key={`${selectionKey}-branch-extend`}
-                    title="Extend Branch"
+                    title="Extend branch"
                     testId="branch-extend-toggle"
                     defaultOpen={false}
                     actionOnly

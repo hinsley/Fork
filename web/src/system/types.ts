@@ -107,11 +107,24 @@ export interface EquilibriumDeflationTargetConfig {
   shift: number
 }
 
+export interface CalculationDiagnostic {
+  kind: string
+  message: string
+  suggestion?: string
+  iterations?: number
+  max_iterations?: number
+  residual_norm?: number
+  tolerance?: number
+  step_size?: number
+  min_step_size?: number
+}
+
 export interface EquilibriumRunSummary {
   timestamp: string
   success: boolean
   residual_norm?: number
   iterations?: number
+  diagnostic?: CalculationDiagnostic
 }
 
 export interface EquilibriumObject {
@@ -841,6 +854,7 @@ export type BranchType =
     }
 
 export interface ContinuationBranchData {
+  termination?: CalculationDiagnostic
   points: ContinuationPoint[]
   bifurcations: number[]
   indices: number[]

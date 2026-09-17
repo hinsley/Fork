@@ -1,3 +1,4 @@
+import { formatError } from '../format';
 import inquirer from 'inquirer';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
@@ -16,7 +17,7 @@ import { getBranchParams, isValidName, normalizeName } from './utils';
 import { runHomotopySaddleContinuationWithProgress } from './progress';
 
 export const HOMOTOPY_SADDLE_MENU_TITLE =
-  'Method 3: Homotopy-Saddle from Equilibrium';
+  'Continue homotopy saddle from equilibrium';
 
 type HomotopyBranchTypeData = {
   type: 'HomotopySaddleCurve';
@@ -130,7 +131,7 @@ export async function initiateHomotopySaddleFromEquilibrium(
     {
       id: 'param1',
       label: 'First parameter',
-      section: 'Parameters',
+      section: 'Setup',
       getDisplay: () => param1Name,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -151,7 +152,7 @@ export async function initiateHomotopySaddleFromEquilibrium(
     {
       id: 'param2',
       label: 'Second parameter',
-      section: 'Parameters',
+      section: 'Setup',
       getDisplay: () => param2Name,
       edit: async () => {
         const choices = sysConfig.paramNames.filter((name) => name !== param1Name);
@@ -169,7 +170,7 @@ export async function initiateHomotopySaddleFromEquilibrium(
     {
       id: 'ntst',
       label: 'NTST',
-      section: 'Initialization',
+      section: 'Mesh',
       getDisplay: () => formatUnset(ntstInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -183,7 +184,7 @@ export async function initiateHomotopySaddleFromEquilibrium(
     {
       id: 'ncol',
       label: 'NCOL',
-      section: 'Initialization',
+      section: 'Mesh',
       getDisplay: () => formatUnset(ncolInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -286,7 +287,7 @@ export async function initiateHomotopySaddleFromEquilibrium(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Predictor',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -469,7 +470,7 @@ export async function initiateHomotopySaddleFromEquilibrium(
 
     return newBranch;
   } catch (error) {
-    printError(`Method 3 failed: ${error}`);
+    printError(`Method 3 failed: ${formatError(error)}`);
     return null;
   }
 }

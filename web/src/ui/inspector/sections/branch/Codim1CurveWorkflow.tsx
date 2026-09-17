@@ -41,7 +41,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
 {showCodim1CurveContinuations ? (
                   <InspectorDisclosure
                     key={`${selectionKey}-codim1-curves`}
-                    title="Codim-1 Curve Continuations"
+                    title="Codimension-1 curve"
                     testId="codim1-curve-toggle"
                     defaultOpen={false}
                     actionOnly

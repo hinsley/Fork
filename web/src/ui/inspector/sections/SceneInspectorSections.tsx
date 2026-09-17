@@ -22,6 +22,16 @@ export function SceneInspectorSections({
     updateSceneAxisCount,
     updateSceneAxisVariable,
   } = scope
+  const selectedEntriesById = new Map(sceneSelectedEntries.map((entry) => [entry.id, entry]))
+  const displayedEntries = [
+    ...sceneSelectedIds.map((id) => selectedEntriesById.get(id) ?? {
+      id,
+      name: system.nodes[id]?.name ?? id,
+      type: 'Unavailable source — uncheck to remove',
+      visible: true,
+    }),
+    ...sceneFilteredEntries.filter((entry) => !sceneSelectedSet.has(entry.id)),
+  ]
   return <>
 {scene ? (
             <div className="inspector-section">
@@ -136,42 +146,17 @@ export function SceneInspectorSections({
                     data-testid="scene-object-search"
                   />
                 </label>
-                {sceneSelectedEntries.length > 0 ? (
-                  <div className="scene-object-selected">
-                    {sceneSelectedEntries.map((entry) => (
-                      <div className="scene-object-selected__row" key={`scene-sel-${entry.id}`}>
-                        <div className="scene-object-selected__info">
-                          <span>{entry.name}</span>
-                          <span className="scene-object-selected__meta">
-                            {entry.type.replace('_', ' ')}
-                            {entry.visible ? '' : ' · hidden'}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          className="scene-object-selected__remove"
-                          onClick={() => {
-                            const next = sceneSelectedIds.filter((id) => id !== entry.id)
-                            onUpdateScene(scene.id, { selectedNodeIds: next })
-                          }}
-                          aria-label={`Remove ${entry.name} from scene`}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
+                {sceneSelectedIds.length === 0 ? (
                   <p className="empty-state">
                     {scene.display === 'selection'
                       ? 'No items selected yet. Showing the current selection by default.'
                       : 'No items selected yet. Showing all visible items by default.'}{' '}
-                    Use the list below to add objects or branches to this scene.
+                    Select objects or branches below to override the fallback.
                   </p>
-                )}
-                {sceneFilteredEntries.length > 0 ? (
+                ) : null}
+                {displayedEntries.length > 0 ? (
                   <div className="scene-object-list">
-                    {sceneFilteredEntries.map((entry) => {
+                    {displayedEntries.map((entry) => {
                       const checked = sceneSelectedSet.has(entry.id)
                       return (
                         <label

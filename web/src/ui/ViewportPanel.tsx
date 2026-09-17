@@ -8184,7 +8184,7 @@ export function ViewportPanel({
         }}
         data-testid="viewport-create-scene"
       >
-        State Space Scene
+        State space scene
       </button>
       <button
         className="context-menu__item"
@@ -8194,7 +8194,7 @@ export function ViewportPanel({
         }}
         data-testid="viewport-create-analysis"
       >
-        Event Map
+        Event map
       </button>
       <button
         className="context-menu__item"
@@ -8204,7 +8204,7 @@ export function ViewportPanel({
         }}
         data-testid="viewport-create-bifurcation"
       >
-        Bifurcation Diagram
+        Bifurcation diagram
       </button>
     </div>
   ) : null
@@ -8222,10 +8222,10 @@ export function ViewportPanel({
             <button
               className="viewport-insert__button"
               onClick={(event) => openCreateMenu(event, null)}
-              aria-label="Add viewport"
+              aria-label="Create viewport"
               data-testid="viewport-insert-empty"
             >
-              <Icon name="plus" /> Add viewport
+              <Icon name="plus" /> Create viewport
             </button>
           </div>
         </div>
@@ -8306,7 +8306,7 @@ export function ViewportPanel({
               <button
                 className="viewport-insert__button"
                 onClick={(event) => openCreateMenu(event, targetId)}
-                aria-label="Add viewport"
+                aria-label="Create viewport"
               >
                 +
               </button>

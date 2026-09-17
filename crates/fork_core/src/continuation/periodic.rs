@@ -232,6 +232,7 @@ impl Default for CollocationAdaptivitySettings {
     }
 }
 
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CollocationDefectTerminationReason {
@@ -4223,7 +4224,7 @@ fn correct_limit_cycle_setup_impl(
     })?;
     let initial_norm = residual_rms(&residual);
     if !initial_norm.is_finite() {
-        bail!("Fixed-parameter limit-cycle correction failed: non-finite initial residual");
+        return Err(crate::diagnostics::CalculationDiagnostic::numerical("nonfinite", "Limit-cycle correction", 0, max_iterations, initial_norm, tolerance).into());
     }
 
     let mut residual_norm = initial_norm;
@@ -4260,18 +4261,9 @@ fn correct_limit_cycle_setup_impl(
         let newton_step = state_period_jacobian
             .lu()
             .solve(&(-&residual))
-            .ok_or_else(|| {
-                anyhow!(
-                    "Fixed-parameter limit-cycle correction failed: singular state-period Jacobian at iteration {} (residual {:.3e})",
-                    iteration + 1,
-                    residual_norm
-                )
-            })?;
+            .ok_or_else(|| crate::diagnostics::CalculationDiagnostic::numerical("singular_jacobian", "Limit-cycle correction", iteration, max_iterations, residual_norm, tolerance))?;
         if newton_step.iter().any(|value| !value.is_finite()) {
-            bail!(
-                "Fixed-parameter limit-cycle correction failed: non-finite Newton step at iteration {}",
-                iteration + 1
-            );
+            return Err(crate::diagnostics::CalculationDiagnostic::numerical("nonfinite", "Limit-cycle correction", iteration, max_iterations, residual_norm, tolerance).into());
         }
 
         let mut accepted = None;
@@ -4298,24 +4290,14 @@ fn correct_limit_cycle_setup_impl(
         }
 
         let Some((trial, trial_residual, trial_norm)) = accepted else {
-            bail!(
-                "Fixed-parameter limit-cycle correction failed: line search could not reduce residual {:.3e} at iteration {}",
-                residual_norm,
-                iteration + 1
-            );
+            return Err(crate::diagnostics::CalculationDiagnostic::numerical("stalled", "Limit-cycle correction", iteration + 1, max_iterations, residual_norm, tolerance).into());
         };
         current = trial;
         residual = trial_residual;
         residual_norm = trial_norm;
     }
 
-    bail!(
-        "Fixed-parameter limit-cycle correction failed to converge in {} iterations: residual {:.3e} (initial {:.3e}, tolerance {:.3e})",
-        max_iterations,
-        residual_norm,
-        initial_norm,
-        tolerance
-    )
+    Err(crate::diagnostics::CalculationDiagnostic::numerical("iteration_limit", "Limit-cycle correction", max_iterations, max_iterations, residual_norm, tolerance).into())
 }
 
 fn correction_termination(
@@ -6161,23 +6143,21 @@ mod tests {
                 heteroclinic_events: None,
             }
         };
-        let branch = ContinuationBranch {
-            points: vec![
-                corrected_point(&mut system, 1.0),
-                corrected_point(&mut system, 1.01),
-            ],
-            bifurcations: Vec::new(),
-            indices: vec![0, 1],
-            branch_type: BranchType::LimitCycle {
-                ntst: mesh_points,
-                ncol: degree,
-                normalized_mesh: uniform_normalized_mesh(mesh_points),
-            },
-            upoldp: Some(vec![vec![0.0, 1.0]]),
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: vec![
+            corrected_point(&mut system, 1.0),
+            corrected_point(&mut system, 1.01),
+        ],
+        bifurcations: Vec::new(),
+        indices: vec![0, 1],
+        branch_type: BranchType::LimitCycle {
+            ntst: mesh_points,
+            ncol: degree,
+            normalized_mesh: uniform_normalized_mesh(mesh_points),
+        },
+        upoldp: Some(vec![vec![0.0, 1.0]]),
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
         let config = CollocationConfig {
             mesh_points,
             degree,

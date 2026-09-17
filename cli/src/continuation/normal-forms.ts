@@ -1,3 +1,4 @@
+import { formatError } from '../format';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { printError, printSuccess } from '../format';
@@ -205,7 +206,7 @@ export function computeAndPersistNormalForm(
     printSuccess('Normal-form coefficients and provenance saved on the branch point.');
     return normalForm;
   } catch (error) {
-    printError(String(error));
+    printError(formatError(error));
     return null;
   }
 }
@@ -305,7 +306,7 @@ export async function initiatePeriodicBranchPointSwitch(
     printSuccess(`Saved corrected secondary periodic branch ${child.name} (${data.points.length} points).`);
     return child;
   } catch (error) {
-    printError(String(error));
+    printError(formatError(error));
     return null;
   }
 }

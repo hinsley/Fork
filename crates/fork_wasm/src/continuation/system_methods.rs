@@ -412,7 +412,7 @@ impl WasmSystem {
             settings,
             &self.periodicity,
         )
-        .map_err(|e| JsValue::from_str(&format!("1D manifold computation failed: {}", e)))?;
+        .map_err(|e| crate::diagnostics::error_to_js(e.context("1D manifold computation failed")))?;
         to_value(&branches).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
@@ -430,7 +430,7 @@ impl WasmSystem {
         let settings: Manifold2DSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid manifold settings: {}", e)))?;
         let branch = continue_manifold_eq_2d(&mut self.system, &equilibrium_state, settings)
-            .map_err(|e| JsValue::from_str(&format!("2D manifold computation failed: {}", e)))?;
+            .map_err(|e| crate::diagnostics::error_to_js(e.context("2D manifold computation failed")))?;
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
@@ -479,7 +479,7 @@ impl WasmSystem {
             settings,
             Some(&mut on_ring_progress),
         )
-        .map_err(|e| JsValue::from_str(&format!("2D manifold computation failed: {}", e)))?;
+        .map_err(|e| crate::diagnostics::error_to_js(e.context("2D manifold computation failed")))?;
         if let Some(err) = callback_error {
             return Err(err);
         }
@@ -529,7 +529,7 @@ impl WasmSystem {
             &floquet_multipliers,
             settings,
         )
-        .map_err(|e| JsValue::from_str(&format!("Cycle manifold computation failed: {}", e)))?;
+        .map_err(|e| crate::diagnostics::error_to_js(e.context("Cycle manifold computation failed")))?;
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
@@ -590,7 +590,7 @@ impl WasmSystem {
             settings,
             Some(&mut on_ring_progress),
         )
-        .map_err(|e| JsValue::from_str(&format!("Cycle manifold computation failed: {}", e)))?;
+        .map_err(|e| crate::diagnostics::error_to_js(e.context("Cycle manifold computation failed")))?;
         if let Some(err) = callback_error {
             return Err(err);
         }
@@ -2991,28 +2991,26 @@ mod tests {
     #[wasm_bindgen_test]
     fn legacy_limit_cycle_extension_rejects_map_systems() {
         let mut system = build_two_dim_map_with_param();
-        let branch = ContinuationBranch {
-            points: vec![ContinuationPoint {
-                state: vec![1.0, 2.0, 1.5, 2.5, 6.25],
-                param_value: 0.0,
-                stability: BifurcationType::None,
-                eigenvalues: Vec::new(),
-                cycle_points: None,
-                homoclinic_events: None,
-                heteroclinic_events: None,
-            }],
-            bifurcations: Vec::new(),
-            indices: vec![0],
-            branch_type: BranchType::LimitCycle {
-                ntst: 1,
-                ncol: 1,
-                normalized_mesh: vec![0.0, 1.0],
-            },
-            upoldp: Some(vec![vec![1.0, 0.0]]),
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: vec![ContinuationPoint {
+            state: vec![1.0, 2.0, 1.5, 2.5, 6.25],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+            homoclinic_events: None,
+            heteroclinic_events: None,
+        }],
+        bifurcations: Vec::new(),
+        indices: vec![0],
+        branch_type: BranchType::LimitCycle {
+            ntst: 1,
+            ncol: 1,
+            normalized_mesh: vec![0.0, 1.0],
+        },
+        upoldp: Some(vec![vec![1.0, 0.0]]),
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
         let branch_val = to_value(&branch).expect("branch");
 
         let err = system
@@ -3047,28 +3045,26 @@ mod tests {
     #[wasm_bindgen_test]
     fn extend_continuation_rejects_missing_upoldp() {
         let mut system = build_two_dim_system_with_param();
-        let branch = ContinuationBranch {
-            points: vec![ContinuationPoint {
-                state: vec![0.0, 0.0],
-                param_value: 0.0,
-                stability: BifurcationType::None,
-                eigenvalues: Vec::new(),
-                cycle_points: None,
-                homoclinic_events: None,
-                heteroclinic_events: None,
-            }],
-            bifurcations: Vec::new(),
-            indices: vec![0],
-            branch_type: BranchType::LimitCycle {
-                ntst: 3,
-                ncol: 2,
-                normalized_mesh: vec![0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0],
-            },
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: None,
-        };
+        let branch = ContinuationBranch { termination: None, points: vec![ContinuationPoint {
+            state: vec![0.0, 0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+            homoclinic_events: None,
+            heteroclinic_events: None,
+        }],
+        bifurcations: Vec::new(),
+        indices: vec![0],
+        branch_type: BranchType::LimitCycle {
+            ntst: 3,
+            ncol: 2,
+            normalized_mesh: vec![0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0],
+        },
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: None, };
         let branch_val = to_value(&branch).expect("branch");
 
         let err = system

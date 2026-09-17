@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { calculationError } from '../calculationError'
 
 import type {
   ComputeEventSeriesFromOrbitRequest,
@@ -2387,7 +2388,7 @@ async function runValidateSystem(
     }
     return { ok: true, equationErrors }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = calculationError(err).message
     for (let i = 0; i < system.equations.length; i += 1) {
       abortIfNeeded(signal)
       try {
@@ -2397,7 +2398,7 @@ async function runValidateSystem(
         })
         void instance
       } catch (eqErr) {
-        const eqMessage = eqErr instanceof Error ? eqErr.message : String(eqErr)
+        const eqMessage = calculationError(eqErr).message
         equationErrors[i] = eqMessage
       }
     }
@@ -2483,11 +2484,12 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   try {
     await dispatchWorkerOperation(message, controller)
   } catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err))
+    const error = calculationError(err)
     const response: WorkerResponse = {
       id: message.id,
       ok: false,
       error: error.message,
+      diagnostic: error.diagnostic,
       aborted: error.name === 'AbortError',
     }
     ctx.postMessage(response)

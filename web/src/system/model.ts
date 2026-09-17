@@ -1,3 +1,4 @@
+import { normalizeCalculationDiagnostic } from '../compute/calculationError'
 import type {
   AnalysisAxisSpec,
   AnalysisObject,
@@ -1835,6 +1836,9 @@ export function normalizeSystem(system: System): System {
   const objectNameToNodeId = new Map<string, string>()
   Object.entries(next.objects).forEach(([id, obj]) => {
     const normalizedObject = { ...obj, id } as AnalysisObject
+    if (normalizedObject.type === 'equilibrium' && normalizedObject.lastRun?.diagnostic) {
+      normalizedObject.lastRun.diagnostic = normalizeCalculationDiagnostic(normalizedObject.lastRun.diagnostic)
+    }
     next.objects[id] = normalizedObject
     if (!next.nodes[id]) {
       next.nodes[id] = createTreeNode({

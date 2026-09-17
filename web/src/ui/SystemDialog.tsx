@@ -67,7 +67,7 @@ export function SystemDialog({
               handleCreate()
             }}
           >
-            <label htmlFor="new-system-name">New system</label>
+            <label htmlFor="new-system-name">Create system</label>
             <div className="dialog__row">
               <input
                 id="new-system-name"

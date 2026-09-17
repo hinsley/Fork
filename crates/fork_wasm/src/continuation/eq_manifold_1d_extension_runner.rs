@@ -194,7 +194,7 @@ impl WasmEqManifold1DExtensionRunner {
             batch_settings,
             &self.periodicity,
         )
-        .map_err(|error| JsValue::from_str(&format!("1D manifold extension failed: {}", error)))?;
+        .map_err(|error| crate::diagnostics::error_to_js(error.context("1D manifold extension failed")))?;
         let after_counters = curve_counters(&branch);
         let units_advanced = match self.kind {
             SystemKind::Flow => after_counters.0.saturating_sub(before_counters.0),

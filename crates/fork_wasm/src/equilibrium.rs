@@ -1,4 +1,6 @@
 //! Equilibrium solver runner and helpers.
+use crate::diagnostics::error_to_js;
+use fork_core::diagnostics::CalculationDiagnostic;
 
 use crate::system::{build_system, SystemType, WasmSystem};
 use fork_core::equation_engine::EquationSystem;
@@ -48,7 +50,7 @@ impl WasmSystem {
             settings,
             &self.periodicity,
         )
-        .map_err(|e| JsValue::from_str(&format!("Equilibrium solve failed: {}", e)))?;
+        .map_err(|e| error_to_js(e.context("Equilibrium solve failed")))?;
 
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
@@ -85,7 +87,7 @@ impl WasmSystem {
             DeflationSettings { exponent, shift },
             &self.periodicity,
         )
-        .map_err(|e| JsValue::from_str(&format!("Deflated equilibrium solve failed: {}", e)))?;
+        .map_err(|e| crate::diagnostics::error_to_js(e.context("Deflated equilibrium solve failed")))?;
 
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
@@ -126,7 +128,7 @@ impl WasmSystem {
             &targets,
             &self.periodicity,
         )
-        .map_err(|e| JsValue::from_str(&format!("Deflated equilibrium solve failed: {}", e)))?;
+        .map_err(|e| crate::diagnostics::error_to_js(e.context("Deflated equilibrium solve failed")))?;
 
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
@@ -316,10 +318,7 @@ impl WasmEquilibriumSolverRunner {
             }
 
             if state.iterations >= state.settings.max_steps {
-                return Err(JsValue::from_str(&format!(
-                    "Newton solver failed to converge in {} steps (‖f(x)‖ = {}).",
-                    state.settings.max_steps, state.deflated_residual_norm
-                )));
+                return Err(error_to_js(CalculationDiagnostic::numerical("iteration_limit", "Newton solve", state.iterations, state.settings.max_steps, state.deflated_residual_norm, state.settings.tolerance).into()));
             }
 
             let mut jacobian = compute_jacobian_with_periodicity(
@@ -339,7 +338,7 @@ impl WasmEquilibriumSolverRunner {
             .map_err(|e| JsValue::from_str(&format!("Deflation failed: {}", e)))?;
             let delta =
                 solve_linear_system(state.system.equations.len(), &jacobian, &state.residual)
-                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+                    .map_err(|e| error_to_js(e.context(CalculationDiagnostic::numerical("singular_jacobian", "Newton solve", state.iterations, state.settings.max_steps, state.deflated_residual_norm, state.settings.tolerance))))?;
 
             for i in 0..state.state.len() {
                 state.state[i] -= state.settings.damping * delta[i];

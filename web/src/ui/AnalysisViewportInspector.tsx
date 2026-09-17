@@ -16,6 +16,7 @@ import {
   resolveAnalysisSourceExpression
 } from '../analysis/analysisViewportUtils'
 import { OpacityPercentInput } from './OpacityPercentInput'
+import { InspectorSubDisclosure } from './inspector/selectionSession'
 
 type AnalysisViewportInspectorProps = {
   system: System
@@ -109,10 +110,20 @@ export function AnalysisViewportInspector({
       )
     })
   }, [sourceEntries, sourceSearch])
-  const selectedEntries = useMemo(
-    () => sourceEntries.filter((entry) => selectedSourceSet.has(entry.id)),
-    [selectedSourceSet, sourceEntries]
-  )
+  const displayedEntries = useMemo(() => {
+    const byId = new Map(sourceEntries.map((entry) => [entry.id, entry]))
+    return [
+      ...viewport.sourceNodeIds.map((id) => byId.get(id) ?? {
+        id,
+        name: system.nodes[id]?.name ?? id,
+        typeLabel: system.nodes[id]
+          ? 'Incompatible source — uncheck to remove'
+          : 'Unavailable source — uncheck to remove',
+        visible: system.nodes[id]?.visibility ?? true
+      }),
+      ...filteredEntries.filter((entry) => !selectedSourceSet.has(entry.id))
+    ]
+  }, [sourceEntries, viewport.sourceNodeIds, system.nodes, filteredEntries, selectedSourceSet])
   const eventExpression = useMemo(
     () => resolveAnalysisEventExpression(system.config, viewport.event),
     [system.config, viewport.event]
@@ -387,7 +398,7 @@ export function AnalysisViewportInspector({
 
   return (
     <div className="inspector-section">
-      <h3>Event Map</h3>
+      <h3>Event map</h3>
       <div className="inspector-subsection">
         <h4 className="inspector-subheading">Sources</h4>
         <label>
@@ -417,47 +428,16 @@ export function AnalysisViewportInspector({
             placeholder="Type to filter…"
           />
         </label>
-        {selectedEntries.length > 0 ? (
-          <div className="scene-object-selected">
-            {selectedEntries.map((entry) => (
-              <div
-                className="scene-object-selected__row"
-                key={`analysis-sel-${entry.id}`}
-              >
-                <div className="scene-object-selected__info">
-                  <span>{entry.name}</span>
-                  <span className="scene-object-selected__meta">
-                    {entry.typeLabel}
-                    {entry.visible ? '' : ' · hidden'}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="scene-object-selected__remove"
-                  onClick={() => {
-                    onUpdateAnalysisViewport(viewport.id, {
-                      sourceNodeIds: viewport.sourceNodeIds.filter(
-                        (id) => id !== entry.id
-                      )
-                    })
-                  }}
-                  aria-label={`Remove ${entry.name} from analysis viewport`}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : (
+        {viewport.sourceNodeIds.length === 0 ? (
           <p className="empty-state">
             {viewport.display === 'selection'
               ? 'No explicit sources selected. The current compatible selection will be used.'
               : 'No explicit sources selected. All visible compatible sources will be used.'}
           </p>
-        )}
-        {filteredEntries.length > 0 ? (
+        ) : null}
+        {displayedEntries.length > 0 ? (
           <div className="scene-object-list">
-            {filteredEntries.map((entry) => {
+            {displayedEntries.map((entry) => {
               const checked = selectedSourceSet.has(entry.id)
               return (
                 <label
@@ -730,8 +710,7 @@ export function AnalysisViewportInspector({
         })}
       </div>
 
-      <div className="inspector-subsection">
-        <h4 className="inspector-subheading">Advanced</h4>
+      <InspectorSubDisclosure title="Advanced" testId="analysis-advanced-toggle">
         <label>
           Skip hits
           <input
@@ -849,7 +828,7 @@ export function AnalysisViewportInspector({
             </label>
           </>
         ) : null}
-      </div>
+      </InspectorSubDisclosure>
     </div>
   )
 }

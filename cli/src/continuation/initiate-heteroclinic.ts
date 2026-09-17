@@ -1,3 +1,4 @@
+import { formatError } from '../format';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { printError, printInfo, printSuccess } from '../format';
@@ -359,7 +360,7 @@ export async function initiateHeteroclinicFromOrbit(
     if (options.autoInspect ?? true) await inspectBranch(sysName, branch);
     return branch;
   } catch (error) {
-    printError(`Heteroclinic initialization failed: ${error}`);
+    printError(`Heteroclinic initialization failed: ${formatError(error)}`);
     console.log(chalk.gray('Check endpoint Morse indices and improve the connecting-orbit seed.'));
     return null;
   }

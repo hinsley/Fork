@@ -1,3 +1,4 @@
+use crate::diagnostics::CalculationDiagnostic;
 use crate::{
     autodiff::Dual, equation_engine::EquationSystem, state_periodicity::StatePeriodicity,
     traits::DynamicalSystem,
@@ -262,20 +263,12 @@ pub fn solve_equilibrium_with_deflation_targets_and_periodicity(
             break;
         }
 
-        if iterations >= settings.max_steps {
-            if deflation_targets.is_empty() {
-                bail!(
-                    "Newton solver failed to converge in {} steps (||f(x)|| = {}).",
-                    settings.max_steps,
-                    residual_norm
-                );
-            }
-            bail!(
-                "Deflated Newton solver failed to converge in {} steps (deflated residual = {}, original residual = {}).",
-                settings.max_steps,
-                deflation_evaluation.residual_norm,
-                residual_norm
-            );
+        if iterations >= settings.max_steps || !deflation_evaluation.residual_norm.is_finite() {
+            return Err(CalculationDiagnostic::numerical(
+                if deflation_evaluation.residual_norm.is_finite() { "iteration_limit" } else { "nonfinite" },
+                if deflation_targets.is_empty() { "Newton solve" } else { "Deflated Newton solve" },
+                iterations, settings.max_steps, deflation_evaluation.residual_norm, settings.tolerance,
+            ).into());
         }
 
         let mut jacobian = compute_jacobian_with_periodicity(system, kind, &state, periodicity)?;
@@ -286,7 +279,7 @@ pub fn solve_equilibrium_with_deflation_targets_and_periodicity(
             &mut jacobian,
         );
         let delta = solve_linear_system(dim, &jacobian, &residual)
-            .context("Failed to solve linear system during Newton iteration.")?;
+            .with_context(|| CalculationDiagnostic::numerical("singular_jacobian", "Newton solve", iterations, settings.max_steps, deflation_evaluation.residual_norm, settings.tolerance))?;
 
         for i in 0..dim {
             state[i] -= settings.damping * delta[i];
@@ -926,6 +919,26 @@ mod tests {
         let mut system = EquationSystem::new(vec![bytecode], Vec::new());
         system.set_maps(compiler.param_map, compiler.var_map);
         system
+    }
+
+    #[test]
+    fn newton_failure_retains_iteration_and_residual_evidence() {
+        let settings = NewtonSettings { max_steps: 1, damping: 0.5, tolerance: 1e-12 };
+        let system = build_scalar_system("x");
+        let error = solve_equilibrium(&system, SystemKind::Flow, &[1.0], settings).unwrap_err();
+        let report = error.downcast_ref::<crate::diagnostics::CalculationDiagnostic>().expect("typed Newton failure");
+        assert_eq!(report.kind, "iteration_limit");
+        assert_eq!(report.iterations, Some(1));
+        assert_eq!(report.residual_norm, Some(0.5));
+        assert_eq!(report.tolerance, Some(1e-12));
+
+        let singular = build_constant_system(1.0);
+        let error = solve_equilibrium(&singular, SystemKind::Flow, &[0.0], settings).unwrap_err();
+        let report = error.downcast_ref::<crate::diagnostics::CalculationDiagnostic>().expect("typed singular failure");
+        assert_eq!(report.kind, "singular_jacobian");
+        assert_eq!(report.iterations, Some(0));
+        assert_eq!(report.residual_norm, Some(1.0));
+        assert!(error.chain().count() > 1, "retain underlying linear solve cause");
     }
 
     #[test]

@@ -376,12 +376,12 @@ function App() {
               actions={
                 <div className="panel-actions">
                   <button onClick={openCreateObjectMenu} data-testid="create-object-button">
-                    <Icon name="plus" /> Object
+                    <Icon name="plus" /> Create object
                   </button>
                   <button
                     onClick={createRootFolder}
-                    title="Create Folder"
-                    aria-label="Create Folder"
+                    title="Create folder"
+                    aria-label="Create folder"
                     data-testid="create-folder-button"
                   >
                     <Icon name="folder" />

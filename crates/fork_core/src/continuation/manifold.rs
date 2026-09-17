@@ -933,24 +933,22 @@ fn build_eq_1d_branch(
         resume_state,
     });
     let indices: Vec<i32> = (0..branch_points.len() as i32).collect();
-    ContinuationBranch {
-        points: branch_points,
-        bifurcations: Vec::new(),
-        indices,
-        branch_type: BranchType::ManifoldEq1D {
-            stability,
-            direction,
-            eig_index,
-            method: method.to_string(),
-            caps,
-            map_iterations,
-            cycle_point_index,
-        },
-        upoldp: None,
-        homoc_context: None,
-        resume_state: None,
-        manifold_geometry: Some(geometry),
-    }
+    ContinuationBranch { termination: None, points: branch_points,
+    bifurcations: Vec::new(),
+    indices,
+    branch_type: BranchType::ManifoldEq1D {
+        stability,
+        direction,
+        eig_index,
+        method: method.to_string(),
+        caps,
+        map_iterations,
+        cycle_point_index,
+    },
+    upoldp: None,
+    homoc_context: None,
+    resume_state: None,
+    manifold_geometry: Some(geometry), }
 }
 
 fn profile_f64_matches(value: f64, baseline_default: f64) -> bool {
@@ -1387,30 +1385,28 @@ pub fn continue_manifold_eq_2d_with_progress(
     let surface = add_equilibrium_center_cap(surface, corrected_equilibrium);
     let points = surface_points_to_branch_points(&surface.vertices, &surface.ring_offsets);
     let indices: Vec<i32> = (0..points.len() as i32).collect();
-    Ok(ContinuationBranch {
-        points,
-        bifurcations: Vec::new(),
-        indices,
-        branch_type: BranchType::ManifoldEq2D {
-            stability: settings.stability,
-            eig_kind: basis.kind,
-            eig_indices: basis.indices,
-            method: "krauskopf_osinga_geodesic_leaf_continuation".to_string(),
-            caps: settings.caps,
-        },
-        upoldp: None,
-        homoc_context: None,
-        resume_state: None,
-        manifold_geometry: Some(ManifoldGeometry::Surface(ManifoldSurfaceGeometry {
-            dim,
-            vertices_flat: flatten_points(&surface.vertices),
-            triangles: surface.triangles,
-            ring_offsets: surface.ring_offsets,
-            ring_diagnostics: surface.ring_diagnostics,
-            solver_diagnostics: Some(surface.solver_diagnostics),
-            resume_state: surface.resume_state.map(Box::new),
-        })),
-    })
+    Ok(ContinuationBranch { termination: None, points,
+    bifurcations: Vec::new(),
+    indices,
+    branch_type: BranchType::ManifoldEq2D {
+        stability: settings.stability,
+        eig_kind: basis.kind,
+        eig_indices: basis.indices,
+        method: "krauskopf_osinga_geodesic_leaf_continuation".to_string(),
+        caps: settings.caps,
+    },
+    upoldp: None,
+    homoc_context: None,
+    resume_state: None,
+    manifold_geometry: Some(ManifoldGeometry::Surface(ManifoldSurfaceGeometry {
+        dim,
+        vertices_flat: flatten_points(&surface.vertices),
+        triangles: surface.triangles,
+        ring_offsets: surface.ring_offsets,
+        ring_diagnostics: surface.ring_diagnostics,
+        solver_diagnostics: Some(surface.solver_diagnostics),
+        resume_state: surface.resume_state.map(Box::new),
+    })), })
 }
 
 /// Extend a computed two-dimensional equilibrium manifold by additional
@@ -2041,40 +2037,38 @@ fn build_cycle_manifold_branch(
 ) -> Result<ContinuationBranch> {
     let points = surface_points_to_branch_points(&surface.vertices, &surface.ring_offsets);
     let indices: Vec<i32> = (0..points.len() as i32).collect();
-    Ok(ContinuationBranch {
-        points,
-        bifurcations: Vec::new(),
-        indices,
-        branch_type: BranchType::ManifoldCycle2D {
-            stability: settings.stability,
-            direction: settings.direction,
-            floquet_index,
-            ntst: if settings.ntst > 0 {
-                settings.ntst
-            } else {
-                ntst
-            },
-            ncol: if settings.ncol > 0 {
-                settings.ncol
-            } else {
-                ncol
-            },
-            method: method.to_string(),
-            caps: settings.caps,
+    Ok(ContinuationBranch { termination: None, points,
+    bifurcations: Vec::new(),
+    indices,
+    branch_type: BranchType::ManifoldCycle2D {
+        stability: settings.stability,
+        direction: settings.direction,
+        floquet_index,
+        ntst: if settings.ntst > 0 {
+            settings.ntst
+        } else {
+            ntst
         },
-        upoldp: None,
-        homoc_context: None,
-        resume_state: None,
-        manifold_geometry: Some(ManifoldGeometry::Surface(ManifoldSurfaceGeometry {
-            dim,
-            vertices_flat: flatten_points(&surface.vertices),
-            triangles: surface.triangles,
-            ring_offsets: surface.ring_offsets,
-            ring_diagnostics: surface.ring_diagnostics,
-            solver_diagnostics: Some(surface.solver_diagnostics),
-            resume_state: surface.resume_state.map(Box::new),
-        })),
-    })
+        ncol: if settings.ncol > 0 {
+            settings.ncol
+        } else {
+            ncol
+        },
+        method: method.to_string(),
+        caps: settings.caps,
+    },
+    upoldp: None,
+    homoc_context: None,
+    resume_state: None,
+    manifold_geometry: Some(ManifoldGeometry::Surface(ManifoldSurfaceGeometry {
+        dim,
+        vertices_flat: flatten_points(&surface.vertices),
+        triangles: surface.triangles,
+        ring_offsets: surface.ring_offsets,
+        ring_diagnostics: surface.ring_diagnostics,
+        solver_diagnostics: Some(surface.solver_diagnostics),
+        resume_state: surface.resume_state.map(Box::new),
+    })), })
 }
 
 #[derive(Clone)]
@@ -3460,18 +3454,14 @@ struct IsochronBvpSolution {
     residual_norm: f64,
     iterations: usize,
     converged: bool,
+    failure_kind: &'static str,
 }
 
 fn require_converged_isochron_bvp(solve: &IsochronBvpSolution, context: &str) -> Result<()> {
     if solve.converged && solve.residual_norm.is_finite() {
         return Ok(());
     }
-    bail!(
-        "{} did not converge: residual {:.3e} after {} Newton iterations.",
-        context,
-        solve.residual_norm,
-        solve.iterations
-    )
+    Err(crate::diagnostics::CalculationDiagnostic::numerical(solve.failure_kind, context, solve.iterations, ISOCHRON_BVP_NEWTON_MAX_ITERS, solve.residual_norm, ISOCHRON_BVP_NEWTON_TOL).into())
 }
 
 fn solve_isochron_return_preimage_bvp(
@@ -3564,11 +3554,13 @@ fn solve_isochron_return_preimage_bvp_with_guess(
             residual_norm,
             iterations: 0,
             converged: true,
+            failure_kind: "iteration_limit",
         });
     }
 
     let mut converged = false;
     let mut iterations = 0usize;
+    let mut failure_kind = if residual_norm.is_finite() { "iteration_limit" } else { "nonfinite" };
     for iter in 0..ISOCHRON_BVP_NEWTON_MAX_ITERS {
         iterations = iter + 1;
         let jac = build_isochron_open_orbit_jacobian(
@@ -3582,6 +3574,7 @@ fn solve_isochron_return_preimage_bvp_with_guess(
         )?;
         let rhs = residual.iter().map(|value| -value).collect::<Vec<_>>();
         let Some(delta) = solve_dense_linear_system(unknowns, &jac, &rhs) else {
+            failure_kind = "singular_jacobian";
             break;
         };
         let mut accepted = false;
@@ -3622,6 +3615,7 @@ fn solve_isochron_return_preimage_bvp_with_guess(
             break;
         }
         if !accepted {
+            failure_kind = "stalled";
             break;
         }
     }
@@ -3632,6 +3626,7 @@ fn solve_isochron_return_preimage_bvp_with_guess(
         residual_norm,
         iterations,
         converged,
+        failure_kind,
     })
 }
 
@@ -16579,6 +16574,7 @@ mod tests {
     #[test]
     fn manifold_cycle_2d_never_accepts_a_nonconverged_collocation_solution() {
         let nonconverged = IsochronBvpSolution {
+            failure_kind: "iteration_limit",
             start: vec![1.0, 2.0, 3.0],
             unknown: vec![1.0, 2.0, 3.0],
             residual_norm: 1e-2,
@@ -16587,7 +16583,7 @@ mod tests {
         };
         let error = require_converged_isochron_bvp(&nonconverged, "test phase")
             .expect_err("nonconverged collocation output must be rejected");
-        assert!(error.to_string().contains("did not converge"));
+        assert_eq!(error.downcast_ref::<crate::diagnostics::CalculationDiagnostic>().unwrap().residual_norm, Some(1e-2));
     }
 
     #[test]
@@ -17069,39 +17065,37 @@ mod tests {
             0.02,
             12,
         );
-        let initial = ContinuationBranch {
-            points: surface_points_to_branch_points(&ring, &[0]),
-            bifurcations: Vec::new(),
-            indices: (0..ring.len() as i32).collect(),
-            branch_type: BranchType::ManifoldCycle2D {
-                stability: ManifoldStability::Unstable,
-                direction: ManifoldDirection::Plus,
-                floquet_index: 0,
-                ntst,
-                ncol,
-                method: "krauskopf_osinga_geodesic_leaf_continuation".to_string(),
-                caps: ManifoldTerminationCaps::default(),
-            },
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: Some(ManifoldGeometry::Surface(ManifoldSurfaceGeometry {
-                dim: 3,
-                vertices_flat: flatten_points(&ring),
-                triangles: Vec::new(),
-                ring_offsets: vec![0],
-                ring_diagnostics: Vec::new(),
-                solver_diagnostics: Some(ManifoldSurfaceSolverDiagnostics::default()),
-                resume_state: Some(Box::new(ManifoldSurfaceResumeState::GeodesicRings {
-                    version: 1,
-                    outer_ring: ring.clone(),
-                    inward_anchors: vec![vec![0.0, 0.0, 0.0]; ring.len()],
-                    current_leaf_delta: 0.02,
-                    accumulated_arclength: 0.0,
-                    center: None,
-                })),
+        let initial = ContinuationBranch { termination: None, points: surface_points_to_branch_points(&ring, &[0]),
+        bifurcations: Vec::new(),
+        indices: (0..ring.len() as i32).collect(),
+        branch_type: BranchType::ManifoldCycle2D {
+            stability: ManifoldStability::Unstable,
+            direction: ManifoldDirection::Plus,
+            floquet_index: 0,
+            ntst,
+            ncol,
+            method: "krauskopf_osinga_geodesic_leaf_continuation".to_string(),
+            caps: ManifoldTerminationCaps::default(),
+        },
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: Some(ManifoldGeometry::Surface(ManifoldSurfaceGeometry {
+            dim: 3,
+            vertices_flat: flatten_points(&ring),
+            triangles: Vec::new(),
+            ring_offsets: vec![0],
+            ring_diagnostics: Vec::new(),
+            solver_diagnostics: Some(ManifoldSurfaceSolverDiagnostics::default()),
+            resume_state: Some(Box::new(ManifoldSurfaceResumeState::GeodesicRings {
+                version: 1,
+                outer_ring: ring.clone(),
+                inward_anchors: vec![vec![0.0, 0.0, 0.0]; ring.len()],
+                current_leaf_delta: 0.02,
+                accumulated_arclength: 0.0,
+                center: None,
             })),
-        };
+        })), };
         let original = initial.clone();
 
         let extended = extend_limit_cycle_manifold_2d(

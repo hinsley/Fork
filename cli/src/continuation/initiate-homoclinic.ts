@@ -1,3 +1,4 @@
+import { formatError } from '../format';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { Storage } from '../storage';
@@ -33,7 +34,7 @@ import {
 } from './collocation-adaptivity';
 
 export const HOMOCLINIC_FROM_HOMOTOPY_MENU_TITLE =
-  'Method 4: Homoclinic from Homotopy-Saddle';
+  'Continue homoclinic curve from homotopy saddle';
 
 type HomoclinicBranchTypeData = {
   type: 'HomoclinicCurve';
@@ -392,7 +393,7 @@ export async function initiateHomoclinicFromLargeCycle(
     {
       id: 'param1',
       label: 'First parameter',
-      section: 'Parameters',
+      section: 'Setup',
       getDisplay: () => param1Name,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -413,7 +414,7 @@ export async function initiateHomoclinicFromLargeCycle(
     {
       id: 'param2',
       label: 'Second parameter',
-      section: 'Parameters',
+      section: 'Setup',
       getDisplay: () => param2Name,
       edit: async () => {
         const choices = sysConfig.paramNames.filter((name) => name !== param1Name);
@@ -452,7 +453,7 @@ export async function initiateHomoclinicFromLargeCycle(
     {
       id: 'targetNtst',
       label: 'Target NTST',
-      section: 'Initialization',
+      section: 'Mesh',
       getDisplay: () => formatUnset(targetNtstInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -466,7 +467,7 @@ export async function initiateHomoclinicFromLargeCycle(
     {
       id: 'targetNcol',
       label: 'Target NCOL',
-      section: 'Initialization',
+      section: 'Mesh',
       getDisplay: () => formatUnset(targetNcolInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -480,7 +481,7 @@ export async function initiateHomoclinicFromLargeCycle(
     {
       id: 'shootingIntervals',
       label: 'Shooting intervals',
-      section: 'Standard Shooting',
+      section: 'Mesh',
       getDisplay: () =>
         discretization === 'shooting'
           ? formatUnset(shootingIntervalsInput)
@@ -497,7 +498,7 @@ export async function initiateHomoclinicFromLargeCycle(
     {
       id: 'integrationStepsPerSegment',
       label: 'Integration steps per segment',
-      section: 'Standard Shooting',
+      section: 'Mesh',
       getDisplay: () =>
         discretization === 'shooting'
           ? formatUnset(integrationStepsPerSegmentInput)
@@ -604,7 +605,7 @@ export async function initiateHomoclinicFromLargeCycle(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Predictor',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -694,7 +695,7 @@ export async function initiateHomoclinicFromLargeCycle(
     )
   );
 
-  const menuResult = await runConfigMenu('Method 1: Homoclinic from Large Cycle', entries);
+  const menuResult = await runConfigMenu('Continue homoclinic curve from large cycle', entries);
   if (menuResult === 'back') {
     return null;
   }
@@ -850,7 +851,7 @@ export async function initiateHomoclinicFromLargeCycle(
 
     return newBranch;
   } catch (error) {
-    printError(`Method 1 failed: ${error}`);
+    printError(`Method 1 failed: ${formatError(error)}`);
     return null;
   }
 }
@@ -1029,7 +1030,7 @@ export async function initiateHomoclinicFromHomoclinic(
     {
       id: 'targetNtst',
       label: 'Target NTST',
-      section: 'Initialization',
+      section: 'Mesh',
       getDisplay: () =>
         discretization === 'collocation'
           ? formatUnset(targetNtstInput)
@@ -1046,7 +1047,7 @@ export async function initiateHomoclinicFromHomoclinic(
     {
       id: 'targetNcol',
       label: 'Target NCOL',
-      section: 'Initialization',
+      section: 'Mesh',
       getDisplay: () =>
         discretization === 'collocation'
           ? formatUnset(targetNcolInput)
@@ -1063,7 +1064,7 @@ export async function initiateHomoclinicFromHomoclinic(
     {
       id: 'shootingIntervals',
       label: 'Shooting intervals',
-      section: 'Standard Shooting',
+      section: 'Mesh',
       getDisplay: () =>
         discretization === 'shooting'
           ? formatUnset(shootingIntervalsInput)
@@ -1080,7 +1081,7 @@ export async function initiateHomoclinicFromHomoclinic(
     {
       id: 'integrationStepsPerSegment',
       label: 'Integration steps per segment',
-      section: 'Standard Shooting',
+      section: 'Mesh',
       getDisplay: () =>
         discretization === 'shooting'
           ? formatUnset(integrationStepsPerSegmentInput)
@@ -1187,7 +1188,7 @@ export async function initiateHomoclinicFromHomoclinic(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Predictor',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1277,7 +1278,7 @@ export async function initiateHomoclinicFromHomoclinic(
     )
   );
 
-  const menuResult = await runConfigMenu('Method 2: Homoclinic from Homoclinic', entries);
+  const menuResult = await runConfigMenu('Restart homoclinic branch from point', entries);
   if (menuResult === 'back') {
     return null;
   }
@@ -1532,7 +1533,7 @@ export async function initiateHomoclinicFromHomoclinic(
 
     return newBranch;
   } catch (error) {
-    printError(`Method 2 failed: ${error}`);
+    printError(`Method 2 failed: ${formatError(error)}`);
     return null;
   }
 }
@@ -1606,7 +1607,7 @@ export async function initiateHomoclinicFromHomotopySaddle(
     {
       id: 'targetNtst',
       label: 'Target NTST',
-      section: 'Initialization',
+      section: 'Mesh',
       getDisplay: () => formatUnset(targetNtstInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1620,7 +1621,7 @@ export async function initiateHomoclinicFromHomotopySaddle(
     {
       id: 'targetNcol',
       label: 'Target NCOL',
-      section: 'Initialization',
+      section: 'Mesh',
       getDisplay: () => formatUnset(targetNcolInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1724,7 +1725,7 @@ export async function initiateHomoclinicFromHomotopySaddle(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Predictor',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1912,7 +1913,7 @@ export async function initiateHomoclinicFromHomotopySaddle(
 
     return newBranch;
   } catch (error) {
-    printError(`Method 4 failed: ${error}`);
+    printError(`Method 4 failed: ${formatError(error)}`);
     return null;
   }
 }

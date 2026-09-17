@@ -255,7 +255,7 @@ function NormalFormWorkflowContent({
   return (
     <InspectorDisclosure
       key={`${selectionKey}-normal-form`}
-      title="Normal Form & Branch Switching"
+      title="Normal form & branch switching"
       testId="normal-form-workflow-toggle"
       defaultOpen={Boolean(provenance)}
       actionOnly

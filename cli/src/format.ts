@@ -1,4 +1,38 @@
 import chalk from 'chalk';
+import type { CalculationDiagnostic } from './types';
+
+export function calculationDiagnostic(error: unknown): CalculationDiagnostic | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const candidate = 'diagnostic' in error ? error.diagnostic : error;
+  if (!candidate || typeof candidate !== 'object' ||
+    !('kind' in candidate) || typeof candidate.kind !== 'string' ||
+    !('message' in candidate) || typeof candidate.message !== 'string') return undefined;
+  const diagnostic: CalculationDiagnostic = { kind: candidate.kind, message: candidate.message };
+  if ('suggestion' in candidate && typeof candidate.suggestion === 'string') diagnostic.suggestion = candidate.suggestion;
+  const numericKeys = ['iterations', 'max_iterations', 'residual_norm', 'tolerance', 'step_size', 'min_step_size'] as const;
+  for (const key of numericKeys) {
+    const value: unknown = Object.getOwnPropertyDescriptor(candidate, key)?.value;
+    if (typeof value === 'number' && Number.isFinite(value)) diagnostic[key] = value;
+  }
+  return diagnostic;
+}
+
+export function formatError(error: unknown): string {
+  const diagnostic = calculationDiagnostic(error);
+  if (diagnostic) {
+    const metrics: string[] = [];
+    if (diagnostic.iterations !== undefined) metrics.push(`iterations ${diagnostic.iterations}${diagnostic.max_iterations !== undefined ? `/${diagnostic.max_iterations}` : ''}`);
+    if (diagnostic.residual_norm !== undefined) metrics.push(`residual ${formatNum(diagnostic.residual_norm)}`);
+    if (diagnostic.tolerance !== undefined) metrics.push(`tolerance ${formatNum(diagnostic.tolerance)}`);
+    if (diagnostic.step_size !== undefined) metrics.push(`step ${formatNum(diagnostic.step_size)}`);
+    if (diagnostic.min_step_size !== undefined) metrics.push(`minimum ${formatNum(diagnostic.min_step_size)}`);
+    return [diagnostic.message, metrics.length ? `  ${metrics.join(' · ')}` : '', diagnostic.suggestion ? `  Try: ${diagnostic.suggestion}` : ''].filter(Boolean).join('\n');
+  }
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message;
+  return 'Calculation failed without further details.';
+}
 
 /**
  * Terminal output formatting utilities for consistent, readable CLI output.

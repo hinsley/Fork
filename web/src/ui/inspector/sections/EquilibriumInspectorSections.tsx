@@ -8,6 +8,7 @@ import {
 import type { EquilibriumManifoldProfileDraft } from '../../manifoldProfileDrafts'
 import { InspectorSubDisclosure } from '../selectionSession'
 import { OpacityPercentInput } from '../../OpacityPercentInput'
+import { CalculationDiagnosticSummary } from '../CalculationDiagnosticSummary'
 
 type EquilibriumManifoldMode = 'curve_1d' | 'surface_2d'
 
@@ -79,7 +80,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
             <>
               <InspectorDisclosure
                 key={`${selectionKey}-equilibrium-solver`}
-                title={`${equilibriumLabel} Solver`}
+                title={`Solve ${equilibriumLabel}`}
                 testId="equilibrium-solver-toggle"
                 defaultOpen={false}
                 actionOnly
@@ -287,7 +288,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                   </button>
                 </div>
                 <div className="inspector-section">
-                  <h4 className="inspector-subheading">Residual and iterations</h4>
+                  <h4 className="inspector-subheading">Last successful solution</h4>
                   {equilibrium.solution ? (
                     <InspectorMetrics
                       rows={[
@@ -307,6 +308,12 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                 </div>
                 <div className="inspector-section">
                   <h4 className="inspector-subheading">Last solver attempt</h4>
+                  {equilibrium.lastRun?.diagnostic ? (
+                    <CalculationDiagnosticSummary diagnostic={equilibrium.lastRun.diagnostic} />
+                  ) : null}
+                  {equilibrium.lastRun && !equilibrium.lastRun.success && equilibrium.solution ? (
+                    <p className="inspector-help">The latest attempt failed. The previous successful solution is unchanged.</p>
+                  ) : null}
                   {equilibrium.lastRun ? (
                     <InspectorMetrics
                       rows={[
@@ -315,7 +322,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                           label: 'Result',
                           value: equilibrium.lastRun.success ? 'Success' : 'Failed',
                         },
-                        ...(equilibrium.lastRun.residual_norm !== undefined
+                        ...(!equilibrium.lastRun.diagnostic && equilibrium.lastRun.residual_norm !== undefined
                           ? [
                               {
                                 label: 'Residual',
@@ -323,7 +330,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                               },
                             ]
                           : []),
-                        ...(equilibrium.lastRun.iterations !== undefined
+                        ...(!equilibrium.lastRun.diagnostic && equilibrium.lastRun.iterations !== undefined
                           ? [
                               {
                                 label: 'Iterations',
@@ -342,7 +349,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
               {equilibrium.solution ? (
                 <InspectorDisclosure
                 key={`${selectionKey}-equilibrium-data`}
-                title={`${equilibriumLabel} Data`}
+                title="Inspect data"
                 testId="equilibrium-data-toggle"
                 actionOnly
               >
@@ -675,7 +682,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
               {equilibrium.solution ? (
                 <InspectorDisclosure
                 key={`${selectionKey}-equilibrium-continuation`}
-                title={`${equilibriumLabel} Continuation`}
+                title={`Continue ${equilibriumLabel}`}
                 testId="equilibrium-continuation-toggle"
                 defaultOpen={false}
                 actionOnly
@@ -882,7 +889,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
               {equilibrium.solution ? (
                 <InspectorDisclosure
                 key={`${selectionKey}-equilibrium-manifold`}
-                title="Invariant Manifolds"
+                title="Invariant manifold"
                 testId="equilibrium-manifold-toggle"
                 defaultOpen={false}
                 actionOnly

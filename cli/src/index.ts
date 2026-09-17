@@ -55,6 +55,9 @@ import {
     runConfigMenu
 } from './menu';
 import {
+    calculationDiagnostic,
+    formatError,
+    printWarning,
     printHeader,
     printField,
     printArray,
@@ -317,7 +320,7 @@ async function mainMenu() {
         const systems = Storage.listSystems();
 
         const choices = [];
-        choices.push({ name: 'Create New System', value: 'CREATE' });
+        choices.push({ name: 'Create system', value: 'CREATE' });
 
         if (systems.length > 0) {
             choices.push(new inquirer.Separator());
@@ -363,10 +366,12 @@ async function systemContext(initialSysName: string) {
 
         const choices = [
             { name: 'Objects', value: 'Objects' },
+            new inquirer.Separator('== Configure =='),
+            { name: 'Edit system', value: 'Edit System' },
+            new inquirer.Separator('== Manage =='),
+            { name: 'Duplicate system', value: 'Duplicate System' },
             new inquirer.Separator(),
-            { name: 'Edit System', value: 'Edit System' },
-            { name: 'Duplicate System', value: 'Duplicate System' },
-            { name: 'Delete System', value: 'Delete System' },
+            { name: 'Delete system', value: 'Delete System' },
             new inquirer.Separator(),
             { name: 'Back', value: 'Back' }
         ];
@@ -618,7 +623,7 @@ async function createSystem() {
     try {
         config.periodicForcing = await editPeriodicForcing(config);
     } catch (error) {
-        console.error(chalk.red(`Periodic forcing declaration rejected: ${error instanceof Error ? error.message : String(error)}`));
+        console.error(chalk.red(`Periodic forcing declaration rejected: ${formatError(error)}`));
     }
 
     Storage.saveSystem(config);
@@ -672,7 +677,7 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
                 try {
                     new WasmBridge(sys).validatePeriodicForcing();
                 } catch (error) {
-                    console.error(chalk.red(`Periodic forcing declaration rejected: ${error instanceof Error ? error.message : String(error)}`));
+                    console.error(chalk.red(`Periodic forcing declaration rejected: ${formatError(error)}`));
                     continue;
                 }
             }
@@ -736,7 +741,7 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
             try {
                 sys.periodicForcing = await editPeriodicForcing(sys);
             } catch (error) {
-                console.error(chalk.red(`Periodic forcing declaration rejected: ${error instanceof Error ? error.message : String(error)}`));
+                console.error(chalk.red(`Periodic forcing declaration rejected: ${formatError(error)}`));
             }
         } else if (action === 'Edit Parameters') {
             while (true) {
@@ -792,7 +797,7 @@ async function objectsListMenu(sysName: string) {
         const objects = Storage.listObjects(sysName);
         const choices = [];
 
-        choices.push({ name: 'Create New Object', value: 'CREATE' });
+        choices.push({ name: 'Create object', value: 'CREATE' });
 
         if (objects.length > 0) {
             choices.push(new inquirer.Separator());
@@ -1032,7 +1037,7 @@ async function createOrbit(sysName: string): Promise<NavigationRequest | void> {
 
         return await manageObject(sysName, orbit);
     } catch (e) {
-        console.error(chalk.red("Simulation Failed:"), e);
+        console.error(chalk.red("Simulation Failed:"), formatError(e));
     }
 }
 
@@ -1314,7 +1319,7 @@ async function solveForcedPeriodicResponseObject(
         Storage.saveObject(sysName, object);
         printSuccess('Forced periodic response converged.');
     } catch (error) {
-        printError(error instanceof Error ? error.message : String(error));
+        printError(formatError(error));
     }
 }
 
@@ -1414,7 +1419,7 @@ async function createForcedPeriodicResponseBranch(
         Storage.saveBranch(sysName, object.name, branch);
         printSuccess(`Branch ${branch.name} saved.`);
     } catch (error) {
-        printError(error instanceof Error ? error.message : String(error));
+        printError(formatError(error));
     }
 }
 
@@ -1432,15 +1437,22 @@ async function manageForcedPeriodicResponse(
             name: 'action',
             message: 'Object Actions',
             choices: [
-                { name: 'Inspect Data', value: 'inspect' },
-                { name: 'Solve / Rerun', value: 'solve' },
-                { name: 'Create Continuation Branch', value: 'continue' },
-                { name: 'Branches', value: 'branches' },
                 ...(usesEquationContext(system)
-                    ? [{ name: 'Equation Forcing Context', value: 'forcing-context' }]
+                    ? [new inquirer.Separator('== Configure =='),
+                        { name: 'Equation forcing context', value: 'forcing-context' }]
                     : []),
+                new inquirer.Separator('== Inspect =='),
+                { name: 'Inspect data', value: 'inspect' },
+                new inquirer.Separator('== Compute =='),
+                { name: 'Solve forced response', value: 'solve' },
+                new inquirer.Separator('== Continuation =='),
+                { name: 'Continue forced response', value: 'continue' },
+                { name: 'Branches', value: 'branches' },
+                new inquirer.Separator('== Manage =='),
+                { name: 'Rename object', value: 'rename' },
                 new inquirer.Separator(),
-                { name: 'Delete Object', value: 'delete' },
+                { name: 'Delete object', value: 'delete' },
+                new inquirer.Separator(),
                 { name: 'Back', value: 'back' }
             ]
         });
@@ -1473,6 +1485,14 @@ async function manageForcedPeriodicResponse(
                     Storage.loadBranch(sysName, object.name, branchName) as ContinuationObject
                 );
             }
+        }
+        if (action === 'rename') {
+            const newName = await promptRename('Object', object.name, candidate => objectExists(sysName, candidate));
+            if (!newName) continue;
+            Storage.renameObject(sysName, object.name, newName);
+            object.name = newName;
+            Storage.saveObject(sysName, object);
+            printSuccess(`Object renamed to ${newName}.`);
         }
         if (action === 'delete') {
             const { confirm } = await inquirer.prompt({
@@ -1538,6 +1558,7 @@ async function manageBranch(
         printField('Parameter', branch.parameterName);
         printField('Points', branch.data.points.length.toLocaleString());
         printField('Bifurcations', branch.data.bifurcations.length.toString());
+        if (branch.data.termination) printWarning(`Stopped early; accepted points retained.\n${formatError(branch.data.termination)}`);
         printBlank();
 
         const { action } = await inquirer.prompt({
@@ -1545,20 +1566,22 @@ async function manageBranch(
             name: 'action',
             message: 'Branch Actions',
             choices: [
-                { name: 'Inspect Data', value: 'Inspect Data' },
+                new inquirer.Separator('== Inspect =='),
+                { name: 'Inspect data', value: 'Inspect Data' },
                 ...(supportsContinuationBranchExtension(branch.branchType)
-                    ? [{
+                    ? [new inquirer.Separator(branch.branchType?.includes('manifold') ? '== Manifolds ==' : '== Continuation =='), {
                         name: branch.branchType === 'eq_manifold_1d' ||
                             branch.branchType === 'eq_manifold_2d' ||
                             branch.branchType === 'cycle_manifold_2d'
-                            ? 'Extend Manifold'
-                            : 'Extend Branch',
+                            ? 'Extend manifold'
+                            : 'Extend branch',
                         value: 'Extend Branch'
                     }]
                     : []),
+                new inquirer.Separator('== Manage =='),
+                { name: 'Rename branch', value: 'Rename Branch' },
                 new inquirer.Separator(),
-                { name: 'Rename Branch', value: 'Rename Branch' },
-                { name: 'Delete Branch', value: 'Delete Branch' },
+                { name: 'Delete branch', value: 'Delete Branch' },
                 new inquirer.Separator(),
                 { name: 'Back', value: 'Back' }
             ],
@@ -1666,7 +1689,7 @@ async function equilibriumBranchesMenu(
             );
 
         const choices: Array<{ name: string; value: string } | inquirer.Separator> = [];
-        choices.push({ name: 'Create New Branch', value: 'CREATE' });
+        choices.push({ name: 'Create branch', value: 'CREATE' });
 
         if (branches.length > 0) {
             choices.push(new inquirer.Separator());
@@ -1730,7 +1753,7 @@ async function limitCycleBranchesMenu(
             .filter(b => lcBranchTypes.includes(b.branchType));
 
         const choices: Array<{ name: string; value: string } | inquirer.Separator> = [];
-        choices.push({ name: 'Create New Branch', value: 'CREATE' });
+        choices.push({ name: 'Create branch', value: 'CREATE' });
 
         if (branches.length > 0) {
             choices.push(new inquirer.Separator());
@@ -1810,14 +1833,18 @@ async function manageLimitCycle(
             name: 'action',
             message: 'Object Actions',
             choices: [
-                { name: 'Branches', value: 'Branches' },
-                { name: 'Inspect State', value: 'Inspect State' },
                 ...(usesEquationContext(limitCycleSystem)
-                    ? [{ name: 'Equation Forcing Context', value: 'Equation Forcing Context' }]
+                    ? [new inquirer.Separator('== Configure =='),
+                        { name: 'Equation forcing context', value: 'Equation Forcing Context' }]
                     : []),
+                new inquirer.Separator('== Inspect =='),
+                { name: 'Inspect data', value: 'Inspect State' },
+                new inquirer.Separator('== Continuation =='),
+                { name: 'Branches', value: 'Branches' },
+                new inquirer.Separator('== Manage =='),
+                { name: 'Rename object', value: 'Rename Object' },
                 new inquirer.Separator(),
-                { name: 'Rename Object', value: 'Rename Object' },
-                { name: 'Delete Object', value: 'Delete Object' },
+                { name: 'Delete object', value: 'Delete Object' },
                 new inquirer.Separator(),
                 { name: 'Back', value: 'Back' }
             ],
@@ -1975,21 +2002,26 @@ async function manageOrbit(
             name: 'action',
             message: 'Object Actions',
             choices: [
-                { name: 'Inspect Data', value: 'Inspect Data' },
-                { name: 'Rerun Orbit', value: 'Rerun Orbit' },
-                { name: 'Extend Orbit', value: 'Extend Orbit' },
-                { name: 'Oseledets Solver', value: 'Oseledets Solver' },
                 ...(usesEquationContext(orbitSystem)
-                    ? [{ name: 'Equation Forcing Context', value: 'Equation Forcing Context' }]
+                    ? [new inquirer.Separator('== Configure =='),
+                        { name: 'Equation forcing context', value: 'Equation Forcing Context' }]
                     : []),
-                { name: 'Create Limit Cycle Object (from this orbit)', value: 'Create Limit Cycle Object' },
-                { name: 'Continue Heteroclinic Connection (between two equilibria)', value: 'Create Heteroclinic Curve' },
+                new inquirer.Separator('== Inspect =='),
+                { name: 'Inspect data', value: 'Inspect Data' },
+                new inquirer.Separator('== Compute =='),
+                { name: 'Run orbit', value: 'Rerun Orbit' },
+                { name: 'Extend orbit', value: 'Extend Orbit' },
+                { name: 'Lyapunov analysis', value: 'Oseledets Solver' },
+                { name: 'Create limit cycle from orbit', value: 'Create Limit Cycle Object' },
+                new inquirer.Separator('== Continuation =='),
+                { name: 'Continue heteroclinic connection (between two equilibria)', value: 'Create Heteroclinic Curve' },
                 ...(Storage.listBranches(sysName, obj.name).length > 0
-                    ? [{ name: 'Heteroclinic Branches', value: 'Heteroclinic Branches' }]
+                    ? [{ name: 'Heteroclinic branches', value: 'Heteroclinic Branches' }]
                     : []),
+                new inquirer.Separator('== Manage =='),
+                { name: 'Rename object', value: 'Rename Object' },
                 new inquirer.Separator(),
-                { name: 'Rename Object', value: 'Rename Object' },
-                { name: 'Delete Object', value: 'Delete Object' },
+                { name: 'Delete object', value: 'Delete Object' },
                 new inquirer.Separator(),
                 { name: 'Back', value: 'Back' }
             ],
@@ -2199,7 +2231,7 @@ async function manageOrbit(
                 Storage.saveObject(sysName, obj);
                 console.log(chalk.green("Orbit extended and saved."));
             } catch (e) {
-                console.error(chalk.red("Extension Failed:"), e);
+                console.error(chalk.red("Extension Failed:"), formatError(e));
             }
         }
     }
@@ -2210,7 +2242,7 @@ async function oseledetsSolverMenu(sysName: string, obj: OrbitObject) {
         const { task } = await inquirer.prompt([{
             type: 'rawlist',
             name: 'task',
-            message: 'Oseledets Solver',
+            message: 'Lyapunov analysis',
             choices: [
                 { name: 'Lyapunov Exponents', value: 'Lyapunov Exponents' },
                 { name: 'Covariant Lyapunov Vectors', value: 'Covariant Lyapunov Vectors' },
@@ -2349,7 +2381,7 @@ async function runLyapunovExponents(sysName: string, obj: OrbitObject) {
         console.log(chalk.green("Lyapunov exponents computed and stored."));
         await inspectOrbitData(sysName, obj);
     } catch (err) {
-        const message = err instanceof Error ? err.message : `${err}`;
+        const message = formatError(err);
         console.error(chalk.red("Lyapunov computation failed:"), message);
     }
 }
@@ -2595,7 +2627,7 @@ async function runCovariantLyapunovVectors(sysName: string, obj: OrbitObject) {
         );
         await inspectOrbitData(sysName, obj);
     } catch (err) {
-        const message = err instanceof Error ? err.message : `${err}`;
+        const message = formatError(err);
         console.error(chalk.red("Covariant Lyapunov computation failed:"), message);
     }
 }
@@ -2629,7 +2661,7 @@ async function inspectOrbitData(sysName: string, obj: OrbitObject) {
             console.log(chalk.cyan(`Lyapunov Dimension: ${dimension.toFixed(6)}`));
         }
     } else {
-        console.log(chalk.gray('Lyapunov exponents not computed yet. Use the Oseledets Solver to compute them.'));
+        console.log(chalk.gray('Lyapunov exponents not computed yet. Use Lyapunov analysis to compute them.'));
     }
 
     if (obj.covariantVectors && obj.covariantVectors.vectors.length > 0) {
@@ -2648,7 +2680,7 @@ async function inspectOrbitData(sysName: string, obj: OrbitObject) {
             });
         }
     } else {
-        console.log(chalk.gray('Covariant Lyapunov vectors not computed yet. Use the Oseledets Solver to compute them.'));
+        console.log(chalk.gray('Covariant Lyapunov vectors not computed yet. Use Lyapunov analysis to compute them.'));
     }
 
     await inquirer.prompt({ type: 'input', name: 'cont', message: 'Press enter to continue...' });
@@ -2766,15 +2798,20 @@ async function manageEquilibrium(
             name: 'action',
             message: 'Object Actions',
             choices: [
-                { name: 'Inspect Data', value: 'Inspect Data' },
-                { name: `${equilibriumLabel} Solver`, value: 'Equilibrium Solver' },
-                { name: 'Branches', value: 'Branches' },
                 ...(usesEquationContext(sysConfig)
-                    ? [{ name: 'Equation Forcing Context', value: 'Equation Forcing Context' }]
+                    ? [new inquirer.Separator('== Configure =='),
+                        { name: 'Equation forcing context', value: 'Equation Forcing Context' }]
                     : []),
+                new inquirer.Separator('== Inspect =='),
+                { name: 'Inspect data', value: 'Inspect Data' },
+                new inquirer.Separator('== Compute =='),
+                { name: `Solve ${equilibriumLabelLower}`, value: 'Equilibrium Solver' },
+                new inquirer.Separator('== Continuation =='),
+                { name: 'Branches', value: 'Branches' },
+                new inquirer.Separator('== Manage =='),
+                { name: 'Rename object', value: 'Rename Object' },
                 new inquirer.Separator(),
-                { name: 'Rename Object', value: 'Rename Object' },
-                { name: 'Delete Object', value: 'Delete Object' },
+                { name: 'Delete object', value: 'Delete Object' },
                 new inquirer.Separator(),
                 { name: 'Back', value: 'Back' }
             ],
@@ -3210,7 +3247,10 @@ async function executeEquilibriumSolver(
         runRecord.iterations = result.iterations;
         console.log(chalk.green(`${equilibriumLabel} found and saved.`));
     } catch (err) {
-        const message = err instanceof Error ? err.message : `${err}`;
+        runRecord.diagnostic = calculationDiagnostic(err);
+        runRecord.residual_norm = runRecord.diagnostic?.residual_norm;
+        runRecord.iterations = runRecord.diagnostic?.iterations;
+        const message = formatError(err);
         console.error(chalk.red(`${equilibriumLabel} solve failed:`), message);
     } finally {
         obj.lastRun = runRecord;
@@ -3372,6 +3412,7 @@ function renderEquilibriumData(obj: EquilibriumObject, sysConfig: SystemConfig) 
     } else {
         console.log(`  Timestamp : ${obj.lastRun.timestamp}`);
         console.log(`  Result    : ${obj.lastRun.success ? 'Success' : 'Failed'}`);
+        if (obj.lastRun.diagnostic) printWarning(formatError(obj.lastRun.diagnostic));
         if (obj.lastRun.residual_norm !== undefined) {
             console.log(`  Residual  : ${obj.lastRun.residual_norm.toExponential(6)}`);
         }

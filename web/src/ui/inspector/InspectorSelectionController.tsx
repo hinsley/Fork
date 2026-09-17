@@ -4747,7 +4747,7 @@ function useInspectorSelectionController({
   const showHomoclinicFromHomoclinic =
     branch?.branchType === 'homoclinic_curve' && hasSelectedBranchPoint
   const showHomotopySaddleFromEquilibrium =
-    branch?.branchType === 'equilibrium' && hasSelectedBranchPoint
+    !isDiscreteMap && branch?.branchType === 'equilibrium' && hasSelectedBranchPoint
   const showHomoclinicFromHomotopySaddle =
     branch?.branchType === 'homotopy_saddle_curve' && hasSelectedBranchPoint
   const homotopyStageDReady = homotopyBranchStage === 'StageD'
@@ -4997,6 +4997,20 @@ function useInspectorSelectionController({
         selectedBranchPoint.normal_form ||
         branchNormalFormIsChildProvenance)
   )
+  const showCodim2BranchSwitch = Boolean(
+    selectedBranchPoint?.codim2?.refined &&
+      !selectedBranchPoint.codim2.candidate &&
+      (selectedBranchPoint.codim2.type === 'GeneralizedHopf' ||
+        selectedBranchPoint.codim2.type === 'BogdanovTakens')
+  )
+  const invariantEigenmodeUnavailableReason = invariantMeasure
+    ? invariantMeasure.result.stationaryDistribution.length < 2
+      ? 'This cover has no nontrivial mode.'
+      : !invariantMeasure.result.stationaryDistribution.some((mass) => mass > 0) ||
+          invariantMeasure.result.residual > invariantMeasure.result.settings.tolerance
+        ? 'Requires a converged stationary measure.'
+        : null
+    : null
 
   const workflowActions: WorkflowActionEntry[] = []
   if (
@@ -5042,7 +5056,7 @@ function useInspectorSelectionController({
       workflowActions.push({
         id: 'orbit-data-toggle',
         group: 'Inspect',
-        label: 'View Data',
+        label: 'Inspect data',
         description: 'Inspect stored orbit samples, parameters, and run metadata.',
       })
     }
@@ -5082,7 +5096,7 @@ function useInspectorSelectionController({
       workflowActions.push({
         id: 'equilibrium-data-toggle',
         group: 'Inspect',
-        label: 'View Data',
+        label: 'Inspect data',
         description: `Inspect the stored ${equilibriumLabelLower} solution and spectrum.`,
       })
     }
@@ -5114,7 +5128,7 @@ function useInspectorSelectionController({
       workflowActions.push({
         id: 'forced-response-data-toggle',
         group: 'Inspect',
-        label: 'View Data',
+        label: 'Inspect data',
         description: 'Inspect the strobe state, response period, trajectory, and multipliers.',
       })
     }
@@ -5137,9 +5151,17 @@ function useInspectorSelectionController({
     workflowActions.push({
       id: 'limit-cycle-data-toggle',
       group: 'Inspect',
-      label: 'View Data',
+      label: 'Inspect data',
       description: 'Inspect the cycle profile, parameters, and Floquet data.',
     })
+    if (!isDiscreteMap) {
+      workflowActions.push({
+        id: 'limit-cycle-floquet-toggle',
+        group: 'Compute',
+        label: 'Compute Floquet modes',
+        description: 'Compute the cycle multipliers and mode vectors.',
+      })
+    }
     if (limitCycleDisplayMultipliers.length > 0) {
       workflowActions.push({
         id: 'limit-cycle-manifold-toggle',
@@ -5161,8 +5183,16 @@ function useInspectorSelectionController({
     workflowActions.push({
       id: 'invariant-measure-data-toggle',
       group: 'Inspect',
-      label: 'View Data',
+      label: 'Inspect data',
       description: 'Inspect the source grid, method settings, and convergence diagnostics.',
+    })
+    workflowActions.push({
+      id: 'invariant-measure-eigenmodes-toggle',
+      group: 'Compute',
+      label: 'Compute eigenmodes',
+      disabled: Boolean(invariantEigenmodeUnavailableReason),
+      description: invariantEigenmodeUnavailableReason ??
+        'Compute nontrivial modes of the stored transfer operator.',
     })
   }
   if (branch) {
@@ -5170,13 +5200,13 @@ function useInspectorSelectionController({
       {
         id: 'branch-summary-toggle',
         group: 'Inspect',
-        label: 'View Summary',
+        label: 'Inspect summary',
         description: 'Inspect branch metadata, settings, and solver diagnostics.',
       },
       {
         id: 'branch-points-toggle',
         group: 'Inspect',
-        label: 'View Data',
+        label: 'Inspect data',
         description: 'Navigate branch points and inspect the selected point.',
       }
     )
@@ -5187,6 +5217,14 @@ function useInspectorSelectionController({
       group: 'Bifurcations',
       label: 'Normal form & branch switching',
       description: 'Compute local coefficients and continue an eligible outgoing branch.',
+    })
+  }
+  if (showCodim2BranchSwitch) {
+    workflowActions.push({
+      id: 'codim2-branch-switch-toggle',
+      group: 'Bifurcations',
+      label: 'Branch switching',
+      description: 'Start an outgoing curve from the refined GH or BT event.',
     })
   }
   if (canExtendInvariantManifold) {
@@ -5267,7 +5305,7 @@ function useInspectorSelectionController({
   if (showHomoclinicFromHomoclinic) {
     workflowActions.push({
       id: 'homoclinic-from-homoclinic-toggle',
-      group: 'Bifurcations',
+      group: 'Continuation',
       label: 'Restart homoclinic branch',
       description: 'Restart homoclinic continuation from the selected point.',
     })
@@ -5275,7 +5313,7 @@ function useInspectorSelectionController({
   if (showHomotopySaddleFromEquilibrium) {
     workflowActions.push({
       id: 'homotopy-saddle-from-equilibrium-toggle',
-      group: 'Bifurcations',
+      group: 'Continuation',
       label: 'Homotopy-saddle continuation',
       description: 'Initialize the staged homotopy construction.',
     })
@@ -5283,9 +5321,12 @@ function useInspectorSelectionController({
   if (showHomoclinicFromHomotopySaddle) {
     workflowActions.push({
       id: 'homoclinic-from-homotopy-saddle-toggle',
-      group: 'Bifurcations',
+      group: 'Continuation',
       label: 'Homoclinic from homotopy saddle',
-      description: 'Create the homoclinic branch from a completed StageD point.',
+      disabled: !homotopyStageDReady,
+      description: homotopyStageDReady
+        ? 'Create the homoclinic branch from a completed StageD point.'
+        : 'Requires a completed StageD point.',
     })
   }
 
@@ -8773,6 +8814,7 @@ function useInspectorSelectionController({
     hopfCurveError,
     hopfCurveLabel,
     hopfOmega,
+    invariantEigenmodeUnavailableReason,
     isBranchRenderTarget,
     isDiscreteMap,
     isHopfPointSelected,
@@ -8970,6 +9012,7 @@ function useInspectorSelectionController({
     setSelectionNameDraft,
     showBranchContinueFromPoint,
     showCodim1CurveContinuations,
+    showCodim2BranchSwitch,
     showEquilibriumEigenvectorControls,
     showFoldCurveContinuation,
     showHomoclinicFromHomoclinic,

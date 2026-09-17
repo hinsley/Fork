@@ -1,3 +1,4 @@
+import { calculationError } from '../compute/calculationError'
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import type {
   ComputeEventSeriesFromOrbitRequest,
@@ -35,6 +36,7 @@ import type {
   EquilibriumObject,
   EquilibriumDeflationConfig,
   EquilibriumManifold2DSettings,
+  EquilibriumRunSummary,
   EquilibriumSolverParams,
   ForcedPeriodicResponseObject,
   ForcedPeriodicResponseSolverParams,
@@ -2281,7 +2283,7 @@ export function AppProvider({
         try {
           await write
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err)
+          const message = calculationError(err).message
           dispatch({ type: 'SET_ERROR', error: message })
         } finally {
           inFlightDebouncedWritesRef.current.delete(write)
@@ -2304,7 +2306,7 @@ export function AppProvider({
         try {
           await write
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err)
+          const message = calculationError(err).message
           dispatch({ type: 'SET_ERROR', error: message })
         } finally {
           inFlightDebouncedWritesRef.current.delete(write)
@@ -2347,7 +2349,7 @@ export function AppProvider({
         dispatch({ type: 'FINISH_ENTITY_LOAD', objectIds, branchIds, ids: loadIds })
         return merged
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         loadIds.forEach((id) => {
           dispatch({ type: 'SET_ENTITY_LOAD_ERROR', id, error: message })
         })
@@ -2444,7 +2446,7 @@ export function AppProvider({
         await store.save(nextSystem)
         await refreshSystems()
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -2973,7 +2975,7 @@ export function AppProvider({
           await store.save(selected)
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -2997,7 +2999,7 @@ export function AppProvider({
           await store.save(system)
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -3046,7 +3048,7 @@ export function AppProvider({
         await store.save(selected)
         return result.nodeId
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
         return null
       } finally {
@@ -3122,7 +3124,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: withViewport })
         await store.save(withViewport)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -3139,7 +3141,7 @@ export function AppProvider({
         if (err instanceof Error && err.name === 'AbortError') {
           throw err
         }
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
         throw err
       }
@@ -3238,7 +3240,7 @@ export function AppProvider({
         if (err instanceof Error && err.name === 'AbortError') {
           return null
         }
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         if (!silent) {
           dispatch({ type: 'SET_ERROR', error: message })
           throw err instanceof Error ? err : new Error(message)
@@ -3361,7 +3363,7 @@ export function AppProvider({
         return result
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') return null
-        const message = error instanceof Error ? error.message : String(error)
+        const message = calculationError(error).message
         dispatch({ type: 'SET_ERROR', error: message })
         throw error instanceof Error ? error : new Error(message)
       } finally {
@@ -3609,7 +3611,7 @@ export function AppProvider({
         return result
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') return null
-        const message = error instanceof Error ? error.message : String(error)
+        const message = calculationError(error).message
         dispatch({ type: 'SET_ERROR', error: message })
         throw error instanceof Error ? error : new Error(message)
       } finally {
@@ -3772,7 +3774,7 @@ export function AppProvider({
         return result
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') return null
-        const message = error instanceof Error ? error.message : String(error)
+        const message = calculationError(error).message
         dispatch({ type: 'SET_ERROR', error: message })
         throw error instanceof Error ? error : new Error(message)
       } finally {
@@ -3919,7 +3921,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -4041,7 +4043,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -4188,7 +4190,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -4245,7 +4247,7 @@ export function AppProvider({
         await store.save(selected)
         return result.nodeId
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
         return null
       } finally {
@@ -4318,7 +4320,7 @@ export function AppProvider({
         await store.save(selected)
         return created.nodeId
       } catch (err) {
-        dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : String(err) })
+        dispatch({ type: 'SET_ERROR', error: calculationError(err).message })
         return null
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -4407,7 +4409,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
       } catch (err) {
-        dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : String(err) })
+        dispatch({ type: 'SET_ERROR', error: calculationError(err).message })
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
       }
@@ -4496,7 +4498,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : String(err) })
+        dispatch({ type: 'SET_ERROR', error: calculationError(err).message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -4560,7 +4562,7 @@ export function AppProvider({
       } catch (error) {
         dispatch({
           type: 'SET_ERROR',
-          error: error instanceof Error ? error.message : String(error),
+          error: calculationError(error).message,
         })
         return null
       } finally {
@@ -4615,7 +4617,7 @@ export function AppProvider({
         await store.save(selected)
         return result.nodeId
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
         return null
       } finally {
@@ -4629,11 +4631,11 @@ export function AppProvider({
     async (request: EquilibriumSolveRequest) => {
       if (!state.system) return
       dispatch({ type: 'SET_BUSY', busy: true })
-      const runSummary = {
+      const runSummary: EquilibriumRunSummary = {
         timestamp: new Date().toISOString(),
         success: false,
-        residual_norm: undefined as number | undefined,
-        iterations: undefined as number | undefined,
+        residual_norm: undefined,
+        iterations: undefined,
       }
       let mapIterations: number | undefined
       let deflation: EquilibriumDeflationConfig | undefined
@@ -4772,8 +4774,11 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        dispatch({ type: 'SET_ERROR', error: message })
+        const error = calculationError(err)
+        runSummary.diagnostic = error.diagnostic
+        runSummary.residual_norm = error.diagnostic?.residual_norm
+        runSummary.iterations = error.diagnostic?.iterations
+        dispatch({ type: 'SET_ERROR', error: error.message })
         const updated = updateObject(state.system, request.equilibriumId, {
           lastRun: runSummary,
           lastSolverParams: {
@@ -4903,7 +4908,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -5151,7 +5156,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -5339,7 +5344,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -5499,7 +5504,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -5685,7 +5690,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -5952,7 +5957,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -6158,7 +6163,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -6440,7 +6445,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -6602,7 +6607,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -6769,7 +6774,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -6957,7 +6962,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
       } catch (err) {
-        dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : String(err) })
+        dispatch({ type: 'SET_ERROR', error: calculationError(err).message })
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
       }
@@ -7246,7 +7251,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : String(err) })
+        dispatch({ type: 'SET_ERROR', error: calculationError(err).message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -7378,7 +7383,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : String(err) })
+        dispatch({ type: 'SET_ERROR', error: calculationError(err).message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -7604,7 +7609,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -7919,7 +7924,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -8086,7 +8091,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -8365,7 +8370,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -8572,7 +8577,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -8792,7 +8797,7 @@ export function AppProvider({
       } catch (error) {
         dispatch({
           type: 'SET_ERROR',
-          error: error instanceof Error ? error.message : String(error),
+          error: calculationError(error).message,
         })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -8999,7 +9004,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -9236,7 +9241,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -9476,7 +9481,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -9775,7 +9780,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -9953,7 +9958,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -10143,7 +10148,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
@@ -10171,7 +10176,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.saveUi(updated)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -10198,7 +10203,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.saveUi(updated)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
@@ -10225,7 +10230,7 @@ export function AppProvider({
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.saveUi(updated)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = calculationError(err).message
         dispatch({ type: 'SET_ERROR', error: message })
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })

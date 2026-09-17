@@ -215,7 +215,7 @@ export function SelectionInspectorView({
         {selectionNode ? (
           <div
             className={`inspector-group inspector-navigation-page${navigationClass}`}
-            key={workflowFocus?.activeWorkflow ?? 'selection-root'}
+            key={selectionKey}
           >
             {!workflowFocus?.activeWorkflow ? (
               <div className="inspector-section inspector-entity-header">
@@ -712,7 +712,7 @@ export function SelectionInspectorView({
           {limitCycle ? (
             <InspectorDisclosure
               key={`${selectionKey}-limit-cycle-data`}
-              title="Limit Cycle Data"
+              title="Inspect data"
               testId="limit-cycle-data-toggle"
               actionOnly
             >
@@ -952,37 +952,6 @@ export function SelectionInspectorView({
                   )}
                   {systemDraft.type === 'flow' ? (
                     <>
-                      <label>
-                        Floquet backend
-                        <select
-                          value={limitCycleFloquetBackend}
-                          onChange={(event) =>
-                            setLimitCycleFloquetBackend(
-                              event.target.value as typeof limitCycleFloquetBackend
-                            )
-                          }
-                          disabled={runDisabled}
-                          data-testid="limit-cycle-floquet-backend"
-                        >
-                          <option value="auto">Automatic</option>
-                          <option value="periodic_schur">Periodic Schur</option>
-                          <option value="block_cyclic">Block-cyclic reference</option>
-                        </select>
-                      </label>
-                      <div className="inspector-inline-actions">
-                        <button
-                          className="inspector-primary-action"
-                          type="button"
-                          onClick={() => void handleComputeLimitCycleFloquetModes()}
-                          disabled={runDisabled}
-                          data-testid="limit-cycle-floquet-modes-compute"
-                        >
-                          Compute Floquet modes
-                        </button>
-                      </div>
-                      {limitCycleFloquetModesError ? (
-                        <div className="field-error">{limitCycleFloquetModesError}</div>
-                      ) : null}
                       {limitCycleFloquetModes ? (
                         <>
                           {!limitCycleFloquetModesMatchMesh ? (
@@ -1175,6 +1144,46 @@ export function SelectionInspectorView({
                 </div>
                 </div>
               </InspectorSubDisclosure>
+            </InspectorDisclosure>
+          ) : null}
+          {limitCycle && systemDraft.type === 'flow' ? (
+            <InspectorDisclosure
+              key={`${selectionKey}-limit-cycle-floquet`}
+              title="Compute Floquet modes"
+              testId="limit-cycle-floquet-toggle"
+              actionOnly
+            >
+                      <label>
+                        Floquet backend
+                        <select
+                          value={limitCycleFloquetBackend}
+                          onChange={(event) =>
+                            setLimitCycleFloquetBackend(
+                              event.target.value as typeof limitCycleFloquetBackend
+                            )
+                          }
+                          disabled={runDisabled}
+                          data-testid="limit-cycle-floquet-backend"
+                        >
+                          <option value="auto">Automatic</option>
+                          <option value="periodic_schur">Periodic Schur</option>
+                          <option value="block_cyclic">Block-cyclic reference</option>
+                        </select>
+                      </label>
+                      <div className="inspector-inline-actions">
+                        <button
+                          className="inspector-primary-action"
+                          type="button"
+                          onClick={() => void handleComputeLimitCycleFloquetModes()}
+                          disabled={runDisabled}
+                          data-testid="limit-cycle-floquet-modes-compute"
+                        >
+                          Compute Floquet modes
+                        </button>
+                      </div>
+                      {limitCycleFloquetModesError ? (
+                        <div className="field-error">{limitCycleFloquetModesError}</div>
+                      ) : null}
             </InspectorDisclosure>
           ) : null}
 

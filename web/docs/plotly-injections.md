@@ -27,6 +27,12 @@ right-side relative-mass axis while the map remains on `x_n` versus
 `x_{n+1}`. The source grid is drawn first and derived invariant measures are
 drawn above it, with a visible legend for the two layers.
 
+Inspector workflow navigation keys the selection page by selection rather than the active
+workflow, so `PlotlyViewport` instances inside inspector disclosures (e.g. State Grid eigenmode
+convergence plots and Floquet mode plots) remain mounted while a different workflow is focused;
+the plots are hidden with CSS instead of unmounted, and `purgePlot()` now runs only when the
+selection changes or the object is removed.
+
 ## Runtime touchpoints
 
 ### Plotly lifecycle and render config

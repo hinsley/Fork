@@ -1,3 +1,4 @@
+import { formatError } from '../format';
 /**
  * Equilibrium Branch Initiation Module
  * 
@@ -142,7 +143,7 @@ export async function initiateEquilibriumBranchFromPoint(
     {
       id: 'parameter',
       label: 'Continuation parameter',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => {
         const isSame = selectedParamName === sourceBranch.parameterName;
         return isSame ? `${selectedParamName} (same as source)` : selectedParamName;
@@ -166,7 +167,7 @@ export async function initiateEquilibriumBranchFromPoint(
     {
       id: 'branchName',
       label: 'Branch name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => formatUnset(branchName),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -187,7 +188,7 @@ export async function initiateEquilibriumBranchFromPoint(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -207,7 +208,7 @@ export async function initiateEquilibriumBranchFromPoint(
     {
       id: 'stepSize',
       label: 'Initial step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(stepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -221,7 +222,7 @@ export async function initiateEquilibriumBranchFromPoint(
     {
       id: 'maxSteps',
       label: 'Max points',
-      section: 'Predictor Settings',
+      section: 'Resource limits',
       getDisplay: () => formatUnset(maxStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -235,7 +236,7 @@ export async function initiateEquilibriumBranchFromPoint(
     {
       id: 'minStep',
       label: 'Min step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(minStepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -249,7 +250,7 @@ export async function initiateEquilibriumBranchFromPoint(
     {
       id: 'maxStep',
       label: 'Max step size',
-      section: 'Predictor Settings',
+      section: 'Predictor',
       getDisplay: () => formatUnset(maxStepSizeInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -263,7 +264,7 @@ export async function initiateEquilibriumBranchFromPoint(
     {
       id: 'correctorSteps',
       label: 'Corrector steps',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorStepsInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -277,7 +278,7 @@ export async function initiateEquilibriumBranchFromPoint(
     {
       id: 'correctorTolerance',
       label: 'Corrector tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(correctorToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -291,7 +292,7 @@ export async function initiateEquilibriumBranchFromPoint(
     {
       id: 'stepTolerance',
       label: 'Step tolerance',
-      section: 'Corrector Settings',
+      section: 'Corrector',
       getDisplay: () => formatUnset(stepToleranceInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -386,7 +387,7 @@ export async function initiateEquilibriumBranchFromPoint(
     return newBranch;
 
   } catch (e) {
-    printError(`Continuation Failed: ${e}`);
+    printError(`Continuation Failed: ${formatError(e)}`);
     return null;
   }
 }
@@ -437,7 +438,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
     {
       id: 'branchName',
       label: 'Branch name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => formatUnset(branchName),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -451,7 +452,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
     {
       id: 'stability',
       label: 'Manifold stability',
-      section: 'Manifold Selection',
+      section: 'Setup',
       getDisplay: () => stability,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -470,7 +471,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
     {
       id: 'direction',
       label: 'Stage 1 direction',
-      section: 'Manifold Selection',
+      section: 'Setup',
       getDisplay: () => direction,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -490,7 +491,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
     {
       id: 'eigIndex',
       label: 'Eigen index (optional)',
-      section: 'Manifold Selection',
+      section: 'Setup',
       getDisplay: () => {
         const parsed = parseOptionalIndex(eigIndexInput);
         if (parsed === undefined) {
@@ -564,7 +565,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
     {
       id: 'maxSteps',
       label: 'Caps: max steps',
-      section: 'Termination Caps',
+      section: 'Resource limits',
       getDisplay: () => maxStepsInput,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -578,7 +579,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
     {
       id: 'maxPoints',
       label: 'Caps: max points',
-      section: 'Termination Caps',
+      section: 'Resource limits',
       getDisplay: () => maxPointsInput,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -593,7 +594,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
       ? [{
           id: 'maxIterations',
           label: 'Caps: max iterations',
-          section: 'Termination Caps',
+          section: 'Resource limits',
           getDisplay: () => maxIterationsInput,
           edit: async () => {
             const { value } = await inquirer.prompt({
@@ -607,7 +608,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
       : [{
           id: 'maxTime',
           label: 'Caps: max time',
-          section: 'Termination Caps',
+          section: 'Resource limits',
           getDisplay: () => maxTimeInput,
           edit: async () => {
             const { value } = await inquirer.prompt({
@@ -874,7 +875,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
       }
       return savedBranches[0];
     } catch (e) {
-      printError(`1D equilibrium manifold failed: ${e}`);
+      printError(`1D equilibrium manifold failed: ${formatError(e)}`);
       return null;
     }
   }
@@ -991,7 +992,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
     {
       id: 'branchName',
       label: 'Branch name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => formatUnset(branchName),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1005,7 +1006,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
     {
       id: 'stability',
       label: 'Manifold stability',
-      section: 'Manifold Selection',
+      section: 'Setup',
       getDisplay: () => stability,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1024,7 +1025,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
     {
       id: 'eigIndices',
       label: 'Eigen indices (optional)',
-      section: 'Manifold Selection',
+      section: 'Setup',
       getDisplay: () => formatUnset(eigIndicesInput),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1244,7 +1245,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
     {
       id: 'maxSteps',
       label: 'Caps: max steps',
-      section: 'Termination Caps',
+      section: 'Resource limits',
       getDisplay: () => maxStepsInput,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1258,7 +1259,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
     {
       id: 'maxPoints',
       label: 'Caps: max points',
-      section: 'Termination Caps',
+      section: 'Resource limits',
       getDisplay: () => maxPointsInput,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1272,7 +1273,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
     {
       id: 'maxRings',
       label: 'Caps: max rings',
-      section: 'Termination Caps',
+      section: 'Resource limits',
       getDisplay: () => maxRingsInput,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1286,7 +1287,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
     {
       id: 'maxVertices',
       label: 'Caps: max vertices',
-      section: 'Termination Caps',
+      section: 'Resource limits',
       getDisplay: () => maxVerticesInput,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1300,7 +1301,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
     {
       id: 'maxTime',
       label: 'Caps: max time',
-      section: 'Termination Caps',
+      section: 'Resource limits',
       getDisplay: () => maxTimeInput,
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1468,7 +1469,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
       printSuccess(`2D equilibrium manifold saved as "${continuation.name}".`);
       return continuation;
     } catch (e) {
-      printError(`2D equilibrium manifold failed: ${e}`);
+      printError(`2D equilibrium manifold failed: ${formatError(e)}`);
       return null;
     }
   }
@@ -1521,7 +1522,7 @@ export async function initiateMapCycleFromPD(
     {
       id: 'cycleObjectName',
       label: `${targetLabel} object name`,
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => cycleObjectName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1545,7 +1546,7 @@ export async function initiateMapCycleFromPD(
     {
       id: 'branchName',
       label: 'Branch name',
-      section: 'Branch Settings',
+      section: 'Setup',
       getDisplay: () => branchName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1590,7 +1591,7 @@ export async function initiateMapCycleFromPD(
     {
       id: 'direction',
       label: 'Direction',
-      section: 'Continuation Settings',
+      section: 'Predictor',
       getDisplay: () => directionLabel(directionForward),
       edit: async () => {
         const { value } = await inquirer.prompt({
@@ -1755,7 +1756,7 @@ export async function initiateMapCycleFromPD(
     printSuccess(`Period-doubled ${targetLabel} branching successful! Generated ${branchData.points.length} points.`);
     return newBranch;
   } catch (e) {
-    printError(`Period-doubled ${targetLabel} branching failed: ${e}`);
+    printError(`Period-doubled ${targetLabel} branching failed: ${formatError(e)}`);
     return null;
   }
 }

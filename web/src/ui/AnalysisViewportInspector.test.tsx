@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -7,6 +8,7 @@ import {
   updateAnalysisViewport
 } from '../system/model'
 import type { SystemConfig } from '../system/types'
+import { createDemoSystem } from '../system/fixtures'
 import { AnalysisViewportInspector } from './AnalysisViewportInspector'
 
 function renderInspector(options?: {
@@ -63,6 +65,62 @@ function renderInspector(options?: {
 }
 
 describe('AnalysisViewportInspector', () => {
+  it('pins selected sources under filtering and removes unavailable selections without dropping others', () => {
+    const { system, objectNodeId, branchNodeId } = createDemoSystem()
+    const added = addAnalysisViewport(system, 'Sources')
+    const initialViewport = {
+      ...added.system.analysisViewports[0],
+      sourceNodeIds: [branchNodeId, 'missing-source', objectNodeId]
+    }
+    function Wrapper() {
+      const [viewport, setViewport] = useState(initialViewport)
+      return (
+        <AnalysisViewportInspector
+          system={added.system}
+          viewport={viewport}
+          onUpdateAnalysisViewport={(_, update) => setViewport((prev) => ({ ...prev, ...update }))}
+        />
+      )
+    }
+    render(<Wrapper />)
+    fireEvent.change(screen.getByLabelText('Search compatible sources'), {
+      target: { value: 'no matching source' }
+    })
+    const incompatible = screen.getByRole('checkbox', { name: /Incompatible source/ })
+    const unavailable = screen.getByRole('checkbox', { name: /missing-source/ })
+    const orbit = screen.getByRole('checkbox', { name: /Orbit A/ })
+    expect(incompatible).toBeChecked()
+    expect(unavailable).toBeChecked()
+    expect(orbit).toBeChecked()
+    const sources = screen.getByRole('heading', { name: 'Sources' }).parentElement!
+    expect(within(sources).getAllByRole('checkbox')).toEqual([incompatible, unavailable, orbit])
+    fireEvent.click(unavailable)
+    expect(screen.queryByRole('checkbox', { name: /missing-source/ })).toBeNull()
+    expect(incompatible).toBeChecked()
+    expect(orbit).toBeChecked()
+    fireEvent.click(incompatible)
+    expect(screen.queryByRole('checkbox', { name: /Incompatible source/ })).toBeNull()
+    expect(orbit).toBeChecked()
+    fireEvent.change(screen.getByLabelText('Search compatible sources'), {
+      target: { value: '' }
+    })
+    expect(screen.getAllByRole('checkbox', { name: /Orbit A/ })).toHaveLength(1)
+  })
+
+  it('retains advanced values while collapsed and reopened', async () => {
+    const user = userEvent.setup()
+    renderInspector()
+    const skipHits = screen.getByLabelText('Skip hits')
+    expect(skipHits).not.toBeVisible()
+    await user.click(screen.getByTestId('analysis-advanced-toggle'))
+    fireEvent.change(skipHits, { target: { value: '7' } })
+    await user.click(screen.getByTestId('analysis-advanced-toggle'))
+    expect(skipHits).not.toBeVisible()
+    await user.click(screen.getByTestId('analysis-advanced-toggle'))
+    expect(skipHits).toBeVisible()
+    expect(skipHits).toHaveValue(7)
+  })
+
   it('keeps blank custom event expressions blank and shows local validation errors', async () => {
     const onValidateAnalysisExpression = vi.fn(
       async ({
@@ -163,7 +221,7 @@ describe('AnalysisViewportInspector', () => {
     expect(screen.queryByText(/Using hit /)).not.toBeInTheDocument()
   })
 
-  it('shows cobweb and identity-line controls for same-observable 2D event maps', () => {
+  it('shows cobweb and identity-line controls for same-observable 2D event maps', async () => {
     renderInspector({
       config: {
         name: 'Logistic',
@@ -175,6 +233,7 @@ describe('AnalysisViewportInspector', () => {
         type: 'map'
       }
     })
+    await userEvent.setup().click(screen.getByTestId('analysis-advanced-toggle'))
 
     expect(screen.queryByText('Connect plotted hits')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Show cobweb')).toBeInTheDocument()
@@ -216,7 +275,7 @@ describe('AnalysisViewportInspector', () => {
     ).toBe('dashed')
   })
 
-  it('shows cobweb and identity-line controls for delta-t axes at different hit offsets', () => {
+  it('shows cobweb and identity-line controls for delta-t axes at different hit offsets', async () => {
     renderInspector({
       viewportUpdate: {
         axes: {
@@ -226,6 +285,7 @@ describe('AnalysisViewportInspector', () => {
         }
       }
     })
+    await userEvent.setup().click(screen.getByTestId('analysis-advanced-toggle'))
 
     expect(screen.queryByText('Connect plotted hits')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Show cobweb')).toBeInTheDocument()

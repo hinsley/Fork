@@ -211,7 +211,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const suppressNextClickRef = useRef(false)
     const equilibriumLabel = formatEquilibriumLabel(system.config.type)
     const createEquilibriumLabel =
-      system.config.type === 'map' ? 'Fixed point / Cycle' : equilibriumLabel
+      system.config.type === 'map' ? 'Fixed point / cycle' : equilibriumLabel
 
     const rootNodes = useMemo(
       () =>
@@ -1086,7 +1086,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               }}
               data-testid="create-state-grid"
             >
-              State Grid
+              State grid
             </button>
           </div>
         ) : null}
@@ -1163,7 +1163,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
                   }}
                   data-testid="object-context-create-folder"
                 >
-                  {node.kind === 'folder' ? 'Create Subfolder' : 'Create Folder'}
+                  {node.kind === 'folder' ? 'Create subfolder' : 'Create folder'}
                 </button>
               )
             })()}

@@ -29,7 +29,7 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
 {showHomoclinicFromHomoclinic ? (
                   <InspectorDisclosure
                     key={`${selectionKey}-homoclinic-homoclinic`}
-                    title="Continue from Point"
+                    title="Restart homoclinic branch"
                     testId="homoclinic-from-homoclinic-toggle"
                     defaultOpen={false}
                     actionOnly

@@ -1,3 +1,4 @@
+import { calculationError } from './calculationError'
 import { makeStableId, nowPerfMs } from '../utils/determinism'
 
 export type JobTiming = {
@@ -121,7 +122,7 @@ export class JobQueue {
           this.emitTiming(job, startedAt, nowPerfMs(), 'cancelled')
           continue
         }
-        const error = err instanceof Error ? err : new Error(String(err))
+        const error = calculationError(err)
         job.reject(error)
         this.emitTiming(job, startedAt, nowPerfMs(), 'failed')
       } finally {

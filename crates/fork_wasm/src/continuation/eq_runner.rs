@@ -89,7 +89,7 @@ impl WasmEquilibriumRunner {
         );
 
         let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
-            .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+            .map_err(|e| crate::diagnostics::error_to_js(e.context("Continuation init failed")))?;
 
         Ok(WasmEquilibriumRunner {
             runner: RunnerHandle::new(runner),

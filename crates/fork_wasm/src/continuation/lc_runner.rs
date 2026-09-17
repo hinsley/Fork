@@ -127,7 +127,7 @@ impl WasmLimitCycleRunner {
                 .map(|(setup, flat_state)| (setup, flat_state, None))
         };
         let (setup, flat_state, correction_report) =
-            prepared.map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+            prepared.map_err(crate::diagnostics::error_to_js)?;
 
         let config = setup.collocation_config();
         let mesh_points = config.mesh_points;

@@ -1,3 +1,4 @@
+import { calculationError } from './calculationError'
 import type {
   ComputeEventSeriesFromOrbitRequest,
   ComputeEventSeriesFromSamplesRequest,
@@ -113,7 +114,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       if (message.ok) {
         entry.resolve(message.result)
       } else {
-        const error = new Error(message.error)
+        const error = calculationError({ message: message.error, diagnostic: message.diagnostic })
         if (message.aborted) error.name = 'AbortError'
         entry.reject(error)
       }

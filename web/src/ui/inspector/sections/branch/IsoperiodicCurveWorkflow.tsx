@@ -33,8 +33,8 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                     key={`${selectionKey}-isoperiodic-curve`}
                     title={
                       branch.branchType === 'isoperiodic_curve'
-                        ? 'Continue from Point'
-                        : 'Continue Isoperiodic Curve'
+                        ? 'Continue isoperiodic curve'
+                        : 'Create isoperiodic curve'
                     }
                     testId="isoperiodic-curve-toggle"
                     defaultOpen={false}

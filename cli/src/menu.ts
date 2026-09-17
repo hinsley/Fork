@@ -19,12 +19,20 @@ export async function runConfigMenu(
     title: string,
     entries: ConfigEntry[]
 ): Promise<ConfigMenuResult> {
+    const sectionOrder = ['Setup', 'Initialization', 'Predictor', 'Corrector', 'Mesh', 'Resource limits', 'Output'];
+    const orderedEntries = [...entries].sort((a, b) => {
+        const rank = (section?: string) => {
+            const index = sectionOrder.indexOf(section ?? '');
+            return index < 0 ? sectionOrder.length : index;
+        };
+        return rank(a.section) - rank(b.section);
+    });
     while (true) {
         const choices: Array<{ name: string; value: string } | inquirer.Separator> = [];
 
         if (entries.length > 0) {
             let lastSection: string | null = null;
-            for (const entry of entries) {
+            for (const entry of orderedEntries) {
                 const section = entry.section ?? '';
                 if (section !== lastSection) {
                     const label = section.length > 0 ? `== ${section} ==` : '== Settings ==';
