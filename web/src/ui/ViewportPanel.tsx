@@ -286,6 +286,8 @@ type MapFunctionSamples = {
 
 const MIN_VIEWPORT_HEIGHT = 200
 const CLV_HEAD_RATIO = 0.25
+// Axis-free so the same template works in 2D and 3D scene projections.
+const CLV_HOVER_TEMPLATE = 'CLV v%{customdata[0]}<br>t: %{customdata[1]:.6g}<extra></extra>'
 const COBWEB_DIAGONAL_COLOR = 'rgba(120,120,120,0.45)'
 const COBWEB_FUNCTION_COLOR = '#6f7a89'
 const MAP_FUNCTION_SAMPLE_COUNT = 256
@@ -632,6 +634,9 @@ function buildClvTraces(
     const lineX: Array<number | null> = []
     const lineY: Array<number | null> = []
     const lineZ: Array<number | null> = []
+    // One entry per pushed line point, so the entry for the null line separator
+    // is inert (null points never hover).
+    const lineHover: Array<[number, number]> = []
     const headLineX: Array<number | null> = []
     const headLineY: Array<number | null> = []
     const headX: number[] = []
@@ -672,6 +677,8 @@ function buildClvTraces(
 
       lineX.push(base[0], shaftX, null)
       lineY.push(base[1], shaftY, null)
+      const hoverEntry: [number, number] = [vectorIndex + 1, covariant.times[idx]]
+      lineHover.push(hoverEntry, hoverEntry, hoverEntry)
       if (use3d) {
         lineZ.push(base[2], shaftZ, null)
       }
@@ -719,8 +726,9 @@ function buildClvTraces(
             color,
             width: clv.thickness,
           },
+          customdata: lineHover,
+          hovertemplate: CLV_HOVER_TEMPLATE,
           showlegend: false,
-          hoverinfo: 'none',
         })
       } else {
         traces.push({
@@ -734,13 +742,16 @@ function buildClvTraces(
             color,
             width: clv.thickness,
           },
+          customdata: lineHover,
+          hovertemplate: CLV_HOVER_TEMPLATE,
           showlegend: false,
-          hoverinfo: 'none',
         })
       }
     }
 
     if (showHeads) {
+      // Heads stay non-hoverable so each arrow exposes exactly one hover label
+      // (the shaft trace owns the vector index and sample time).
       if (use3d && headX.length > 0) {
         traces.push({
           type: 'cone',

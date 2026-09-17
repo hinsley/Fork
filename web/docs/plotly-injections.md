@@ -205,6 +205,10 @@ selection changes or the object is removed.
     sampled along the cycle with a configurable integer stride; CLV,
     equilibrium eigenspace, and Floquet mode color pickers each persist a
     separate alpha value and apply it independently of the node color opacity;
+  - CLV arrow shaft traces set an axis-free `hovertemplate` over `customdata`
+    of `[vector index, sample time]`, so each arrow shows exactly one label in
+    both 2-axis and 3-axis scene projections; the arrow-head traces keep
+    `hoverinfo: 'none'` to avoid a duplicate hover label per arrow;
   - cycle-like continuation branches (limit cycle, isoperiodic, homoclinic
     related) use envelope rendering (min/max traces) for one-free-variable
     projections, rather than plotting every cycle profile point.

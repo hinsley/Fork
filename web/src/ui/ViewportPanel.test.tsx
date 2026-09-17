@@ -1141,6 +1141,105 @@ describe('ViewportPanel view state wiring', () => {
     expect(clvTrace?.opacity).toBeUndefined()
   })
 
+  it('exposes CLV hover metadata with the vector index and sample time in 2D and 3D', () => {
+    const config: SystemConfig = {
+      name: 'Clv_Hover_System',
+      equations: ['x', 'y', 'z'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow'
+    }
+    let system = createSystem({ name: 'Clv_Hover_System_System', config })
+    const scene3d = addScene(system, 'CLV Hover 3D')
+    system = scene3d.system
+    const scene2d = addScene(system, 'CLV Hover 2D')
+    system = scene2d.system
+    system = updateScene(system, scene2d.nodeId, { axisVariables: ['x', 'y'] })
+
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Clv_Hover_Orbit',
+      systemName: config.name,
+      data: [
+        [0, 0, 0, 0],
+        [0.5, 1, 1, 1],
+        [1, 2, 2, 2]
+      ],
+      t_start: 0,
+      t_end: 1,
+      dt: 0.5,
+      covariantVectors: {
+        dim: 3,
+        times: [0, 0.5],
+        vectors: [
+          [[1, 0, 0], [0, 1, 0]],
+          [[1, 0, 0], [0, 1, 0]]
+        ]
+      }
+    }
+    const orbitResult = addObject(system, orbit)
+    system = updateNodeRender(orbitResult.system, orbitResult.nodeId, {
+      clv: {
+        enabled: true,
+        stride: 1,
+        lengthScale: 0.5,
+        headScale: 1,
+        thickness: 2,
+        vectorIndices: [0, 1],
+        colors: ['#ff0000', '#00ff00'],
+        opacities: [1, 1]
+      }
+    })
+
+    renderPanel(system)
+
+    type ClvTrace = {
+      customdata?: Array<[number, number]>
+      hovertemplate?: string
+      hoverinfo?: string
+    }
+
+    for (const sceneNodeId of [scene3d.nodeId, scene2d.nodeId]) {
+      const props = plotlyCalls.find((entry) => entry.plotId === sceneNodeId)
+      const clvTraces = (props?.data ?? []).filter(
+        (trace) =>
+          'legendgroup' in trace && trace.legendgroup === 'fork-independent-color-opacity'
+      ) as ClvTrace[]
+      const arrowTraces = clvTraces.filter((trace) => trace.hovertemplate !== undefined)
+      const headTraces = clvTraces.filter((trace) => trace.hovertemplate === undefined)
+
+      // One hoverable shaft trace per requested vector, using customdata only so
+      // the same template works in both projections.
+      expect(arrowTraces).toHaveLength(2)
+      arrowTraces.forEach((trace) => {
+        expect(trace.hovertemplate).toBe(
+          'CLV v%{customdata[0]}<br>t: %{customdata[1]:.6g}<extra></extra>'
+        )
+      })
+      // Two endpoints per arrow plus an inert entry for the null line separator.
+      expect(arrowTraces[0].customdata).toEqual([
+        [1, 0],
+        [1, 0],
+        [1, 0],
+        [1, 0.5],
+        [1, 0.5],
+        [1, 0.5]
+      ])
+      expect(arrowTraces[1].customdata).toEqual([
+        [2, 0],
+        [2, 0],
+        [2, 0],
+        [2, 0.5],
+        [2, 0.5],
+        [2, 0.5]
+      ])
+      // Arrow heads stay non-hoverable so each arrow shows a single label.
+      expect(headTraces.map((trace) => trace.hoverinfo)).toEqual(['none', 'none'])
+    }
+  })
+
   it('renders a selected orbit-point marker in state-space scenes', () => {
     const config: SystemConfig = {
       name: 'Orbit_Selected_Point_System',
