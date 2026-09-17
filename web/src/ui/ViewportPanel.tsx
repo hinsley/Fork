@@ -287,7 +287,7 @@ type MapFunctionSamples = {
 const MIN_VIEWPORT_HEIGHT = 200
 const CLV_HEAD_RATIO = 0.25
 // Axis-free so the same template works in 2D and 3D scene projections.
-const CLV_HOVER_TEMPLATE = 'CLV v%{customdata[0]}<br>t: %{customdata[1]:.6g}<extra></extra>'
+const CLV_HOVER_TEMPLATE = 'CLV v%{customdata[0]}<br>t: %{customdata[1]}<extra></extra>'
 const COBWEB_DIAGONAL_COLOR = 'rgba(120,120,120,0.45)'
 const COBWEB_FUNCTION_COLOR = '#6f7a89'
 const MAP_FUNCTION_SAMPLE_COUNT = 256
