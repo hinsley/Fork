@@ -1215,7 +1215,7 @@ describe('ViewportPanel view state wiring', () => {
       expect(arrowTraces).toHaveLength(2)
       arrowTraces.forEach((trace) => {
         expect(trace.hovertemplate).toBe(
-          'CLV v%{customdata[0]}<br>t: %{customdata[1]}<extra></extra>'
+          'CLV v%{customdata[0]}<br>t: %{customdata[1]:.6~g}<extra></extra>'
         )
       })
       // Two endpoints per arrow plus an inert entry for the null line separator.
