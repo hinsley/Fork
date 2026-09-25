@@ -5,7 +5,7 @@ test.use({ viewport: { width: 1024, height: 800 } })
 
 // Regression: in a tall, narrow tile the default 3D camera clipped the cube's
 // tick labels and axis titles at the sides. The scene now keeps a square
-// domain there and a scaled-down cube.
+// domain there, inset so the cube leaves room for its labels.
 test('3D scene in a narrow tile keeps a square scene domain', async ({ page }) => {
   test.setTimeout(60_000)
   const harness = createHarness(page)
@@ -25,7 +25,7 @@ test('3D scene in a narrow tile keeps a square scene domain', async ({ page }) =
           _fullLayout?: {
             width: number
             height: number
-            scene?: { domain?: { x: number[]; y: number[] }; aspectratio?: { x: number } }
+            scene?: { domain?: { x: number[]; y: number[] }; aspectmode?: string }
           }
         })._fullLayout
         const domain = full?.scene?.domain
@@ -35,9 +35,10 @@ test('3D scene in a narrow tile keeps a square scene domain', async ({ page }) =
         return {
           tall: full.height > full.width,
           squareEnough: height <= width + 12,
-          cubeScale: full.scene?.aspectratio?.x ?? null,
+          inset: domain.y[1] - domain.y[0] < 1,
+          aspectmode: full.scene?.aspectmode ?? null,
         }
       })
     )
-    .toEqual({ tall: true, squareEnough: true, cubeScale: 0.8 })
+    .toEqual({ tall: true, squareEnough: true, inset: true, aspectmode: 'cube' })
 })

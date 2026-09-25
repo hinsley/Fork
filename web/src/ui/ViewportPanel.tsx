@@ -7095,7 +7095,12 @@ function buildDiagramTraces(
 
 /** Narrowest width / height at which the default 3D camera shows every tick label. */
 const SCENE_3D_MIN_ASPECT = 1
-const SCENE_3D_CUBE_SCALE = 0.8
+/**
+ * Fraction of the (square-limited) tile height given to the 3D scene. gl3d
+ * sizes the cube from the scene height, so this leaves room for tick labels.
+ * (A scaled `aspectmode: 'manual'` cube does the same but breaks drag-rotation.)
+ */
+const SCENE_3D_FILL = 0.85
 
 function buildSceneBaseLayout(
   config: SystemConfig,
@@ -7128,7 +7133,8 @@ function buildSceneBaseLayout(
     // gl3d fits the cube to the scene's height, so in a tall, narrow tile the
     // tick labels and axis titles fall off the sides. Keep the scene square
     // (centred vertically) there, and give it the whole tile (no 2D margins).
-    const squareHeight = Math.min(1, Math.max(0.2, plotAspect / SCENE_3D_MIN_ASPECT))
+    const squareHeight =
+      Math.min(1, Math.max(0.2, plotAspect / SCENE_3D_MIN_ASPECT)) * SCENE_3D_FILL
     const inset = (1 - squareHeight) / 2
     return {
       ...base,
@@ -7151,10 +7157,7 @@ function buildSceneBaseLayout(
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         bgcolor: plotlyTheme.background,
-        // A cube like `aspectmode: 'cube'`, scaled down so the default camera
-        // frames it with its tick labels instead of clipping the near corners.
-        aspectmode: 'manual',
-        aspectratio: { x: SCENE_3D_CUBE_SCALE, y: SCENE_3D_CUBE_SCALE, z: SCENE_3D_CUBE_SCALE },
+        aspectmode: 'cube',
       },
     }
   }

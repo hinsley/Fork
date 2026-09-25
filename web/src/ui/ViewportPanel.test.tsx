@@ -2488,10 +2488,9 @@ describe('ViewportPanel view state wiring', () => {
     )
     expect(props).toBeTruthy()
     expect(props?.layout?.scene?.camera).toBeUndefined()
-    expect(props?.layout?.scene?.aspectmode).toBe('manual')
-    const ratio = props?.layout?.scene?.aspectratio
-    expect(ratio?.x).toBe(ratio?.y)
-    expect(ratio?.y).toBe(ratio?.z)
+    // A scaled 'manual' aspect ratio breaks gl3d drag-rotation; keep 'cube'.
+    expect(props?.layout?.scene?.aspectmode).toBe('cube')
+    expect(props?.layout?.scene?.aspectratio).toBeUndefined()
     expect(props?.viewRevision).toBe(2)
     expect(props?.initialView).toMatchObject({
       'scene.camera': {

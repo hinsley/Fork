@@ -168,11 +168,12 @@ state, or rendering injection.
   drawn. Without a grid the `yaxis2` key is omitted entirely: Plotly treats a
   present-but-`undefined` `yaxisN` as an axis and throws
   (`reading 'anchor'`).
-- `web/src/ui/ViewportPanel.tsx`: 3-axis scenes use `aspectmode: 'manual'`
-  with a uniform `aspectratio` of 0.8 (a scaled-down cube), zero 2D margins,
-  and, when the tile is taller than wide, a square `scene.domain` centred
-  vertically, so the default camera keeps tick labels and axis titles inside
-  narrow tiles. The camera itself is never injected here.
+- `web/src/ui/ViewportPanel.tsx`: 3-axis scenes use `aspectmode: 'cube'`, zero
+  2D margins, and a `scene.domain` that is at most square (centred vertically
+  when the tile is taller than wide) and inset to 85% of that height, so the
+  default camera keeps tick labels and axis titles inside narrow tiles. A
+  scaled `aspectmode: 'manual'` cube is avoided because it stops drag-rotation.
+  The camera itself is never injected here.
 - `web/src/ui/ViewportPanel.tsx`: orbit scene traces set explicit
   `hovertemplate` strings so hover labels use the active scene axis variable
   names (not Plotly defaults) and include trajectory position metadata:
