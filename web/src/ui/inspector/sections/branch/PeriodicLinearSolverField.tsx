@@ -11,7 +11,7 @@ export function PeriodicLinearSolverField({
 }) {
   return (
     <InspectorSubDisclosure title="Linear solve" testId={`${testId}-toggle`}>
-      <label>
+      <label title="Off: structured periodic corrector. Turn on and rerun if it fails.">
         <input
           type="checkbox"
           checked={useDenseSolve}
@@ -20,10 +20,6 @@ export function PeriodicLinearSolverField({
         />
         Use dense solve (slower)
       </label>
-      <span className="field-help">
-        Unchecked uses the structured periodic corrector. If it fails, enable this option
-        and rerun. Initialization and diagnostics are unchanged.
-      </span>
     </InspectorSubDisclosure>
   )
 }

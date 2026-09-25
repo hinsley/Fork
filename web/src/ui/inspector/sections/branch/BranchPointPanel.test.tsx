@@ -12,7 +12,10 @@ import type {
 } from '../../../../system/types'
 import type { BranchPointSelection } from '../../../branchPointSelection'
 
-function hopfBranchSystem() {
+function hopfBranchSystem(
+  options: { parameterName?: 'mu' | 'nu'; hopfRealPart?: number } = {}
+) {
+  const parameterName = options.parameterName ?? 'mu'
   const config: SystemConfig = {
     name: 'Branch_Panel_Hopf',
     equations: ['mu * x - y', 'x + mu * y'],
@@ -35,15 +38,15 @@ function hopfBranchSystem() {
     param_value: mu,
     stability: mu === 0 ? 'Hopf' : 'None',
     eigenvalues: [
-      { re: mu, im: 1 },
-      { re: mu, im: -1 },
+      { re: mu === 0 ? (options.hopfRealPart ?? 0) : mu, im: 1 },
+      { re: mu === 0 ? (options.hopfRealPart ?? 0) : mu, im: -1 },
     ],
   }))
   const branch: ContinuationObject = {
     type: 'continuation',
-    name: 'eq_mu',
+    name: `eq_${parameterName}`,
     systemName: config.name,
-    parameterName: 'mu',
+    parameterName,
     parentObject: 'EQ',
     startObject: 'EQ',
     branchType: 'equilibrium',
@@ -191,6 +194,110 @@ describe('branch point panel', () => {
     // Typing in the index input does not step points.
     fireEvent.keyDown(input, { key: 'ArrowRight' })
     expect(input).toHaveValue(0)
+  })
+
+  it('keeps Shift+arrows on bifurcations and works after clicking the summary', () => {
+    const { system, nodeId } = hopfBranchSystem()
+    render(<InspectorDetailsPanel {...baseProps(system, nodeId)} />)
+
+    const input = screen.getByTestId('branch-point-input')
+    const scrubber = screen.getByTestId('branch-point-scrubber')
+    // At the last point there is no later bifurcation: handled as a no-op, so
+    // the range input cannot fall back to its native one-point step.
+    expect(input).toHaveValue(4)
+    expect(fireEvent.keyDown(scrubber, { key: 'ArrowRight', shiftKey: true })).toBe(false)
+    expect(input).toHaveValue(4)
+    fireEvent.keyDown(scrubber, { key: 'ArrowLeft', shiftKey: true })
+    expect(input).toHaveValue(2)
+    expect(fireEvent.keyDown(scrubber, { key: 'ArrowLeft', shiftKey: true })).toBe(false)
+    expect(input).toHaveValue(2)
+    // Plain arrows at the ends are swallowed too.
+    fireEvent.change(scrubber, { target: { value: '0' } })
+    expect(fireEvent.keyDown(scrubber, { key: 'ArrowLeft' })).toBe(false)
+    expect(input).toHaveValue(0)
+
+    // The branch root is focusable (not a tab stop), so a click on the summary
+    // gives arrow keys a target.
+    const root = screen.getByTestId('branch-summary').closest('.branch-root') as HTMLElement
+    expect(root).toHaveAttribute('tabindex', '-1')
+    root.focus()
+    expect(root).toHaveFocus()
+    fireEvent.keyDown(root, { key: 'ArrowRight' })
+    expect(input).toHaveValue(1)
+  })
+
+  it('reads a Hopf point with locator-noise Re λ as non-hyperbolic', async () => {
+    const user = userEvent.setup()
+    const { system, nodeId } = hopfBranchSystem({ hopfRealPart: 4.2e-7 })
+    render(<InspectorDetailsPanel {...baseProps(system, nodeId)} />)
+
+    await user.click(screen.getByTestId('branch-bifurcation-2'))
+    expect(screen.getByTestId('branch-point-stability')).toHaveTextContent('non-hyperbolic')
+    const rows = within(screen.getByTestId('branch-point-eigenvalues')).getAllByRole('row')
+    expect(rows.filter((row) => row.classList.contains('is-unstable'))).toHaveLength(0)
+  })
+
+  it('defaults the limit-cycle parameter to the branch parameter', async () => {
+    const user = userEvent.setup()
+    const { system, nodeId } = hopfBranchSystem({ parameterName: 'nu' })
+    render(<InspectorDetailsPanel {...baseProps(system, nodeId)} />)
+
+    await user.click(screen.getByTestId('branch-bifurcation-2'))
+    await user.click(
+      within(screen.getByTestId('branch-point-panel')).getByTestId(
+        'action-limit-cycle-from-hopf-toggle'
+      )
+    )
+    expect(screen.getByTestId('limit-cycle-from-hopf-parameter')).toHaveValue('nu')
+    expect(
+      (screen.getByTestId('limit-cycle-from-hopf-branch-name') as HTMLInputElement).value
+    ).toMatch(/_nu$/)
+  })
+
+  it('blocks continuation when the initial or min step exceeds the max step', async () => {
+    const user = userEvent.setup()
+    const { system, nodeId } = hopfBranchSystem()
+    render(<InspectorDetailsPanel {...baseProps(system, nodeId)} />)
+
+    await user.click(screen.getByTestId('branch-bifurcation-2'))
+    await user.click(
+      within(screen.getByTestId('branch-point-panel')).getByTestId(
+        'action-limit-cycle-from-hopf-toggle'
+      )
+    )
+    const submit = screen.getByTestId('limit-cycle-from-hopf-submit')
+    expect(submit).toHaveTextContent(/^Continue$/)
+    expect(submit).toBeEnabled()
+    expect(screen.getByTestId('limit-cycle-from-hopf-direction')).toHaveTextContent('→ Increasing')
+
+    fireEvent.change(screen.getByTestId('limit-cycle-from-hopf-step-size'), {
+      target: { value: '0.5' },
+    })
+    expect(submit).toBeDisabled()
+    expect(screen.getByTestId('limit-cycle-from-hopf-step-error')).toHaveTextContent(
+      'Initial step exceeds max step.'
+    )
+    expect(screen.getByTestId('limit-cycle-from-hopf-step-size')).toHaveAttribute(
+      'aria-invalid',
+      'true'
+    )
+
+    fireEvent.change(screen.getByTestId('limit-cycle-from-hopf-step-size'), {
+      target: { value: '0.05' },
+    })
+    fireEvent.change(screen.getByTestId('limit-cycle-from-hopf-min-step-size'), {
+      target: { value: '1' },
+    })
+    expect(submit).toBeDisabled()
+    expect(screen.getByTestId('limit-cycle-from-hopf-step-error')).toHaveTextContent(
+      'Min step exceeds max step.'
+    )
+
+    fireEvent.change(screen.getByTestId('limit-cycle-from-hopf-min-step-size'), {
+      target: { value: '1e-5' },
+    })
+    expect(submit).toBeEnabled()
+    expect(screen.queryByTestId('limit-cycle-from-hopf-step-error')).toBeNull()
   })
 
   it('jumps on Enter in the index input', () => {

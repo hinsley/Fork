@@ -1595,12 +1595,19 @@ function makeBranchExtensionDraft(
     branch?.branchType === 'homoclinic_curve' || branch?.branchType === 'heteroclinic_curve'
       ? '32'
       : base.correctorSteps
+  // Older runs could store an initial/min step above the max step (the solver
+  // clamps it); seed a consistent draft so the Extend form starts valid.
+  const maxStep = defaults?.max_step_size
+  const clampToMax = (value: number | undefined) =>
+    typeof value === 'number' && typeof maxStep === 'number' && value > maxStep
+      ? maxStep
+      : value
   return {
     ...base,
-    stepSize: defaults?.step_size?.toString() ?? base.stepSize,
+    stepSize: clampToMax(defaults?.step_size)?.toString() ?? base.stepSize,
     maxSteps: '300',
-    minStepSize: defaults?.min_step_size?.toString() ?? base.minStepSize,
-    maxStepSize: defaults?.max_step_size?.toString() ?? base.maxStepSize,
+    minStepSize: clampToMax(defaults?.min_step_size)?.toString() ?? base.minStepSize,
+    maxStepSize: maxStep?.toString() ?? base.maxStepSize,
     correctorSteps:
       branch?.branchType === 'homoclinic_curve' || branch?.branchType === 'heteroclinic_curve'
         ? '32'
@@ -2428,6 +2435,9 @@ function useInspectorSelectionController({
   const systemConfigKey = useMemo(() => buildSystemConfigKey(system.config), [system.config])
   const stableSystemConfigRef = useRef(system.config)
   const prevBranchIdRef = useRef<string | null>(null)
+  // Branch whose continuation parameter seeded the LC-from-Hopf draft; a new
+  // branch re-seeds it so the picker defaults to that branch's parameter.
+  const limitCycleFromHopfParamSeedRef = useRef<string | null>(null)
   const prevBranchPointCountRef = useRef(0)
   const prevBranchMinLogicalIndexRef = useRef<number | null>(null)
   const prevBranchMaxLogicalIndexRef = useRef<number | null>(null)
@@ -3819,6 +3829,28 @@ function useInspectorSelectionController({
     setLimitCycleFloquetModesError(null)
   }, [selectedNodeId, limitCycle?.floquetModes?.computedAt])
 
+  // A successful Floquet computation returns to the object page with the
+  // Floquet section open, so the new modes (and their display toggles) show.
+  const floquetComputePendingRef = useRef<{ nodeId: string; computedAt: string | null } | null>(
+    null
+  )
+  const [limitCycleFloquetRevealedFor, setLimitCycleFloquetRevealedFor] = useState<
+    string | null
+  >(null)
+  const limitCycleFloquetRevealed =
+    limitCycleFloquetRevealedFor !== null && limitCycleFloquetRevealedFor === selectedNodeId
+  const limitCycleFloquetComputedAt = limitCycle?.floquetModes?.computedAt ?? null
+  const closeActiveWorkflow = workflowFocus?.closeWorkflow
+  const activeWorkflowId = workflowFocus?.activeWorkflow ?? null
+  useEffect(() => {
+    const pending = floquetComputePendingRef.current
+    if (!pending || pending.nodeId !== selectedNodeId) return
+    if (!limitCycleFloquetComputedAt || limitCycleFloquetComputedAt === pending.computedAt) return
+    floquetComputePendingRef.current = null
+    setLimitCycleFloquetRevealedFor(pending.nodeId)
+    if (activeWorkflowId === 'limit-cycle-floquet-toggle') closeActiveWorkflow?.()
+  }, [activeWorkflowId, closeActiveWorkflow, limitCycleFloquetComputedAt, selectedNodeId])
+
   useEffect(() => {
     if (!orbit) return
     setLimitCycleFromOrbitDraft((prev) => {
@@ -3978,6 +4010,9 @@ function useInspectorSelectionController({
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, param2Name, name: nextName }
     })
+    const hopfParamSeedKey = `${selectedNodeId ?? ''}:${hopfDefaultParam}`
+    const reseedHopfParam = limitCycleFromHopfParamSeedRef.current !== hopfParamSeedKey
+    limitCycleFromHopfParamSeedRef.current = hopfParamSeedKey
     setLimitCycleFromHopfDraft((prev) => {
       const suggestedLimitCycleName = suggestDefaultName('limitCycle', {
         sourceName: branchName,
@@ -3985,15 +4020,22 @@ function useInspectorSelectionController({
       })
       const limitCycleName =
         prev.limitCycleName.trim().length > 0 ? prev.limitCycleName : suggestedLimitCycleName
-      const paramName = continuationParameterSet.has(prev.parameterName)
-        ? prev.parameterName
-        : hopfDefaultParam
+      const paramName =
+        !reseedHopfParam && continuationParameterSet.has(prev.parameterName)
+          ? prev.parameterName
+          : hopfDefaultParam
       const suggestedBranchName = suggestDefaultName('continuationBranch', {
         sourceName: limitCycleName,
         parameterName: paramName,
       })
-      const branchNameValue =
-        prev.branchName.trim().length > 0 ? prev.branchName : suggestedBranchName
+      const previousSuggestedBranchName = suggestDefaultName('continuationBranch', {
+        sourceName: limitCycleName,
+        parameterName: prev.parameterName,
+      })
+      const keepBranchName =
+        prev.branchName.trim().length > 0 &&
+        !(reseedHopfParam && prev.branchName === previousSuggestedBranchName)
+      const branchNameValue = keepBranchName ? prev.branchName : suggestedBranchName
       return {
         ...prev,
         limitCycleName,
@@ -4166,6 +4208,7 @@ function useInspectorSelectionController({
     existingObjectNames,
     firstContinuationParameter,
     selectedBranchPoint,
+    selectedNodeId,
   ])
 
   useEffect(() => {
@@ -8530,6 +8573,10 @@ function useInspectorSelectionController({
   const handleComputeLimitCycleFloquetModes = async () => {
     if (!limitCycle || !selectedNodeId) return
     setLimitCycleFloquetModesError(null)
+    floquetComputePendingRef.current = {
+      nodeId: selectedNodeId,
+      computedAt: limitCycle.floquetModes?.computedAt ?? null,
+    }
     try {
       await onComputeLimitCycleFloquetModes({
         limitCycleId: selectedNodeId,
@@ -8844,6 +8891,7 @@ function useInspectorSelectionController({
     limitCycleFloquetModesAvailable,
     limitCycleFloquetModesError,
     limitCycleFloquetModesMatchMesh,
+    limitCycleFloquetRevealed,
     limitCycleFloquetRender,
     limitCycleFloquetVisibleSet,
     setLimitCycleFloquetBackend,

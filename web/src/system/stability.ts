@@ -12,23 +12,65 @@ export type EquilibriumStability = {
   center: number
 }
 
-const DEFAULT_TOLERANCE = 1e-8
+/** Absolute floor: below this, Re λ (or |μ| − 1) is zero at any scale. */
+const ABSOLUTE_TOLERANCE = 1e-8
+/** Relative resolution of a computed spectrum near the stability boundary. */
+const RELATIVE_TOLERANCE = 1e-5
+
+type SpectrumValue = Pick<ContinuationEigenvalue, 're' | 'im'>
+
+function finiteSpectrum(
+  eigenvalues: ContinuationEigenvalue[] | null | undefined
+): ContinuationEigenvalue[] {
+  return (eigenvalues ?? []).filter(
+    (value) => Number.isFinite(value?.re) && Number.isFinite(value?.im)
+  )
+}
+
+/**
+ * Distance below which an eigenvalue counts as sitting on the stability
+ * boundary (Re λ = 0 for flows, |μ| = 1 for maps).
+ *
+ * Eigenvalues at a located bifurcation are only as accurate as the locator:
+ * the continuation core stops refining once its test function is ~1e-6, and
+ * dense eigensolvers add errors proportional to the Jacobian's norm. A fixed
+ * 1e-8 therefore reports a Hopf point with Re λ = 4e-7 (next to |λ| ≈ 14) as
+ * unstable. We use a relative tolerance on the boundary's natural scale:
+ * - flows: `max(1e-8, 1e-5 · max|λ|)` — the imaginary axis has no scale of its
+ *   own, so the spectral radius sets it;
+ * - maps: `max(1e-8, 1e-5)` on `|μ| − 1` — the unit circle fixes the scale,
+ *   and a large multiplier elsewhere must not blur a multiplier near 1.
+ * Genuinely unstable points (Re λ well above 1e-5 of the spectrum) still count.
+ */
+export function stabilityTolerance(
+  eigenvalues: SpectrumValue[] | null | undefined,
+  systemType: 'flow' | 'map'
+): number {
+  if (systemType === 'map') return Math.max(ABSOLUTE_TOLERANCE, RELATIVE_TOLERANCE)
+  let radius = 0
+  for (const value of eigenvalues ?? []) {
+    const modulus = Math.hypot(value.re, value.im)
+    if (Number.isFinite(modulus) && modulus > radius) radius = modulus
+  }
+  return Math.max(ABSOLUTE_TOLERANCE, RELATIVE_TOLERANCE * radius)
+}
 
 /**
  * Classifies an equilibrium (flow) or fixed point / cycle (map) from its
  * eigenvalues. Flows use the sign of Re(λ); maps use |λ| relative to 1.
+ * Values within {@link stabilityTolerance} of the boundary are neutral, so a
+ * located Hopf / fold point reads `non-hyperbolic`.
  */
 export function classifyEquilibrium(
   eigenvalues: ContinuationEigenvalue[] | null | undefined,
   systemType: 'flow' | 'map',
-  tolerance = DEFAULT_TOLERANCE
+  tolerance?: number
 ): EquilibriumStability {
-  const values = (eigenvalues ?? []).filter(
-    (value) => Number.isFinite(value?.re) && Number.isFinite(value?.im)
-  )
+  const values = finiteSpectrum(eigenvalues)
   if (values.length === 0) {
     return { kind: 'unknown', label: 'unknown', unstable: 0, stable: 0, center: 0 }
   }
+  const tol = tolerance ?? stabilityTolerance(values, systemType)
   let unstable = 0
   let stable = 0
   let center = 0
@@ -36,10 +78,10 @@ export function classifyEquilibrium(
   for (const value of values) {
     const measure =
       systemType === 'map' ? Math.hypot(value.re, value.im) - 1 : value.re
-    if (measure > tolerance) unstable += 1
-    else if (measure < -tolerance) stable += 1
+    if (measure > tol) unstable += 1
+    else if (measure < -tol) stable += 1
     else center += 1
-    if (Math.abs(value.im) > tolerance) complex = true
+    if (Math.abs(value.im) > tol) complex = true
   }
   const shape = systemType === 'flow' ? (complex ? 'focus' : 'node') : null
   let kind: StabilityKind
@@ -60,6 +102,16 @@ export function classifyEquilibrium(
   return { kind, label, unstable, stable, center }
 }
 
+/** Whether one eigenvalue lies strictly on the unstable side of the boundary. */
+export function isUnstableEigenvalue(
+  value: SpectrumValue,
+  systemType: 'flow' | 'map',
+  tolerance: number
+): boolean {
+  const measure = systemType === 'map' ? Math.hypot(value.re, value.im) - 1 : value.re
+  return measure > tolerance
+}
+
 /**
  * Count of unstable directions for a continuation point, used to split a branch
  * into stability runs. Returns null when eigenvalues are missing.
@@ -67,17 +119,12 @@ export function classifyEquilibrium(
 export function unstableDimension(
   eigenvalues: ContinuationEigenvalue[] | null | undefined,
   systemType: 'flow' | 'map',
-  tolerance = DEFAULT_TOLERANCE
+  tolerance?: number
 ): number | null {
-  const values = (eigenvalues ?? []).filter(
-    (value) => Number.isFinite(value?.re) && Number.isFinite(value?.im)
-  )
+  const values = finiteSpectrum(eigenvalues)
   if (values.length === 0) return null
-  return values.filter((value) =>
-    systemType === 'map'
-      ? Math.hypot(value.re, value.im) - 1 > tolerance
-      : value.re > tolerance
-  ).length
+  const tol = tolerance ?? stabilityTolerance(values, systemType)
+  return values.filter((value) => isUnstableEigenvalue(value, systemType, tol)).length
 }
 
 const BIFURCATION_CODES: Record<string, string> = {

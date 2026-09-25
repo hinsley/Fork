@@ -1,6 +1,8 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
+import { validateStepSizes } from './stepSizeValidation'
+import { StepSizeError } from './StepSizeError'
 
 export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -26,6 +28,7 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
     suggestDefaultName,
     systemDraft,
   } = scope
+  const isoperiodicCurveStepIssues = validateStepSizes(isoperiodicCurveDraft)
   if (!branch) return null
   return <>
 {showIsoperiodicContinuation ? (
@@ -43,13 +46,11 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                     <div className="inspector-section">
                       {runDisabled ? (
                         <div className="field-warning">
-                          Apply valid system changes before continuing.
+                          Apply valid system changes first.
                         </div>
                       ) : null}
                       {continuationParameterCount < 2 ? (
-                        <p className="empty-state">
-                          Add a second parameter to enable isoperiodic curve continuation.
-                        </p>
+                        <p className="field-warning">Needs a second parameter.</p>
                       ) : null}
                       <label>
                         Curve name
@@ -153,8 +154,8 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                           }
                           data-testid="isoperiodic-curve-direction"
                         >
-                          <option value="forward">Forward</option>
-                          <option value="backward">Backward</option>
+                          <option value="forward">→ Increasing</option>
+                          <option value="backward">← Decreasing</option>
                         </select>
                       </label>
                       <label>
@@ -162,6 +163,7 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                         <input
                           type="number"
                           value={isoperiodicCurveDraft.stepSize}
+                          aria-invalid={isoperiodicCurveStepIssues.stepSize || undefined}
                           onChange={(event) =>
                             setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
@@ -176,6 +178,7 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                         <input
                           type="number"
                           value={isoperiodicCurveDraft.minStepSize}
+                          aria-invalid={isoperiodicCurveStepIssues.minStepSize || undefined}
                           onChange={(event) =>
                             setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
@@ -190,6 +193,7 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                         <input
                           type="number"
                           value={isoperiodicCurveDraft.maxStepSize}
+                          aria-invalid={isoperiodicCurveStepIssues.maxStepSize || undefined}
                           onChange={(event) =>
                             setIsoperiodicCurveDraft((prev) => ({
                               ...prev,
@@ -199,6 +203,7 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                           data-testid="isoperiodic-curve-max-step-size"
                         />
                       </label>
+                      <StepSizeError issues={isoperiodicCurveStepIssues} testId="isoperiodic-curve-step-error" />
                       <label>
                         Max points
                         <input
@@ -269,6 +274,7 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                         className="inspector-primary-action"
                         onClick={handleCreateIsoperiodicCurve}
                         disabled={
+                          isoperiodicCurveStepIssues.invalid ||
                           runDisabled ||
                           !selectedBranchPoint ||
                           (branch.branchType !== 'limit_cycle' &&
@@ -276,9 +282,7 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                         }
                         data-testid="isoperiodic-curve-submit"
                       >
-                        {branch.branchType === 'isoperiodic_curve'
-                          ? 'Continue from Point'
-                          : 'Continue Isoperiodic Curve'}
+                        Continue
                       </button>
                     </div>
                   </InspectorDisclosure>

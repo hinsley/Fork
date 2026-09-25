@@ -1,6 +1,8 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 import { PeriodicLinearSolverField } from './PeriodicLinearSolverField'
+import { validateStepSizes } from './stepSizeValidation'
+import { StepSizeError } from './StepSizeError'
 
 export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -14,6 +16,7 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
     selectionKey,
     setBranchExtensionDraft,
   } = scope
+  const branchExtensionStepIssues = validateStepSizes(branchExtensionDraft)
   return <>
 {canExtendBranch ? (
                   <InspectorDisclosure
@@ -26,10 +29,10 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
                     <div className="inspector-section">
                       {runDisabled ? (
                         <div className="field-warning">
-                          Apply valid system changes before extending.
+                          Apply valid system changes first.
                         </div>
                       ) : null}
-                      <label>
+                      <label title="Point index direction to extend">
                         Direction
                         <select
                           value={branchExtensionDraft.forward ? 'forward' : 'backward'}
@@ -42,8 +45,8 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
                           disabled={!canExtendBranch}
                           data-testid="branch-extend-direction"
                         >
-                          <option value="forward">Forward (Increasing Index)</option>
-                          <option value="backward">Backward (Decreasing Index)</option>
+                          <option value="forward">→ Increasing</option>
+                          <option value="backward">← Decreasing</option>
                         </select>
                       </label>
                       <label>
@@ -66,6 +69,7 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
                         <input
                           type="number"
                           value={branchExtensionDraft.stepSize}
+                          aria-invalid={branchExtensionStepIssues.stepSize || undefined}
                           onChange={(event) =>
                             setBranchExtensionDraft((prev) => ({
                               ...prev,
@@ -81,6 +85,7 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
                         <input
                           type="number"
                           value={branchExtensionDraft.minStepSize}
+                          aria-invalid={branchExtensionStepIssues.minStepSize || undefined}
                           onChange={(event) =>
                             setBranchExtensionDraft((prev) => ({
                               ...prev,
@@ -96,6 +101,7 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
                         <input
                           type="number"
                           value={branchExtensionDraft.maxStepSize}
+                          aria-invalid={branchExtensionStepIssues.maxStepSize || undefined}
                           onChange={(event) =>
                             setBranchExtensionDraft((prev) => ({
                               ...prev,
@@ -106,6 +112,7 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
                           data-testid="branch-extend-max-step"
                         />
                       </label>
+                      <StepSizeError issues={branchExtensionStepIssues} testId="branch-extend-step-error" />
                       <label>
                         Corrector steps
                         <input
@@ -183,10 +190,10 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
                       <button
                         className="inspector-primary-action"
                         onClick={handleExtendBranch}
-                        disabled={runDisabled || !canExtendBranch}
+                        disabled={branchExtensionStepIssues.invalid || runDisabled || !canExtendBranch}
                         data-testid="branch-extend-submit"
                       >
-                        Extend Branch
+                        Extend
                       </button>
                     </div>
                   </InspectorDisclosure>

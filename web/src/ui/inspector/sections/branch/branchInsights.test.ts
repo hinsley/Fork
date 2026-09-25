@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ContinuationObject, ContinuationPoint } from '../../../../system/types'
 import {
   branchSpectrumKind,
@@ -138,6 +138,18 @@ describe('branch insights', () => {
     expect(buildEigenRows([{ re: 0.5, im: 0 }], 'flow', false)[0].unstable).toBe(false)
   })
 
+  it('does not tint a located Hopf pair (locator noise) as unstable', () => {
+    const rows = buildEigenRows(
+      [
+        { re: 4.16564e-7, im: 9.62453 },
+        { re: 4.16564e-7, im: -9.62453 },
+        { re: -13.6667, im: 0 },
+      ],
+      'flow'
+    )
+    expect(rows.map((row) => row.unstable)).toEqual([false, false, false])
+  })
+
   it('treats cycle-like branches as multipliers and skips the trivial one', () => {
     expect(branchSpectrumKind('pd_curve', 'flow')).toBe('cycle')
     const rows = buildEigenRows(
@@ -168,5 +180,24 @@ describe('branch insights', () => {
     expect(recallBranchPoint('sys-memory', 'branch-a', 5)).toBe(3)
     expect(recallBranchPoint('sys-memory', 'branch-a', 3)).toBeNull()
     expect(recallBranchPoint('sys-memory', 'branch-b', 5)).toBeNull()
+  })
+
+  it('restores the remembered point after a reload (fresh module, same storage)', async () => {
+    rememberBranchPoint('sys-reload', 'branch-r', 7)
+    vi.resetModules()
+    const reloaded = await import('./branchInsights')
+    expect(reloaded.recallBranchPoint('sys-reload', 'branch-r', 10)).toBe(7)
+    expect(reloaded.recallBranchPoint('sys-reload', 'branch-r', 7)).toBeNull()
+  })
+
+  it('ignores unreadable stored points', async () => {
+    localStorage.setItem('fork:branch-points', '{not json')
+    vi.resetModules()
+    const reloaded = await import('./branchInsights')
+    expect(reloaded.recallBranchPoint('sys-bad', 'branch-x', 10)).toBeNull()
+    reloaded.rememberBranchPoint('sys-bad', 'branch-x', 2)
+    vi.resetModules()
+    const again = await import('./branchInsights')
+    expect(again.recallBranchPoint('sys-bad', 'branch-x', 10)).toBe(2)
   })
 })

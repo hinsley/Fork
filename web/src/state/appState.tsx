@@ -1205,6 +1205,32 @@ function resolveBranchPointReducedParamOverrides(
   return valuesByGeneratedName
 }
 
+/**
+ * Full-system parameter vector a reduced run actually used. Reduced configs
+ * append generated frozen-variable parameters after the system's own, so the
+ * leading slice is the native vector with every point override applied.
+ */
+function fullParamsFromRunConfig(system: SystemConfig, runConfig: SystemConfig): number[] {
+  const params = runConfig.params.slice(0, system.params.length)
+  return params.length === system.params.length ? params : [...system.params]
+}
+
+/** `params` with a native parameter set to `value` (e.g. a seed point's value). */
+function withNativeParamValue(
+  system: SystemConfig,
+  params: number[],
+  ref: ParameterRef | null | undefined,
+  value: number | null | undefined
+): number[] {
+  if (!ref || ref.kind !== 'native_param') return params
+  if (typeof value !== 'number' || !Number.isFinite(value)) return params
+  const index = system.paramNames.indexOf(ref.name)
+  if (index < 0 || index >= params.length) return params
+  const next = [...params]
+  next[index] = value
+  return next
+}
+
 function applyReducedParamOverrides(
   runConfig: SystemConfig,
   overrides: Partial<Record<string, number>>
@@ -6166,7 +6192,9 @@ export function AppProvider({
           data: normalized,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...baseParams],
+          // The run's parameters: the source parameter sits at the seed point's
+          // value even when the new branch continues in a different parameter.
+          params: fullParamsFromRunConfig(system, runConfig),
           mapIterations,
           subsystemSnapshot: snapshot,
         }
@@ -7395,7 +7423,7 @@ export function AppProvider({
           data: branchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...baseParams],
+          params: fullParamsFromRunConfig(system, runConfig),
           subsystemSnapshot: snapshot,
         }
         const sourceSystem = attachNormalFormProvenance(
@@ -8261,6 +8289,9 @@ export function AppProvider({
         if (!Number.isFinite(paramValue)) {
           throw new Error('Continuation parameter value is not finite.')
         }
+        // Parameters at the Hopf point (source parameter(s) set to the point's
+        // values), not the source branch's base vector.
+        const runParams = fullParamsFromRunConfig(system, runConfig)
 
         const branchData = await client.runLimitCycleContinuationFromHopf(
           {
@@ -8335,6 +8366,12 @@ export function AppProvider({
 
         const logicalIndex =
           sourceBranch.data.indices?.[request.pointIndex] ?? request.pointIndex
+        const cycleParams = withNativeParamValue(
+          system,
+          runParams,
+          parameterRef,
+          firstPoint.param_value
+        )
 
         const lcObj: LimitCycleObject = {
           type: 'limit_cycle',
@@ -8351,8 +8388,8 @@ export function AppProvider({
           normalized_mesh: objNormalizedMesh,
           period,
           state: firstPoint.state,
-          parameters: [...baseParams],
-          customParameters: inheritedCustomParameters(system, baseParams),
+          parameters: [...cycleParams],
+          customParameters: inheritedCustomParameters(system, cycleParams),
           parameterName: parameterDisplayName,
           parameterRef,
           paramValue: firstPoint.param_value,
@@ -8377,7 +8414,7 @@ export function AppProvider({
           data: normalizedBranchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...baseParams],
+          params: [...runParams],
           subsystemSnapshot: snapshot,
         }
 
@@ -8974,6 +9011,13 @@ export function AppProvider({
         if (!firstPoint || firstPoint.state.length === 0) {
           throw new Error('Cycle continuation did not return a valid initial state.')
         }
+        const runParams = fullParamsFromRunConfig(system, runConfig)
+        const cycleParams = withNativeParamValue(
+          system,
+          runParams,
+          parameterRef,
+          firstPoint.param_value
+        )
 
         const solution = {
           state: firstPoint.state,
@@ -8992,8 +9036,8 @@ export function AppProvider({
           name: cycleName,
           systemName: system.name,
           solution,
-          parameters: [...baseParams],
-          customParameters: inheritedCustomParameters(system, baseParams),
+          parameters: [...cycleParams],
+          customParameters: inheritedCustomParameters(system, cycleParams),
           lastSolverParams: {
             initialGuess: firstPoint.state,
             maxSteps: solverMaxSteps,
@@ -9020,7 +9064,7 @@ export function AppProvider({
           data: normalizedBranchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...baseParams],
+          params: [...runParams],
           mapIterations: solverMapIterations,
           subsystemSnapshot: snapshot,
         }
@@ -9188,6 +9232,13 @@ export function AppProvider({
         if (!firstPoint || firstPoint.state.length === 0) {
           throw new Error('Limit cycle continuation did not return a valid initial state.')
         }
+        const runParams = fullParamsFromRunConfig(system, runConfig)
+        const cycleParams = withNativeParamValue(
+          system,
+          runParams,
+          parameterRef,
+          firstPoint.param_value
+        )
 
         const period = firstPoint.state[firstPoint.state.length - 1]
         if (!Number.isFinite(period) || period <= 0) {
@@ -9221,8 +9272,8 @@ export function AppProvider({
           normalized_mesh: objNormalizedMesh,
           period,
           state: firstPoint.state,
-          parameters: [...baseParams],
-          customParameters: inheritedCustomParameters(system, baseParams),
+          parameters: [...cycleParams],
+          customParameters: inheritedCustomParameters(system, cycleParams),
           parameterName: parameterDisplayName,
           parameterRef,
           paramValue: firstPoint.param_value,
@@ -9248,7 +9299,7 @@ export function AppProvider({
           data: normalizedBranchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...baseParams],
+          params: [...runParams],
           subsystemSnapshot: snapshot,
         }
 

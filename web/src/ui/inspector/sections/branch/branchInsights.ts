@@ -15,6 +15,8 @@ import {
   bifurcationCode,
   bifurcationTone,
   classifyEquilibrium,
+  isUnstableEigenvalue,
+  stabilityTolerance,
   unstableDimension,
   type BifurcationTone,
   type StabilityKind,
@@ -331,15 +333,17 @@ export function buildEigenRows(
   markUnstable = true
 ): EigenRow[] {
   const trivialIndex = kind === 'cycle' ? resolveTrivialFloquetModeIndex(eigenvalues) : null
+  // Same boundary tolerance as the stability chip, so a Hopf pair at
+  // Re λ ≈ 1e-7 is not tinted unstable while the chip says non-hyperbolic.
+  const tolerance =
+    kind === 'cycle' ? CYCLE_TOLERANCE : stabilityTolerance(eigenvalues, kind)
   const rows = eigenvalues.map((value, index) => {
     const modulus = Math.hypot(value.re, value.im)
     const trivial = index === trivialIndex
     const unstable =
-      !markUnstable
+      !markUnstable || trivial
         ? false
-        : kind === 'flow'
-        ? value.re > 1e-8
-        : !trivial && modulus > 1 + (kind === 'cycle' ? CYCLE_TOLERANCE : 1e-8)
+        : isUnstableEigenvalue(value, kind === 'flow' ? 'flow' : 'map', tolerance)
     return {
       index,
       re: value.re,
@@ -403,12 +407,48 @@ export function formatBranchSummaryDetail(
   return parts.join(' · ')
 }
 
-// Last selected point per branch, so re-selecting a branch restores the point
-// instead of jumping back to the endpoint. Session-only by design.
+// Last selected point per branch, so re-selecting a branch (or reloading the
+// page) restores the point instead of jumping back to the endpoint. This is a
+// per-viewer convenience: kept in memory and mirrored to localStorage (never in
+// the system's stored data, so it needs no storage-format change).
 const branchPointMemory = new Map<string, number>()
+const BRANCH_POINT_STORAGE_KEY = 'fork:branch-points'
+const BRANCH_POINT_STORAGE_LIMIT = 200
+
+function readStoredBranchPoints(): Record<string, number> {
+  try {
+    const raw = globalThis.localStorage?.getItem(BRANCH_POINT_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, number>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeStoredBranchPoint(key: string, arrayIndex: number) {
+  try {
+    const storage = globalThis.localStorage
+    if (!storage) return
+    const stored = readStoredBranchPoints()
+    delete stored[key]
+    stored[key] = arrayIndex
+    // Insertion order doubles as recency; drop the oldest beyond the cap.
+    const keys = Object.keys(stored)
+    for (const stale of keys.slice(0, Math.max(0, keys.length - BRANCH_POINT_STORAGE_LIMIT))) {
+      delete stored[stale]
+    }
+    storage.setItem(BRANCH_POINT_STORAGE_KEY, JSON.stringify(stored))
+  } catch {
+    // Storage unavailable (private mode, quota): memory still works.
+  }
+}
 
 export function rememberBranchPoint(systemId: string, branchId: string, arrayIndex: number) {
-  branchPointMemory.set(`${systemId}:${branchId}`, arrayIndex)
+  const key = `${systemId}:${branchId}`
+  if (branchPointMemory.get(key) === arrayIndex) return
+  branchPointMemory.set(key, arrayIndex)
+  writeStoredBranchPoint(key, arrayIndex)
 }
 
 export function recallBranchPoint(
@@ -416,8 +456,13 @@ export function recallBranchPoint(
   branchId: string,
   pointCount: number
 ): number | null {
-  const value = branchPointMemory.get(`${systemId}:${branchId}`)
-  return typeof value === 'number' && value >= 0 && value < pointCount ? value : null
+  const key = `${systemId}:${branchId}`
+  const value = branchPointMemory.has(key)
+    ? branchPointMemory.get(key)
+    : readStoredBranchPoints()[key]
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < pointCount
+    ? value
+    : null
 }
 
 /** Tab-separated `label<TAB>value` lines with full precision, for the clipboard. */

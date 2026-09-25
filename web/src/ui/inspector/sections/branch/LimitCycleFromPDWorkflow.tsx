@@ -1,6 +1,8 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 import { PeriodicLinearSolverField } from './PeriodicLinearSolverField'
+import { validateStepSizes } from './stepSizeValidation'
+import { StepSizeError } from './StepSizeError'
 
 export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -15,7 +17,6 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
     limitCycleFromPDError,
     limitCycleFromPDLabel,
     limitCycleFromPDNameSuggestion,
-    pdObjectLabel,
     pdObjectLabelName,
     runDisabled,
     selectedBranchPoint,
@@ -25,6 +26,7 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
     showLimitCycleFromPD,
     systemDraft,
   } = scope
+  const limitCycleFromPDStepIssues = validateStepSizes(limitCycleFromPDDraft)
   if (!branch) return null
   return <>
 {showLimitCycleFromPD ? (
@@ -38,26 +40,20 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
                     <div className="inspector-section">
                     {systemDraft.type === 'map' ? (
                       branch.branchType !== 'equilibrium' ? (
-                        <p className="empty-state">
-                          Period-doubling branching for maps requires a cycle branch.
-                        </p>
+                        <p className="field-warning">Needs a cycle branch.</p>
                       ) : null
                     ) : branch.branchType !== 'limit_cycle' ? (
-                      <p className="empty-state">
-                        Period-doubling branching is only available for limit cycle branches.
-                      </p>
+                      <p className="field-warning">Needs a limit-cycle branch.</p>
                     ) : null}
                     {runDisabled ? (
                       <div className="field-warning">
-                        Apply valid system changes before continuing.
+                        Apply valid system changes first.
                       </div>
                     ) : null}
                     {!selectedBranchPoint ? (
-                      <p className="empty-state">Select a branch point to continue.</p>
+                      <p className="field-warning">Select a point.</p>
                     ) : selectedBranchPoint.stability !== 'PeriodDoubling' ? (
-                      <p className="empty-state">
-                        Select a Period Doubling point to branch.
-                      </p>
+                      <p className="field-warning">Select a PD point.</p>
                     ) : (
                       <>
                         <label>
@@ -123,8 +119,8 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
                             }
                             data-testid="limit-cycle-from-pd-direction"
                           >
-                            <option value="forward">Forward (Increasing Param)</option>
-                            <option value="backward">Backward (Decreasing Param)</option>
+                            <option value="forward">→ Increasing</option>
+                            <option value="backward">← Decreasing</option>
                           </select>
                         </label>
                         {systemDraft.type === 'map' ? (
@@ -165,6 +161,7 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
                           <input
                             type="number"
                             value={limitCycleFromPDDraft.stepSize}
+                            aria-invalid={limitCycleFromPDStepIssues.stepSize || undefined}
                             onChange={(event) =>
                               setLimitCycleFromPDDraft((prev) => ({
                                 ...prev,
@@ -193,6 +190,7 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
                           <input
                             type="number"
                             value={limitCycleFromPDDraft.minStepSize}
+                            aria-invalid={limitCycleFromPDStepIssues.minStepSize || undefined}
                             onChange={(event) =>
                               setLimitCycleFromPDDraft((prev) => ({
                                 ...prev,
@@ -207,6 +205,7 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
                           <input
                             type="number"
                             value={limitCycleFromPDDraft.maxStepSize}
+                            aria-invalid={limitCycleFromPDStepIssues.maxStepSize || undefined}
                             onChange={(event) =>
                               setLimitCycleFromPDDraft((prev) => ({
                                 ...prev,
@@ -216,6 +215,7 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
                             data-testid="limit-cycle-from-pd-max-step-size"
                           />
                         </label>
+                        <StepSizeError issues={limitCycleFromPDStepIssues} testId="limit-cycle-from-pd-step-error" />
                         <div className="inspector-divider">Corrector</div>
                         <label>
                           Corrector steps
@@ -291,6 +291,7 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
                               : handleCreateLimitCycleFromPD
                           }
                           disabled={
+                            limitCycleFromPDStepIssues.invalid ||
                             runDisabled ||
                             (systemDraft.type === 'map'
                               ? branch.branchType !== 'equilibrium'
@@ -299,7 +300,7 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
                           }
                           data-testid="limit-cycle-from-pd-submit"
                         >
-                          {`Continue ${pdObjectLabel}`}
+                          Continue
                         </button>
                       </>
                     )}

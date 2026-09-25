@@ -5684,6 +5684,82 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('returns to the object with the Floquet section open after computing modes', async () => {
+    const user = userEvent.setup()
+    const { system } = createPeriodDoublingSystem()
+    const branchId = Object.keys(system.branches)[0]
+    const branch = branchId ? system.branches[branchId] : undefined
+    const limitCycleId =
+      branch &&
+      Object.entries(system.objects).find(([, obj]) => obj.name === branch.parentObject)?.[0]
+    if (!branchId || !branch || !limitCycleId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+    const limitCycle = system.objects[limitCycleId] as LimitCycleObject
+    const props = {
+      selectedNodeId: limitCycleId,
+      view: 'selection' as const,
+      theme: 'light' as const,
+      onRename: vi.fn(),
+      onToggleVisibility: vi.fn(),
+      onUpdateRender: vi.fn(),
+      onUpdateScene: vi.fn(),
+      onUpdateBifurcationDiagram: vi.fn(),
+      onUpdateSystem: vi.fn().mockResolvedValue(undefined),
+      onValidateSystem: vi.fn().mockResolvedValue({ ok: true, equationErrors: [] }),
+      onRunOrbit: vi.fn().mockResolvedValue(undefined),
+      onComputeLyapunovExponents: vi.fn().mockResolvedValue(undefined),
+      onComputeCovariantLyapunovVectors: vi.fn().mockResolvedValue(undefined),
+      onComputeLimitCycleFloquetModes: vi.fn().mockResolvedValue(undefined),
+      onSolveEquilibrium: vi.fn().mockResolvedValue(undefined),
+      onCreateEquilibriumBranch: vi.fn().mockResolvedValue(undefined),
+      onCreateBranchFromPoint: vi.fn().mockResolvedValue(undefined),
+      onExtendBranch: vi.fn().mockResolvedValue(undefined),
+      onCreateFoldCurveFromPoint: vi.fn().mockResolvedValue(undefined),
+      onCreateHopfCurveFromPoint: vi.fn().mockResolvedValue(undefined),
+      onCreateNSCurveFromPoint: vi.fn().mockResolvedValue(undefined),
+      onCreateLimitCycleFromHopf: vi.fn().mockResolvedValue(undefined),
+      onCreateLimitCycleFromOrbit: vi.fn().mockResolvedValue(undefined),
+      onCreateLimitCycleFromPD: vi.fn().mockResolvedValue(undefined),
+      onCreateCycleFromPD: vi.fn().mockResolvedValue(undefined),
+      onSetLimitCycleRenderTarget: vi.fn(),
+    }
+    const { rerender } = render(<InspectorDetailsPanel system={system} {...props} />)
+
+    await user.click(screen.getByTestId('action-limit-cycle-floquet-toggle'))
+    await user.click(screen.getByTestId('limit-cycle-floquet-modes-compute'))
+    expect(screen.getByTestId('inspector-workflow-focus')).toBeVisible()
+
+    const multipliers = [
+      { re: 1, im: 0 },
+      { re: 0.5, im: 0 },
+    ]
+    const computed = {
+      ...system,
+      objects: {
+        ...system.objects,
+        [limitCycleId]: {
+          ...limitCycle,
+          floquetMultipliers: multipliers,
+          floquetModes: {
+            ntst: limitCycle.ntst,
+            ncol: limitCycle.ncol,
+            backend: 'block_cyclic' as const,
+            multipliers,
+            vectors: [],
+            computedAt: '2026-09-25T00:00:00.000Z',
+          },
+        },
+      },
+    }
+    rerender(<InspectorDetailsPanel system={computed} {...props} />)
+
+    await waitFor(() => expect(screen.queryByTestId('inspector-workflow-focus')).toBeNull())
+    expect(
+      screen.getByTestId('limit-cycle-data-floquet-toggle').closest('details')
+    ).toHaveAttribute('open')
+  })
+
   it('shows a toggle for the trivial Floquet mode (index 0)', async () => {
     const user = userEvent.setup()
     const { system } = createPeriodDoublingSystem()

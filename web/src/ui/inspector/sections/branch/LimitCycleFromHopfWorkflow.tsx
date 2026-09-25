@@ -2,6 +2,8 @@ import type { InspectorSelectionController } from '../../../InspectorDetailsPane
 import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 import { PeriodicLinearSolverField } from './PeriodicLinearSolverField'
+import { validateStepSizes } from './stepSizeValidation'
+import { StepSizeError } from './StepSizeError'
 
 export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -24,6 +26,7 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
     showLimitCycleFromHopf,
     suggestDefaultName,
   } = scope
+  const limitCycleFromHopfStepIssues = validateStepSizes(limitCycleFromHopfDraft)
   if (!branch) return null
   return <>
 {showLimitCycleFromHopf ? (
@@ -36,26 +39,21 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                   >
                     <div className="inspector-section">
                       {!isHopfSourceBranch ? (
-                        <p className="empty-state">
-                          Limit cycle continuation is only available for equilibrium or Hopf curve
-                          branches.
-                        </p>
+                        <p className="field-warning">Needs an equilibrium or Hopf curve branch.</p>
                       ) : null}
                       {continuationParameterCount === 0 ? (
-                        <p className="empty-state">Add a parameter before continuing.</p>
+                        <p className="field-warning">Needs a parameter.</p>
                       ) : null}
                       {runDisabled ? (
                         <div className="field-warning">
-                          Apply valid system changes before continuing.
+                          Apply valid system changes first.
                         </div>
                       ) : null}
                       {!isHopfSourceBranch ||
                       continuationParameterCount === 0 ? null : !selectedBranchPoint ? (
-                        <p className="empty-state">Select a branch point to continue.</p>
+                        <p className="field-warning">Select a point.</p>
                       ) : !isHopfPointSelected ? (
-                        <p className="empty-state">
-                          Select a Hopf bifurcation point to continue a limit cycle.
-                        </p>
+                        <p className="field-warning">Select a Hopf point.</p>
                       ) : (
                           <>
                             <label>
@@ -144,7 +142,7 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                               data-testid="limit-cycle-from-hopf-amplitude"
                             />
                           </label>
-                          <label>
+                          <label title="Mesh intervals along the cycle">
                             NTST
                             <input
                               type="number"
@@ -157,9 +155,8 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                               }
                               data-testid="limit-cycle-from-hopf-ntst"
                             />
-                            <span className="field-help">Mesh intervals along the cycle.</span>
                           </label>
-                          <label>
+                          <label title="Collocation points per mesh interval">
                             NCOL
                             <input
                               type="number"
@@ -172,9 +169,6 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                               }
                               data-testid="limit-cycle-from-hopf-ncol"
                             />
-                            <span className="field-help">
-                              Collocation points per mesh interval.
-                            </span>
                           </label>
                           <label>
                             Direction
@@ -188,8 +182,8 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                               }
                               data-testid="limit-cycle-from-hopf-direction"
                             >
-                              <option value="forward">Forward (Increasing Param)</option>
-                              <option value="backward">Backward (Decreasing Param)</option>
+                              <option value="forward">→ Increasing</option>
+                              <option value="backward">← Decreasing</option>
                             </select>
                           </label>
                           <label>
@@ -197,6 +191,7 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                             <input
                               type="number"
                               value={limitCycleFromHopfDraft.stepSize}
+                              aria-invalid={limitCycleFromHopfStepIssues.stepSize || undefined}
                               onChange={(event) =>
                                 setLimitCycleFromHopfDraft((prev) => ({
                                   ...prev,
@@ -225,6 +220,7 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                             <input
                               type="number"
                               value={limitCycleFromHopfDraft.minStepSize}
+                              aria-invalid={limitCycleFromHopfStepIssues.minStepSize || undefined}
                               onChange={(event) =>
                                 setLimitCycleFromHopfDraft((prev) => ({
                                   ...prev,
@@ -239,6 +235,7 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                             <input
                               type="number"
                               value={limitCycleFromHopfDraft.maxStepSize}
+                              aria-invalid={limitCycleFromHopfStepIssues.maxStepSize || undefined}
                               onChange={(event) =>
                                 setLimitCycleFromHopfDraft((prev) => ({
                                   ...prev,
@@ -248,6 +245,7 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                               data-testid="limit-cycle-from-hopf-max-step-size"
                             />
                           </label>
+                          <StepSizeError issues={limitCycleFromHopfStepIssues} testId="limit-cycle-from-hopf-step-error" />
                           <label>
                             Corrector steps
                             <input
@@ -314,6 +312,7 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                             className="inspector-primary-action"
                             onClick={handleCreateLimitCycleFromHopf}
                             disabled={
+                              limitCycleFromHopfStepIssues.invalid ||
                               runDisabled ||
                               !selectedBranchPoint ||
                               !isHopfSourceBranch ||
@@ -322,7 +321,7 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                             }
                             data-testid="limit-cycle-from-hopf-submit"
                           >
-                            Continue Limit Cycle
+                            Continue
                           </button>
                           </>
                     )}

@@ -27,6 +27,7 @@ export function LimitCycleInspectorSections({
     limitCycleFloquetModes,
     limitCycleFloquetModesAvailable,
     limitCycleFloquetModesError,
+    limitCycleFloquetRevealed,
     limitCycleFloquetModesMatchMesh,
     limitCycleFloquetOpacities,
     limitCycleFloquetRender,
@@ -164,7 +165,11 @@ export function LimitCycleInspectorSections({
       ) : null}
 
       {limitCycleModeMultipliers.length > 0 || limitCycleFloquetModes ? (
-        <DataDetails title="Floquet" testId="limit-cycle-data-floquet-toggle">
+        <DataDetails
+          title="Floquet"
+          testId="limit-cycle-data-floquet-toggle"
+          defaultOpen={limitCycleFloquetRevealed}
+        >
           {limitCycleModeMultipliers.length > 0 ? (
             <div className="inspector-split">
               {limitCycleMultiplierPlot ? (

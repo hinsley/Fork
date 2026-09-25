@@ -17,6 +17,11 @@
   min-width: 0;
 }
 
+/* Focused only to receive ←/→ after a click; not a tab stop. */
+.branch-root:focus {
+  outline: none;
+}
+
 /* ---- Summary ------------------------------------------------------------ */
 
 .branch-summary {
@@ -480,4 +485,9 @@
 .branch-eig-plot {
   max-width: 100%;
   overflow: hidden;
+}
+
+/* Inline validation in branch workflow forms (e.g. step > max step). */
+.inspector-browser .inspector-section input[type][aria-invalid='true'] {
+  border-color: var(--danger);
 }

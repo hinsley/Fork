@@ -1,5 +1,7 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
+import { validateStepSizes } from './stepSizeValidation'
+import { StepSizeError } from './StepSizeError'
 
 export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -19,6 +21,7 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
     suggestDefaultName,
     systemDraft,
   } = scope
+  const homotopySaddleFromEquilibriumStepIssues = validateStepSizes(homotopySaddleFromEquilibriumDraft)
   if (!branch) return null
   return <>
 {showHomotopySaddleFromEquilibrium ? (
@@ -31,20 +34,18 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
                   >
                     <div className="inspector-section">
                       {systemDraft.type === 'map' ? (
-                        <p className="empty-state">
-                          Homotopy-saddle continuation is only available for flow systems.
-                        </p>
+                        <p className="field-warning">Flow systems only.</p>
                       ) : null}
                       {continuationParameterCount < 2 ? (
-                        <p className="empty-state">Add a second parameter to continue.</p>
+                        <p className="field-warning">Needs a second parameter.</p>
                       ) : null}
                       {runDisabled ? (
                         <div className="field-warning">
-                          Apply valid system changes before continuing.
+                          Apply valid system changes first.
                         </div>
                       ) : null}
                       {!selectedBranchPoint ? (
-                        <p className="empty-state">Select a branch point to continue.</p>
+                        <p className="field-warning">Select a point.</p>
                       ) : (
                         <>
                           <label>
@@ -208,8 +209,8 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
                               }
                               data-testid="homotopy-saddle-from-equilibrium-direction"
                             >
-                              <option value="forward">Forward</option>
-                              <option value="backward">Backward</option>
+                              <option value="forward">→ Increasing</option>
+                              <option value="backward">← Decreasing</option>
                             </select>
                           </label>
                           <div className="inspector-divider">Predictor</div>
@@ -218,6 +219,7 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
                             <input
                               type="number"
                               value={homotopySaddleFromEquilibriumDraft.stepSize}
+                              aria-invalid={homotopySaddleFromEquilibriumStepIssues.stepSize || undefined}
                               onChange={(event) =>
                                 setHomotopySaddleFromEquilibriumDraft((prev) => ({
                                   ...prev,
@@ -246,6 +248,7 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
                             <input
                               type="number"
                               value={homotopySaddleFromEquilibriumDraft.minStepSize}
+                              aria-invalid={homotopySaddleFromEquilibriumStepIssues.minStepSize || undefined}
                               onChange={(event) =>
                                 setHomotopySaddleFromEquilibriumDraft((prev) => ({
                                   ...prev,
@@ -260,6 +263,7 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
                             <input
                               type="number"
                               value={homotopySaddleFromEquilibriumDraft.maxStepSize}
+                              aria-invalid={homotopySaddleFromEquilibriumStepIssues.maxStepSize || undefined}
                               onChange={(event) =>
                                 setHomotopySaddleFromEquilibriumDraft((prev) => ({
                                   ...prev,
@@ -269,6 +273,7 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
                               data-testid="homotopy-saddle-from-equilibrium-max-step-size"
                             />
                           </label>
+                          <StepSizeError issues={homotopySaddleFromEquilibriumStepIssues} testId="homotopy-saddle-from-equilibrium-step-error" />
                           <div className="inspector-divider">Corrector</div>
                           <label>
                             Corrector steps
@@ -319,6 +324,7 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
                             className="inspector-primary-action"
                             onClick={handleCreateHomotopySaddleFromEquilibrium}
                             disabled={
+                              homotopySaddleFromEquilibriumStepIssues.invalid ||
                               runDisabled ||
                               !selectedBranchPoint ||
                               branch.branchType !== 'equilibrium' ||
@@ -326,7 +332,7 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
                             }
                             data-testid="homotopy-saddle-from-equilibrium-submit"
                           >
-                            Continue Homotopy-Saddle
+                            Continue
                           </button>
                         </>
                       )}

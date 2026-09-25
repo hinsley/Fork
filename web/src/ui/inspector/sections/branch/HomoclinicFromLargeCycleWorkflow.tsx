@@ -2,6 +2,8 @@ import type { InspectorSelectionController } from '../../../InspectorDetailsPane
 import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 import { isHomoclinicExtraSelectionDisabled } from '../../../../system/homoclinicExtras'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
+import { validateStepSizes } from './stepSizeValidation'
+import { StepSizeError } from './StepSizeError'
 
 export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -21,6 +23,7 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
     suggestDefaultName,
     systemDraft,
   } = scope
+  const homoclinicFromLargeCycleStepIssues = validateStepSizes(homoclinicFromLargeCycleDraft)
   if (!branch) return null
   return <>
 {showHomoclinicFromLargeCycle ? (
@@ -33,23 +36,18 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                   >
                     <div className="inspector-section">
                       {systemDraft.type === 'map' ? (
-                        <p className="empty-state">
-                          Homoclinic continuation is only available for flow systems.
-                        </p>
-                      ) : null}
-                      {continuationParameterCount < 2 ? (
-                        <p className="empty-state">Add a second parameter to continue.</p>
+                        <p className="field-warning">Flow systems only.</p>
                       ) : null}
                       {runDisabled ? (
                         <div className="field-warning">
-                          Apply valid system changes before continuing.
+                          Apply valid system changes first.
                         </div>
                       ) : null}
                       {continuationParameterCount < 2 ? (
-                        <p className="empty-state">Add a second parameter to continue.</p>
+                        <p className="field-warning">Needs a second parameter.</p>
                       ) : null}
                       {!selectedBranchPoint ? (
-                        <p className="empty-state">Select a branch point to continue.</p>
+                        <p className="field-warning">Select a point.</p>
                       ) : (
                         <>
                           <label>
@@ -268,8 +266,8 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                               }
                               data-testid="homoclinic-from-large-cycle-direction"
                             >
-                              <option value="forward">Forward</option>
-                              <option value="backward">Backward</option>
+                              <option value="forward">→ Increasing</option>
+                              <option value="backward">← Decreasing</option>
                             </select>
                           </label>
                           <div className="inspector-divider">Predictor</div>
@@ -278,6 +276,7 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                             <input
                               type="number"
                               value={homoclinicFromLargeCycleDraft.stepSize}
+                              aria-invalid={homoclinicFromLargeCycleStepIssues.stepSize || undefined}
                               onChange={(event) =>
                                 setHomoclinicFromLargeCycleDraft((prev) => ({
                                   ...prev,
@@ -306,6 +305,7 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                             <input
                               type="number"
                               value={homoclinicFromLargeCycleDraft.minStepSize}
+                              aria-invalid={homoclinicFromLargeCycleStepIssues.minStepSize || undefined}
                               onChange={(event) =>
                                 setHomoclinicFromLargeCycleDraft((prev) => ({
                                   ...prev,
@@ -320,6 +320,7 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                             <input
                               type="number"
                               value={homoclinicFromLargeCycleDraft.maxStepSize}
+                              aria-invalid={homoclinicFromLargeCycleStepIssues.maxStepSize || undefined}
                               onChange={(event) =>
                                 setHomoclinicFromLargeCycleDraft((prev) => ({
                                   ...prev,
@@ -329,6 +330,7 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                               data-testid="homoclinic-from-large-cycle-max-step-size"
                             />
                           </label>
+                          <StepSizeError issues={homoclinicFromLargeCycleStepIssues} testId="homoclinic-from-large-cycle-step-error" />
                           <div className="inspector-divider">Corrector</div>
                           <label>
                             Corrector steps
@@ -391,6 +393,7 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                             className="inspector-primary-action"
                             onClick={handleCreateHomoclinicFromLargeCycle}
                             disabled={
+                              homoclinicFromLargeCycleStepIssues.invalid ||
                               runDisabled ||
                               !selectedBranchPoint ||
                               branch.branchType !== 'limit_cycle' ||
@@ -398,7 +401,7 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                             }
                             data-testid="homoclinic-from-large-cycle-submit"
                           >
-                            Continue Homoclinic
+                            Continue
                           </button>
                         </>
                       )}

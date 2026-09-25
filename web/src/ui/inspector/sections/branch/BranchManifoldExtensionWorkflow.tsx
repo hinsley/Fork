@@ -26,7 +26,7 @@ export function BranchManifoldExtensionWorkflow({ scope }: { scope: InspectorSel
                     <div className="inspector-section">
                       {runDisabled ? (
                         <div className="field-warning">
-                          Apply valid system changes before extending.
+                          Apply valid system changes first.
                         </div>
                       ) : null}
                       <label>
@@ -169,7 +169,7 @@ export function BranchManifoldExtensionWorkflow({ scope }: { scope: InspectorSel
                         disabled={runDisabled}
                         data-testid="manifold-extend-submit"
                       >
-                        Extend Manifold
+                        Extend
                       </button>
                     </div>
                   </InspectorDisclosure>

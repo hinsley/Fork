@@ -44,11 +44,14 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
   if (!branch) return null
 
   // ←/→ step one point; Shift+←/→ jump to the previous/next bifurcation.
+  // Handled keys never fall through to native handling (e.g. the scrubber's
+  // range input would otherwise step one point at the last bifurcation).
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
     if (event.altKey || event.ctrlKey || event.metaKey) return
     if (isTextEntry(event.target)) return
     if (branchSortedOrder.length === 0) return
+    event.preventDefault()
     const direction = event.key === 'ArrowRight' ? 1 : -1
     const current = branchSortedIndex < 0 ? 0 : branchSortedIndex
     let target = current + direction
@@ -65,12 +68,13 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
       target = next
     }
     if (target < 0 || target >= branchSortedOrder.length) return
-    event.preventDefault()
     setBranchPoint(branchSortedOrder[target])
   }
 
   return <>
-    <div className="branch-root" onKeyDown={handleKeyDown}>
+    {/* Focusable (not tabbable) so a click anywhere in the summary or point
+        panel keeps arrow-key stepping working. */}
+    <div className="branch-root" tabIndex={-1} onKeyDown={handleKeyDown}>
       <BranchSummary scope={scope} />
       <BranchPointPanel scope={scope} />
       <BranchSolverDetails scope={scope} />
@@ -82,7 +86,6 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
         testId="codim2-branch-switch-toggle"
         actionOnly
       >
-                                    <h4 className="inspector-subheading">Branch switching</h4>
                                     <div className="inspector-actions">
                                       {selectedBranchPoint.codim2.type === 'GeneralizedHopf' ? (
                                         <button

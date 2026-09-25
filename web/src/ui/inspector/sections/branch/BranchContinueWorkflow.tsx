@@ -1,5 +1,7 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
+import { validateStepSizes } from './stepSizeValidation'
+import { StepSizeError } from './StepSizeError'
 
 export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -20,6 +22,7 @@ export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionCon
     showBranchContinueFromPoint,
     suggestDefaultName,
   } = scope
+  const branchContinuationStepIssues = validateStepSizes(branchContinuationDraft)
   if (!branch) return null
   return <>
 {showBranchContinueFromPoint ? (
@@ -33,11 +36,11 @@ export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionCon
                     <div className="inspector-section">
                       {runDisabled ? (
                         <div className="field-warning">
-                          Apply valid system changes before continuing.
+                          Apply valid system changes first.
                         </div>
                       ) : null}
                       {continuationParameterCount === 0 ? (
-                        <p className="empty-state">Add parameters to enable continuation.</p>
+                        <p className="field-warning">Needs a parameter.</p>
                       ) : null}
                       <label>
                         Branch name
@@ -107,8 +110,8 @@ export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionCon
                           }
                           data-testid="branch-from-point-direction"
                         >
-                          <option value="forward">Forward (Increasing Param)</option>
-                          <option value="backward">Backward (Decreasing Param)</option>
+                          <option value="forward">→ Increasing</option>
+                          <option value="backward">← Decreasing</option>
                         </select>
                       </label>
                       <div className="inspector-divider">Predictor</div>
@@ -117,6 +120,7 @@ export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionCon
                         <input
                           type="number"
                           value={branchContinuationDraft.stepSize}
+                          aria-invalid={branchContinuationStepIssues.stepSize || undefined}
                           onChange={(event) =>
                             setBranchContinuationDraft((prev) => ({
                               ...prev,
@@ -145,6 +149,7 @@ export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionCon
                         <input
                           type="number"
                           value={branchContinuationDraft.minStepSize}
+                          aria-invalid={branchContinuationStepIssues.minStepSize || undefined}
                           onChange={(event) =>
                             setBranchContinuationDraft((prev) => ({
                               ...prev,
@@ -159,6 +164,7 @@ export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionCon
                         <input
                           type="number"
                           value={branchContinuationDraft.maxStepSize}
+                          aria-invalid={branchContinuationStepIssues.maxStepSize || undefined}
                           onChange={(event) =>
                             setBranchContinuationDraft((prev) => ({
                               ...prev,
@@ -168,6 +174,7 @@ export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionCon
                           data-testid="branch-from-point-max-step"
                         />
                       </label>
+                      <StepSizeError issues={branchContinuationStepIssues} testId="branch-from-point-step-error" />
                       <div className="inspector-divider">Corrector</div>
                       <label>
                         Corrector steps
@@ -218,13 +225,14 @@ export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionCon
                         className="inspector-primary-action"
                         onClick={handleCreateBranchFromPoint}
                         disabled={
+                          branchContinuationStepIssues.invalid ||
                           runDisabled ||
                           !selectedBranchPoint ||
                           !branchSupportsContinueFromPoint
                         }
                         data-testid="branch-from-point-submit"
                       >
-                        Create Branch
+                        Continue
                       </button>
                     </div>
                   </InspectorDisclosure>

@@ -2,6 +2,8 @@ import type { InspectorSelectionController } from '../../../InspectorDetailsPane
 import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 import { isHomoclinicExtraSelectionDisabled } from '../../../../system/homoclinicExtras'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
+import { validateStepSizes } from './stepSizeValidation'
+import { StepSizeError } from './StepSizeError'
 
 export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -20,6 +22,7 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
     showHomoclinicFromHomoclinic,
     suggestDefaultName,
   } = scope
+  const homoclinicFromHomoclinicStepIssues = validateStepSizes(homoclinicFromHomoclinicDraft)
   if (!branch) return null
   const sourceType = branch.data.branch_type
   const sourceUsesShooting =
@@ -37,11 +40,11 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                     <div className="inspector-section">
                       {runDisabled ? (
                         <div className="field-warning">
-                          Apply valid system changes before continuing.
+                          Apply valid system changes first.
                         </div>
                       ) : null}
                       {!selectedBranchPoint ? (
-                        <p className="empty-state">Select a branch point to continue.</p>
+                        <p className="field-warning">Select a point.</p>
                       ) : (
                         <>
                           <label>
@@ -113,7 +116,13 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                             </select>
                           </label>
                           <div className="inspector-divider">Initialization</div>
-                          <label>
+                          <label
+                            title={
+                              sourceUsesShooting
+                                ? 'A standard-shooting source restarts with standard shooting.'
+                                : undefined
+                            }
+                          >
                             Method
                             <select
                               value={homoclinicFromHomoclinicDraft.discretization}
@@ -134,11 +143,6 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                               <option value="shooting">Standard Shooting</option>
                             </select>
                           </label>
-                          {sourceUsesShooting ? (
-                            <p className="field-help">
-                              A standard-shooting source restarts with standard shooting.
-                            </p>
-                          ) : null}
                           {homoclinicFromHomoclinicDraft.discretization === 'collocation' ? (
                             <>
                               <label>
@@ -278,8 +282,8 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                               }
                               data-testid="homoclinic-from-homoclinic-direction"
                             >
-                              <option value="forward">Forward</option>
-                              <option value="backward">Backward</option>
+                              <option value="forward">→ Increasing</option>
+                              <option value="backward">← Decreasing</option>
                             </select>
                           </label>
                           <div className="inspector-divider">Predictor</div>
@@ -288,6 +292,7 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                             <input
                               type="number"
                               value={homoclinicFromHomoclinicDraft.stepSize}
+                              aria-invalid={homoclinicFromHomoclinicStepIssues.stepSize || undefined}
                               onChange={(event) =>
                                 setHomoclinicFromHomoclinicDraft((prev) => ({
                                   ...prev,
@@ -316,6 +321,7 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                             <input
                               type="number"
                               value={homoclinicFromHomoclinicDraft.minStepSize}
+                              aria-invalid={homoclinicFromHomoclinicStepIssues.minStepSize || undefined}
                               onChange={(event) =>
                                 setHomoclinicFromHomoclinicDraft((prev) => ({
                                   ...prev,
@@ -330,6 +336,7 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                             <input
                               type="number"
                               value={homoclinicFromHomoclinicDraft.maxStepSize}
+                              aria-invalid={homoclinicFromHomoclinicStepIssues.maxStepSize || undefined}
                               onChange={(event) =>
                                 setHomoclinicFromHomoclinicDraft((prev) => ({
                                   ...prev,
@@ -339,6 +346,7 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                               data-testid="homoclinic-from-homoclinic-max-step-size"
                             />
                           </label>
+                          <StepSizeError issues={homoclinicFromHomoclinicStepIssues} testId="homoclinic-from-homoclinic-step-error" />
                           <div className="inspector-divider">Corrector</div>
                           <label>
                             Corrector steps
@@ -401,13 +409,14 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                             className="inspector-primary-action"
                             onClick={handleCreateHomoclinicFromHomoclinic}
                             disabled={
+                              homoclinicFromHomoclinicStepIssues.invalid ||
                               runDisabled ||
                               !selectedBranchPoint ||
                               branch.branchType !== 'homoclinic_curve'
                             }
                             data-testid="homoclinic-from-homoclinic-submit"
                           >
-                            Continue Homoclinic
+                            Continue
                           </button>
                         </>
                       )}

@@ -1,5 +1,7 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
+import { validateStepSizes } from './stepSizeValidation'
+import { StepSizeError } from './StepSizeError'
 
 export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -36,6 +38,9 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
     suggestDefaultName,
     systemDraft,
   } = scope
+  const foldCurveStepIssues = validateStepSizes(foldCurveDraft)
+  const hopfCurveStepIssues = validateStepSizes(hopfCurveDraft)
+  const nsCurveStepIssues = validateStepSizes(nsCurveDraft)
   if (!branch) return null
   return <>
 {showCodim1CurveContinuations ? (
@@ -49,13 +54,11 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                     <div className="inspector-section">
                       {runDisabled ? (
                         <div className="field-warning">
-                          Apply valid system changes before continuing.
+                          Apply valid system changes first.
                         </div>
                       ) : null}
                       {continuationParameterCount < 2 ? (
-                        <p className="empty-state">
-                          Add a second parameter to enable codim-1 continuation.
-                        </p>
+                        <p className="field-warning">Needs a second parameter.</p>
                       ) : null}
                       {showFoldCurveContinuation ? (
                         <>
@@ -122,8 +125,8 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                               }
                               data-testid="fold-curve-direction"
                             >
-                              <option value="forward">Forward</option>
-                              <option value="backward">Backward</option>
+                              <option value="forward">→ Increasing</option>
+                              <option value="backward">← Decreasing</option>
                             </select>
                           </label>
                           <label>
@@ -131,6 +134,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             <input
                               type="number"
                               value={foldCurveDraft.stepSize}
+                              aria-invalid={foldCurveStepIssues.stepSize || undefined}
                               onChange={(event) =>
                                 setFoldCurveDraft((prev) => ({
                                   ...prev,
@@ -145,6 +149,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             <input
                               type="number"
                               value={foldCurveDraft.minStepSize}
+                              aria-invalid={foldCurveStepIssues.minStepSize || undefined}
                               onChange={(event) =>
                                 setFoldCurveDraft((prev) => ({
                                   ...prev,
@@ -159,6 +164,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             <input
                               type="number"
                               value={foldCurveDraft.maxStepSize}
+                              aria-invalid={foldCurveStepIssues.maxStepSize || undefined}
                               onChange={(event) =>
                                 setFoldCurveDraft((prev) => ({
                                   ...prev,
@@ -168,6 +174,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                               data-testid="fold-curve-max-step-size"
                             />
                           </label>
+                          <StepSizeError issues={foldCurveStepIssues} testId="fold-curve-step-error" />
                           <label>
                             Max points
                             <input
@@ -231,13 +238,14 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             className="inspector-primary-action"
                             onClick={handleCreateFoldCurve}
                             disabled={
+                              foldCurveStepIssues.invalid ||
                               runDisabled ||
                               !selectedBranchPoint ||
                               branch.branchType !== 'equilibrium'
                             }
                             data-testid="fold-curve-submit"
                           >
-                            Continue Fold Curve
+                            Continue
                           </button>
                         </>
                       ) : showHopfCurveContinuation ? (
@@ -313,8 +321,8 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                               }
                               data-testid="hopf-curve-direction"
                             >
-                              <option value="forward">Forward</option>
-                              <option value="backward">Backward</option>
+                              <option value="forward">→ Increasing</option>
+                              <option value="backward">← Decreasing</option>
                             </select>
                           </label>
                           <label>
@@ -322,6 +330,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             <input
                               type="number"
                               value={hopfCurveDraft.stepSize}
+                              aria-invalid={hopfCurveStepIssues.stepSize || undefined}
                               onChange={(event) =>
                                 setHopfCurveDraft((prev) => ({
                                   ...prev,
@@ -336,6 +345,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             <input
                               type="number"
                               value={hopfCurveDraft.minStepSize}
+                              aria-invalid={hopfCurveStepIssues.minStepSize || undefined}
                               onChange={(event) =>
                                 setHopfCurveDraft((prev) => ({
                                   ...prev,
@@ -350,6 +360,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             <input
                               type="number"
                               value={hopfCurveDraft.maxStepSize}
+                              aria-invalid={hopfCurveStepIssues.maxStepSize || undefined}
                               onChange={(event) =>
                                 setHopfCurveDraft((prev) => ({
                                   ...prev,
@@ -359,6 +370,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                               data-testid="hopf-curve-max-step-size"
                             />
                           </label>
+                          <StepSizeError issues={hopfCurveStepIssues} testId="hopf-curve-step-error" />
                           <label>
                             Max points
                             <input
@@ -422,13 +434,14 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             className="inspector-primary-action"
                             onClick={handleCreateHopfCurve}
                             disabled={
+                              hopfCurveStepIssues.invalid ||
                               runDisabled ||
                               !selectedBranchPoint ||
                               branch.branchType !== 'equilibrium'
                             }
                             data-testid="hopf-curve-submit"
                           >
-                            {`Continue ${hopfCurveLabel} Curve`}
+                            Continue
                           </button>
                         </>
                       ) : showNSCurveContinuation ? (
@@ -504,8 +517,8 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                               }
                               data-testid="ns-curve-direction"
                             >
-                              <option value="forward">Forward</option>
-                              <option value="backward">Backward</option>
+                              <option value="forward">→ Increasing</option>
+                              <option value="backward">← Decreasing</option>
                             </select>
                           </label>
                           <label>
@@ -513,6 +526,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             <input
                               type="number"
                               value={nsCurveDraft.stepSize}
+                              aria-invalid={nsCurveStepIssues.stepSize || undefined}
                               onChange={(event) =>
                                 setNSCurveDraft((prev) => ({
                                   ...prev,
@@ -527,6 +541,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             <input
                               type="number"
                               value={nsCurveDraft.minStepSize}
+                              aria-invalid={nsCurveStepIssues.minStepSize || undefined}
                               onChange={(event) =>
                                 setNSCurveDraft((prev) => ({
                                   ...prev,
@@ -541,6 +556,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             <input
                               type="number"
                               value={nsCurveDraft.maxStepSize}
+                              aria-invalid={nsCurveStepIssues.maxStepSize || undefined}
                               onChange={(event) =>
                                 setNSCurveDraft((prev) => ({
                                   ...prev,
@@ -550,6 +566,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                               data-testid="ns-curve-max-step-size"
                             />
                           </label>
+                          <StepSizeError issues={nsCurveStepIssues} testId="ns-curve-step-error" />
                           <label>
                             Max points
                             <input
@@ -613,13 +630,14 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                             className="inspector-primary-action"
                             onClick={handleCreateNSCurve}
                             disabled={
+                              nsCurveStepIssues.invalid ||
                               runDisabled ||
                               !selectedBranchPoint ||
                               branch.branchType !== 'equilibrium'
                             }
                             data-testid="ns-curve-submit"
                           >
-                            {`Continue ${nsCurveLabel} Curve`}
+                            Continue
                           </button>
                         </>
                       ) : null}

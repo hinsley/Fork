@@ -1,6 +1,8 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { isHomoclinicExtraSelectionDisabled } from '../../../../system/homoclinicExtras'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
+import { validateStepSizes } from './stepSizeValidation'
+import { StepSizeError } from './StepSizeError'
 
 export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -19,6 +21,7 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
     showHomoclinicFromHomotopySaddle,
     suggestDefaultName,
   } = scope
+  const homoclinicFromHomotopySaddleStepIssues = validateStepSizes(homoclinicFromHomotopySaddleDraft)
   if (!branch) return null
   return <>
 {showHomoclinicFromHomotopySaddle ? (
@@ -30,20 +33,21 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                     actionOnly
                   >
                     <div className="inspector-section">
-                      <div className="field-help">{`Current stage: ${homotopyBranchStage ?? 'Unknown'}`}</div>
                       {!homotopyStageDReady ? (
-                        <p className="empty-state">
-                          Continue the homotopy-saddle branch to StageD before initializing a
-                          homoclinic curve.
+                        <p
+                          className="field-warning"
+                          title="Continue the homotopy-saddle branch to StageD first."
+                        >
+                          {`Needs StageD (at ${homotopyBranchStage ?? 'unknown'}).`}
                         </p>
                       ) : null}
                       {runDisabled ? (
                         <div className="field-warning">
-                          Apply valid system changes before continuing.
+                          Apply valid system changes first.
                         </div>
                       ) : null}
                       {!selectedBranchPoint ? (
-                        <p className="empty-state">Select a branch point to continue.</p>
+                        <p className="field-warning">Select a point.</p>
                       ) : (
                         <>
                           <label>
@@ -162,8 +166,8 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                               }
                               data-testid="homoclinic-from-homotopy-saddle-direction"
                             >
-                              <option value="forward">Forward</option>
-                              <option value="backward">Backward</option>
+                              <option value="forward">→ Increasing</option>
+                              <option value="backward">← Decreasing</option>
                             </select>
                           </label>
                           <div className="inspector-divider">Predictor</div>
@@ -172,6 +176,7 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                             <input
                               type="number"
                               value={homoclinicFromHomotopySaddleDraft.stepSize}
+                              aria-invalid={homoclinicFromHomotopySaddleStepIssues.stepSize || undefined}
                               onChange={(event) =>
                                 setHomoclinicFromHomotopySaddleDraft((prev) => ({
                                   ...prev,
@@ -200,6 +205,7 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                             <input
                               type="number"
                               value={homoclinicFromHomotopySaddleDraft.minStepSize}
+                              aria-invalid={homoclinicFromHomotopySaddleStepIssues.minStepSize || undefined}
                               onChange={(event) =>
                                 setHomoclinicFromHomotopySaddleDraft((prev) => ({
                                   ...prev,
@@ -214,6 +220,7 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                             <input
                               type="number"
                               value={homoclinicFromHomotopySaddleDraft.maxStepSize}
+                              aria-invalid={homoclinicFromHomotopySaddleStepIssues.maxStepSize || undefined}
                               onChange={(event) =>
                                 setHomoclinicFromHomotopySaddleDraft((prev) => ({
                                   ...prev,
@@ -223,6 +230,7 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                               data-testid="homoclinic-from-homotopy-saddle-max-step-size"
                             />
                           </label>
+                          <StepSizeError issues={homoclinicFromHomotopySaddleStepIssues} testId="homoclinic-from-homotopy-saddle-step-error" />
                           <div className="inspector-divider">Corrector</div>
                           <label>
                             Corrector steps
@@ -283,6 +291,7 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                             className="inspector-primary-action"
                             onClick={handleCreateHomoclinicFromHomotopySaddle}
                             disabled={
+                              homoclinicFromHomotopySaddleStepIssues.invalid ||
                               runDisabled ||
                               !selectedBranchPoint ||
                               branch.branchType !== 'homotopy_saddle_curve' ||
@@ -290,7 +299,7 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                             }
                             data-testid="homoclinic-from-homotopy-saddle-submit"
                           >
-                            Continue Homoclinic
+                            Continue
                           </button>
                         </>
                       )}

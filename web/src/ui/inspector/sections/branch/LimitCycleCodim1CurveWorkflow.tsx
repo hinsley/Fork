@@ -1,6 +1,8 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { formatContinuationParameterDisplayLabel } from '../../../../system/subsystemGateway'
 import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
+import { validateStepSizes } from './stepSizeValidation'
+import { StepSizeError } from './StepSizeError'
 
 export function LimitCycleCodim1CurveWorkflow({
   scope,
@@ -30,6 +32,7 @@ export function LimitCycleCodim1CurveWorkflow({
     suggestDefaultName,
     systemDraft,
   } = scope
+  const limitCycleCodim1CurveStepIssues = validateStepSizes(limitCycleCodim1CurveDraft)
 
   if (!branch || !showLimitCycleCodim1CurveContinuation || !limitCycleCodim1Curve) {
     return null
@@ -52,12 +55,10 @@ export function LimitCycleCodim1CurveWorkflow({
     >
       <div className="inspector-section">
         {runDisabled ? (
-          <div className="field-warning">Apply valid system changes before continuing.</div>
+          <div className="field-warning">Apply valid system changes first.</div>
         ) : null}
         {continuationParameterCount < 2 ? (
-          <p className="empty-state">
-            Add a second parameter to enable codim-1 continuation.
-          </p>
+          <p className="field-warning">Needs a second parameter.</p>
         ) : null}
         <h4 className="inspector-subheading">{`${limitCycleCodim1Curve.label} curve`}</h4>
         <label>
@@ -138,8 +139,8 @@ export function LimitCycleCodim1CurveWorkflow({
             }
             data-testid="limit-cycle-codim1-curve-direction"
           >
-            <option value="forward">Forward</option>
-            <option value="backward">Backward</option>
+            <option value="forward">→ Increasing</option>
+            <option value="backward">← Decreasing</option>
           </select>
         </label>
         <label>
@@ -147,6 +148,7 @@ export function LimitCycleCodim1CurveWorkflow({
           <input
             type="number"
             value={limitCycleCodim1CurveDraft.stepSize}
+            aria-invalid={limitCycleCodim1CurveStepIssues.stepSize || undefined}
             onChange={(event) =>
               setLimitCycleCodim1CurveDraft((prev) => ({
                 ...prev,
@@ -161,6 +163,7 @@ export function LimitCycleCodim1CurveWorkflow({
           <input
             type="number"
             value={limitCycleCodim1CurveDraft.minStepSize}
+            aria-invalid={limitCycleCodim1CurveStepIssues.minStepSize || undefined}
             onChange={(event) =>
               setLimitCycleCodim1CurveDraft((prev) => ({
                 ...prev,
@@ -175,6 +178,7 @@ export function LimitCycleCodim1CurveWorkflow({
           <input
             type="number"
             value={limitCycleCodim1CurveDraft.maxStepSize}
+            aria-invalid={limitCycleCodim1CurveStepIssues.maxStepSize || undefined}
             onChange={(event) =>
               setLimitCycleCodim1CurveDraft((prev) => ({
                 ...prev,
@@ -184,6 +188,7 @@ export function LimitCycleCodim1CurveWorkflow({
             data-testid="limit-cycle-codim1-curve-max-step-size"
           />
         </label>
+        <StepSizeError issues={limitCycleCodim1CurveStepIssues} testId="limit-cycle-codim1-curve-step-error" />
         <label>
           Max points
           <input
@@ -254,6 +259,7 @@ export function LimitCycleCodim1CurveWorkflow({
           className="inspector-primary-action"
           onClick={handleCreateLimitCycleCodim1Curve}
           disabled={
+            limitCycleCodim1CurveStepIssues.invalid ||
             runDisabled ||
             !selectedBranchPoint ||
             (branch.branchType !== 'limit_cycle' &&
@@ -264,7 +270,7 @@ export function LimitCycleCodim1CurveWorkflow({
           }
           data-testid="limit-cycle-codim1-curve-submit"
         >
-          {`Continue ${limitCycleCodim1Curve.label} Curve`}
+          Continue
         </button>
       </div>
     </InspectorDisclosure>

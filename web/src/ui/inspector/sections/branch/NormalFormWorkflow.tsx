@@ -262,12 +262,11 @@ function NormalFormWorkflowContent({
     >
       <div className="inspector-section">
         {runDisabled ? (
-          <div className="field-warning">Apply valid system changes before computing.</div>
+          <div className="field-warning">Apply valid system changes first.</div>
         ) : null}
         {isPeriodicSource && !hasPersistentMesh ? (
           <div className="field-warning" data-testid="normal-form-mesh-warning">
-            This legacy cycle has no persistent collocation mesh. Recontinue it before
-            computing or switching a normal form.
+            Legacy cycle without a stored mesh; recontinue it first.
           </div>
         ) : null}
         {eligible ? (
@@ -283,7 +282,7 @@ function NormalFormWorkflowContent({
               })
             }
           >
-            Compute Normal Form
+            Compute
           </button>
         ) : null}
       </div>
@@ -346,8 +345,8 @@ function NormalFormWorkflowContent({
           <label>
             Direction
             <select value={forward ? 'forward' : 'backward'} onChange={(event) => setForward(event.target.value === 'forward')}>
-              <option value="forward">Forward</option>
-              <option value="backward">Backward</option>
+              <option value="forward">→ Increasing</option>
+              <option value="backward">← Decreasing</option>
             </select>
           </label>
           <button
@@ -357,7 +356,7 @@ function NormalFormWorkflowContent({
             disabled={runDisabled || !hasPersistentMesh}
             onClick={handlePeriodicSwitch}
           >
-            Correct & Continue Secondary Branch
+            Continue
           </button>
         </div>
       ) : null}
@@ -427,8 +426,8 @@ function NormalFormWorkflowContent({
           <label>
             Direction
             <select value={forward ? 'forward' : 'backward'} onChange={(event) => setForward(event.target.value === 'forward')}>
-              <option value="forward">Forward</option>
-              <option value="backward">Backward</option>
+              <option value="forward">→ Increasing</option>
+              <option value="backward">← Decreasing</option>
             </select>
           </label>
           <button
@@ -438,7 +437,7 @@ function NormalFormWorkflowContent({
             disabled={runDisabled}
             onClick={handleCodim2Switch}
           >
-            Correct & Continue Target Branch
+            Continue
           </button>
         </div>
       ) : null}
