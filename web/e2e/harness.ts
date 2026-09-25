@@ -150,7 +150,6 @@ export class ForkHarness {
   }
 
   async solveEquilibrium() {
-    await clickInspectorAction(this.page, 'action-equilibrium-solver-toggle')
     await this.page.getByTestId('equilibrium-solve-submit').click()
   }
 

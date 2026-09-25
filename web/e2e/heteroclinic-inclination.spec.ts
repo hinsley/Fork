@@ -96,13 +96,11 @@ async function createSeedObjects(
     await harness.createEquilibrium()
     await page.getByTestId('inspector-name').fill(name)
     await page.getByTestId('inspector-name').press('Enter')
-    await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
     await page.getByTestId('equilibrium-solve-guess-0').fill(x)
     for (let index = 1; index < dimension; index += 1) {
       await page.getByTestId(`equilibrium-solve-guess-${index}`).fill('0')
     }
     await page.getByTestId('equilibrium-solve-submit').click()
-    await page.getByTestId('inspector-workflow-back').click()
     await expect(page.getByText(/^Solved$/)).toBeVisible()
   }
 }

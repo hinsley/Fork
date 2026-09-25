@@ -15,7 +15,7 @@ describe('selectionSessionReducer', () => {
     const exitingForward = selectionSessionReducer(initial, {
       type: 'start-navigation',
       direction: 'forward',
-      targetWorkflow: 'equilibrium-solver-toggle',
+      targetWorkflow: 'equilibrium-continuation-toggle',
     })
     expect(exitingForward).toMatchObject({
       activeWorkflow: null,
@@ -26,13 +26,13 @@ describe('selectionSessionReducer', () => {
       type: 'commit-navigation',
     })
     expect(enteringForward).toMatchObject({
-      activeWorkflow: 'equilibrium-solver-toggle',
+      activeWorkflow: 'equilibrium-continuation-toggle',
       navigationDirection: 'forward',
       navigationPhase: 'entering',
     })
     const open = selectionSessionReducer(enteringForward, { type: 'finish-navigation' })
     expect(open).toMatchObject({
-      activeWorkflow: 'equilibrium-solver-toggle',
+      activeWorkflow: 'equilibrium-continuation-toggle',
       navigationDirection: null,
       navigationPhase: 'idle',
     })

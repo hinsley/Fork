@@ -1392,7 +1392,8 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
-    expect(screen.getByTestId('action-equilibrium-solver-toggle')).toBeVisible()
+    expect(screen.getByTestId('equilibrium-solve-submit')).toBeVisible()
+    expect(screen.queryByTestId('action-equilibrium-solver-toggle')).toBeNull()
     expect(screen.getByTestId('inspector-status-chip')).toHaveTextContent('unsolved')
     expect(screen.queryByTestId('inspector-actions-more')).toBeNull()
     expect(screen.queryByTestId('action-equilibrium-continuation-toggle')).toBeNull()
@@ -1430,7 +1431,7 @@ describe('InspectorDetailsPanel', () => {
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
     const actions = screen.getByTestId('inspector-actions')
-    expect(within(actions).getByTestId('action-equilibrium-solver-toggle')).toBeVisible()
+    expect(screen.getByTestId('equilibrium-solver-section')).toBeVisible()
     expect(within(actions).getByTestId('action-equilibrium-continuation-toggle')).toBeVisible()
     const manifoldAction = screen.getByTestId('action-equilibrium-manifold-toggle')
     expect(manifoldAction).not.toBeVisible()
@@ -1441,7 +1442,6 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByTestId('equilibrium-glance-state')).toBeVisible()
     expect(screen.getByTestId('equilibrium-data-parameters')).toBeVisible()
     for (const panelTestId of [
-      'equilibrium-solver-toggle',
       'equilibrium-continuation-toggle',
       'equilibrium-manifold-toggle',
     ]) {
@@ -2782,7 +2782,6 @@ describe('InspectorDetailsPanel', () => {
       opacity: 0.64,
     })
 
-    await user.click(screen.getByTestId('isocline-toggle'))
     expect(
       screen.getByRole('region', { name: 'Isocline active variable ranges' })
     ).toBeInTheDocument()
@@ -2901,7 +2900,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('isocline-toggle'))
     fireEvent.change(screen.getByTestId('isocline-level'), { target: { value: '-' } })
     const callsBefore = onComputeIsocline.mock.calls.length
     await user.click(screen.getByTestId('isocline-compute'))
@@ -2973,7 +2971,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('isocline-toggle'))
     fireEvent.change(screen.getByTestId('isocline-axis-min-x'), { target: { value: '5' } })
     fireEvent.change(screen.getByTestId('isocline-axis-max-x'), { target: { value: '-5' } })
     await user.click(screen.getByTestId('isocline-compute'))
@@ -2990,7 +2987,6 @@ describe('InspectorDetailsPanel', () => {
   })
 
   it('hides frozen-variable table when all variables are active for an isocline', async () => {
-    const user = userEvent.setup()
     const config: SystemConfig = {
       name: 'Iso_All_Active',
       equations: ['x + y', 'y - z', 'x - z'],
@@ -3050,7 +3046,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('isocline-toggle'))
     expect(screen.getByTestId('isocline-parameter-table')).toBeInTheDocument()
     expect(screen.queryByTestId('isocline-frozen-table')).toBeNull()
   })
@@ -6810,7 +6805,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
     await user.clear(screen.getByTestId('equilibrium-solve-steps'))
     await user.type(screen.getByTestId('equilibrium-solve-steps'), '10')
     await user.clear(screen.getByTestId('equilibrium-solve-damping'))
@@ -6886,7 +6880,6 @@ describe('InspectorDetailsPanel', () => {
       onSolveEquilibrium
     )
 
-    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
     await user.click(screen.getByTestId('equilibrium-deflation-toggle'))
     expect(screen.getByText('Known saddle')).toBeVisible()
     await user.click(
@@ -7012,7 +7005,6 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(current.system, current.nodeId, vi.fn())
 
-    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
     await user.click(screen.getByTestId('equilibrium-deflation-toggle'))
     expect(screen.getByText('Cycle two')).toBeVisible()
     expect(screen.getByText('Map equilibrium')).toBeVisible()

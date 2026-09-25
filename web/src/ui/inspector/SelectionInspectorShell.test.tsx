@@ -42,7 +42,6 @@ function requiredProps(system: System, selectedNodeId: string) {
 
 describe('selection inspector workflow shell', () => {
   it('keeps a failed latest attempt separate from the stored successful solution', async () => {
-    const user = userEvent.setup()
     const base = createSystem({ name: 'Failed_Attempt' })
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
@@ -72,15 +71,13 @@ describe('selection inspector workflow shell', () => {
     const added = addObject(base, equilibrium)
     render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
     expect(screen.getByText('last attempt failed')).toBeVisible()
-    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
+    // The solver section is inline, so the last attempt is visible without a click.
     expect(screen.getByTestId('calculation-diagnostic')).toBeVisible()
     expect(screen.getByText('Newton correction did not converge.')).toBeVisible()
     expect(screen.getByText('Choose a closer initial guess.')).toBeVisible()
     expect(screen.getByTestId('calculation-diagnostic-metrics')).toHaveTextContent('Residual 2.50e-1')
     expect(screen.getByText('Stored solution unchanged.')).toBeVisible()
-    await user.click(screen.getByTestId('inspector-workflow-back'))
-    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
-    expect(screen.getByTestId('calculation-diagnostic')).toBeVisible()
+    expect(screen.queryByTestId('action-equilibrium-solver-toggle')).toBeNull()
   })
 
   it('shows solved equilibrium data inline without an Inspect workflow', async () => {
@@ -121,12 +118,14 @@ describe('selection inspector workflow shell', () => {
     const parameters = within(screen.getByTestId('equilibrium-data-parameters'))
     expect(parameters.getByText(base.config.paramNames[0])).toBeVisible()
     expect(parameters.getByRole('button', { name: 'Copy parameters' })).toBeVisible()
-    expect(screen.getByTestId('equilibrium-solve-submit')).not.toBeVisible()
-
-    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
-
+    // The solver form is inline next to the data, not behind a button.
     expect(screen.getByTestId('equilibrium-solve-submit')).toBeVisible()
-    // The header and glance stay pinned; inline data yields to the workflow.
+    expect(screen.getByTestId('equilibrium-solver-section')).toBeVisible()
+
+    await user.click(screen.getByTestId('action-equilibrium-continuation-toggle'))
+
+    expect(screen.getByTestId('equilibrium-branch-submit')).toBeVisible()
+    // The header and glance stay pinned; inline sections yield to the workflow.
     expect(screen.getByTestId('equilibrium-glance-state')).toBeVisible()
     expect(screen.getByTestId('inspector-panel-body')).toHaveClass('inspector-browser--workflow')
     expect(screen.queryByText('Cached solver parameters')).toBeNull()

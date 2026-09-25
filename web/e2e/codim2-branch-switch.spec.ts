@@ -26,9 +26,7 @@ test('switches a generalized-Hopf point to an LPC curve', async ({ page }) => {
 
   await harness.createEquilibrium()
   await harness.selectTreeNode('Equilibrium_1')
-  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-submit').click()
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-equilibrium-continuation-toggle')
   await page.getByTestId('equilibrium-branch-name').fill('eq_codim2')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('mu')

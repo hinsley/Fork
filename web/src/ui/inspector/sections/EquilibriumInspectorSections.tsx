@@ -76,14 +76,8 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
   return <>
 {equilibrium ? (
             <>
-              <InspectorDisclosure
-                key={`${selectionKey}-equilibrium-solver`}
-                title={`Solve ${equilibriumLabel}`}
-                testId="equilibrium-solver-toggle"
-                defaultOpen={false}
-                actionOnly
-              >
-                <div className="inspector-section">
+              <InlineSection title="Solver" testId="equilibrium-solver-section">
+                <div className="inspector-section inspector-inline-form">
                   {runDisabled ? (
                     <div className="field-warning">
                       Apply valid system changes first.
@@ -296,7 +290,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                     ) : null}
                   </div>
                 ) : null}
-              </InspectorDisclosure>
+              </InlineSection>
 
               {equilibrium.solution && equilibrium.parameters && equilibrium.parameters.length > 0 ? (
                 <InlineSection

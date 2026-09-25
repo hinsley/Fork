@@ -9,7 +9,6 @@ test('plain inspector checkbox labels align without changing multi-column contro
   await harness.openSystem('Lorenz')
   await harness.createEquilibrium()
   await harness.solveEquilibrium()
-  await page.getByTestId('inspector-workflow-back').click()
   await expandDetails(page, 'equilibrium-data-eigenpairs-toggle')
 
   const plainCheckbox = page.getByTestId('equilibrium-eigenvector-enabled')

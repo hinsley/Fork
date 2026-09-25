@@ -56,7 +56,6 @@ test('solves a real-WASM time-forced flow and preserves autonomous guards', asyn
   await expect(page.getByTestId('branch-point-render-lc')).toHaveCount(0)
 
   await harness.createEquilibrium()
-  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await expect(
     page.getByTestId('autonomous-workflow-warning')
   ).toHaveText(
@@ -64,12 +63,10 @@ test('solves a real-WASM time-forced flow and preserves autonomous guards', asyn
   )
   await expect(page.getByTestId('equilibrium-solve-submit')).toBeDisabled()
 
-  await page.getByTestId('inspector-workflow-back').click()
   // Frozen variables open as a header popover, not a workflow.
   await clickInspectorAction(page, 'action-frozen-variables-toggle')
   await page.getByTestId('frozen-equation-context-toggle').check()
   await page.keyboard.press('Escape')
-  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await expect(page.getByTestId('equilibrium-solve-submit')).toBeEnabled()
 })
 

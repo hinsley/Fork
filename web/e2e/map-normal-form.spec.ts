@@ -48,9 +48,7 @@ test('computes and persists a real map branch-point normal form in the Inspector
 
   await harness.createEquilibrium()
   await harness.selectTreeNode('Fixed_point_1')
-  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-submit').click()
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-equilibrium-continuation-toggle')
   await page.getByTestId('equilibrium-branch-name').fill('map_pitchfork_points')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('mu')

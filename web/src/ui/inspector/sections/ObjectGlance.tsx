@@ -13,7 +13,6 @@ import {
   fmtRelativeTime,
   fmtSci,
 } from '../../../utils/format'
-import { Icon } from '../../Icon'
 import { KeyValues, type HeaderChip } from '../InspectorChrome'
 import { computeInvariantMeasureStats } from './invariantMeasureStats'
 import {
@@ -422,8 +421,6 @@ function isoclineModel(scope: InspectorSelectionController): ObjectHeaderModel |
     isocline,
     isoclineStale,
     isoclineResolvedExpression,
-    isoclineComputing,
-    handleComputeIsocline,
   } = scope
   if (!isocline) return null
   const computedAt = isocline.lastComputed?.computedAt
@@ -438,7 +435,6 @@ function isoclineModel(scope: InspectorSelectionController): ObjectHeaderModel |
           testId: 'isocline-stale-indicator',
         }
       : null
-  const needsCompute = !computedAt || isoclineStale
   return {
     chip,
     meta: computedAt ? [`computed ${fmtRelativeTime(computedAt)}`] : [],
@@ -451,25 +447,9 @@ function isoclineModel(scope: InspectorSelectionController): ObjectHeaderModel |
             value: `${isoclineResolvedExpression || '∅'} = ${fmt(isocline.level)}`,
             testId: 'isocline-resolved-expression',
           },
-          ...isocline.axes.map((axis) => ({
-            label: axis.variableName,
-            value: `[${fmt(axis.min)}, ${fmt(axis.max)}] × ${fmtCount(axis.samples)}`,
-          })),
         ]}
       />
     ),
-    barExtra: needsCompute ? (
-      <button
-        type="button"
-        className="btn"
-        onClick={() => void handleComputeIsocline()}
-        disabled={isoclineComputing}
-        data-testid="isocline-quick-compute"
-      >
-        <Icon name="play" size={13} />
-        {isoclineComputing ? 'Computing…' : 'Compute'}
-      </button>
-    ) : null,
   }
 }
 

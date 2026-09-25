@@ -5151,14 +5151,6 @@ function useInspectorSelectionController({
     }
   }
   if (equilibrium) {
-    workflowActions.push({
-      id: 'equilibrium-solver-toggle',
-      group: 'Compute',
-      label: 'Solve',
-      title: `Solve ${equilibriumLabelLower}`,
-      description: 'Refine the state and compute its local spectrum.',
-      primary: true,
-    })
     if (equilibrium.solution) {
       workflowActions.push(
         {
@@ -5219,16 +5211,6 @@ function useInspectorSelectionController({
           ? 'Create a 2D invariant manifold from a Floquet eigenspace.'
           : 'Requires Floquet multipliers. Continue the cycle first.',
       disabled: limitCycleDisplayMultipliers.length === 0 || isDiscreteMap,
-    })
-  }
-  if (isocline) {
-    workflowActions.push({
-      id: 'isocline-toggle',
-      group: 'Compute',
-      label: 'Configure',
-      title: 'Isocline',
-      description: 'Choose active axes, frozen values, and recompute the geometry.',
-      primary: true,
     })
   }
   if (invariantMeasure) {
