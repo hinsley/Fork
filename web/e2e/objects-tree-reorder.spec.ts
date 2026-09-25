@@ -13,7 +13,11 @@ test('object tree native drag reorders with a live preview', async ({ page }) =>
     })
     .first()
   await expect(originalBranch.locator('.tree-node__name')).toHaveText('eq_branch')
-  await expect(originalBranch.locator('.tree-node__kind')).toHaveText('equilibrium branch')
+  await expect(originalBranch.locator('.tree-node__glyph')).toHaveAttribute(
+    'data-kind',
+    'branch-equilibrium'
+  )
+  await expect(originalBranch.locator('.tree-node__data')).toHaveText('p1 0…0 · 1')
   await originalBranch.click({ button: 'right' })
   await page.getByTestId('object-context-duplicate').click()
 

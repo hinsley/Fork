@@ -136,6 +136,34 @@ describe('IndexedDbSystemStore', () => {
     }
   })
 
+  it('persists row summaries on index entries for skeleton loads', async () => {
+    const store = makeStore()
+    try {
+      const base = createSystem({ name: 'IndexedDB_Summary' })
+      const orbit: OrbitObject = {
+        type: 'orbit',
+        name: 'Orbit_A',
+        systemName: base.config.name,
+        data: [
+          [0, 0, 0],
+          [2, 1, 0],
+        ],
+        t_start: 0,
+        t_end: 2,
+        dt: 0.1,
+      }
+      const added = addObject(base, orbit)
+      const legacy = structuredClone(added.system)
+      delete legacy.index.objects[added.nodeId].summary
+      await store.save(legacy)
+
+      const skeleton = await store.load(added.system.id)
+      expect(skeleton.index.objects[added.nodeId].summary).toEqual({ text: 't 0–2 · 2' })
+    } finally {
+      await store.clear()
+    }
+  })
+
   it('preserves untouched payload records when saving a single edited entity', async () => {
     const store = makeStore()
     try {

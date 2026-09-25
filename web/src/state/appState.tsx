@@ -139,6 +139,7 @@ import { createSystemStorageCommands } from './systemStorageCommands'
 import {
   createSystemTreeCommands,
   validateObjectName,
+  type CreateFolderOptions,
 } from './systemTreeCommands'
 import { validateSystemConfig } from './systemValidation'
 import { isValidDisplayName, suggestDefaultName } from '../utils/naming'
@@ -2067,7 +2068,7 @@ export type AppActions = {
   moveNode: (nodeId: string, direction: 'up' | 'down') => void
   reorderNode: (nodeId: string, targetId: string, placement?: ReorderPlacement) => void
   moveNodeIntoParent: (nodeId: string, parentId: string | null) => void
-  createFolder: (parentId?: string | null) => string | null
+  createFolder: (parentId?: string | null, options?: CreateFolderOptions) => string | null
   updateLayout: (layout: Partial<System['ui']['layout']>) => void
   updateViewportHeight: (nodeId: string, height: number) => void
   updateRender: (nodeId: string, render: Partial<TreeNode['render']>) => void

@@ -24,6 +24,7 @@ import { normalizePeriodicVariables } from './periodicity'
 import { liftReducedFloquetVectorsForDisplay } from './floquetModes'
 import { normalizePeriodicForcing } from './forcing'
 import { normalizeColorOpacity } from './color'
+import { rowSummaryField, summarizeBranch, summarizeObject } from './rowSummary'
 
 const DEFAULT_SYSTEM: SystemConfig = {
   name: 'Untitled System',
@@ -214,7 +215,8 @@ function rebuildSystemIndex(system: System): SystemIndex {
       name: obj.name,
       objectType: obj.type,
       shard: shardForEntityId(id),
-      updatedAt
+      updatedAt,
+      ...rowSummaryField(summarizeObject(obj, system.config))
     }
   })
   Object.entries(system.branches).forEach(([id, branch]) => {
@@ -225,7 +227,8 @@ function rebuildSystemIndex(system: System): SystemIndex {
       parentObjectId: branch.parentObjectId ?? null,
       startObjectId: branch.startObjectId ?? null,
       shard: shardForEntityId(id),
-      updatedAt
+      updatedAt,
+      ...rowSummaryField(summarizeBranch(branch, system.config))
     }
   })
   return index
@@ -313,7 +316,8 @@ export function addObject(
     name: obj.name,
     objectType: obj.type,
     shard: shardForEntityId(node.id),
-    updatedAt
+    updatedAt,
+    ...rowSummaryField(summarizeObject(obj, next.config))
   }
   next.updatedAt = updatedAt
   return { system: next, nodeId: node.id }
@@ -368,7 +372,8 @@ export function updateObject(
     name: updated.name,
     objectType: updated.type,
     shard: shardForEntityId(nodeId),
-    updatedAt
+    updatedAt,
+    ...rowSummaryField(summarizeObject(updated, next.config))
   }
   next.updatedAt = updatedAt
   return next
@@ -401,7 +406,8 @@ export function updateBranch(
     parentObjectId: normalized.parentObjectId ?? null,
     startObjectId: normalized.startObjectId ?? null,
     shard: shardForEntityId(nodeId),
-    updatedAt
+    updatedAt,
+    ...rowSummaryField(summarizeBranch(normalized, next.config))
   }
   next.updatedAt = updatedAt
   return next
@@ -435,7 +441,8 @@ export function addBranch(
     parentObjectId: normalized.parentObjectId ?? null,
     startObjectId: normalized.startObjectId ?? null,
     shard: shardForEntityId(node.id),
-    updatedAt
+    updatedAt,
+    ...rowSummaryField(summarizeBranch(normalized, next.config))
   }
   const parent = next.nodes[parentNodeId]
   if (parent) {
@@ -1153,7 +1160,8 @@ export function duplicateNode(
         name: nextName,
         objectType: object.type,
         shard: shardForEntityId(newId),
-        updatedAt
+        updatedAt,
+        ...rowSummaryField(summarizeObject(object, next.config))
       }
     } else if (sourceNode.kind === 'branch') {
       const branch = system.branches[sourceId]
@@ -1167,7 +1175,8 @@ export function duplicateNode(
         parentObjectId: branch.parentObjectId ?? null,
         startObjectId: branch.startObjectId ?? null,
         shard: shardForEntityId(newId),
-        updatedAt
+        updatedAt,
+        ...rowSummaryField(summarizeBranch(branch, next.config))
       }
     } else if (sourceNode.kind === 'scene') {
       const scene = sourceScenesById.get(sourceId)
@@ -1306,7 +1315,8 @@ export function duplicateNode(
       parentObjectId: branch.parentObjectId ?? null,
       startObjectId: branch.startObjectId ?? null,
       shard: shardForEntityId(newBranchId),
-      updatedAt
+      updatedAt,
+      ...rowSummaryField(summarizeBranch(branch, next.config))
     }
   })
 
@@ -1651,7 +1661,8 @@ export function mergeLoadedEntities(
         name: normalizedObject.name,
         objectType: normalizedObject.type,
         shard: shardForEntityId(id),
-        updatedAt
+        updatedAt,
+        ...rowSummaryField(summarizeObject(normalizedObject, next.config))
       }
     })
   }
@@ -1669,7 +1680,8 @@ export function mergeLoadedEntities(
         parentObjectId: normalizedBranch.parentObjectId ?? null,
         startObjectId: normalizedBranch.startObjectId ?? null,
         shard: shardForEntityId(id),
-        updatedAt
+        updatedAt,
+        ...rowSummaryField(summarizeBranch(normalizedBranch, next.config))
       }
     })
   }

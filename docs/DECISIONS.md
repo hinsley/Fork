@@ -19,6 +19,24 @@ Impact:
 References:
 ```
 
+### 2026-09-25: Row summaries live on index entries
+Context:
+Objects-tree rows show real data (`t 0-100 . 10k`, `saddle 1u`, `p -0.5...1.5 . 41`, bifurcation
+codes), but systems load as skeletons and only visible/expanded entities are hydrated.
+Decision:
+`ObjectIndexEntry` / `BranchIndexEntry` carry an optional `summary: RowSummary` (short strings
+and `[code, count]` pairs only, never point arrays), computed by pure functions in
+`web/src/system/rowSummary.ts` wherever an index entry is written: `model.ts` add/update/
+duplicate/merge/rebuild, `opfs.ts` `ensureIndex`, `indexedDb.ts` `ensure*Index`. The tree
+prefers the hydrated payload and falls back to the index summary.
+Why:
+Rendering rows must not hydrate every entity; the index is already loaded with the skeleton.
+Impact:
+No schema bump (the field is optional). Older systems backfill as entities hydrate and save.
+Summary changes do not bump index `updatedAt`. The memory store keeps full systems.
+References:
+`web/src/system/rowSummary.ts`, `web/src/ui/ObjectsTree.tsx`, `web/src/system/types.ts`
+
 ### 2026-09-16: Concise persisted CalculationDiagnostic for numerical failures
 Context:
 Equilibrium/PALC failures reached users as string-only thrown errors, and early-stopped
