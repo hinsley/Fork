@@ -172,6 +172,27 @@ describe('OpfsSystemStore v3', () => {
     expect(loaded.branches[fixture.branchId].parentObjectId).toBe(fixture.orbitAId)
   })
 
+  it('persists row summaries on index entries so skeleton rows can show data', async () => {
+    const installed = installMockOpfs()
+    cleanup = installed.cleanup
+    const store = new OpfsSystemStore()
+    const fixture = createOpfsFixture()
+    const legacy = structuredClone(fixture.system)
+    Object.values(legacy.index.objects).forEach((entry) => delete entry.summary)
+    Object.values(legacy.index.branches).forEach((entry) => delete entry.summary)
+    await store.save(legacy)
+
+    const skeleton = await store.load(fixture.system.id)
+    expect(skeleton.objects).toEqual({})
+    expect(skeleton.index.objects[fixture.orbitAId].summary).toEqual({ text: 't 0–0.1 · 2' })
+    expect(skeleton.index.branches[fixture.branchId].summary).toEqual({ text: 'mu 0…0 · 1' })
+
+    // Saving a skeleton keeps summaries of entities that were never hydrated.
+    await store.save(skeleton)
+    const reloaded = await store.load(fixture.system.id)
+    expect(reloaded.index.objects[fixture.orbitBId].summary).toEqual({ text: 't 0–0.1 · 2' })
+  })
+
   it('saves only changed payload files for single-entity edits', async () => {
     const installed = installMockOpfs()
     cleanup = installed.cleanup

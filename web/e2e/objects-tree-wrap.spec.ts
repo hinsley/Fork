@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { createHarness } from './harness'
 
-test('objects tree wraps long names without horizontal overflow', async ({ page }) => {
+test('objects tree truncates long names on a single line without horizontal overflow', async ({ page }) => {
   test.setTimeout(60_000)
 
   const harness = createHarness(page)
@@ -41,19 +41,28 @@ test('objects tree wraps long names without horizontal overflow', async ({ page 
 
   expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
 
-  const visibility = page.locator('[data-testid^="node-visibility-"]').first()
-  const indicatorSpacing = await visibility.evaluate((button) => {
-    const label = button.parentElement?.querySelector('.tree-node__label')
-    if (!(label instanceof HTMLElement)) throw new Error('Object label not found')
-    const buttonRect = button.getBoundingClientRect()
+  // Single-line row: the name truncates with an ellipsis instead of wrapping.
+  const rowMetrics = await longLabel.evaluate((label) => {
+    const row = label.closest('.tree-node__row-motion')
+    const eye = row?.querySelector('[data-testid^="node-visibility-"]')
+    if (!(row instanceof HTMLElement) || !(eye instanceof HTMLElement)) {
+      throw new Error('Row or visibility toggle not found')
+    }
     const labelRect = label.getBoundingClientRect()
-    const indicatorStyle = getComputedStyle(button, '::before')
+    const eyeRect = eye.getBoundingClientRect()
+    const rowRect = row.getBoundingClientRect()
     return {
-      indicatorWidth: Number.parseFloat(indicatorStyle.width),
-      labelGap: labelRect.left - buttonRect.right,
+      rowHeight: rowRect.height,
+      labelTruncated: label.scrollWidth > label.clientWidth,
+      textOverflow: getComputedStyle(label).textOverflow,
+      gapToEye: eyeRect.left - labelRect.right,
+      eyeInsideRow: eyeRect.right <= rowRect.right + 0.5,
     }
   })
 
-  expect(indicatorSpacing.indicatorWidth).toBe(11)
-  expect(indicatorSpacing.labelGap).toBeGreaterThanOrEqual(3)
+  expect(rowMetrics.rowHeight).toBeLessThanOrEqual(28)
+  expect(rowMetrics.labelTruncated).toBe(true)
+  expect(rowMetrics.textOverflow).toBe('ellipsis')
+  expect(rowMetrics.gapToEye).toBeGreaterThanOrEqual(0)
+  expect(rowMetrics.eyeInsideRow).toBe(true)
 })

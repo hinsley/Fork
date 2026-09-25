@@ -22,6 +22,8 @@ import {
   updateBifurcationDiagram,
   updateNodeRender,
   updateScene,
+  updateBranch,
+  updateObject,
   updateSystem,
 } from './model'
 import { buildSubsystemSnapshot } from './subsystemGateway'
@@ -1313,4 +1315,89 @@ describe('system model', () => {
     expect(updated.frozenVariables?.frozenEquationContext).toBeUndefined()
   })
 
+  it('writes row summaries onto index entries at every index choke point', () => {
+    const system = createSystem({ name: 'Summaries' })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_1',
+      systemName: system.config.name,
+      data: [
+        [0, 0, 1],
+        [1, 0.1, 0.9],
+      ],
+      t_start: 0,
+      t_end: 1,
+      dt: 0.1,
+    }
+    const added = addObject(system, orbit)
+    expect(added.system.index.objects[added.nodeId].summary).toEqual({ text: 't 0–1 · 2' })
+
+    const updated = updateObject(added.system, added.nodeId, { data: [], t_end: 0 })
+    expect(updated.index.objects[added.nodeId].summary).toEqual({ text: '—', tone: 'muted' })
+
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_mu',
+      systemName: system.config.name,
+      parameterName: 'mu',
+      parentObject: orbit.name,
+      startObject: orbit.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          { state: [0], param_value: -1, stability: 'None' },
+          { state: [0], param_value: 2, stability: 'Fold' },
+        ],
+        bifurcations: [1],
+        indices: [0, 1],
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        max_steps: 10,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: '2026-01-01T00:00:00.000Z',
+    }
+    const withBranch = addBranch(updated, branch, added.nodeId)
+    const expectedBranch = { text: 'mu −1…2 · 2', bifs: [['LP', 1]] }
+    expect(withBranch.system.index.branches[withBranch.nodeId].summary).toEqual(expectedBranch)
+
+    const grown = updateBranch(withBranch.system, withBranch.nodeId, {
+      ...branch,
+      data: { ...branch.data, points: [...branch.data.points, { state: [0], param_value: 3, stability: 'None' }] },
+    })
+    expect(grown.index.branches[withBranch.nodeId].summary?.text).toBe('mu −1…3 · 3')
+
+    const duplicated = duplicateNode(grown, added.nodeId)
+    expect(duplicated).not.toBeNull()
+    const copyId = Object.keys(duplicated!.system.index.objects).find((id) => id !== added.nodeId)!
+    expect(duplicated!.system.index.objects[copyId].summary).toEqual({ text: '—', tone: 'muted' })
+    const copyBranchId = Object.keys(duplicated!.system.index.branches).find(
+      (id) => id !== withBranch.nodeId
+    )!
+    expect(duplicated!.system.index.branches[copyBranchId].summary?.text).toBe('mu −1…3 · 3')
+
+    const stripped = structuredClone(grown)
+    delete stripped.index.objects[added.nodeId].summary
+    expect(normalizeSystem(stripped).index.objects[added.nodeId].summary).toEqual({
+      text: '—',
+      tone: 'muted',
+    })
+
+    const skeleton = structuredClone(grown)
+    skeleton.objects = {}
+    skeleton.branches = {}
+    const normalizedSkeleton = normalizeSystem(skeleton)
+    expect(normalizedSkeleton.index.branches[withBranch.nodeId].summary?.text).toBe(
+      'mu −1…3 · 3'
+    )
+    const merged = mergeLoadedEntities(normalizedSkeleton, {
+      objects: { [added.nodeId]: { ...orbit, id: added.nodeId } },
+    })
+    expect(merged.index.objects[added.nodeId].summary).toEqual({ text: 't 0–1 · 2' })
+  })
 })

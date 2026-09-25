@@ -20,6 +20,11 @@ type SystemTreeAction =
   | { type: 'SET_SYSTEM'; system: System | null }
   | { type: 'SET_ERROR'; error: string | null }
 
+export type CreateFolderOptions = {
+  /** Wrap this node (a sibling under `parentId`) in the new folder. */
+  wrapNodeId?: string
+}
+
 type LoadEntity = (id: string) => void | Promise<void>
 type ScheduleSave = (system: System) => void
 
@@ -31,7 +36,7 @@ export type SystemTreeCommands = {
   moveNode: (nodeId: string, direction: 'up' | 'down') => void
   reorderNode: (nodeId: string, targetId: string, placement?: ReorderPlacement) => void
   moveNodeIntoParent: (nodeId: string, parentId: string | null) => void
-  createFolder: (parentId?: string | null) => string | null
+  createFolder: (parentId?: string | null, options?: CreateFolderOptions) => string | null
   updateLayout: (layout: Partial<System['ui']['layout']>) => void
   updateViewportHeight: (nodeId: string, height: number) => void
   updateRender: (nodeId: string, render: Partial<TreeNode['render']>) => void
@@ -163,21 +168,26 @@ export function createSystemTreeCommands({
     scheduleUiSave(system)
   }
 
-  const createFolder = (parentId: string | null = null) => {
+  const createFolder = (parentId: string | null = null, options: CreateFolderOptions = {}) => {
     const current = getCurrentSystem()
     if (!current) return null
     const parent = parentId ? current.nodes[parentId] : null
     if (parentId && !parent) return null
-    const siblingIds = parent ? parent.children : current.rootIds
-    const siblingNames =
-      siblingIds
-        .map((id) => current.nodes[id])
-        .filter((node): node is TreeNode => Boolean(node))
-        .map((node) => node.name)
-    const name = suggestDefaultName('folder', { existingNames: siblingNames })
+    // Folder names are unique across the whole tree so they stay distinguishable.
+    const folderNames = Object.values(current.nodes)
+      .filter((node) => node.kind === 'folder')
+      .map((node) => node.name)
+    const name = suggestDefaultName('folder', { existingNames: folderNames })
     const created = addSystemFolder(current, name, parentId)
     if (!created.nodeId) return null
-    const selected = selectSystemNode(created.system, created.nodeId)
+    let system = created.system
+    const wrapNode = options.wrapNodeId ? system.nodes[options.wrapNodeId] : null
+    if (wrapNode && (wrapNode.parentId ?? null) === parentId) {
+      // Put the folder where the wrapped node was, then move the node inside it.
+      system = reorderSystemNode(system, created.nodeId, wrapNode.id, 'before')
+      system = moveSystemNodeIntoParent(system, wrapNode.id, created.nodeId)
+    }
+    const selected = selectSystemNode(system, created.nodeId)
     dispatch({ type: 'SET_SYSTEM', system: selected })
     scheduleUiSave(selected)
     return created.nodeId

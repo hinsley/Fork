@@ -1447,12 +1447,39 @@ export interface SystemUiState {
   limitCycleRenderTargets?: Record<string, LimitCycleRenderTarget>
 }
 
+/**
+ * Compact, display-ready digest of an entity for single-line tree rows. Stored on
+ * index entries so rows can show real data before the payload is hydrated.
+ * Never holds arrays of points.
+ */
+export type RowSummaryTone =
+  | 'stable'
+  | 'unstable'
+  | 'saddle'
+  | 'nonhyperbolic'
+  | 'unknown'
+  | 'muted'
+
+export interface RowSummary {
+  /** Muted data summary, e.g. `t 0–100 · 10k`, `T 6.28`, `p −0.5…1.5 · 41`. */
+  text?: string
+  /** Status shown as a chip, e.g. `stable focus`, `saddle 1u`, `unsolved`. */
+  status?: string
+  /** Tone of `status`; `muted` without a status dims `text` (not computed yet). */
+  tone?: RowSummaryTone
+  /** Deduplicated bifurcation codes in first-seen order with their counts. */
+  bifs?: Array<[string, number]>
+  /** Termination / failure message. */
+  warn?: string
+}
+
 export interface ObjectIndexEntry {
   id: string
   name: string
   objectType: AnalysisObject['type']
   shard: string
   updatedAt: string
+  summary?: RowSummary
 }
 
 export interface BranchIndexEntry {
@@ -1463,6 +1490,7 @@ export interface BranchIndexEntry {
   startObjectId: string | null
   shard: string
   updatedAt: string
+  summary?: RowSummary
 }
 
 export interface SystemIndex {
