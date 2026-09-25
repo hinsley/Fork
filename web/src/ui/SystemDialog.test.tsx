@@ -51,10 +51,6 @@ describe('SystemDialog', () => {
     await user.click(screen.getByRole('button', { name: 'System A' }))
     expect(onOpenSystem).toHaveBeenCalledWith('sys-1')
 
-    await user.click(screen.getByRole('button', { name: 'Export' }))
-    expect(onExportSystem).not.toHaveBeenCalled()
-    expect(screen.getByRole('heading', { name: 'Export System A' })).toBeInTheDocument()
-
     await user.click(screen.getByRole('button', { name: 'Download ZIP archive' }))
     expect(onExportSystem).toHaveBeenCalledWith('sys-1')
 
@@ -68,7 +64,7 @@ describe('SystemDialog', () => {
     expect(onImportSystem).toHaveBeenCalledWith(file)
   })
 
-  it('opens the embed creator from the export choice', async () => {
+  it('opens the embed creator from the row action', async () => {
     const user = userEvent.setup()
     const onCreateEmbed = vi.fn()
 
@@ -93,11 +89,51 @@ describe('SystemDialog', () => {
       />
     )
 
-    await user.click(screen.getByRole('button', { name: 'Export' }))
     await user.click(screen.getByRole('button', { name: 'Create embed' }))
 
     expect(onCreateEmbed).toHaveBeenCalledWith('sys-1')
-    expect(screen.queryByRole('heading', { name: 'Export System A' })).not.toBeInTheDocument()
+  })
+
+  it('shows type, dimension, parameter names, and relative update time per row', () => {
+    const updatedAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString()
+    render(
+      <SystemDialog
+        open
+        systems={[
+          {
+            id: 'sys-1',
+            name: 'Lorenz',
+            updatedAt,
+            type: 'flow',
+            varNames: ['x', 'y', 'z'],
+            paramNames: ['sigma', 'rho', 'beta'],
+          },
+          {
+            id: 'legacy',
+            name: 'Legacy',
+            updatedAt: 'not a date',
+            type: 'map',
+          },
+        ]}
+        onOpenSystem={vi.fn()}
+        onExportSystem={vi.fn()}
+        onCreateEmbed={vi.fn()}
+        onCreateSystem={vi.fn()}
+        onDeleteSystem={vi.fn()}
+        onImportSystem={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    const lorenz = screen.getByRole('button', { name: 'Lorenz' })
+    expect(lorenz).toHaveTextContent('Flow')
+    expect(lorenz).toHaveTextContent('3D')
+    expect(lorenz).toHaveTextContent('sigma rho beta')
+    expect(lorenz).toHaveTextContent('3 h ago')
+    const legacy = screen.getByRole('button', { name: 'Legacy' })
+    expect(legacy).toHaveTextContent('Map')
+    expect(legacy).toHaveTextContent('—')
+    expect(legacy).not.toHaveTextContent('undefined')
   })
 
   it('shows empty state and uses the default name for create', async () => {
@@ -118,7 +154,7 @@ describe('SystemDialog', () => {
       />
     )
 
-    expect(screen.getByText('No saved systems yet.')).toBeInTheDocument()
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0)
 
     await user.click(screen.getByTestId('create-system'))
     expect(onCreateSystem).toHaveBeenCalledWith('NewSystem')

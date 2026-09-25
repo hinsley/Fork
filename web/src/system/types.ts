@@ -1540,4 +1540,7 @@ export interface SystemSummary {
   name: string
   updatedAt: string
   type: SystemConfig['type']
+  /** Absent in summaries written before these fields existed (legacy OPFS manifests). */
+  varNames?: string[]
+  paramNames?: string[]
 }

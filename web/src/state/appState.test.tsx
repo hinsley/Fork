@@ -5656,6 +5656,10 @@ describe('appState equilibrium manifold actions', () => {
     expect(getContext().state.continuationProgress).toEqual({
       label: 'Extend Invariant Manifold (1D)',
       progress: expect.objectContaining({ done: false, current_step: 0 }),
+      target: {
+        name: fixture.system.branches[fixture.nodeId].name,
+        nodeId: fixture.nodeId,
+      },
     })
 
     await act(async () => {
@@ -5920,6 +5924,10 @@ describe('appState equilibrium manifold actions', () => {
     expect(getContext().state.continuationProgress).toEqual({
       label: 'Extend Invariant Manifold (2D)',
       progress: expect.objectContaining({ done: false, current_step: 0, rings_computed: 0 }),
+      target: {
+        name: fixture.system.branches[fixture.nodeId].name,
+        nodeId: fixture.nodeId,
+      },
     })
 
     await act(async () => {

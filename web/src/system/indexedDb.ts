@@ -328,6 +328,8 @@ export class IndexedDbSystemStore implements SystemStore {
           name: system.name,
           updatedAt: system.updatedAt,
           type: system.config.type,
+          varNames: [...system.config.varNames],
+          paramNames: [...system.config.paramNames],
         } satisfies SystemSummary
       })
       return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))

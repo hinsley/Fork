@@ -157,4 +157,45 @@ describe('system storage commands', () => {
     expect(harness.clearBrowserStorage).toHaveBeenCalledTimes(1)
     expect(harness.reloadBrowser).toHaveBeenCalledTimes(1)
   })
+
+  it('reports failed imports, opens, deletes, and saves instead of failing silently', async () => {
+    const system = createSystem({ name: 'Failing_Store' })
+    const store = new MemorySystemStore()
+    await store.save(system)
+    const harness = setupStorageCommands({ store, initialSystem: system })
+
+    vi.spyOn(store, 'importSystemArchive').mockRejectedValueOnce(new Error('Bad archive'))
+    await harness.commands.importSystem(new File(['nope'], 'bad.zip'))
+    expect(harness.getState().error).toBe('Import failed: Bad archive')
+    expect(harness.getState().busy).toBe(false)
+
+    await harness.commands.openSystem('missing-id')
+    expect(harness.getState().error).toBe('Open failed: System "missing-id" not found')
+    expect(harness.getState().busy).toBe(false)
+
+    vi.spyOn(store, 'remove').mockRejectedValueOnce(new Error('Delete denied'))
+    await harness.commands.deleteSystem(system.id)
+    expect(harness.getState().error).toBe('Delete failed: Delete denied')
+    expect(harness.getState().systems.map((entry) => entry.id)).toEqual([system.id])
+    expect(harness.getState().busy).toBe(false)
+
+    vi.spyOn(store, 'save').mockRejectedValueOnce(new Error('Quota exceeded'))
+    await harness.commands.saveSystem()
+    expect(harness.getState().error).toBe('Save failed: Quota exceeded')
+    expect(harness.getState().busy).toBe(false)
+  })
+
+  it('lists summaries with variable and parameter names, newest first', async () => {
+    const older = { ...createSystem({ name: 'Older' }), updatedAt: '2024-01-01T00:00:00.000Z' }
+    const newer = { ...createSystem({ name: 'Newer' }), updatedAt: '2024-02-01T00:00:00.000Z' }
+    const store = new MemorySystemStore()
+    await store.save(older)
+    await store.save(newer)
+
+    const summaries = await store.list()
+
+    expect(summaries.map((entry) => entry.name)).toEqual(['Newer', 'Older'])
+    expect(summaries[0]?.varNames).toEqual(newer.config.varNames)
+    expect(summaries[0]?.paramNames).toEqual(newer.config.paramNames)
+  })
 })

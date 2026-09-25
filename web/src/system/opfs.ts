@@ -302,6 +302,8 @@ function resolveSummary(system: System): SystemSummary {
     name: system.name,
     updatedAt: system.updatedAt,
     type: system.config.type,
+    varNames: [...system.config.varNames],
+    paramNames: [...system.config.paramNames],
   }
 }
 
@@ -534,6 +536,8 @@ export class OpfsSystemStore implements SystemStore {
               ? currentMeta.updatedAt
               : system.updatedAt,
           type: currentMeta.config.type,
+          varNames: [...currentMeta.config.varNames],
+          paramNames: [...currentMeta.config.paramNames],
         }
       : resolveSummary(system)
     await Promise.all([writeUi(systemDir, system), writeManifest(systemDir, summary)])

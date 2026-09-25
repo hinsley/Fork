@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './ui/primitives.css'
 import './App.css'
 import './ui/inspector/inspector.css'
@@ -9,22 +9,87 @@ import { ObjectsTree, type ObjectsTreeHandle } from './ui/ObjectsTree'
 import { InspectorPanel } from './ui/InspectorPanel'
 import { ViewportPanel } from './ui/ViewportPanel'
 import { SystemDialog } from './ui/SystemDialog'
+import { SystemLibrary } from './ui/SystemLibrary'
 import { SystemSettingsDialog } from './ui/SystemSettingsDialog'
-import { Toolbar } from './ui/Toolbar'
+import { Toolbar, type ToolbarProgress } from './ui/Toolbar'
 import { EmbedDialog } from './ui/EmbedDialog'
-import { isDeterministicMode } from './utils/determinism'
+import { ErrorToast } from './ui/ErrorToast'
+import { CommandPalette, type Command } from './ui/CommandPalette'
+import { formatSystemChip } from './ui/shellFormat'
+import { isEditableTarget } from './ui/shortcuts'
+import { useThemePreference } from './ui/useThemePreference'
+import { useMediaQuery } from './ui/useMediaQuery'
 import { suggestDefaultName } from './utils/naming'
 import { formatEquilibriumLabel } from './system/labels'
+import type { System } from './system/types'
+import type { ContinuationProgressState } from './state/appState'
 import type {
   BranchPointSelection,
   LimitCyclePointSelection,
   OrbitPointSelection,
 } from './ui/branchPointSelection'
+// Last so shell rules win over component stylesheets imported above.
+import './ui/shell.css'
 
 const MIN_LEFT_WIDTH = 220
 const MIN_RIGHT_WIDTH = 240
 const MAX_PANEL_WIDTH = 520
 const SPLITTER_WIDTH = 2
+const DEFAULT_LEFT_WIDTH = 280
+const DEFAULT_RIGHT_WIDTH = 320
+const MANIFOLD_2D_LABELS = new Set([
+  'Invariant Manifold (Equilibrium 2D)',
+  'Invariant Manifold (Limit Cycle 2D)',
+  'Extend Invariant Manifold (2D)',
+])
+
+function toToolbarProgress(state: ContinuationProgressState | null): ToolbarProgress | null {
+  if (!state) return null
+  const { progress } = state
+  return {
+    label: state.label,
+    target: state.target,
+    currentStep: progress.current_step,
+    maxSteps: progress.max_steps,
+    points: progress.points_computed,
+    bifurcations: progress.bifurcations_found,
+    ringsComputed: progress.rings_computed,
+    showArclength: MANIFOLD_2D_LABELS.has(state.label),
+    arclength: progress.current_step,
+    arclengthTarget: progress.max_steps,
+    radius: progress.current_param,
+    phase: progress.phase,
+    discoveredBoxes: progress.discovered_boxes,
+    frontierBoxes: progress.frontier_boxes,
+    edgesBuilt: progress.edges_built,
+    residual: progress.residual,
+    tolerance: progress.tolerance,
+    restartCount: progress.restart_count,
+    maxRestarts: progress.max_restarts,
+    subspaceDimension: progress.subspace_dimension,
+    maxSubspaceDimension: progress.max_subspace_dimension,
+    convergedModes: progress.converged_modes,
+    requestedModes: progress.requested_modes,
+  }
+}
+
+function humanize(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+}
+
+function nodeHint(system: System, nodeId: string): string {
+  const node = system.nodes[nodeId]
+  if (!node) return ''
+  if (node.kind === 'branch') {
+    const branchType = system.index.branches[nodeId]?.branchType
+    return branchType ? `${humanize(branchType)} branch` : 'branch'
+  }
+  if (node.kind === 'diagram') return 'bifurcation diagram'
+  return humanize(node.objectType ?? node.kind)
+}
 
 function App() {
   const { state, actions } = useAppContext()
@@ -32,15 +97,12 @@ function App() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [systemSettingsOpen, setSystemSettingsOpen] = useState(false)
   const [embedDialogOpen, setEmbedDialogOpen] = useState(false)
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    if (typeof window === 'undefined') return 'light'
-    if (isDeterministicMode()) return 'light'
-    const stored =
-      'localStorage' in window && typeof window.localStorage.getItem === 'function'
-        ? window.localStorage.getItem('fork-theme')
-        : null
-    return stored === 'dark' ? 'dark' : 'light'
-  })
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  // Below 900px the side panels overlay the plot, one at a time, and start closed.
+  const narrow = useMediaQuery('(max-width: 900px)')
+  const [narrowPanel, setNarrowPanel] = useState<'objects' | 'inspector' | null>(null)
+  const { preference: themePreference, theme, setPreference: setThemePreference } =
+    useThemePreference()
   const [branchPointSelection, setBranchPointSelection] =
     useState<BranchPointSelection>(null)
   const [orbitPointSelection, setOrbitPointSelection] =
@@ -64,97 +126,101 @@ function App() {
     void actions.refreshSystems()
   }, [actions])
 
-  const isSystemDialogOpen = dialogOpen
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    if (
-      !isDeterministicMode() &&
-      'localStorage' in window &&
-      typeof window.localStorage.setItem === 'function'
-    ) {
-      window.localStorage.setItem('fork-theme', theme)
-    }
-  }, [theme])
-
-  useEffect(() => {
-    if (!system) return
-    if (system.ui.selectedNodeId && !system.ui.layout.inspectorOpen) {
-      actions.updateLayout({ inspectorOpen: true })
-    }
-  }, [actions, system, system?.ui.layout.inspectorOpen, system?.ui.selectedNodeId])
-
+  const objectsOpen = narrow
+    ? narrowPanel === 'objects'
+    : (system?.ui.layout.objectsOpen ?? true)
+  const inspectorOpen = narrow
+    ? narrowPanel === 'inspector'
+    : (system?.ui.layout.inspectorOpen ?? true)
   const isSystemSettingsOpen = systemSettingsOpen && Boolean(system)
 
-  const openSystemsDialog = () => {
-    setDialogOpen(true)
-  }
-  const closeSystemsDialog = () => {
-    setDialogOpen(false)
-  }
-  const finishSystemsDialog = () => {
-    setDialogOpen(false)
+  const closeSystemsDialog = useCallback(() => setDialogOpen(false), [])
+
+  const toggleObjects = useCallback(() => {
+    if (narrow) setNarrowPanel((panel) => (panel === 'objects' ? null : 'objects'))
+    else actions.updateLayout({ objectsOpen: !objectsOpen })
+  }, [actions, narrow, objectsOpen])
+
+  const toggleInspector = useCallback(() => {
+    if (narrow) setNarrowPanel((panel) => (panel === 'inspector' ? null : 'inspector'))
+    else actions.updateLayout({ inspectorOpen: !inspectorOpen })
+  }, [actions, narrow, inspectorOpen])
+
+  const revealInspector = () => {
+    if (narrow) setNarrowPanel('inspector')
+    else if (!inspectorOpen) actions.updateLayout({ inspectorOpen: true })
   }
 
-  const openSystemSettings = () => {
-    setSystemSettingsOpen(true)
-  }
-
-  const closeSystemSettings = () => {
-    setSystemSettingsOpen(false)
-    setEmbedDialogOpen(false)
-  }
-
-  const goHome = () => {
+  const goHome = useCallback(() => {
     setDialogOpen(false)
     setSystemSettingsOpen(false)
     actions.closeSystem()
-  }
+  }, [actions])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey
+      const otherModalOpen = Boolean(
+        document.querySelector('[aria-modal="true"]:not([data-testid="command-palette"])')
+      )
+      if (mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
+        if (otherModalOpen) return
+        event.preventDefault()
+        setPaletteOpen((open) => !open)
+        return
+      }
+      if (!system || mod || event.altKey || isEditableTarget(event.target)) return
+      if (otherModalOpen || paletteOpen) return
+      if (event.key === '[') {
+        event.preventDefault()
+        toggleObjects()
+      } else if (event.key === ']') {
+        event.preventDefault()
+        toggleInspector()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [system, paletteOpen, toggleObjects, toggleInspector])
 
   const selectNode = (nodeId: string) => {
     actions.selectNode(nodeId)
-    if (system && !system.ui.layout.inspectorOpen) {
-      actions.updateLayout({ inspectorOpen: true })
-    }
   }
+
+  const existingObjectNames = () => Object.values(system?.objects ?? {}).map((obj) => obj.name)
 
   const createOrbit = async () => {
     if (!system) return
-    const names = Object.values(system.objects).map((obj) => obj.name)
-    const name = suggestDefaultName('orbit', { existingNames: names })
+    const name = suggestDefaultName('orbit', { existingNames: existingObjectNames() })
     await actions.createOrbitObject(name)
   }
 
   const createEquilibrium = async () => {
     if (!system) return
-    const names = Object.values(system.objects).map((obj) => obj.name)
     const name = suggestDefaultName('equilibrium', {
       entityLabel: formatEquilibriumLabel(system.config.type),
-      existingNames: names,
+      existingNames: existingObjectNames(),
     })
     await actions.createEquilibriumObject(name)
   }
 
   const createIsocline = async () => {
     if (!system) return
-    const names = Object.values(system.objects).map((obj) => obj.name)
-    const name = suggestDefaultName('isocline', { existingNames: names })
+    const name = suggestDefaultName('isocline', { existingNames: existingObjectNames() })
     await actions.createIsoclineObject(name)
   }
 
   const createStateGrid = async () => {
     if (!system) return
-    const names = Object.values(system.objects).map((object) => object.name)
-    const name = suggestDefaultName('stateGrid', { existingNames: names })
+    const name = suggestDefaultName('stateGrid', { existingNames: existingObjectNames() })
     await actions.createStateGridObject(name)
   }
 
   const createForcedPeriodicResponse = async (orbitId?: string) => {
     if (!system) return
-    const names = Object.values(system.objects).map((object) => object.name)
     const name = suggestDefaultName('forcedPeriodicResponse', {
       entityLabel: 'Forced response',
-      existingNames: names,
+      existingNames: existingObjectNames(),
     })
     await actions.createForcedPeriodicResponseObject(name, orbitId)
   }
@@ -187,6 +253,107 @@ function App() {
     const name = suggestDefaultName('analysisViewport', { existingNames: names })
     await actions.addAnalysisViewport(name, targetId)
   }
+
+  // Rebuilt only while the palette is open; cheap enough to recompute per render then.
+  const commands: Command[] = !paletteOpen
+    ? []
+    : (() => {
+        const list: Command[] = []
+        if (system) {
+          Object.values(system.nodes).forEach((node) => {
+            if (node.kind === 'camera') return
+            list.push({
+              id: `node-${node.id}`,
+              label: node.name,
+              hint: nodeHint(system, node.id),
+              icon: node.kind === 'folder' ? 'folder' : undefined,
+              run: () => {
+                selectNode(node.id)
+                revealInspector()
+              },
+            })
+          })
+          const creators: Array<[string, string, () => unknown]> = [
+            ['orbit', 'Orbit', createOrbit],
+            ['equilibrium', formatEquilibriumLabel(system.config.type), createEquilibrium],
+            ['isocline', 'Isocline', createIsocline],
+            ['state-grid', 'State grid', createStateGrid],
+            ['scene', 'Scene', () => createScene(null)],
+            ['bifurcation', 'Bifurcation diagram', () => createBifurcation(null)],
+            ['analysis', 'Analysis viewport', () => createAnalysis(null)],
+            ['folder', 'Folder', createRootFolder],
+          ]
+          creators.forEach(([id, label, run]) => {
+            list.push({
+              id: `create-${id}`,
+              label: `New ${label.toLowerCase()}`,
+              hint: 'Create',
+              icon: 'plus',
+              run: () => void run(),
+            })
+          })
+          list.push(
+            {
+              id: 'system-settings',
+              label: 'System settings',
+              hint: formatSystemChip({
+                name: system.name,
+                type: system.config.type,
+                dimension: system.config.varNames.length,
+                solver: system.config.solver,
+              }),
+              icon: 'function',
+              keywords: 'equations parameters edit',
+              run: () => setSystemSettingsOpen(true),
+            },
+            {
+              id: 'toggle-objects',
+              label: `${objectsOpen ? 'Hide' : 'Show'} objects panel`,
+              hint: '[',
+              icon: 'panel-left',
+              run: toggleObjects,
+            },
+            {
+              id: 'toggle-inspector',
+              label: `${inspectorOpen ? 'Hide' : 'Show'} inspector panel`,
+              hint: ']',
+              icon: 'panel-right',
+              run: toggleInspector,
+            },
+            { id: 'go-home', label: 'All systems', hint: 'Home', icon: 'systems', run: goHome }
+          )
+        }
+        systems
+          .filter((entry) => entry.id !== system?.id)
+          .forEach((entry) => {
+            list.push({
+              id: `system-${entry.id}`,
+              label: entry.name,
+              hint: `Open ${entry.type === 'map' ? 'map' : 'flow'}`,
+              icon: 'systems',
+              keywords: 'switch system open',
+              run: () => void actions.openSystem(entry.id),
+            })
+          })
+        const themes: Array<[typeof themePreference, string]> = [
+          ['light', 'Light'],
+          ['dark', 'Dark'],
+          ['system', 'System'],
+        ]
+        themes
+          .filter(([value]) => value !== themePreference)
+          .forEach(([value, label]) => {
+            list.push({
+              id: `theme-${value}`,
+              label: `${label} theme`,
+              hint: 'Theme',
+              icon: value === 'dark' ? 'moon' : 'sun',
+              keywords: 'color scheme appearance',
+              run: () => setThemePreference(value),
+            })
+          })
+        return list
+      })()
 
   const updatePreview = (side: 'left' | 'right', nextWidth: number, workspaceWidth: number) => {
     const rawOffset =
@@ -246,82 +413,96 @@ function App() {
     updatePreview(side, startWidth, workspaceRect.width)
   }
 
-  const gridTemplateColumns = system
-    ? `${system.ui.layout.leftWidth}px ${SPLITTER_WIDTH}px 1fr ${SPLITTER_WIDTH}px ${system.ui.layout.rightWidth}px`
-    : '1fr'
+  const resetWidth = (side: 'left' | 'right') => () => {
+    actions.updateLayout(
+      side === 'left' ? { leftWidth: DEFAULT_LEFT_WIDTH } : { rightWidth: DEFAULT_RIGHT_WIDTH }
+    )
+  }
+
+  const gridTemplateColumns = useMemo(() => {
+    if (!system) return '1fr'
+    const { leftWidth, rightWidth } = system.ui.layout
+    return [
+      objectsOpen ? `${leftWidth}px` : '0px',
+      objectsOpen ? `${SPLITTER_WIDTH}px` : '0px',
+      'minmax(0, 1fr)',
+      inspectorOpen ? `${SPLITTER_WIDTH}px` : '0px',
+      inspectorOpen ? `${rightWidth}px` : '0px',
+    ].join(' ')
+  }, [system, objectsOpen, inspectorOpen])
+
+  const libraryActions = {
+    onCreateSystem: async (name: string) => {
+      await actions.createSystem(name)
+      closeSystemsDialog()
+    },
+    onOpenSystem: async (id: string) => {
+      await actions.openSystem(id)
+      closeSystemsDialog()
+    },
+    onExportSystem: (id: string) => void actions.exportSystem(id),
+    onCreateEmbed: async (id: string) => {
+      if (system?.id !== id) await actions.openSystem(id)
+      closeSystemsDialog()
+      setEmbedDialogOpen(true)
+    },
+    onDeleteSystem: (id: string) => void actions.deleteSystem(id),
+    onImportSystem: async (file: File) => {
+      await actions.importSystem(file)
+      closeSystemsDialog()
+    },
+  }
 
   return (
     <div className="app">
       <Toolbar
-        systemName={system?.name ?? null}
-        busy={busy}
-        progress={
-          continuationProgress
+        system={
+          system
             ? {
-                label: continuationProgress.label,
-                currentStep: continuationProgress.progress.current_step,
-                maxSteps: continuationProgress.progress.max_steps,
-                points: continuationProgress.progress.points_computed,
-                bifurcations: continuationProgress.progress.bifurcations_found,
-                ringsComputed: continuationProgress.progress.rings_computed,
-                showArclength:
-                  continuationProgress.label === 'Invariant Manifold (Equilibrium 2D)' ||
-                  continuationProgress.label === 'Invariant Manifold (Limit Cycle 2D)' ||
-                  continuationProgress.label === 'Extend Invariant Manifold (2D)',
-                arclength: continuationProgress.progress.current_step,
-                arclengthTarget: continuationProgress.progress.max_steps,
-                radius: continuationProgress.progress.current_param,
-                phase: continuationProgress.progress.phase,
-                discoveredBoxes: continuationProgress.progress.discovered_boxes,
-                frontierBoxes: continuationProgress.progress.frontier_boxes,
-                edgesBuilt: continuationProgress.progress.edges_built,
-                residual: continuationProgress.progress.residual,
-                tolerance: continuationProgress.progress.tolerance,
-                restartCount: continuationProgress.progress.restart_count,
-                maxRestarts: continuationProgress.progress.max_restarts,
-                subspaceDimension: continuationProgress.progress.subspace_dimension,
-                maxSubspaceDimension: continuationProgress.progress.max_subspace_dimension,
-                convergedModes: continuationProgress.progress.converged_modes,
-                requestedModes: continuationProgress.progress.requested_modes,
+                name: system.name,
+                type: system.config.type,
+                dimension: system.config.varNames.length,
+                solver: system.config.solver,
               }
             : null
         }
+        busy={busy}
+        progress={toToolbarProgress(continuationProgress)}
         onHome={goHome}
-        onOpenSystems={openSystemsDialog}
-        theme={theme}
-        onThemeChange={setTheme}
+        onOpenSystems={() => setDialogOpen(true)}
+        onOpenSystemSettings={() => setSystemSettingsOpen(true)}
+        onOpenCommandPalette={() => setPaletteOpen(true)}
+        onSelectNode={system ? selectNode : undefined}
+        panels={
+          system
+            ? {
+                objectsOpen,
+                inspectorOpen,
+                onToggleObjects: toggleObjects,
+                onToggleInspector: toggleInspector,
+              }
+            : null
+        }
+        themePreference={themePreference}
+        onThemeChange={setThemePreference}
         onResetFork={actions.resetFork}
         onCancelCalculation={actions.cancelCalculation}
       />
 
       <SystemDialog
-        open={isSystemDialogOpen}
+        open={dialogOpen}
         systems={systems}
+        activeSystemId={system?.id ?? null}
         onClose={closeSystemsDialog}
-        onCreateSystem={async (name) => {
-          await actions.createSystem(name)
-          finishSystemsDialog()
-        }}
-        onOpenSystem={async (id) => {
-          await actions.openSystem(id)
-          finishSystemsDialog()
-        }}
-        onExportSystem={(id) => void actions.exportSystem(id)}
-        onCreateEmbed={async (id) => {
-          await actions.openSystem(id)
-          finishSystemsDialog()
-          setEmbedDialogOpen(true)
-        }}
-        onDeleteSystem={(id) => void actions.deleteSystem(id)}
-        onImportSystem={async (file) => {
-          await actions.importSystem(file)
-          finishSystemsDialog()
-        }}
+        {...libraryActions}
       />
       <SystemSettingsDialog
         open={isSystemSettingsOpen}
         system={system}
-        onClose={closeSystemSettings}
+        onClose={() => {
+          setSystemSettingsOpen(false)
+          setEmbedDialogOpen(false)
+        }}
         actions={actions}
       />
       <EmbedDialog
@@ -330,47 +511,37 @@ function App() {
         appTheme={theme}
         onClose={() => setEmbedDialogOpen(false)}
       />
-
-      {error ? (
-        <div className="error-banner" role="alert">
-          <span>{error}</span>
-          <button onClick={actions.clearError}>Dismiss</button>
-        </div>
+      {paletteOpen ? (
+        <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />
       ) : null}
 
+      {error ? <ErrorToast message={error} onDismiss={actions.clearError} /> : null}
+
       {!system ? (
-        <main className="empty-workspace">
-          <div className="empty-card">
-            <Icon name="fork" className="empty-card__mark" />
-            <h1>Fork Dynamics</h1>
-            <p>Dynamical systems & bifurcation analysis</p>
-            <div className="empty-card__actions">
-              <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
-                Open a system
-              </button>
-              <a
-                className="empty-card__resource-link"
-                href="https://github.com/hinsley/Fork/tree/main/tutorial"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Documentation
-              </a>
-            </div>
+        <main className="home" data-testid="home">
+          <div className="home__inner">
+            <SystemLibrary systems={systems} {...libraryActions} />
           </div>
         </main>
       ) : (
         <main
-          className={`workspace${dragPreview ? ' workspace--resizing' : ''}`}
+          className={[
+            'workspace',
+            dragPreview ? 'workspace--resizing' : '',
+            objectsOpen ? '' : 'workspace--objects-closed',
+            inspectorOpen ? '' : 'workspace--inspector-closed',
+          ]
+            .filter(Boolean)
+            .join(' ')}
           style={{ gridTemplateColumns }}
           data-testid="workspace"
           ref={workspaceRef}
         >
-          <div className="workspace__left">
+          <div className="workspace__left" hidden={!objectsOpen}>
             <Panel
               title="Objects"
               open
-              onToggle={() => undefined}
+              onToggle={toggleObjects}
               testId="objects-panel"
               className="panel--objects"
               showToggle={false}
@@ -394,7 +565,10 @@ function App() {
                 ref={objectsTreeRef}
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
-                onSelect={selectNode}
+                onSelect={(nodeId) => {
+                  selectNode(nodeId)
+                  if (narrow) setNarrowPanel('inspector')
+                }}
                 onToggleVisibility={actions.toggleVisibility}
                 onRename={actions.renameNode}
                 onToggleExpanded={actions.toggleExpanded}
@@ -413,13 +587,19 @@ function App() {
           </div>
           <div
             className="splitter splitter--left"
+            hidden={!objectsOpen}
             onPointerDown={onPointerDown('left')}
             onPointerMove={handleResizeMove}
             onPointerUp={finishResize}
             onPointerCancel={finishResize}
+            onDoubleClick={resetWidth('left')}
+            title="Drag to resize · double-click to reset"
             data-testid="splitter-left"
           />
-          <div className="workspace__center">
+          <div
+            className="workspace__center"
+            onPointerDown={narrow && narrowPanel ? () => setNarrowPanel(null) : undefined}
+          >
             <Panel
               title="Viewport"
               open
@@ -462,25 +642,23 @@ function App() {
           </div>
           <div
             className="splitter splitter--right"
+            hidden={!inspectorOpen}
             onPointerDown={onPointerDown('right')}
             onPointerMove={handleResizeMove}
             onPointerUp={finishResize}
             onPointerCancel={finishResize}
+            onDoubleClick={resetWidth('right')}
+            title="Drag to resize · double-click to reset"
             data-testid="splitter-right"
           />
-          <div className="workspace__right">
+          <div className="workspace__right" hidden={!inspectorOpen}>
             <Panel
               title="Inspector"
               open
-              onToggle={() => undefined}
+              onToggle={toggleInspector}
               testId="inspector-panel"
-              showToggle={false}
-              actions={
-                <button onClick={openSystemSettings} data-testid="open-system-settings"
-                  aria-label="System Settings" title="System Settings">
-                  <Icon name="settings" />
-                </button>
-              }
+              className="panel--inspector"
+              hideHeader
             >
               <InspectorPanel
                 system={system}
