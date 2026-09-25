@@ -173,7 +173,6 @@ for (const dimension of [2, 3]) test(`grid-seeded continuous particles escape an
   await expect(page.getByTestId('particles-pointSize')).toHaveValue('7.5')
   await page.getByTestId('particles-pointSize').fill('5')
   await expect(page.getByTestId('particles-pointSize-number')).toHaveValue('5')
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-particles-animation-toggle')
   await expect(page.getByTestId('particles-count')).toHaveCount(0)
   await page.getByTestId('particles-lifetime').fill('0.1')

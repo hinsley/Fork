@@ -71,19 +71,19 @@ describe('selection inspector workflow shell', () => {
     }
     const added = addObject(base, equilibrium)
     render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
-    await user.click(within(screen.getByTestId('inspector-actions')).getByRole('button', { name: 'Compute' }))
+    expect(screen.getByText('last attempt failed')).toBeVisible()
     await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
     expect(screen.getByTestId('calculation-diagnostic')).toBeVisible()
     expect(screen.getByText('Newton correction did not converge.')).toBeVisible()
     expect(screen.getByText('Choose a closer initial guess.')).toBeVisible()
     expect(screen.getByTestId('calculation-diagnostic-metrics')).toHaveTextContent('Residual 2.50e-1')
-    expect(screen.getByText(/previous successful solution is unchanged/)).toBeVisible()
+    expect(screen.getByText('Stored solution unchanged.')).toBeVisible()
     await user.click(screen.getByTestId('inspector-workflow-back'))
     await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
     expect(screen.getByTestId('calculation-diagnostic')).toBeVisible()
   })
 
-  it('opens solved equilibrium data from the Inspect action', async () => {
+  it('shows solved equilibrium data inline without an Inspect workflow', async () => {
     const user = userEvent.setup()
     const base = createSystem({
       name: 'Workflow_Inspect',
@@ -113,52 +113,26 @@ describe('selection inspector workflow shell', () => {
     const added = addObject(base, equilibrium)
     render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
 
-    const actions = screen.getByTestId('inspector-actions')
-    expect(within(actions).getByRole('heading', { name: 'Inspect' })).toBeVisible()
-    await user.click(within(actions).getByRole('button', { name: 'Inspect' }))
-
-    await user.click(screen.getByTestId('action-equilibrium-data-toggle'))
-
-    expect(screen.getByTestId('inspector-workflow-focus')).toHaveTextContent('Inspect')
-    expect(screen.getByTestId('equilibrium-data-coordinates-toggle')).toBeVisible()
-    expect(screen.getByTestId('equilibrium-data-parameters-toggle')).toBeVisible()
-    expect(screen.getByTestId('equilibrium-data-eigenpairs-toggle')).toBeVisible()
-    expect(screen.queryByTestId('equilibrium-data-summary-toggle')).toBeNull()
-    const coordinatesToggle = screen.getByTestId('equilibrium-data-coordinates-toggle')
-    await user.click(coordinatesToggle)
-    const coordinatesDetails = coordinatesToggle.closest('details')
-    expect(coordinatesDetails).not.toBeNull()
-    const coordinates = within(coordinatesDetails as HTMLElement)
-    const coordinateLabel = coordinates.getByText(base.config.varNames[0])
-    const coordinateCopy = coordinates.getByRole('button', { name: 'Copy' })
-    expect(coordinateLabel).toBeVisible()
-    expect(
-      coordinateLabel.compareDocumentPosition(coordinateCopy) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).not.toBe(0)
-
-    const parametersToggle = screen.getByTestId('equilibrium-data-parameters-toggle')
-    await user.click(parametersToggle)
-    const parametersDetails = parametersToggle.closest('details')
-    expect(parametersDetails).not.toBeNull()
-    const parameters = within(parametersDetails as HTMLElement)
-    const parameterLabel = parameters.getByText(base.config.paramNames[0])
-    const parameterCopy = parameters.getByRole('button', { name: 'Copy' })
-    expect(
-      parameterLabel.compareDocumentPosition(parameterCopy) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).not.toBe(0)
+    expect(screen.queryByTestId('action-equilibrium-data-toggle')).toBeNull()
+    expect(screen.getByTestId('inspector-meta')).toHaveTextContent('Solved')
+    const state = within(screen.getByTestId('equilibrium-glance-state'))
+    expect(state.getByText(base.config.varNames[0])).toBeVisible()
+    expect(state.getByRole('button', { name: 'Copy state' })).toBeVisible()
+    const parameters = within(screen.getByTestId('equilibrium-data-parameters'))
+    expect(parameters.getByText(base.config.paramNames[0])).toBeVisible()
+    expect(parameters.getByRole('button', { name: 'Copy parameters' })).toBeVisible()
     expect(screen.getByTestId('equilibrium-solve-submit')).not.toBeVisible()
-    expect(screen.queryByTestId('inspector-workflow-advanced')).toBeNull()
 
-    await user.click(screen.getByTestId('inspector-workflow-back'))
-    await user.click(within(screen.getByTestId('inspector-actions')).getByRole('button', { name: 'Compute' }))
     await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
 
     expect(screen.getByTestId('equilibrium-solve-submit')).toBeVisible()
-    expect(screen.getByTestId('equilibrium-data-coordinates-toggle')).not.toBeVisible()
+    // The header and glance stay pinned; inline data yields to the workflow.
+    expect(screen.getByTestId('equilibrium-glance-state')).toBeVisible()
+    expect(screen.getByTestId('inspector-panel-body')).toHaveClass('inspector-browser--workflow')
     expect(screen.queryByText('Cached solver parameters')).toBeNull()
   })
 
-  it('groups configuration actions and labels continuation actions', () => {
+  it('shows primary actions as buttons and the rest in the overflow menu', () => {
     const base = createSystem({ name: 'Workflow_Groups' })
     const added = addObject(
       base,
@@ -173,28 +147,33 @@ describe('selection inspector workflow shell', () => {
     render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
 
     const actions = screen.getByTestId('inspector-actions')
-    expect(within(actions).queryByText('Actions')).toBeNull()
-    expect(within(actions).queryByText('Available for this selection')).toBeNull()
-    expect(actions).toHaveTextContent('Configure')
-    expect(actions).toHaveTextContent('Frozen Variables')
-    expect(actions).toHaveTextContent('Parameters')
-    expect(within(actions).getAllByTestId(/^action-/)[0]).toHaveTextContent('Appearance')
-    expect(actions).not.toHaveTextContent('Modify appearance')
-    expect(within(actions).getByRole('heading', { name: 'Continuation' })).toBeVisible()
+    expect(within(actions).getAllByTestId(/^action-/)[0]).toHaveTextContent('Run')
+    expect(screen.getByTestId('action-orbit-run-toggle')).toBeVisible()
+    expect(screen.getByTestId('action-oseledets-toggle')).toBeVisible()
+    expect(screen.getByTestId('orbit-extend-quick')).toBeVisible()
+    // Appearance, parameters and frozen variables live in the header.
+    expect(within(actions).queryByTestId('action-appearance-toggle')).toBeNull()
+    expect(screen.getByTestId('action-appearance-toggle')).toHaveAttribute('aria-label', 'Appearance')
+    expect(screen.getByTestId('action-parameters-toggle')).toBeVisible()
+    expect(screen.getByTestId('action-frozen-variables-toggle')).toBeVisible()
+    expect(actions).not.toHaveTextContent('Configure')
+    const more = screen.getByTestId('inspector-actions-more')
     expect(screen.getByTestId('action-limit-cycle-toggle')).not.toBeVisible()
-    expect(screen.getByRole('button', { name: 'Continuation' })).toHaveAttribute('aria-expanded', 'false')
-    fireEvent.click(screen.getByRole('button', { name: 'Continuation' }))
+    expect(more).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(more)
+    expect(more).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByTestId('action-limit-cycle-toggle')).toBeVisible()
     expect(screen.getByTestId('action-heteroclinic-from-orbit-toggle')).toHaveTextContent(
       'Heteroclinic connection'
     )
+    fireEvent.click(screen.getByTestId('action-limit-cycle-toggle'))
+    expect(screen.getByTestId('inspector-workflow-focus')).toHaveTextContent('Limit cycle from orbit')
     expect(screen.getByTestId('heteroclinic-from-orbit-toggle').closest('details')).toHaveClass(
       'inspector-disclosure--action-only'
     )
-    expect(within(actions).queryByRole('heading', { name: 'Continue' })).toBeNull()
   })
 
-  it('routes discrete-map orbit data and workflows exclusively through Actions', async () => {
+  it('shows discrete-map orbit data inline and workflows through Actions', async () => {
     const user = userEvent.setup()
     const base = createSystem({
       name: 'Workflow_Map',
@@ -218,27 +197,24 @@ describe('selection inspector workflow shell', () => {
     })
     render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
 
-    const actions = screen.getByTestId('inspector-actions')
-    expect(within(actions).getByRole('heading', { name: 'Inspect' })).toBeVisible()
-    expect(screen.getByTestId('action-orbit-run-toggle')).not.toBeVisible()
-    await user.click(screen.getByRole('button', { name: 'Compute' }))
     expect(screen.getByTestId('action-orbit-run-toggle')).toBeVisible()
     expect(screen.getByTestId('action-oseledets-toggle')).toBeVisible()
     expect(screen.queryByTestId('action-limit-cycle-toggle')).toBeNull()
+    expect(screen.queryByTestId('inspector-actions-more')).toBeNull()
+    expect(screen.queryByTestId('action-orbit-data-toggle')).toBeNull()
 
-    for (const testId of ['orbit-data-toggle', 'orbit-run-toggle', 'oseledets-toggle']) {
+    for (const testId of ['orbit-run-toggle', 'oseledets-toggle']) {
       expect(screen.getByTestId(testId).closest('details')).toHaveClass(
         'inspector-disclosure--action-only'
       )
     }
 
-    await user.click(screen.getByRole('button', { name: 'Inspect' }))
-    await user.click(screen.getByTestId('action-orbit-data-toggle'))
-    expect(screen.getByTestId('orbit-data-summary-toggle')).toBeVisible()
-    await user.click(screen.getByTestId('inspector-workflow-back'))
+    expect(screen.getByTestId('inspector-meta')).toHaveTextContent('2 points')
+    expect(screen.getByTestId('orbit-glance-final-state')).toHaveTextContent('0.592')
+    expect(screen.getByTestId('orbit-data-preview-toggle')).toBeVisible()
     await user.click(screen.getByTestId('action-orbit-run-toggle'))
-    expect(screen.getByTestId('orbit-run-result')).toHaveTextContent('Orbit ready')
-    expect(screen.getByTestId('orbit-run-result')).toHaveTextContent('2 points')
+    expect(screen.getByTestId('inspector-meta')).toHaveTextContent('2 points')
+    expect(screen.getByTestId('orbit-run-submit')).toBeVisible()
   })
 
   it('focuses one action and retains its draft when returning to browse mode', async () => {
@@ -250,7 +226,7 @@ describe('selection inspector workflow shell', () => {
     expect(screen.getByTestId('inspector-name')).toBeVisible()
     await user.click(screen.getByTestId('action-orbit-run-toggle'))
     expect(screen.getByTestId('inspector-workflow-focus')).toBeVisible()
-    expect(screen.queryByTestId('inspector-name')).toBeNull()
+    expect(screen.getByTestId('inspector-name')).toBeVisible()
     expect(screen.getByTestId('orbit-run-duration')).toBeVisible()
     expect(screen.queryByTestId('inspector-workflow-advanced')).toBeNull()
 

@@ -34,11 +34,10 @@ export function DiagramInspectorSections({
   return <>
 {diagram ? (
             <div className="inspector-section">
-              <h3>Bifurcation diagram</h3>
               {axisOptions.length > 0 ? (
-                <>
+                <div className="inspector-form-grid">
                   <label>
-                    Abscissa
+                    x axis
                     <select
                       value={formatAxisValue(diagram.xAxis)}
                       onChange={(event) =>
@@ -57,7 +56,7 @@ export function DiagramInspectorSections({
                     </select>
                   </label>
                   <label>
-                    Ordinate
+                    y axis
                     <select
                       value={formatAxisValue(diagram.yAxis)}
                       onChange={(event) =>
@@ -75,30 +74,27 @@ export function DiagramInspectorSections({
                       ))}
                     </select>
                   </label>
-                </>
+                </div>
               ) : (
-                <p className="empty-state">
-                  Add parameters or state space variables to configure axes.
-                </p>
+                <p className="faint">—</p>
               )}
               {branchEntries.length > 0 || diagramSelectedIds.length > 0 ? (
                 <div className="inspector-subsection">
-                  <h4 className="inspector-subheading">Displayed branches</h4>
-                  <label>
-                    Search branches
-                    <input
-                      value={diagramSearch}
-                      onChange={(event) => setDiagramSearch(event.target.value)}
-                      placeholder="Type to filter…"
-                      data-testid="diagram-branch-search"
-                    />
-                  </label>
-                  {diagramSelectedIds.length === 0 ? (
-                    <p className="empty-state">
-                      No branches selected yet. Showing all visible branches by default. Use
-                      the list below to select branches for this diagram.
-                    </p>
-                  ) : null}
+                  <h4 className="section-head">
+                    <span>Branches</span>
+                    <span className="chip" data-testid="diagram-showing-chip">
+                      {diagramSelectedIds.length === 0
+                        ? 'showing: all visible'
+                        : `${diagramSelectedIds.length} selected`}
+                    </span>
+                  </h4>
+                  <input
+                    value={diagramSearch}
+                    onChange={(event) => setDiagramSearch(event.target.value)}
+                    placeholder="Filter branches…"
+                    aria-label="Search branches"
+                    data-testid="diagram-branch-search"
+                  />
                   {displayedEntries.length > 0 ? (
                     <div className="scene-object-list">
                       {displayedEntries.map((entry) => {
@@ -130,12 +126,10 @@ export function DiagramInspectorSections({
                       })}
                     </div>
                   ) : (
-                    <p className="empty-state">No branches match this search.</p>
+                    <p className="faint">—</p>
                   )}
                 </div>
-              ) : (
-                <p className="empty-state">No branches available yet.</p>
-              )}
+              ) : null}
             </div>
           ) : null}
   </>

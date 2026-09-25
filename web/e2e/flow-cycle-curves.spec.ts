@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { clickInspectorAction, createHarness } from './harness'
+import { clickInspectorAction, createHarness, expandDetails } from './harness'
 
 type CycleCurveFixture = {
   systemName: string
@@ -57,6 +57,7 @@ async function createCrossingLimitCycle(page: Page, branchName: string) {
   await page.getByTestId('limit-cycle-from-orbit-ncol').fill('3')
   await page.getByTestId('limit-cycle-from-orbit-step-size').fill('0.004')
   await page.getByTestId('limit-cycle-from-orbit-max-steps').fill('12')
+  await expandDetails(page, 'limit-cycle-from-orbit-advanced')
   await page.getByTestId('limit-cycle-from-orbit-min-step-size').fill('1e-6')
   await page.getByTestId('limit-cycle-from-orbit-max-step-size').fill('0.008')
   await page.getByTestId('limit-cycle-from-orbit-corrector-steps').fill('12')

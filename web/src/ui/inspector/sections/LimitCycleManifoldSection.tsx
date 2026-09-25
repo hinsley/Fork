@@ -31,22 +31,13 @@ export function LimitCycleManifoldSection({
               <div className="inspector-section">
                 {runDisabled ? (
                   <div className="field-warning">
-                    Apply valid system changes before computing manifolds.
+                    Apply valid system changes first.
                   </div>
                 ) : null}
-                {systemDraft.type === 'map' ? (
-                  <p className="empty-state">
-                    Invariant manifolds are available for flow systems only.
-                  </p>
-                ) : null}
-                {limitCycleDisplayMultipliers.length === 0 ? (
-                  <p className="empty-state">
-                    Floquet multipliers are required. Continue the cycle first to populate them.
-                  </p>
-                ) : (
+                {limitCycleDisplayMultipliers.length === 0 ? null : (
                   <>
                     <label>
-                      Branch name
+                      Branch
                       <input
                         value={limitCycleManifoldDraft.name}
                         onChange={(event) =>

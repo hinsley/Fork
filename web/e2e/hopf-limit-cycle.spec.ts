@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { clickInspectorAction, createHarness } from './harness'
+import { clickInspectorAction, createHarness, expandDetails } from './harness'
 
 test('continue limit cycle from a Hopf bifurcation', async ({ page }) => {
   test.setTimeout(150_000)
@@ -40,6 +40,7 @@ test('continue limit cycle from a Hopf bifurcation', async ({ page }) => {
   await page.getByTestId('equilibrium-branch-parameter').selectOption('mu')
   await page.getByTestId('equilibrium-branch-step-size').fill('0.02')
   await page.getByTestId('equilibrium-branch-max-steps').fill('40')
+  await expandDetails(page, 'equilibrium-branch-advanced')
   await page.getByTestId('equilibrium-branch-min-step').fill('1e-6')
   await page.getByTestId('equilibrium-branch-max-step').fill('0.1')
   await page.getByTestId('equilibrium-branch-corrector-steps').fill('5')

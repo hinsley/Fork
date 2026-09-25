@@ -398,11 +398,19 @@ export function AnalysisViewportInspector({
 
   return (
     <div className="inspector-section">
-      <h3>Event map</h3>
       <div className="inspector-subsection">
-        <h4 className="inspector-subheading">Sources</h4>
-        <label>
-          Fallback display
+        <h4 className="section-head">
+          <span>Sources</span>
+          <span className="chip" data-testid="analysis-showing-chip">
+            {viewport.sourceNodeIds.length > 0
+              ? `${viewport.sourceNodeIds.length} selected`
+              : viewport.display === 'selection'
+                ? 'showing: selection'
+                : 'showing: all visible'}
+          </span>
+        </h4>
+        <label title="Used when no sources are checked below. Axis expressions can use state variables and parameters.">
+          Fallback
           <select
             value={viewport.display}
             onChange={(event) =>
@@ -412,29 +420,16 @@ export function AnalysisViewportInspector({
             }
             data-testid="analysis-display"
           >
-            <option value="all">All visible compatible sources</option>
-            <option value="selection">Selected compatible source</option>
+            <option value="all">All visible</option>
+            <option value="selection">Current selection</option>
           </select>
         </label>
-        <p className="empty-state">
-          Explicitly selected sources override the fallback mode. Axis
-          expressions can use state variables and system parameters.
-        </p>
-        <label>
-          Search compatible sources
-          <input
-            value={sourceSearch}
-            onChange={(event) => setSourceSearch(event.target.value)}
-            placeholder="Type to filter…"
-          />
-        </label>
-        {viewport.sourceNodeIds.length === 0 ? (
-          <p className="empty-state">
-            {viewport.display === 'selection'
-              ? 'No explicit sources selected. The current compatible selection will be used.'
-              : 'No explicit sources selected. All visible compatible sources will be used.'}
-          </p>
-        ) : null}
+        <input
+          value={sourceSearch}
+          onChange={(event) => setSourceSearch(event.target.value)}
+          placeholder="Filter compatible sources…"
+          aria-label="Search compatible sources"
+        />
         {displayedEntries.length > 0 ? (
           <div className="scene-object-list">
             {displayedEntries.map((entry) => {
@@ -466,16 +461,14 @@ export function AnalysisViewportInspector({
             })}
           </div>
         ) : (
-          <p className="empty-state">
-            No compatible sources match this search.
-          </p>
+          <p className="faint">—</p>
         )}
       </div>
 
       <div className="inspector-subsection">
-        <h4 className="inspector-subheading">Event</h4>
+        <h4 className="section-head">Event</h4>
         <label>
-          Event mode
+          Mode
           <select
             value={viewport.event.mode}
             onChange={(event) =>
@@ -498,12 +491,7 @@ export function AnalysisViewportInspector({
             ))}
           </select>
         </label>
-        {viewport.event.mode === 'every_iterate' ? (
-          <p className="empty-state">
-            Every iterate uses each landing iterate directly. Event expression
-            and level are ignored in this mode.
-          </p>
-        ) : (
+        {viewport.event.mode === 'every_iterate' ? null : (
           <>
             <label>
               Source
@@ -632,19 +620,20 @@ export function AnalysisViewportInspector({
               />
             </label>
             <p
-              className="empty-state"
+              className="num muted"
               data-testid="analysis-event-resolved-expression"
             >
-              f(x, p) = {eventExpression || '∅'}
+              f = {eventExpression || '∅'}
             </p>
           </>
         )}
         <div className="inspector-subsection">
-          <h4 className="inspector-subheading">Positivity constraints</h4>
-          <p className="empty-state">
-            Keep only hits where every listed expression is strictly positive.
-            Leave this empty to accept all hits.
-          </p>
+          <h4
+            className="section-head"
+            title="Keep only hits where every listed expression is strictly positive"
+          >
+            Constraints · expr &gt; 0
+          </h4>
           {positivityConstraints.length > 0 ? (
             <>
               {positivityConstraints.map((constraint, index) => (
@@ -687,8 +676,8 @@ export function AnalysisViewportInspector({
               ))}
             </>
           ) : (
-            <p className="empty-state" data-testid="analysis-constraints-empty">
-              No positivity constraints.
+            <p className="faint" data-testid="analysis-constraints-empty">
+              —
             </p>
           )}
           <button
@@ -702,7 +691,7 @@ export function AnalysisViewportInspector({
       </div>
 
       <div className="inspector-subsection">
-        <h4 className="inspector-subheading">Axes</h4>
+        <h4 className="section-head">Axes</h4>
         {renderAxisEditor('x', 'X axis', viewport.axes.x)}
         {renderAxisEditor('y', 'Y axis', viewport.axes.y)}
         {renderAxisEditor('z', 'Z axis', viewport.axes.z ?? null, {

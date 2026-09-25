@@ -86,7 +86,6 @@ test('State Grid creates a separately rendered and persisted invariant-measure o
     page.getByRole('button', { name: 'State_Grid_1 (state grid)', exact: true })
   ).toBeVisible()
 
-  await clickInspectorAction(page, 'action-invariant-measure-data-toggle')
   await expect(page.getByTestId('invariant-measure-source')).toHaveText('State_Grid_1')
   await expect(page.getByTestId('invariant-measure-residual')).not.toHaveText('NaN')
   const coverText = await page.getByTestId('invariant-measure-cover-size').innerText()
@@ -114,7 +113,6 @@ test('State Grid creates a separately rendered and persisted invariant-measure o
   expect(trace?.massSum).toBeCloseTo(1, 10)
   expect(trace?.hoverTemplate).toContain('mass=')
 
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-appearance-toggle')
   await page.getByTestId('inspector-visibility').click()
   await expect.poll(() => plotHasTrace(plot, measureName)).toBe(false)
@@ -143,7 +141,6 @@ test('State Grid creates a sampled flow-map measure for an autonomous flow', asy
   await page.getByTestId('create-state-grid').click()
   await openStateGridWorkflow(page, 'parameters-toggle')
   await page.getByTestId('param-override-beta').fill('0.4')
-  await page.getByTestId('inspector-workflow-back').click()
   await openStateGridWorkflow(page, 'state-grid-setup-toggle')
   await page.getByTestId('state-grid-x-min').fill('-30')
   await page.getByTestId('state-grid-x-max').fill('30')
@@ -158,7 +155,7 @@ test('State Grid creates a sampled flow-map measure for an autonomous flow', asy
   await openStateGridWorkflow(page, 'state-grid-transfer-toggle')
   await expect(page.getByTestId('state-grid-transfer-time-step')).toHaveValue('1')
   await expect(page.getByTestId('state-grid-transfer-integration-step')).toHaveValue('0.01')
-  await expect(page.getByText(/sampled flow map/)).toBeVisible()
+  await expect(page.getByTitle(/sampled flow map/)).toBeVisible()
   const equilibriumCoordinate = Math.sqrt(0.4 * 27)
   await page
     .getByTestId('state-grid-transfer-starting-point-0')
@@ -175,7 +172,6 @@ test('State Grid creates a sampled flow-map measure for an autonomous flow', asy
   await expect(page.getByTestId('inspector-name')).toHaveValue(measureName, {
     timeout: 30_000,
   })
-  await clickInspectorAction(page, 'action-invariant-measure-data-toggle')
   await expect(page.getByTestId('invariant-measure-data-section')).toContainText(
     'fixed-time sampled flow map'
   )
@@ -184,7 +180,7 @@ test('State Grid creates a sampled flow-map measure for an autonomous flow', asy
   await expect(page.getByTestId('invariant-measure-data-section')).toContainText(
     equilibriumCoordinate.toString()
   )
-  await expect(page.getByTestId('invariant-measure-effective-support')).toContainText('cells')
+  await expect(page.getByTestId('invariant-measure-effective-support')).toHaveText(/^\d/)
   await expect(page.getByTestId('invariant-measure-convergence-status')).toContainText(
     /Converged|Iteration limit reached/
   )

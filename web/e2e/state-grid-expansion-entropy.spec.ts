@@ -16,7 +16,10 @@ async function configureTwoDimensionalMap(
   await page.getByTestId('system-eq-0').fill(equations[0])
   await page.getByTestId('system-eq-1').fill(equations[1])
   await page.getByTestId('system-apply').click()
+  await expect(page.getByText('Validating equations…')).toBeHidden()
   await page.getByTestId('close-system-settings').click()
+  // The map equations must be applied before objects are created on top of them.
+  await expect(page.getByTestId('inspector-equations')).toContainText(equations[0])
 }
 
 async function returnToWorkflowOverview(page: Page) {
@@ -99,7 +102,7 @@ test('State Grid computes and restores a flow expansion-entropy convergence resu
   expect(Math.abs(estimate)).toBeLessThan(1e-6)
   await expect(page.getByTestId('state-grid-expansion-entropy-result')).toContainText('9 / 9')
   await expect(page.getByTestId('state-grid-expansion-entropy-result')).toContainText(
-    'Rust/WASM workers'
+    /\d+ workers/
   )
   await expect(page.getByTestId('state-grid-expansion-entropy-plot')).toBeVisible()
   await expect(page.getByTestId('state-grid-expansion-entropy-plot')).toHaveAttribute(
@@ -151,8 +154,10 @@ test('State Grid map entropy matches the analytic diagonal-map value by iteratio
   await openExpansionEntropy(page)
   await page.getByTestId('state-grid-entropy-steps').fill('12')
   await page.getByTestId('state-grid-entropy-checkpoint-stride').fill('3')
-  await expect(page.getByText('Iterations', { exact: true })).toBeVisible()
-  await expect(page.getByText('Step size', { exact: true })).toHaveCount(0)
+  await expect(page.getByTestId('state-grid-entropy-steps').locator('..')).toContainText(
+    'Iterations'
+  )
+  await expect(page.getByTestId('state-grid-entropy-dt')).toHaveCount(0)
   await page.getByTestId('state-grid-run-expansion-entropy').click()
 
   await expect(page.getByTestId('state-grid-final-estimate')).toBeVisible({
@@ -161,9 +166,7 @@ test('State Grid map entropy matches the analytic diagonal-map value by iteratio
   const estimate = Number(await page.getByTestId('state-grid-final-estimate').textContent())
   expect(Math.abs(estimate - Math.log(2))).toBeLessThan(1e-6)
   await expect(page.getByTestId('state-grid-expansion-entropy-result')).toContainText('1 / 1')
-  await expect(page.getByTestId('state-grid-expansion-entropy-result')).toContainText(
-    'finite iteration'
-  )
+  await expect(page.getByTestId('state-grid-expansion-entropy-result')).toContainText('h(n)')
   await expect(page.getByTestId('state-grid-expansion-entropy-plot')).toBeVisible()
 
   await page.getByTestId('open-systems').click()
@@ -193,7 +196,7 @@ test('State Grid contracting map has zero expansion estimate', async ({ page }) 
   await page.getByTestId('state-grid-entropy-checkpoint-stride').fill('2')
   await page.getByTestId('state-grid-run-expansion-entropy').click()
 
-  await expect(page.getByTestId('state-grid-final-estimate')).toHaveText('0.00000', {
+  await expect(page.getByTestId('state-grid-final-estimate')).toHaveText('0', {
     timeout: 30_000,
   })
   await expect(page.getByTestId('state-grid-expansion-entropy-result')).toContainText('9 / 9')

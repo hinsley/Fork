@@ -35,12 +35,12 @@ export function SceneInspectorSections({
   return <>
 {scene ? (
             <div className="inspector-section">
-              <h3>Scene</h3>
               {showSceneAxisPicker && sceneAxisSelection ? (
                 <div className="inspector-subsection">
-                  <h4 className="inspector-subheading">State space axes</h4>
+                  <h4 className="section-head">Axes</h4>
+                  <div className="inspector-form-grid">
                   <label>
-                    Axis count
+                    Count
                     <select
                       value={sceneAxisSelection.length}
                       onChange={(event) => updateSceneAxisCount(Number(event.target.value))}
@@ -56,7 +56,7 @@ export function SceneInspectorSections({
                     </select>
                   </label>
                   <label>
-                    X axis
+                    x
                     <select
                       value={sceneAxisSelection[0]}
                       onChange={(event) => updateSceneAxisVariable(0, event.target.value)}
@@ -75,7 +75,7 @@ export function SceneInspectorSections({
                   </label>
                   {sceneAxisSelection.length >= 2 ? (
                     <label>
-                      Y axis
+                      y
                       <select
                         value={sceneAxisSelection[1]}
                         onChange={(event) => updateSceneAxisVariable(1, event.target.value)}
@@ -97,7 +97,7 @@ export function SceneInspectorSections({
                   ) : null}
                   {sceneAxisSelection.length >= 3 ? (
                     <label>
-                      Z axis
+                      z
                       <select
                         value={sceneAxisSelection[2]}
                         onChange={(event) => updateSceneAxisVariable(2, event.target.value)}
@@ -117,12 +117,22 @@ export function SceneInspectorSections({
                       </select>
                     </label>
                   ) : null}
+                  </div>
                 </div>
               ) : null}
               <div className="inspector-subsection">
-                <h4 className="inspector-subheading">Displayed items</h4>
-                <label>
-                  Fallback display
+                <h4 className="section-head">
+                  <span>Items</span>
+                  {sceneSelectedIds.length === 0 ? (
+                    <span className="chip" data-testid="scene-showing-chip">
+                      {scene.display === 'selection' ? 'showing: selection' : 'showing: all visible'}
+                    </span>
+                  ) : (
+                    <span className="chip">{`${sceneSelectedIds.length} selected`}</span>
+                  )}
+                </h4>
+                <label title="Used when no items are checked below">
+                  Fallback
                   <select
                     value={scene.display}
                     onChange={(event) =>
@@ -132,28 +142,17 @@ export function SceneInspectorSections({
                     }
                     data-testid="scene-display"
                   >
-                    <option value="all">All visible objects and branches</option>
-                    <option value="selection">Selected object or branch</option>
+                    <option value="all">All visible</option>
+                    <option value="selection">Current selection</option>
                   </select>
                 </label>
-                <p className="empty-state">Used when no items are selected below.</p>
-                <label>
-                  Search objects and branches
-                  <input
-                    value={sceneSearch}
-                    onChange={(event) => setSceneSearch(event.target.value)}
-                    placeholder="Type to filter…"
-                    data-testid="scene-object-search"
-                  />
-                </label>
-                {sceneSelectedIds.length === 0 ? (
-                  <p className="empty-state">
-                    {scene.display === 'selection'
-                      ? 'No items selected yet. Showing the current selection by default.'
-                      : 'No items selected yet. Showing all visible items by default.'}{' '}
-                    Select objects or branches below to override the fallback.
-                  </p>
-                ) : null}
+                <input
+                  value={sceneSearch}
+                  onChange={(event) => setSceneSearch(event.target.value)}
+                  placeholder="Filter objects and branches…"
+                  aria-label="Search objects and branches"
+                  data-testid="scene-object-search"
+                />
                 {displayedEntries.length > 0 ? (
                   <div className="scene-object-list">
                     {displayedEntries.map((entry) => {
@@ -183,7 +182,7 @@ export function SceneInspectorSections({
                     })}
                   </div>
                 ) : (
-                  <p className="empty-state">No scene items match this search.</p>
+                  <p className="faint">—</p>
                 )}
               </div>
             </div>

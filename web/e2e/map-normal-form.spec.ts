@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { clickInspectorAction, createHarness } from './harness'
+import { clickInspectorAction, createHarness, expandDetails } from './harness'
 
 async function selectMapBranchPoint(page: Page) {
   const harness = createHarness(page)
@@ -56,6 +56,7 @@ test('computes and persists a real map branch-point normal form in the Inspector
   await page.getByTestId('equilibrium-branch-parameter').selectOption('mu')
   await page.getByTestId('equilibrium-branch-step-size').fill('0.025')
   await page.getByTestId('equilibrium-branch-max-steps').fill('18')
+  await expandDetails(page, 'equilibrium-branch-advanced')
   await page.getByTestId('equilibrium-branch-min-step').fill('1e-7')
   await page.getByTestId('equilibrium-branch-max-step').fill('0.05')
   await page.getByTestId('equilibrium-branch-corrector-steps').fill('12')

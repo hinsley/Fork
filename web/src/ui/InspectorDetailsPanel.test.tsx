@@ -291,16 +291,16 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
-    expect(screen.getByText('invariant measure')).toBeInTheDocument()
+    expect(screen.getByText('Invariant measure')).toBeInTheDocument()
     expect(screen.getByText('3 / 3 occupied cells')).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
+    expect(screen.getByTestId('inspector-status-chip')).toHaveTextContent('converged')
     expect(screen.getByTestId('invariant-measure-source')).toHaveTextContent('State_Grid_1')
     expect(screen.getByTestId('invariant-measure-occupied-cells')).toHaveTextContent('3 / 3')
     expect(screen.getByTestId('invariant-measure-cover-size')).toHaveTextContent('3 / 4')
-    expect(screen.getByTestId('invariant-measure-leading-eigenvalue')).toHaveTextContent('1.000000e+0')
-    expect(screen.getByTestId('invariant-measure-residual')).toHaveTextContent('1.000000e-11')
+    expect(screen.getByTestId('invariant-measure-leading-eigenvalue')).toHaveTextContent('1')
+    expect(screen.getByTestId('invariant-measure-residual')).toHaveTextContent('1e-11')
     expect(screen.getByTestId('invariant-measure-effective-support')).toHaveTextContent(
-      '2.632 cells'
+      '2.632'
     )
     expect(screen.getByTestId('invariant-measure-convergence-status')).toHaveTextContent(
       'Converged'
@@ -318,13 +318,11 @@ describe('InspectorDetailsPanel', () => {
     const leaky = addObject(system, leakyMeasure)
     cleanup()
     renderInspectorForStateSpaceStride(leaky.system, leaky.nodeId, vi.fn())
-    expect(screen.getByText('finite-box mode')).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
-    expect(screen.getByTestId('invariant-measure-leading-eigenvalue')).toHaveTextContent(
-      '5.000000e-1'
-    )
+    expect(screen.getByText('Finite-box mode')).toBeInTheDocument()
+    expect(screen.getByTestId('inspector-status-chip')).toHaveTextContent('leaking')
+    expect(screen.getByTestId('invariant-measure-leading-eigenvalue')).toHaveTextContent('0.5')
     expect(screen.getByTestId('invariant-measure-leakage-warning')).toHaveTextContent(
-      'not mass-preserving'
+      /not mass-preserving/i
     )
   })
 
@@ -429,12 +427,8 @@ describe('InspectorDetailsPanel', () => {
       undefined,
       { onCompute, onUpdate }
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Inspect' }))
-    fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
     expect(screen.getByTestId('invariant-eigenmode-compute')).not.toBeVisible()
     expect(screen.getByTestId('invariant-measure-spectrum-plot')).toBeVisible()
-    fireEvent.click(screen.getByTestId('inspector-workflow-back'))
-    fireEvent.click(screen.getByRole('button', { name: 'Compute' }))
     fireEvent.click(screen.getByTestId('action-invariant-measure-eigenmodes-toggle'))
     const modeCount = screen.getByRole('spinbutton', { name: 'Nontrivial modes' })
     expect(modeCount).toHaveValue(6)
@@ -442,20 +436,19 @@ describe('InspectorDetailsPanel', () => {
     expect(modeCount).toHaveAttribute('max', '7')
     expect(screen.queryByTestId('invariant-eigenmode-count-preset')).not.toBeInTheDocument()
     expect(screen.getByTestId('invariant-measure-spectrum-plot')).toBeInTheDocument()
-    expect(screen.getByTestId('invariant-spectral-gap')).toHaveTextContent('1.000000e-1')
+    expect(screen.getByTestId('invariant-spectral-gap')).toHaveTextContent('0.1')
     expect(screen.getByTestId('invariant-eigenmode-1')).toHaveTextContent('Mode 1 pair')
-    expect(screen.getByTestId('invariant-eigenmode-view-controls')).toHaveTextContent(
-      'right eigenvector describes density relaxation'
+    expect(screen.getByTestId('invariant-eigenmode-1')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/density relaxation/i)
     )
     expect(screen.getByTestId('invariant-eigenmode-view-controls')).toHaveTextContent(
-      'same marker shape, size, and Appearance color'
+      'Overlay · mode 1'
     )
 
     fireEvent.change(modeCount, { target: { value: '8' } })
     expect(screen.getByTestId('invariant-eigenmode-compute')).toBeDisabled()
     fireEvent.change(modeCount, { target: { value: '4' } })
-    fireEvent.click(screen.getByTestId('inspector-workflow-back'))
-    fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
     fireEvent.click(screen.getByTestId('inspector-workflow-back'))
     fireEvent.click(screen.getByTestId('action-invariant-measure-eigenmodes-toggle'))
     expect(screen.getByTestId('invariant-eigenmode-count')).toHaveValue(4)
@@ -471,7 +464,6 @@ describe('InspectorDetailsPanel', () => {
       )
     })
     fireEvent.click(screen.getByTestId('inspector-workflow-back'))
-    fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
     fireEvent.click(screen.getByTestId('invariant-eigenmode-component-imaginary'))
     expect(onUpdate).toHaveBeenCalledWith(
       added.nodeId,
@@ -557,16 +549,11 @@ describe('InspectorDetailsPanel', () => {
     lazySystem.index.objects[grid.nodeId].name = 'Renamed_State_Grid'
 
     renderInspectorForStateSpaceStride(lazySystem, added.nodeId, vi.fn())
-    fireEvent.click(screen.getByTestId('action-invariant-measure-data-toggle'))
 
     expect(screen.getByTestId('invariant-measure-source')).toHaveTextContent(
       'Renamed_State_Grid'
     )
-    expect(
-      screen.queryByText(
-        'The source State Grid is no longer available. This stored measure remains renderable.'
-      )
-    ).toBeNull()
+    expect(screen.queryByText('Source State Grid deleted.')).toBeNull()
   })
 
   it('solves and continues forced periodic responses with live forcing', async () => {
@@ -654,15 +641,11 @@ describe('InspectorDetailsPanel', () => {
         onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
-    expect(screen.getByText('Forcing period')).not.toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: 'Inspect' }))
-    fireEvent.click(screen.getByTestId('action-forced-response-data-toggle'))
     expect(screen.getByText('Forcing period')).toBeVisible()
     expect(screen.getByText(/μ1 =/)).toBeVisible()
-    fireEvent.click(screen.getByTestId('inspector-workflow-back'))
-    expect(screen.getByText('Forcing period')).not.toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: 'Compute' }))
+    expect(screen.getByTestId('inspector-status-chip')).toHaveTextContent('stable')
     fireEvent.click(screen.getByTestId('action-forced-response-solver-toggle'))
+    expect(screen.getByText('Forcing period')).toBeVisible()
     fireEvent.click(screen.getByTestId('forced-response-solve-submit'))
     await waitFor(() => expect(onSolve).toHaveBeenCalledWith(expect.objectContaining({
       responseId: added.nodeId,
@@ -670,7 +653,6 @@ describe('InspectorDetailsPanel', () => {
       stepsPerForcingPeriod: 200,
     })))
     fireEvent.click(screen.getByTestId('inspector-workflow-back'))
-    fireEvent.click(screen.getByRole('button', { name: 'Continuation' }))
     fireEvent.click(screen.getByTestId('action-forced-response-continuation-toggle'))
     fireEvent.click(screen.getByTestId('forced-response-branch-submit'))
     await waitFor(() => expect(onContinue).toHaveBeenCalledWith(expect.objectContaining({
@@ -824,10 +806,10 @@ describe('InspectorDetailsPanel', () => {
     )
 
     expect(screen.getByTestId('forced-response-render-target')).toHaveTextContent(
-      'forced_a @ 7'
+      '@ forced_a #7'
     )
     const restoreButton = screen.getByTestId('forced-response-render-stored')
-    expect(restoreButton).toHaveTextContent('Render stored response')
+    expect(restoreButton).toHaveAttribute('title', 'Render the stored response')
     await user.click(restoreButton)
     expect(onSetRenderTarget).toHaveBeenLastCalledWith(withResponse.nodeId, {
       type: 'object',
@@ -1409,10 +1391,9 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
-    expect(screen.getByTestId('action-equilibrium-solver-toggle')).not.toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: 'Compute' }))
     expect(screen.getByTestId('action-equilibrium-solver-toggle')).toBeVisible()
-    expect(screen.queryByTestId('action-equilibrium-data-toggle')).toBeNull()
+    expect(screen.getByTestId('inspector-status-chip')).toHaveTextContent('unsolved')
+    expect(screen.queryByTestId('inspector-actions-more')).toBeNull()
     expect(screen.queryByTestId('action-equilibrium-continuation-toggle')).toBeNull()
     expect(screen.queryByTestId('action-equilibrium-manifold-toggle')).toBeNull()
   })
@@ -1447,24 +1428,19 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
-    for (const group of ['Compute', 'Inspect', 'Continuation', 'Manifolds']) {
-      const toggle = within(screen.getByTestId('inspector-actions')).getByRole('button', {
-        name: group,
-      })
-      expect(toggle).toHaveAttribute('aria-expanded', 'false')
-      fireEvent.click(toggle)
-    }
-    for (const actionTestId of [
-      'action-equilibrium-solver-toggle',
-      'action-equilibrium-data-toggle',
-      'action-equilibrium-continuation-toggle',
-      'action-equilibrium-manifold-toggle',
-    ]) {
-      expect(screen.getByTestId(actionTestId)).toBeVisible()
-    }
+    const actions = screen.getByTestId('inspector-actions')
+    expect(within(actions).getByTestId('action-equilibrium-solver-toggle')).toBeVisible()
+    expect(within(actions).getByTestId('action-equilibrium-continuation-toggle')).toBeVisible()
+    const manifoldAction = screen.getByTestId('action-equilibrium-manifold-toggle')
+    expect(manifoldAction).not.toBeVisible()
+    fireEvent.click(screen.getByTestId('inspector-actions-more'))
+    expect(manifoldAction).toBeVisible()
+    expect(manifoldAction).toHaveAttribute('role', 'menuitem')
+    expect(screen.queryByTestId('action-equilibrium-data-toggle')).toBeNull()
+    expect(screen.getByTestId('equilibrium-glance-state')).toBeVisible()
+    expect(screen.getByTestId('equilibrium-data-parameters')).toBeVisible()
     for (const panelTestId of [
       'equilibrium-solver-toggle',
-      'equilibrium-data-toggle',
       'equilibrium-continuation-toggle',
       'equilibrium-manifold-toggle',
     ]) {
@@ -1503,8 +1479,9 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
-    expect(screen.getByTestId('limit-cycle-data-toggle')).toBeVisible()
+    expect(screen.getByTestId('limit-cycle-data-preview-toggle')).toBeVisible()
     expect(screen.queryByTestId('limit-cycle-manifold-toggle')).toBeNull()
+    expect(screen.getByTestId('action-limit-cycle-manifold-toggle')).toBeDisabled()
   })
   it('retains accepted branch points while explaining a partial continuation', async () => {
     const user = userEvent.setup()
@@ -2540,7 +2517,7 @@ describe('InspectorDetailsPanel', () => {
 
     expect(screen.queryByTestId('subsystem-mismatch-badge')).not.toBeInTheDocument()
     await user.click(screen.getByTestId('action-limit-cycle-toggle'))
-    expect(screen.getByLabelText('Continuation parameter')).toHaveDisplayValue(
+    expect(screen.getByTestId('limit-cycle-from-orbit-parameter')).toHaveDisplayValue(
       't (frozen forcing context)'
     )
   })
@@ -2662,7 +2639,8 @@ describe('InspectorDetailsPanel', () => {
     )
 
     const header = screen.getByTestId('action-parameters-toggle')
-    expect(within(header).getByText('custom')).toBeInTheDocument()
+    expect(header).toHaveAttribute('aria-label', 'Parameters (custom)')
+    expect(within(header).getByText('p')).toBeInTheDocument()
   })
 
   it('hides the custom parameters tag when overrides are not present', () => {
@@ -2830,7 +2808,7 @@ describe('InspectorDetailsPanel', () => {
     const expressionInput = screen.getByTestId('isocline-expression')
     fireEvent.change(expressionInput, { target: { value: 'x + y - z' } })
     fireEvent.change(frozenInput, { target: { value: '2' } })
-    expect(screen.getByRole('button', { name: 'Compute' })).toBeInTheDocument()
+    expect(screen.getByTestId('isocline-compute')).toHaveTextContent('Compute')
     await user.click(screen.getByTestId('isocline-compute'))
 
     expect(onUpdateIsoclineObject).toHaveBeenCalledWith(added.nodeId, {
@@ -3282,11 +3260,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    const orbitDataToggle = screen.getByTestId('orbit-data-toggle')
-    const orbitDataDetails = orbitDataToggle.closest('details')
-    if (orbitDataDetails && !orbitDataDetails.open) {
-      await user.click(orbitDataToggle)
-    }
     await user.click(screen.getByTestId('orbit-data-preview-toggle'))
 
     expect(screen.getByText('Page 2 of 3')).toBeVisible()
@@ -3369,18 +3342,15 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    const limitCycleDataToggle = screen.getByTestId('limit-cycle-data-toggle')
-    const limitCycleDataDetails = limitCycleDataToggle.closest('details')
-    if (limitCycleDataDetails && !limitCycleDataDetails.open) {
-      await user.click(limitCycleDataToggle)
-    }
     await user.click(screen.getByTestId('limit-cycle-data-preview-toggle'))
 
     expect(screen.getByText('Page 2 of 3')).toBeVisible()
     await user.click(screen.getByTestId('limit-cycle-preview-next'))
     expect(screen.getByText('Page 3 of 3')).toBeVisible()
 
-    const selectedRow = document.querySelector('.orbit-preview__table-grid tbody tr.is-selected')
+    const selectedRow = document.querySelector(
+      '[aria-label="Limit cycle data preview"] tbody tr.is-selected'
+    )
     expect(selectedRow).toBeNull()
 
     const tableRegion = screen.getByRole('region', { name: 'Limit cycle data preview' })
@@ -4302,14 +4272,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    const isoperiodicAction = screen.getByTestId('action-isoperiodic-curve-toggle')
-    const isoperiodicActionGroup = isoperiodicAction.closest('.inspector-actions__group')
-    expect(isoperiodicActionGroup).not.toBeNull()
-    expect(
-      within(isoperiodicActionGroup as HTMLElement).getByRole('heading', {
-        name: 'Continuation',
-      })
-    ).toBeInTheDocument()
+    expect(screen.getByTestId('action-isoperiodic-curve-toggle')).toBeInTheDocument()
 
     await user.click(screen.getByTestId('isoperiodic-curve-toggle'))
     await user.clear(screen.getByTestId('isoperiodic-curve-name'))
@@ -5506,8 +5469,8 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    expect(screen.getByText('Rendered at')).toBeVisible()
-    expect(screen.getByText('lc_pd_mu @ 1')).toBeVisible()
+    expect(screen.getByTestId('limit-cycle-render-target')).toHaveTextContent('@ lc_pd_mu #1')
+    expect(screen.getByTitle('Rendered at lc_pd_mu @ 1')).toBeVisible()
   })
 
   it('uses render target parameters for limit cycle inspector data', async () => {
@@ -5564,17 +5527,14 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('limit-cycle-data-toggle'))
-    const parametersToggle = screen.getByTestId('limit-cycle-data-parameters-toggle')
-    await user.click(parametersToggle)
     await user.click(screen.getByTestId('limit-cycle-data-floquet-toggle'))
 
-    expect(
-      within(parametersToggle.closest('details') as HTMLElement).getByText('0.250000')
-    ).toBeVisible()
-    expect(screen.queryByText('9.00000')).toBeNull()
-    expect(screen.getByText('-1.0000 + 0.0000i')).toBeVisible()
-    expect(screen.queryByText('0.1000 + 0.2000i')).toBeNull()
+    const parameters = screen.getByTestId('limit-cycle-data-parameters')
+    expect(within(parameters).getByText('0.25')).toBeVisible()
+    expect(within(parameters).queryByText('9')).toBeNull()
+    const multipliers = screen.getByTestId('limit-cycle-multiplier-table')
+    expect(within(multipliers).getAllByText('−1')[0]).toBeVisible()
+    expect(within(multipliers).queryByText('0.1 + 0.2i')).toBeNull()
   })
 
   it('uses stored Floquet mode multipliers when mode vectors are present', async () => {
@@ -5643,11 +5603,11 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('limit-cycle-data-toggle'))
     await user.click(screen.getByTestId('limit-cycle-data-floquet-toggle'))
 
-    expect(screen.getByText('0.3000 + 0.0000i')).toBeVisible()
-    expect(screen.queryByText('-1.0000 + 0.0000i')).toBeNull()
+    const multipliers = screen.getByTestId('limit-cycle-multiplier-table')
+    expect(within(multipliers).getAllByText('0.3')[0]).toBeVisible()
+    expect(within(multipliers).queryByText('−1')).toBeNull()
   })
 
   it('shows and runs manual Floquet mode compute even before multipliers exist', async () => {
@@ -5701,13 +5661,10 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByRole('button', { name: 'Inspect' }))
-    await user.click(screen.getByTestId('action-limit-cycle-data-toggle'))
-    await user.click(screen.getByTestId('limit-cycle-data-floquet-toggle'))
-    expect(screen.getByText('Floquet multipliers not computed yet.')).toBeVisible()
+    expect(screen.queryByTestId('limit-cycle-data-floquet-toggle')).toBeNull()
+    expect(screen.getByTestId('limit-cycle-glance')).toBeVisible()
+    expect(screen.getByTestId('inspector-status-chip')).toHaveTextContent('unknown')
     expect(screen.getByTestId('limit-cycle-floquet-modes-compute')).not.toBeVisible()
-    await user.click(screen.getByTestId('inspector-workflow-back'))
-    await user.click(screen.getByRole('button', { name: 'Compute' }))
     await user.click(screen.getByTestId('action-limit-cycle-floquet-toggle'))
 
     const computeButton = screen.getByTestId('limit-cycle-floquet-modes-compute')
@@ -5801,7 +5758,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('limit-cycle-data-toggle'))
     await user.click(screen.getByTestId('limit-cycle-data-floquet-toggle'))
     expect(screen.getByTestId('limit-cycle-floquet-show-0')).toBeVisible()
     expect(screen.getByTestId('limit-cycle-floquet-opacity-0')).toHaveValue(100)
@@ -5863,7 +5819,7 @@ describe('InspectorDetailsPanel', () => {
     )
 
     const button = screen.getByTestId('limit-cycle-render-stored')
-    expect(button).toHaveTextContent('Render @ original parameters')
+    expect(button).toHaveAttribute('title', 'Render the stored cycle')
     await user.click(button)
     expect(onSetLimitCycleRenderTarget).toHaveBeenCalledWith(limitCycleId, {
       type: 'object',
@@ -5916,7 +5872,7 @@ describe('InspectorDetailsPanel', () => {
     )
 
     expect(screen.queryByTestId('limit-cycle-render-stored')).toBeNull()
-    expect(screen.getByText('Stored cycle')).toBeVisible()
+    expect(screen.queryByTestId('limit-cycle-render-target')).toBeNull()
   })
 
   it('branches to period-doubled limit cycles', async () => {
@@ -6983,13 +6939,10 @@ describe('InspectorDetailsPanel', () => {
     await user.click(screen.getByTestId('equilibrium-deflation-toggle'))
     expect(screen.getByText('Cycle two')).toBeVisible()
     expect(screen.getByText('Map equilibrium')).toBeVisible()
-    expect(
-      screen.getByText(/Every stored phase point is avoided/)
-    ).toBeVisible()
+    expect(screen.getByTitle(/every phase point/)).toBeVisible()
   })
 
-  it('hides equilibrium eigenvector controls for 1D systems', async () => {
-    const user = userEvent.setup()
+  it('hides equilibrium eigenvector controls for 1D systems', () => {
     const baseSystem = createSystem({
       name: 'Eigenvector_1D_System',
       config: {
@@ -7051,8 +7004,6 @@ describe('InspectorDetailsPanel', () => {
         onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
-
-    await user.click(screen.getByTestId('action-equilibrium-data-toggle'))
 
     expect(screen.queryByTestId('equilibrium-eigenvector-enabled')).toBeNull()
     expect(screen.queryByTestId('equilibrium-eigenvector-line-length')).toBeNull()
@@ -7127,7 +7078,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('action-equilibrium-data-toggle'))
     await user.click(screen.getByTestId('equilibrium-data-eigenpairs-toggle'))
     await user.click(screen.getByTestId('equilibrium-eigenvector-enabled'))
 
@@ -7232,7 +7182,6 @@ describe('InspectorDetailsPanel', () => {
     }
 
     render(<Wrapper />)
-    await user.click(screen.getByTestId('action-equilibrium-data-toggle'))
     await user.click(screen.getByTestId('equilibrium-data-eigenpairs-toggle'))
 
     fireEvent.change(screen.getByTestId('equilibrium-eigenvector-color-1'), {
@@ -7529,9 +7478,6 @@ describe('InspectorDetailsPanel', () => {
 
     await user.click(screen.getByTestId('action-equilibrium-manifold-toggle'))
 
-    expect(
-      screen.getByText('Map systems currently support 1D equilibrium manifolds only.')
-    ).toBeInTheDocument()
     const modeSelect = screen.getByTestId('equilibrium-manifold-mode') as HTMLSelectElement
     expect(modeSelect.value).toBe('curve_1d')
     expect(Array.from(modeSelect.options).map((option) => option.textContent)).toEqual([

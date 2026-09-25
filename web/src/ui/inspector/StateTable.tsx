@@ -1,3 +1,4 @@
+import { Icon } from '../Icon'
 import { adjustArray } from './stateTableValues'
 
 type StateTableProps = {
@@ -30,19 +31,23 @@ export function StateTable({
         <div className="state-table__actions">
           <button
             type="button"
-            className="inspector-inline-button"
+            className="icon-btn icon-btn--sm"
             onClick={onCopy}
             disabled={!hasVars}
+            aria-label="Copy"
+            title="Copy"
           >
-            Copy
+            <Icon name="copy" size={13} />
           </button>
           <button
             type="button"
-            className="inspector-inline-button"
+            className="icon-btn icon-btn--sm"
             onClick={onPaste}
             disabled={!hasVars}
+            aria-label="Paste"
+            title="Paste"
           >
-            Paste
+            <Icon name="download" size={13} />
           </button>
         </div>
       </div>
@@ -79,7 +84,7 @@ export function StateTable({
           </table>
         </div>
       ) : (
-        <p className="empty-state">{emptyMessage ?? 'No state variables defined yet.'}</p>
+        <p className="empty-state">{emptyMessage ?? '—'}</p>
       )}
     </div>
   )

@@ -1,13 +1,29 @@
+/* ---------------------------------------------------------------------------
+ * Entity header (pinned): name · status chip · icon tools, then a meta line.
+ * ------------------------------------------------------------------------- */
 .inspector-entity-header {
   position: sticky;
-  z-index: 4;
+  z-index: 6;
   top: 0;
-  padding: 2px 0 16px;
-  border: 0;
+  display: grid;
+  gap: 1px;
+  margin: 0 0 10px;
+  padding: 0 0 8px;
   border-bottom: 1px solid var(--panel-border);
-  border-radius: 0;
   background: var(--panel);
-  box-shadow: none;
+}
+
+.inspector-entity-header__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inspector-entity-header__name {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .inspector-entity-header__name-label {
@@ -20,38 +36,428 @@
   white-space: nowrap;
 }
 
-.inspector-entity-header input:not([type]) {
-  min-height: 32px;
-  padding: 3px 5px;
+.inspector-entity-header__name input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
   margin-left: -5px;
-  border-color: transparent;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 5px;
   background: transparent;
-  font-size: 17px;
+  color: var(--text);
+  font-size: 15px;
   font-weight: 600;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
 }
 
-.inspector-entity-header input:not([type]):hover {
+.inspector-entity-header__name input:hover {
   border-color: var(--panel-border);
 }
 
-.inspector-entity-header .inspector-meta {
-  font-size: 11px;
-  line-height: 1.4;
+.inspector-entity-header__name input:focus {
+  border-color: var(--accent);
+  background: var(--input-bg);
+  outline: none;
 }
 
-.inspector-actions {
+.inspector-entity-header__tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+}
+
+.inspector-entity-header__tool {
+  position: relative;
+}
+
+.inspector-entity-header__tool.is-highlighted:not(.is-active) {
+  color: var(--accent);
+}
+
+.inspector-entity-header__badge {
+  position: absolute;
+  top: -1px;
+  right: -2px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 3px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.inspector-entity-header__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.inspector-entity-header__meta > span {
+  white-space: nowrap;
+}
+
+.inspector-entity-header__meta > span + span::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--text-faint);
+}
+
+.inspector-swatch-icon {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+}
+
+.inspector-swatch-icon__dot {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--panel);
+  border-radius: 50%;
+}
+
+/* Popover for appearance / parameters / frozen variables. */
+.inspector-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% - 2px);
+  right: 0;
   display: grid;
-  gap: 18px;
-  margin-bottom: 20px;
-  padding: 2px 0;
-  border: 0;
-  border-radius: 0;
+  gap: 8px;
+  width: min(300px, 100%);
+  max-height: min(70vh, 540px);
+  padding: 8px 10px 10px;
+  overflow: auto;
+}
+
+.inspector-popover[hidden] {
+  display: none;
+}
+
+.inspector-popover__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.inspector-popover__body > .inspector-section {
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * At-a-glance block and inline data.
+ * ------------------------------------------------------------------------- */
+.inspector-glance {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0 0 12px;
+}
+
+.inspector-glance > .kv,
+.inspector-glance > .chip {
+  justify-self: start;
+}
+
+.inspector-glance > .kv {
+  justify-self: stretch;
+}
+
+.inspector-glance__group {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.inspector-value-list {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inspector-value-list li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.inspector-render-target,
+.inspector-selected-point {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.inspector-browser .inspector-render-target__reset {
+  height: 20px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.inspector-inline-section {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  margin: 0 0 12px;
+}
+
+.inspector-inline-section__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.inspector-data-details {
+  min-width: 0;
+  margin: 0 0 10px;
+}
+
+.inspector-data-details > summary {
+  justify-content: flex-start;
+  gap: 5px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.inspector-data-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.inspector-data-details > summary::before {
+  content: '▸';
+  font-size: 10px;
+}
+
+.inspector-data-details[open] > summary::before {
+  content: '▾';
+}
+
+.inspector-data-details > summary:hover {
+  color: var(--text-muted);
+}
+
+.inspector-data-details__body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 6px;
+}
+
+.inspector-table-scroll {
+  max-width: 100%;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+}
+
+.inspector-table-scroll .data-table th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+
+.inspector-split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  align-items: start;
+  gap: 8px;
+}
+
+.inspector-browser .inspector-plot--compact {
+  height: 200px;
+  min-height: 200px;
+}
+
+.data-pager {
+  display: grid;
+  gap: 2px;
+}
+
+.data-pager__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.data-pager__page {
+  padding: 0 6px;
+  color: var(--text-muted);
+}
+
+.data-pager__jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.inspector-browser .data-pager__jump input {
+  width: 56px;
+  height: 22px;
+  min-height: 0;
+  padding: 0 4px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.inspector-browser .data-pager__jump .btn {
+  height: 22px;
+  padding: 0 6px;
+}
+
+.data-pager__summary {
+  font-size: 11px;
+}
+
+.inspector-browser .inspector-error {
+  margin: 0;
+  color: var(--error);
+  font-size: 12px;
+}
+
+.inspector-frozen-table td {
+  vertical-align: middle;
+}
+
+.inspector-frozen-table td:nth-child(2) {
+  text-align: center;
+}
+
+.inspector-frozen-table .state-table__input {
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Action bar: primary buttons + ⋯ overflow menu.
+ * ------------------------------------------------------------------------- */
+.inspector-action-bar {
+  margin: 0 0 12px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.inspector-action-bar__more {
+  position: relative;
+  margin-left: auto;
+}
+
+.inspector-action-menu {
+  position: absolute;
+  z-index: 25;
+  top: calc(100% + 4px);
+  right: 0;
+  display: grid;
+  width: max-content;
+  min-width: 190px;
+  max-width: min(280px, 80vw);
+}
+
+.inspector-action-menu[hidden] {
+  display: none;
+}
+
+.inspector-action-menu [role='menuitem'] {
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.inspector-action-bar .chip {
+  height: 16px;
+}
+
+/* Shared button primitives inside the inspector (beat `.inspector-section button`). */
+.inspector-browser .icon-btn {
+  min-height: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
   background: transparent;
+  color: var(--text-muted);
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.inspector-browser .icon-btn:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--button-bg-hover);
+  color: var(--text);
+}
+
+.inspector-browser .icon-btn.is-active,
+.inspector-browser .icon-btn[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.inspector-browser .btn {
+  min-height: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  background: var(--button-bg);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.inspector-browser .btn:hover:not(:disabled) {
+  border-color: var(--panel-border-strong);
+  background: var(--button-bg-hover);
+  color: var(--text);
+}
+
+.inspector-browser .btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.inspector-browser .btn--primary:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+}
+
+.inspector-browser .btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.inspector-browser .btn.inspector-toggle-button[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--panel-border));
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .inspector-browser {
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .inspector-navigation-page {
@@ -128,175 +534,24 @@
   }
 }
 
-.inspector-actions__group h4 {
-  margin: 0;
-}
-
-.inspector-actions__group h4,
-.inspector-workflow-toolbar > div span {
-  color: var(--text-faint);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  text-transform: none;
-}
-
-.inspector-actions__group {
-  display: grid;
-  gap: 2px;
-}
-
-.inspector-actions__group h4 {
-  padding: 0;
-}
-
-.inspector-actions__toggle {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  min-height: 30px;
-  padding: 4px 8px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 14px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.inspector-actions__toggle:hover {
-  background: var(--button-bg-hover);
-  color: var(--text);
-}
-
-.inspector-actions__chevron {
-  display: inline-block;
-  font-size: 16px;
-  line-height: 1;
-}
-
-.inspector-actions__toggle[aria-expanded='true'] .inspector-actions__chevron {
-  transform: rotate(90deg);
-}
-
-.inspector-actions__items:not([hidden]) {
-  display: grid;
-  gap: 2px;
-}
-
-.inspector-action-row {
-  display: flex;
-  min-height: 36px;
-  padding: 7px 8px;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text);
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 140ms ease,
-    background 140ms ease;
-}
-
-.inspector-action-row:hover {
-  border-color: transparent;
-  background: var(--button-bg-hover);
-}
-
-.inspector-action-row:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.inspector-action-row:disabled:hover {
-  border-color: transparent;
-  background: transparent;
-}
-
-.inspector-action-row:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.inspector-action-row > span:first-child {
-  display: grid;
-  gap: 2px;
-}
-
-.inspector-action-row strong {
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.inspector-action-row__title {
+/* Workflow sub-view: back button + title, below the pinned header and glance. */
+.inspector-workflow-toolbar {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.inspector-action-row small {
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 450;
-  line-height: 1.35;
-}
-
-.inspector-action-row > span:last-child {
-  color: var(--text-faint);
-  font-size: 18px;
-}
-
-.inspector-workflow-toolbar {
-  position: sticky;
-  z-index: 3;
-  top: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
-  padding: 0 0 12px;
-  border: 0;
-  border-bottom: 1px solid var(--panel-border);
-  border-radius: 0;
-  background: var(--panel);
-  box-shadow: none;
-}
-
-.inspector-workflow-toolbar > button {
-  width: 32px;
-  min-height: 32px;
-  padding: 0;
-  border: 1px solid var(--panel-border);
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 18px;
-}
-
-.inspector-workflow-toolbar > div {
-  display: grid;
   min-width: 0;
-  gap: 1px;
+  margin: 0 0 10px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--panel-border);
 }
 
-.inspector-workflow-toolbar > div strong {
-  overflow: hidden;
-  font-size: 14px;
+.inspector-workflow-toolbar strong {
+  min-width: 0;
+  font-size: 13px;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.inspector-browser--workflow .inspector-group > :not(.inspector-entity-header):not(.inspector-workflow-toolbar):not(.inspector-disclosure[data-workflow-active='true']) {
+.inspector-browser--workflow .inspector-group > :not(.inspector-entity-header):not(.inspector-glance):not(.inspector-workflow-toolbar):not(.inspector-disclosure[data-workflow-active='true']) {
   display: none;
 }
 
@@ -333,14 +588,14 @@
 }
 
 .inspector-browser .inspector-disclosure__summary {
-  min-height: 36px;
-  font-size: 13px;
+  min-height: 30px;
+  font-size: 12px;
   font-weight: 550;
 }
 
 .inspector-browser .inspector-disclosure__content {
-  gap: 12px;
-  margin-top: 8px;
+  gap: 10px;
+  margin-top: 6px;
 }
 
 .inspector-browser .inspector-subheading,
@@ -349,6 +604,187 @@
   font-weight: 600;
   letter-spacing: 0;
   text-transform: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * Compute forms: 2-column grid for scalar fields, full-width everything else.
+ * ------------------------------------------------------------------------- */
+.inspector-browser .inspector-section input[type='text'],
+.inspector-browser .inspector-section input[type='number'],
+.inspector-browser .inspector-section input:not([type]),
+.inspector-browser .inspector-section select {
+  min-height: 28px;
+  padding: 3px 6px;
+  border-radius: 5px;
+}
+
+.inspector-browser .inspector-section input[type='color'] {
+  min-height: 28px;
+  padding: 2px 3px;
+  border-radius: 5px;
+}
+
+.inspector-browser .inspector-section label {
+  gap: 3px;
+  font-size: 11px;
+}
+
+.inspector-browser .inspector-section label:not(:has(> input[type='checkbox'])):not(:has(> input[type='radio'])) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.inspector-browser .inspector-section label > input:not([type='checkbox']):not([type='radio']),
+.inspector-browser .inspector-section label > select {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Grids that hold tables / plots must not grow past the panel. */
+.inspector-glance,
+.inspector-glance__group,
+.inspector-inline-section,
+.inspector-data-details__body,
+.inspector-popover,
+.inspector-empty,
+.inspector-browser .inspector-section {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.inspector-form-grid,
+.inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] .inspector-section,
+.inspector-advanced__body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+.inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] .inspector-section > *,
+.inspector-advanced__body > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.inspector-form-grid > label,
+.inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] .inspector-section > label:is(:has(> input[type='number']), :has(> input[type='text']), :has(> input:not([type])), :has(> select)),
+.inspector-advanced__body > label:is(:has(> input[type='number']), :has(> input[type='text']), :has(> input:not([type])), :has(> select)) {
+  grid-column: auto;
+  min-width: 0;
+}
+
+.inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] .inspector-section > label:has(> input[data-testid$='-name']),
+.inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] .inspector-section > label:has(> input[data-testid$='-expression']) {
+  grid-column: 1 / -1;
+}
+
+.inspector-form-grid input,
+.inspector-form-grid select {
+  width: 100%;
+  min-width: 0;
+}
+
+.inspector-advanced {
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.inspector-advanced > summary {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.inspector-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.inspector-advanced > summary::before {
+  content: '▸ ';
+}
+
+.inspector-advanced[open] > summary::before {
+  content: '▾ ';
+}
+
+.inspector-advanced__body {
+  padding-top: 6px;
+}
+
+.inspector-submit-row {
+  display: flex;
+  gap: 6px;
+}
+
+.inspector-submit-row > .inspector-primary-action {
+  flex: 1 1 auto;
+}
+
+.inspector-browser .inspector-primary-action {
+  width: 100%;
+}
+
+.inspector-render-controls {
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * No selection: equations and counts.
+ * ------------------------------------------------------------------------- */
+.inspector-empty {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inspector-equations {
+  display: grid;
+  gap: 3px;
+  margin: 0 0 6px;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  list-style: none;
+}
+
+.inspector-equations li {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.inspector-equations__lhs {
+  color: var(--text-muted);
+}
+
+.inspector-empty__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.inspector-empty__counts .num {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.inspector-browser .section-head .chip {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.inspector-eigenpair__index {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.invariant-eigenmodes__table tbody tr[role='button'] td:first-child {
+  font-family: inherit;
 }
 
 .system-editor {

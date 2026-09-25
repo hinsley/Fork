@@ -92,7 +92,7 @@ describe('AnalysisViewportInspector', () => {
     expect(incompatible).toBeChecked()
     expect(unavailable).toBeChecked()
     expect(orbit).toBeChecked()
-    const sources = screen.getByRole('heading', { name: 'Sources' }).parentElement!
+    const sources = screen.getByRole('heading', { name: /^Sources/ }).parentElement!
     expect(within(sources).getAllByRole('checkbox')).toEqual([incompatible, unavailable, orbit])
     fireEvent.click(unavailable)
     expect(screen.queryByRole('checkbox', { name: /missing-source/ })).toBeNull()

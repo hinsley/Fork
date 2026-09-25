@@ -175,7 +175,6 @@ import {
 import { SystemEditorPanel } from './SystemEditorPanel'
 import {
   InspectorDisclosure,
-  WorkflowActionList,
   WorkflowFocusProvider,
   WorkflowFocusToolbar,
 } from './selectionSession'
@@ -5039,65 +5038,23 @@ function useInspectorSelectionController({
     : null
 
   const workflowActions: WorkflowActionEntry[] = []
-  if (
-    showVisibilityToggle ||
-    selectionNode?.kind === 'object' ||
-    selectionNode?.kind === 'branch'
-  ) {
-    workflowActions.push({
-      id: 'appearance-toggle',
-      group: 'Configure',
-      label: 'Appearance',
-      description: 'Change visibility, color, line, and point styling.',
-    })
-  }
-  if (paramOverrideTarget && !isocline) {
-    workflowActions.push(
-      {
-        id: 'frozen-variables-toggle',
-        group: 'Configure',
-        label: 'Frozen Variables',
-        description: 'Choose variables to hold constant for this object.',
-        tag: subsystemSnapshotMismatch ? 'mismatch' : undefined,
-      },
-      {
-        id: 'parameters-toggle',
-        group: 'Configure',
-        label: 'Parameters',
-        description: 'Override the system parameter values for this object.',
-        tag: hasCustomParamOverride ? 'custom' : undefined,
-      }
-    )
-  } else if (paramOverrideTarget && isocline && equationContextUsed) {
-    workflowActions.push({
-      id: 'frozen-variables-toggle',
-      group: 'Configure',
-      label: 'Equation Forcing Context',
-      description: 'Freeze the forcing context before computing a static isocline.',
-      tag: subsystemSnapshotMismatch ? 'mismatch' : undefined,
-    })
-  }
   if (orbit) {
-    if (orbit.data.length > 0) {
-      workflowActions.push({
-        id: 'orbit-data-toggle',
-        group: 'Inspect',
-        label: 'Inspect data',
-        description: 'Inspect stored orbit samples, parameters, and run metadata.',
-      })
-    }
     workflowActions.push({
       id: 'orbit-run-toggle',
       group: 'Compute',
-      label: 'Run orbit',
+      label: 'Run',
+      title: 'Run orbit',
       description: 'Integrate or iterate this orbit from a chosen initial state.',
+      primary: true,
     })
     if (orbit.data.length >= 2) {
       workflowActions.push({
         id: 'oseledets-toggle',
         group: 'Compute',
-        label: 'Lyapunov analysis',
+        label: 'Lyapunov',
+        title: 'Lyapunov analysis',
         description: 'Compute exponents and covariant Lyapunov vectors.',
+        primary: true,
       })
     }
     if (!isDiscreteMap && orbit.data.length > 0) {
@@ -5118,27 +5075,23 @@ function useInspectorSelectionController({
     }
   }
   if (equilibrium) {
-    if (equilibrium.solution) {
-      workflowActions.push({
-        id: 'equilibrium-data-toggle',
-        group: 'Inspect',
-        label: 'Inspect data',
-        description: `Inspect the stored ${equilibriumLabelLower} solution and spectrum.`,
-      })
-    }
     workflowActions.push({
       id: 'equilibrium-solver-toggle',
       group: 'Compute',
-      label: `Solve ${equilibriumLabel}`,
+      label: 'Solve',
+      title: `Solve ${equilibriumLabelLower}`,
       description: 'Refine the state and compute its local spectrum.',
+      primary: true,
     })
     if (equilibrium.solution) {
       workflowActions.push(
         {
           id: 'equilibrium-continuation-toggle',
           group: 'Continuation',
-          label: `Continue ${equilibriumLabel}`,
+          label: 'Continue',
+          title: `Continue ${equilibriumLabelLower}`,
           description: 'Create a one-parameter continuation branch.',
+          primary: true,
         },
         {
           id: 'equilibrium-manifold-toggle',
@@ -5150,75 +5103,68 @@ function useInspectorSelectionController({
     }
   }
   if (forcedPeriodicResponse) {
-    if (forcedPeriodicResponse.solution) {
-      workflowActions.push({
-        id: 'forced-response-data-toggle',
-        group: 'Inspect',
-        label: 'Inspect data',
-        description: 'Inspect the strobe state, response period, trajectory, and multipliers.',
-      })
-    }
     workflowActions.push({
       id: 'forced-response-solver-toggle',
       group: 'Compute',
-      label: 'Solve forced response',
+      label: 'Solve',
+      title: 'Solve forced response',
       description: 'Correct a phase-locked response on the declared stroboscopic section.',
+      primary: true,
     })
     if (forcedPeriodicResponse.solution) {
       workflowActions.push({
         id: 'forced-response-continuation-toggle',
         group: 'Continuation',
-        label: 'Continue forced response',
+        label: 'Continue',
+        title: 'Continue forced response',
         description: 'Create a one-parameter stroboscopic continuation branch.',
+        primary: true,
       })
     }
   }
   if (limitCycle) {
-    workflowActions.push({
-      id: 'limit-cycle-data-toggle',
-      group: 'Inspect',
-      label: 'Inspect data',
-      description: 'Inspect the cycle profile, parameters, and Floquet data.',
-    })
     if (!isDiscreteMap) {
       workflowActions.push({
         id: 'limit-cycle-floquet-toggle',
         group: 'Compute',
-        label: 'Compute Floquet modes',
+        label: 'Floquet modes',
+        title: 'Compute Floquet modes',
         description: 'Compute the cycle multipliers and mode vectors.',
+        primary: true,
       })
     }
-    if (limitCycleDisplayMultipliers.length > 0) {
-      workflowActions.push({
-        id: 'limit-cycle-manifold-toggle',
-        group: 'Manifolds',
-        label: 'Limit-cycle manifold',
-        description: 'Create a 2D invariant manifold from a Floquet eigenspace.',
-      })
-    }
+    workflowActions.push({
+      id: 'limit-cycle-manifold-toggle',
+      group: 'Manifolds',
+      label: 'Limit-cycle manifold',
+      description: isDiscreteMap
+        ? 'Flow systems only.'
+        : limitCycleDisplayMultipliers.length > 0
+          ? 'Create a 2D invariant manifold from a Floquet eigenspace.'
+          : 'Requires Floquet multipliers. Continue the cycle first.',
+      disabled: limitCycleDisplayMultipliers.length === 0 || isDiscreteMap,
+    })
   }
   if (isocline) {
     workflowActions.push({
       id: 'isocline-toggle',
       group: 'Compute',
-      label: 'Configure and compute isocline',
+      label: 'Configure',
+      title: 'Isocline',
       description: 'Choose active axes, frozen values, and recompute the geometry.',
+      primary: true,
     })
   }
   if (invariantMeasure) {
     workflowActions.push({
-      id: 'invariant-measure-data-toggle',
-      group: 'Inspect',
-      label: 'Inspect data',
-      description: 'Inspect the source grid, method settings, and convergence diagnostics.',
-    })
-    workflowActions.push({
       id: 'invariant-measure-eigenmodes-toggle',
       group: 'Compute',
-      label: 'Compute eigenmodes',
+      label: 'Eigenmodes',
+      title: 'Compute eigenmodes',
       disabled: Boolean(invariantEigenmodeUnavailableReason),
       description: invariantEigenmodeUnavailableReason ??
         'Compute nontrivial modes of the stored transfer operator.',
+      primary: true,
     })
   }
   // Point-dependent branch actions render as buttons in the branch point panel
@@ -5244,16 +5190,20 @@ function useInspectorSelectionController({
     workflowActions.push({
       id: 'manifold-extend-toggle',
       group: 'Manifolds',
-      label: 'Extend invariant manifold',
+      label: 'Extend',
+      title: 'Extend invariant manifold',
       description: 'Continue the selected manifold beyond its current endpoint.',
+      primary: true,
     })
   }
   if (canExtendBranch) {
     workflowActions.push({
       id: 'branch-extend-toggle',
       group: 'Continuation',
-      label: 'Extend branch',
+      label: 'Extend',
+      title: 'Extend branch',
       description: 'Continue the selected branch from an existing endpoint.',
+      primary: true,
     })
   }
   if (showBranchContinueFromPoint) {
@@ -8657,7 +8607,6 @@ function useInspectorSelectionController({
     InspectorMetrics,
     PlotlyViewport,
     StateTable,
-    WorkflowActionList,
     WorkflowFocusToolbar,
     activeFrozenVariableRef,
     analysis,
@@ -9070,6 +9019,8 @@ function useInspectorSelectionController({
     workflowActions,
     workflowFocus,
     writeClipboardText,
+    hasCustomParamOverride,
+    limitCycleRenderPoint,
   }
 
 }

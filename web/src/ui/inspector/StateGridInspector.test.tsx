@@ -37,7 +37,7 @@ function fixture() {
 }
 
 describe('StateGridInspector', () => {
-  it('identifies the State Space scene as the equal-weight State Grid preview', () => {
+  it('shows bounds, resolution and workload at a glance', () => {
     const initial = fixture()
     render(
       <StateGridInspector
@@ -50,15 +50,14 @@ describe('StateGridInspector', () => {
       />
     )
 
-    expect(screen.getByTestId('state-grid-summary')).toHaveTextContent(
-      'State Space scene'
-    )
-    expect(screen.getByTestId('state-grid-summary')).toHaveTextContent(
-      'all 12 cell centers with equal weight'
-    )
+    expect(screen.getByTestId('state-grid-summary')).toHaveTextContent('x[−1, 1] × 3')
+    expect(screen.getByTestId('state-grid-summary')).toHaveTextContent('y[−1, 1] × 4')
+    expect(screen.getByTestId('state-grid-total-points')).toHaveTextContent('12')
+    expect(screen.getByTestId('inspector-name')).toHaveValue('State_Grid_1')
+    expect(screen.getByTestId('inspector-status-chip')).toHaveTextContent('flow')
   })
 
-  it('uses the shared nested configure actions for parameters and frozen variables', () => {
+  it('opens appearance, parameters and frozen variables from the header', () => {
     const initial = fixture()
     const onUpdateObjectParams = vi.fn()
     const onUpdateObjectFrozenVariables = vi.fn()
@@ -85,18 +84,21 @@ describe('StateGridInspector', () => {
     expect(screen.getByTestId('action-state-grid-entropy-toggle')).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId('action-appearance-toggle'))
+    expect(screen.getByTestId('inspector-appearance-popover')).toBeVisible()
+    expect(screen.queryByTestId('inspector-workflow-focus')).toBeNull()
     fireEvent.change(screen.getByTestId('inspector-color-opacity'), {
       target: { value: '42' },
     })
     expect(onUpdateRender).toHaveBeenCalledWith(initial.nodeId, { opacity: 0.42 })
 
-    fireEvent.click(screen.getByTestId('inspector-workflow-back'))
     fireEvent.click(screen.getByTestId('action-frozen-variables-toggle'))
+    expect(screen.getByTestId('inspector-appearance-popover')).not.toBeVisible()
+    expect(screen.getByTestId('inspector-frozen-variables-popover')).toBeVisible()
     fireEvent.click(screen.getByTestId('frozen-variable-toggle-x'))
     expect(onUpdateObjectFrozenVariables).toHaveBeenCalledWith(initial.nodeId, { x: 0 })
   })
 
-  it('keeps State Grid setup in Configure and gates invariant measure by dynamics support', () => {
+  it('keeps State Grid setup in the overflow and gates invariant measure by dynamics support', () => {
     const initial = fixture()
     const mapSystem = {
       ...initial.system,
@@ -119,16 +121,18 @@ describe('StateGridInspector', () => {
       </WorkflowFocusProvider>
     )
 
-    const configureGroup = screen.getByText('Configure').closest('.inspector-actions__group')
+    const menu = screen.getByTestId('inspector-actions-menu')
     expect(
-      Array.from(configureGroup?.querySelectorAll('[data-testid^="action-"]') ?? []).map((button) =>
+      Array.from(menu.querySelectorAll('[data-testid^="action-"]')).map((button) =>
         button.getAttribute('data-testid')
       )
-    ).toEqual([
-      'action-appearance-toggle',
-      'action-frozen-variables-toggle',
-      'action-parameters-toggle',
-      'action-state-grid-setup-toggle',
+    ).toEqual(['action-state-grid-setup-toggle'])
+    const primary = Array.from(
+      screen.getByTestId('inspector-actions').querySelectorAll('.btn[data-testid^="action-"]')
+    ).map((button) => button.getAttribute('data-testid'))
+    expect(primary).toEqual([
+      'action-state-grid-transfer-toggle',
+      'action-state-grid-entropy-toggle',
     ])
     expect(screen.getByTestId('action-state-grid-transfer-toggle')).toBeInTheDocument()
     unmount()
@@ -179,7 +183,8 @@ describe('StateGridInspector', () => {
     )
     const disabledAction = screen.getByTestId('action-state-grid-transfer-toggle')
     expect(disabledAction).toBeDisabled()
-    expect(disabledAction).toHaveTextContent(
+    expect(disabledAction).toHaveAttribute(
+      'title',
       'Invariant measures are not implemented for non-autonomous flows yet.'
     )
     fireEvent.click(disabledAction)
@@ -440,11 +445,11 @@ describe('StateGridInspector', () => {
       />
     )
 
-    expect(screen.getByText('Iterations')).toBeInTheDocument()
-    expect(screen.queryByText('Step size')).not.toBeInTheDocument()
-    expect(screen.getByTestId('state-grid-workload')).toHaveTextContent(
-      'Map/tangent iterations'
+    expect(screen.getByTestId('state-grid-entropy-steps').closest('label')).toHaveTextContent(
+      'Iterations'
     )
+    expect(screen.queryByTestId('state-grid-entropy-dt')).not.toBeInTheDocument()
+    expect(screen.getByText('Work')).toHaveAttribute('title', 'Map/tangent iterations')
     fireEvent.click(screen.getByTestId('state-grid-run-expansion-entropy'))
     await waitFor(() => expect(onCompute).toHaveBeenCalled())
   })
@@ -494,7 +499,7 @@ describe('StateGridInspector', () => {
 
     fireEvent.click(screen.getByTestId('action-state-grid-transfer-toggle'))
     expect(screen.getByTestId('state-grid-invariant-measure-workflow')).toHaveTextContent(
-      'Create a separate invariant-measure object'
+      'Create invariant measure'
     )
     expect(screen.getByTestId('state-grid-transfer-starting-point-0')).toHaveValue(0)
     expect(screen.getByTestId('state-grid-transfer-starting-point-1')).toHaveValue(0)
@@ -562,9 +567,7 @@ describe('StateGridInspector', () => {
     )
 
     fireEvent.click(screen.getByTestId('action-state-grid-transfer-toggle'))
-    expect(screen.getByTestId('state-grid-invariant-measure-workflow')).toHaveTextContent(
-      'sampled flow map'
-    )
+    expect(screen.getByTitle(/sampled flow map/)).toBeInTheDocument()
     expect(screen.getByTestId('state-grid-transfer-time-step')).toHaveValue(1)
     expect(screen.getByTestId('state-grid-transfer-integration-step')).toHaveValue(0.01)
     fireEvent.change(screen.getByTestId('state-grid-transfer-time-step'), {
@@ -630,7 +633,7 @@ describe('StateGridInspector', () => {
       />
     )
 
-    expect(screen.getByTestId('state-grid-final-estimate')).toHaveTextContent('0.200000')
+    expect(screen.getByTestId('state-grid-final-estimate')).toHaveTextContent('0.2')
     expect(screen.getByTestId('state-grid-expansion-entropy-result')).toHaveTextContent('10 / 12')
     expect(screen.getByTestId('state-grid-expansion-entropy-plot')).toBeInTheDocument()
   })

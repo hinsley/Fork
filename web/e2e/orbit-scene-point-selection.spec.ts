@@ -23,7 +23,6 @@ test('clicking a scene orbit point jumps Orbit Data preview to the matching row'
   await harness.selectTreeNode('Orbit_1')
   await harness.runOrbit()
 
-  await harness.openDisclosure('orbit-data-toggle')
   await page.getByTestId('orbit-data-preview-toggle').click()
   await expect(page.getByText(/Selected point #/)).toHaveCount(0)
 
@@ -63,7 +62,7 @@ test('clicking a scene orbit point jumps Orbit Data preview to the matching row'
     if (!Array.isArray(selectedTrace.customdata)) return false
     return selectedTrace.customdata.includes(selectedPointIndex)
   }, targetPointIndex)
-  const selectedRow = page.locator('.orbit-preview__table-grid tbody tr.is-selected')
+  const selectedRow = page.locator('[aria-label="Orbit data preview"] tbody tr.is-selected')
   await expect(selectedRow).toHaveCount(1)
   await expect(selectedRow.locator('td').first()).toHaveText(String(targetPointIndex))
 

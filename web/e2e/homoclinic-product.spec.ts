@@ -102,6 +102,8 @@ test('creates, renders, reloads, and extends a homoclinic branch with HBK diagno
   await page.getByTestId('branch-extend-submit').click()
   await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByText(/homoclinic curve · 2 points/i)).toBeVisible()
+  // The header stays pinned during workflows; wait for the root action bar.
+  await expect(page.getByTestId('inspector-actions')).toBeVisible()
 
   const extendedDiagnostics = await selectHomoclinicEvent(
     page,

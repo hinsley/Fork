@@ -13,10 +13,30 @@ function escapeRegex(value: string) {
 export async function revealInspectorAction(page: Page, actionId: string): Promise<Locator> {
   const action = page.getByTestId(actionId)
   await action.waitFor({ state: 'attached' })
-  const toggle = action.locator('..').locator('..').getByRole('button', { expanded: false })
-  if (await toggle.count()) await toggle.click()
+  // Header popovers (appearance, parameters, frozen variables) float above the action bar.
+  if (await page.locator('.inspector-popover:not([hidden])').count()) {
+    await page.keyboard.press('Escape')
+  }
+  if (!(await action.isVisible())) {
+    // Secondary actions live in the inspector's `⋯` overflow menu.
+    const more = page.getByTestId('inspector-actions-more')
+    if ((await more.count()) && (await more.getAttribute('aria-expanded')) !== 'true') {
+      await more.click()
+    }
+  }
   await action.waitFor({ state: 'visible' })
   return action
+}
+
+/** Opens a `<details>` block by its summary test id (no-op when already open). */
+export async function expandDetails(page: Page, summaryTestId: string) {
+  const summary = page.getByTestId(summaryTestId)
+  await summary.waitFor({ state: 'visible' })
+  const details = summary.locator('..')
+  if (!(await details.evaluate((node) => (node as HTMLDetailsElement).open))) {
+    await summary.click()
+  }
+  await expect(details).toHaveJSProperty('open', true)
 }
 
 export async function clickInspectorAction(page: Page, actionId: string) {

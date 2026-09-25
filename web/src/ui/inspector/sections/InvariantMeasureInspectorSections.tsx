@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
-import { isSubsystemSnapshotCompatible } from '../../../system/subsystemGateway'
 import type { InvariantMeasureObject } from '../../../system/types'
 import {
   DEFAULT_EIGENMODE_COUNT,
@@ -10,221 +9,114 @@ import {
   maxSupportedEigenmodeCount,
   spectralGapStatusLabel,
 } from '../../../system/invariantMeasureEigenmodes'
+import {
+  fmt,
+  fmtComplex,
+  fmtCount,
+  fmtEigenvalues,
+  fmtPercent,
+  fmtRelativeTime,
+  fmtSci,
+} from '../../../utils/format'
+import { computeInvariantMeasureStats } from './invariantMeasureStats'
+import { InlineSection, KeyValues } from '../InspectorChrome'
 
 export function InvariantMeasureInspectorSections({
   scope,
 }: {
   scope: InspectorSelectionController
 }) {
-  const {
-    formatScientific,
-    invariantMeasure,
-    system,
-  } = scope
+  const { invariantMeasure, system } = scope
 
   if (!invariantMeasure) return null
 
   const result = invariantMeasure.result
-  const source = system.objects[invariantMeasure.sourceStateGridId]
-  const sourceIndex = system.index.objects[invariantMeasure.sourceStateGridId]
-  const sourceExists =
-    source?.type === 'state_grid' ||
-    (!source && sourceIndex?.objectType === 'state_grid')
-  const sourceName =
-    source?.type === 'state_grid'
-      ? source.name
-      : !source && sourceIndex?.objectType === 'state_grid'
-        ? sourceIndex.name
-        : invariantMeasure.sourceStateGridName
-  const occupiedCells = result.stationaryDistribution.filter((mass) => mass > 0).length
-  const ambientBoxCount = result.ambientBoxCount ?? result.axes.reduce(
-    (total, axis) => total * axis.resolution,
-    1
-  )
-  const resolution = result.axes.map((axis) => axis.resolution).join(' × ')
-  const dominantEigenvalue = result.dominantEigenvalue ?? 1
-  const massPreserving = Math.abs(dominantEigenvalue - 1) <= 1e-8
-  const totalModeMass = result.stationaryDistribution.reduce((sum, mass) => sum + mass, 0)
-  const squaredModeMass = result.stationaryDistribution.reduce(
-    (sum, mass) => sum + mass * mass,
-    0
-  )
-  const participationSupport = squaredModeMass > 0 ? 1 / squaredModeMass : 0
-  const peakCellMass = result.stationaryDistribution.reduce(
-    (peak, mass) => Math.max(peak, mass),
-    0
-  )
-  const stationaryConverged =
-    totalModeMass > 0 && result.residual <= result.settings.tolerance
-  const snapshotCompatible =
-    !result.subsystemSnapshot ||
-    isSubsystemSnapshotCompatible(system.config, result.subsystemSnapshot)
+  const stats = computeInvariantMeasureStats(invariantMeasure, system)
+  const startingPoint = result.settings.startingPoint
+  const transition =
+    result.dynamicsType === 'flow'
+      ? result.settings.integrationStep !== undefined
+        ? `fixed-time sampled flow map, t ${fmt(result.settings.timeStep ?? 0)} (dt ≤ ${fmt(result.settings.integrationStep)})`
+        : `legacy single-step flow map, t ${fmt(result.settings.timeStep ?? 0)}`
+      : `${result.settings.iterations} map iteration${result.settings.iterations === 1 ? '' : 's'}`
 
   return (
     <InvariantMeasureEigenmodeAnalysis
       scope={scope}
       invariantMeasure={invariantMeasure}
     >
-      <div className="inspector-section" data-testid="invariant-measure-data-section">
-        <div className="inspector-metrics">
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">Source State Grid</span>
-            <strong className="inspector-metrics__value" data-testid="invariant-measure-source">
-              {sourceName}
-            </strong>
-          </div>
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">Occupied cells</span>
-            <strong
-              className="inspector-metrics__value"
-              data-testid="invariant-measure-occupied-cells"
-            >
-              {occupiedCells.toLocaleString()} / {result.totalBoxes.toLocaleString()}
-            </strong>
-          </div>
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">Reachable cover</span>
-            <span className="inspector-metrics__value" data-testid="invariant-measure-cover-size">
-              {result.totalBoxes.toLocaleString()} / {ambientBoxCount.toLocaleString()}
-            </span>
-          </div>
-          {result.coverGrowthIterations !== undefined ? (
-            <div className="inspector-metrics__row">
-              <span className="inspector-metrics__label">Cover growth passes</span>
-              <span className="inspector-metrics__value">
-                {result.coverGrowthIterations.toLocaleString()}
-              </span>
-            </div>
-          ) : null}
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">Retained sample mass</span>
-            <span className="inspector-metrics__value">
-              {(100 * result.retainedMass).toPrecision(6)}%
-            </span>
-          </div>
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">Participation support</span>
-            <span
-              className="inspector-metrics__value"
-              data-testid="invariant-measure-effective-support"
-            >
-              {participationSupport.toLocaleString(undefined, { maximumFractionDigits: 3 })} cells
-            </span>
-          </div>
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">Peak cell mass</span>
-            <span className="inspector-metrics__value">
-              {(100 * peakCellMass).toPrecision(6)}%
-            </span>
-          </div>
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">Excluded source cells</span>
-            <span className="inspector-metrics__value">
-              {result.zeroSurvivorSources.toLocaleString()}
-            </span>
-          </div>
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">Leading eigenvalue</span>
-            <span
-              className="inspector-metrics__value"
-              data-testid="invariant-measure-leading-eigenvalue"
-            >
-              {formatScientific(dominantEigenvalue)}
-            </span>
-          </div>
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">Stationary residual</span>
-            <span className="inspector-metrics__value" data-testid="invariant-measure-residual">
-              {formatScientific(result.residual)}
-            </span>
-          </div>
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">Stationary iterations</span>
-            <span className="inspector-metrics__value">
-              {result.stationaryIterations.toLocaleString()}
-            </span>
-          </div>
-          <div className="inspector-metrics__row">
-            <span className="inspector-metrics__label">Stationary solve</span>
-            <span
-              className="inspector-metrics__value"
-              data-testid="invariant-measure-convergence-status"
-            >
-              {stationaryConverged
-                ? 'Converged'
-                : totalModeMass > 0
-                  ? 'Iteration limit reached'
-                  : 'No surviving mode'}
-            </span>
-          </div>
-        </div>
-
-
-        <h4 className="inspector-subheading">Grid snapshot</h4>
-        <p className="inspector-help">
-          {result.axes.map((axis) => `${axis.variableName} ∈ [${axis.min}, ${axis.max}]`).join('; ')}
-          {resolution ? ` · resolution ${resolution}` : ''}
-        </p>
-        <p className="inspector-help">
-          {result.settings.samplesPerCell} deterministic samples per cell,{' '}
-          {result.dynamicsType === 'flow'
-            ? result.settings.integrationStep !== undefined
-              ? `${result.settings.timeStep ?? 0} flow-map time per transition with integration steps no larger than ${result.settings.integrationStep}`
-              : `${result.settings.timeStep ?? 0} legacy single-step flow transition`
-            : `${result.settings.iterations} map iteration${result.settings.iterations === 1 ? '' : 's'} per transition`}, tolerance{' '}
-          {formatScientific(result.settings.tolerance)}. Computed {result.computedAt}.
-        </p>
-        {result.settings.startingPoint ? (
-          <p className="inspector-help">
-            Starting point: [{result.axes.map((axis) =>
-              result.settings.startingPoint?.[axis.variableName]
-            ).join(', ')}]. Its containing ambient cell was the only initial cover cell.
-          </p>
-        ) : null}
-        {result.dynamicsType === 'flow' ? (
-          <p className="inspector-help">
-            This result uses the fixed-time sampled flow map for the autonomous system; it is not a
-            Poincaré return-map measure.
-          </p>
-        ) : null}
-        <p className="inspector-help">
-          Marker opacity encodes positive mode mass linearly. Zero-mass cells are omitted.
-          The stored result is a snapshot and does not change when its source grid is edited.
-        </p>
-        <p className="inspector-help">
-          Participation support is 1 / Σp². It is the number of equally weighted cells that would
-          have the same concentration as this normalized mode.
-        </p>
-        {massPreserving ? (
-          <p className="inspector-help">
-            The leading eigenvalue is approximately one, so this result is mass-preserving on the
-            grown cover.
-          </p>
-        ) : (
+      <InlineSection title="Data" testId="invariant-measure-data-section">
+        {!stats.massPreserving ? (
           <p className="inspector-error" data-testid="invariant-measure-leakage-warning">
-            This finite-box mode is not mass-preserving: its leading eigenvalue is{' '}
-            {formatScientific(dominantEigenvalue)}. Retained sample mass is{' '}
-            {(100 * result.retainedMass).toPrecision(6)}%.
+            Not mass-preserving: λ₀ = {fmt(stats.dominantEigenvalue)}, retained{' '}
+            {fmtPercent(result.retainedMass)}.
           </p>
-        )}
-        {!sourceExists ? (
-          <p className="inspector-error">
-            The source State Grid is no longer available. This stored measure remains renderable.
-          </p>
+        ) : null}
+        {!stats.sourceExists ? (
+          <p className="inspector-error">Source State Grid deleted.</p>
         ) : null}
         {result.axes.length > 3 ? (
-          <p className="inspector-error">
-            Measures with more than three active grid axes are stored but not projected into a
-            Scene.
-          </p>
+          <p className="inspector-error">More than 3 active axes — not shown in Scenes.</p>
         ) : null}
-        {!snapshotCompatible ? (
-          <p className="inspector-error">
-            The stored subsystem snapshot no longer matches this system, so Fork does not render
-            this measure in a Scene.
-          </p>
+        {!stats.snapshotCompatible ? (
+          <p className="inspector-error">Subsystem snapshot mismatch — not shown in Scenes.</p>
         ) : null}
-      </div>
+        <KeyValues
+          rows={[
+            {
+              label: 'Source',
+              value: stats.sourceName,
+              testId: 'invariant-measure-source',
+            },
+            {
+              label: 'Solve',
+              value: stats.stationaryConverged
+                ? 'Converged'
+                : stats.totalModeMass > 0
+                  ? 'Iteration limit reached'
+                  : 'No surviving mode',
+              testId: 'invariant-measure-convergence-status',
+            },
+            {
+              label: 'Iterations',
+              value: fmtCount(result.stationaryIterations),
+              title: 'Stationary iterations',
+            },
+            result.coverGrowthIterations !== undefined
+              ? { label: 'Cover passes', value: fmtCount(result.coverGrowthIterations) }
+              : null,
+            { label: 'Peak mass', value: fmtPercent(stats.peakCellMass), title: 'Peak cell mass' },
+            {
+              label: 'Excluded',
+              value: fmtCount(result.zeroSurvivorSources),
+              title: 'Excluded source cells',
+            },
+            ...result.axes.map((axis) => ({
+              label: axis.variableName,
+              value: `[${fmt(axis.min)}, ${fmt(axis.max)}] × ${fmtCount(axis.resolution)}`,
+            })),
+            {
+              label: 'Samples',
+              value: `${fmtCount(result.settings.samplesPerCell)} / cell`,
+            },
+            { label: 'Transition', value: transition, title: transition },
+            { label: 'Tolerance', value: fmtSci(result.settings.tolerance) },
+            startingPoint
+              ? {
+                  label: 'Start',
+                  value: `[${result.axes
+                    .map((axis) => startingPoint[axis.variableName])
+                    .join(', ')}]`,
+                  title: 'Initial cover cell contains this point',
+                }
+              : null,
+            {
+              label: 'Computed',
+              value: <span title={result.computedAt}>{fmtRelativeTime(result.computedAt)}</span>,
+            },
+          ]}
+        />
+      </InlineSection>
     </InvariantMeasureEigenmodeAnalysis>
   )
 }
@@ -242,8 +134,6 @@ function InvariantMeasureEigenmodeAnalysis({
     InspectorDisclosure,
     invariantEigenmodeUnavailableReason,
     PlotlyViewport,
-    formatComplexValue,
-    formatScientific,
     onComputeInvariantMeasureEigenmodes,
     onUpdateInvariantMeasureObject,
     plotlyTheme,
@@ -407,181 +297,179 @@ function InvariantMeasureEigenmodeAnalysis({
       testId="invariant-measure-eigenmodes-toggle"
       actionOnly
     >
-      <p className="inspector-help">
-        Compute nontrivial modes of the stored transfer operator. Complex conjugate pairs stay together.
-      </p>
-      <label>
-        Nontrivial modes
-        <input
-          type="number"
-          min={1}
-          max={Math.max(1, maxSupported)}
-          step={1}
-          value={modeCount}
-          onChange={(event) => {
-            setModeCount(Number(event.target.value))
-            setError(null)
-          }}
-          data-testid="invariant-eigenmode-count"
-        />
-      </label>
-      {requestedCount > 12 ? (
-        <p className="inspector-help" data-testid="invariant-eigenmode-deep-warning">
-          Deep requests use more sparse products and can persist large mode vectors. Fork caps the
-          request at {maxSupported.toLocaleString()} modes for this cover.
-        </p>
-      ) : null}
-      <button
-        type="button"
-        className="inspector-primary-action"
-        onClick={() => void runAnalysis()}
-        disabled={running || Boolean(invariantEigenmodeUnavailableReason) || !requestValid}
-        data-testid="invariant-eigenmode-compute"
-      >
-        {running ? 'Computing modes…' : `Compute ${requestedCount} modes`}
-      </button>
-      {invariantEigenmodeUnavailableReason ? (
-        <p className="inspector-error">{invariantEigenmodeUnavailableReason}</p>
-      ) : null}
-      {error ? <p className="inspector-error">{error}</p> : null}
-    </InspectorDisclosure>
-    <InspectorDisclosure
-      key={`${selectionKey}-invariant-measure-data`}
-      title="Inspect data"
-      testId="invariant-measure-data-toggle"
-      actionOnly
-    >
-      {children}
-      <section className="invariant-eigenmodes" data-testid="invariant-measure-eigenmodes">
-      <h4 className="inspector-subheading">Sparse eigenmodes</h4>
-      {storedAnalysis && !analysis ? (
-        <p className="inspector-error">
-          The cached modes refer to an older transfer-operator snapshot and are not displayed.
-        </p>
-      ) : null}
-
-      {analysis ? (
-        <>
-          <div className="inspector-metrics invariant-eigenmodes__summary">
-            <div className="inspector-metrics__row">
-              <span className="inspector-metrics__label">Stationary mode</span>
-              <span className="inspector-metrics__value">
-                λ = {formatScientific(result.dominantEigenvalue ?? 1)}
-              </span>
-            </div>
-            <div className="inspector-metrics__row">
-              <span className="inspector-metrics__label">Computed subset</span>
-              <span className="inspector-metrics__value" data-testid="invariant-eigenmode-subset">
-                {analysis.computedModes} modes ({analysis.representedEigenpairs} eigenpairs)
-              </span>
-            </div>
-            <div className="inspector-metrics__row">
-              <span className="inspector-metrics__label">Spectral gap</span>
-              <span className="inspector-metrics__value" data-testid="invariant-spectral-gap">
-                {analysis.spectralGapStatus === 'available' && analysis.spectralGap !== undefined
-                  ? formatScientific(analysis.spectralGap)
-                  : spectralGapStatusLabel(analysis.spectralGapStatus)}
-              </span>
-            </div>
-          </div>
-          <p className="inspector-help">
-            Modes are sorted by |λ|. Residuals are ‖Pv − λv‖₂. The gap is 1 − |λ₂| only when the
-            stored Markov operator has a simple stationary mode, is irreducible and aperiodic, and
-            both required modes converged.
+      <div className="inspector-section">
+        <label title="Complex conjugate pairs stay together">
+          Nontrivial modes
+          <input
+            type="number"
+            min={1}
+            max={Math.max(1, maxSupported)}
+            step={1}
+            value={modeCount}
+            onChange={(event) => {
+              setModeCount(Number(event.target.value))
+              setError(null)
+            }}
+            data-testid="invariant-eigenmode-count"
+          />
+        </label>
+        {requestedCount > 12 ? (
+          <p className="field-warning" data-testid="invariant-eigenmode-deep-warning">
+            Deep request — max {fmtCount(maxSupported)} modes for this cover.
           </p>
-          {spectrum ? (
-            <div className="inspector-plot">
-              <PlotlyViewport
-                plotId={`invariant-measure-spectrum-${selectedNodeId}`}
-                data={spectrum.data}
-                layout={spectrum.layout}
-                testId="invariant-measure-spectrum-plot"
-                onPointClick={(point) => {
-                  const rank = Number(point.customdata)
-                  if (Number.isInteger(rank)) updateView({ modeRank: rank })
-                }}
-              />
-            </div>
-          ) : null}
-          <div className="invariant-eigenmodes__list" role="list">
+        ) : null}
+        {invariantEigenmodeUnavailableReason ? (
+          <p className="inspector-error">{invariantEigenmodeUnavailableReason}</p>
+        ) : null}
+        {error ? <p className="inspector-error">{error}</p> : null}
+        <button
+          type="button"
+          className="inspector-primary-action"
+          onClick={() => void runAnalysis()}
+          disabled={running || Boolean(invariantEigenmodeUnavailableReason) || !requestValid}
+          data-testid="invariant-eigenmode-compute"
+        >
+          {running ? 'Computing modes…' : `Compute ${requestedCount} modes`}
+        </button>
+      </div>
+    </InspectorDisclosure>
+    {children}
+    {storedAnalysis && !analysis ? (
+      <p className="inspector-error">Cached modes refer to an older operator snapshot.</p>
+    ) : null}
+    {analysis ? (
+      <InlineSection title="Eigenmodes" testId="invariant-measure-eigenmodes">
+        <KeyValues
+          rows={[
+            {
+              label: 'Computed',
+              value: `${analysis.computedModes} modes · ${analysis.representedEigenpairs} pairs`,
+              testId: 'invariant-eigenmode-subset',
+            },
+            analysis.spectralGapStatus !== 'available'
+              ? {
+                  label: 'Gap',
+                  value: spectralGapStatusLabel(analysis.spectralGapStatus),
+                  title: 'Spectral gap 1 − |λ₂|',
+                }
+              : null,
+          ]}
+        />
+        {spectrum ? (
+          <div className="inspector-plot">
+            <PlotlyViewport
+              plotId={`invariant-measure-spectrum-${selectedNodeId}`}
+              data={spectrum.data}
+              layout={spectrum.layout}
+              testId="invariant-measure-spectrum-plot"
+              onPointClick={(point) => {
+                const rank = Number(point.customdata)
+                if (Number.isInteger(rank)) updateView({ modeRank: rank })
+              }}
+            />
+          </div>
+        ) : null}
+        <div className="inspector-table-scroll">
+        <table className="data-table invariant-eigenmodes__table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>λ</th>
+              <th>|λ|</th>
+            </tr>
+          </thead>
+          <tbody>
             {analysis.modes.map((mode) => (
-              <button
+              <tr
                 key={mode.rank}
-                type="button"
-                className={mode.rank === selectedMode?.rank ? 'is-selected' : ''}
+                role="button"
+                tabIndex={0}
+                className={mode.rank === selectedMode?.rank ? 'is-selected' : undefined}
                 onClick={() => updateView({ modeRank: mode.rank })}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    updateView({ modeRank: mode.rank })
+                  }
+                }}
+                title={`${eigenmodeInterpretationLabel(mode.interpretation)} · residual ${fmtSci(
+                  mode.ritzResidual
+                )}${mode.converged ? '' : ' · not converged'}`}
                 data-testid={`invariant-eigenmode-${mode.rank}`}
               >
-                <span>Mode {mode.rank}{mode.conjugatePair ? ' pair' : ''}</span>
-                <strong>{formatComplexValue({ re: mode.eigenvalueRe, im: mode.eigenvalueIm })}</strong>
-                <span>|λ| {formatScientific(mode.modulus)}</span>
-                <span>residual {formatScientific(mode.ritzResidual)}</span>
-                <span>{mode.converged ? 'Converged' : 'Not converged'}</span>
-                <span>{eigenmodeInterpretationLabel(mode.interpretation)}</span>
-              </button>
+                <td className={mode.converged ? undefined : 'faint'}>
+                  Mode {mode.rank}
+                  {mode.conjugatePair ? ' pair' : ''}
+                </td>
+                <td>
+                  {mode.conjugatePair
+                    ? fmtEigenvalues(
+                        [
+                          { re: mode.eigenvalueRe, im: mode.eigenvalueIm },
+                          { re: mode.eigenvalueRe, im: -mode.eigenvalueIm },
+                        ],
+                        { digits: 4 }
+                      )[0]
+                    : fmtComplex({ re: mode.eigenvalueRe, im: mode.eigenvalueIm }, { digits: 4 })}
+                </td>
+                <td>{fmt(mode.modulus, { digits: 4 })}</td>
+              </tr>
             ))}
-          </div>
-          {selectedMode ? (
-            <div className="invariant-eigenmodes__view" data-testid="invariant-eigenmode-view-controls">
-              <h4 className="inspector-subheading">State-space mode {selectedMode.rank}</h4>
-              <p className="inspector-help">
-                This right eigenvector describes density relaxation under the column-stochastic
-                operator. It is signed and is not a probability density. The overlay uses the same
-                marker shape, size, and Appearance color as the invariant measure. Opacity shows
-                mode magnitude, and hover values retain sign. Left observable modes are not
-                computed in this analysis.
-              </p>
-              {selectedMode.conjugatePair ? (
-                <>
-                  <div className="segmented-control" role="group" aria-label="Complex mode component">
-                    {(['real', 'imaginary', 'phase'] as const).map((component) => (
-                      <button
-                        key={component}
-                        type="button"
-                        className={invariantMeasure.eigenmodeView?.component === component ? 'is-active' : ''}
-                        onClick={() => updateView({ component })}
-                        data-testid={`invariant-eigenmode-component-${component}`}
-                      >
-                        {component === 'real' ? 'Real' : component === 'imaginary' ? 'Imaginary' : 'Phase'}
-                      </button>
-                    ))}
-                  </div>
-                  {invariantMeasure.eigenmodeView?.component === 'phase' ? (
-                    <label>
-                      Phase {((invariantMeasure.eigenmodeView?.phase ?? 0) / Math.PI).toFixed(2)}π
-                      <input
-                        type="range"
-                        min={0}
-                        max={2 * Math.PI}
-                        step={Math.PI / 36}
-                        value={invariantMeasure.eigenmodeView?.phase ?? 0}
-                        onChange={(event) => updateView({ phase: Number(event.target.value) })}
-                        data-testid="invariant-eigenmode-phase"
-                      />
-                    </label>
-                  ) : null}
-                </>
-              ) : null}
+          </tbody>
+        </table>
+        </div>
+        {selectedMode ? (
+          <div className="invariant-eigenmodes__view" data-testid="invariant-eigenmode-view-controls">
+            <div className="section-head">
+              <span
+                title="Signed right eigenvector (density relaxation), not a probability density. Opacity shows magnitude."
+              >
+                Overlay · mode {selectedMode.rank}
+              </span>
               <button
                 type="button"
+                className="btn btn--ghost"
                 onClick={() => updateView({ modeRank: null })}
                 data-testid="invariant-eigenmode-hide"
               >
-                Hide mode overlay
+                Hide
               </button>
             </div>
-          ) : null}
-          <p className="inspector-help">
-            Increasing the count reuses this stored sparse operator and saved modes as a warm
-            start, but restarts and reorthogonalizes the Arnoldi solve. The Krylov basis is bounded
-            to {analysis.maxSubspaceDimension} vectors and is not persisted.
-          </p>
-        </>
-      ) : (
-        <p className="empty-state">No sparse eigenmode analysis stored yet.</p>
-      )}
-    </section>
-    </InspectorDisclosure>
+            {selectedMode.conjugatePair ? (
+              <>
+                <div className="segmented-control" role="group" aria-label="Complex mode component">
+                  {(['real', 'imaginary', 'phase'] as const).map((component) => (
+                    <button
+                      key={component}
+                      type="button"
+                      className={invariantMeasure.eigenmodeView?.component === component ? 'is-active' : ''}
+                      onClick={() => updateView({ component })}
+                      data-testid={`invariant-eigenmode-component-${component}`}
+                    >
+                      {component === 'real' ? 'Real' : component === 'imaginary' ? 'Imaginary' : 'Phase'}
+                    </button>
+                  ))}
+                </div>
+                {invariantMeasure.eigenmodeView?.component === 'phase' ? (
+                  <label>
+                    Phase {((invariantMeasure.eigenmodeView?.phase ?? 0) / Math.PI).toFixed(2)}π
+                    <input
+                      type="range"
+                      min={0}
+                      max={2 * Math.PI}
+                      step={Math.PI / 36}
+                      value={invariantMeasure.eigenmodeView?.phase ?? 0}
+                      onChange={(event) => updateView({ phase: Number(event.target.value) })}
+                      data-testid="invariant-eigenmode-phase"
+                    />
+                  </label>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </InlineSection>
+    ) : null}
     </>
   )
 }
