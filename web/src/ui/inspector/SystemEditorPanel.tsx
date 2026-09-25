@@ -231,6 +231,8 @@ type SystemEditorPanelProps = {
   actions: SystemEditorActions
   /** Optional element (e.g. a dialog header) that receives the Import/Copy buttons. */
   toolsContainer?: HTMLElement | null
+  /** Reports whether the draft differs from the applied config. */
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 export function SystemEditorPanel(props: SystemEditorPanelProps) {
@@ -255,8 +257,18 @@ function ParameterMenu({
       if (ref.current && event.target instanceof Node && ref.current.contains(event.target)) return
       setOpen(false)
     }
+    // Capture phase: Esc closes this menu before it can close the surrounding dialog.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setOpen(false)
+    }
     window.addEventListener('pointerdown', close)
-    return () => window.removeEventListener('pointerdown', close)
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('keydown', onKeyDown, true)
+    }
   }, [open])
   return (
     <span className="system-editor__menu" ref={ref}>
@@ -287,7 +299,12 @@ function ParameterMenu({
   )
 }
 
-function SystemEditorSession({ config, actions, toolsContainer }: SystemEditorPanelProps) {
+function SystemEditorSession({
+  config,
+  actions,
+  toolsContainer,
+  onDirtyChange,
+}: SystemEditorPanelProps) {
   const [state, dispatch] = useReducer(systemEditorReducer, config, createState)
   const [referenceOpen, setReferenceOpen] = useState(false)
   const { draft } = state
@@ -295,6 +312,10 @@ function SystemEditorSession({ config, actions, toolsContainer }: SystemEditorPa
   const validation = useMemo(() => validateSystemConfig(systemConfig), [systemConfig])
   const dirty = useMemo(() => !systemConfigsEqual(systemConfig, config), [config, systemConfig])
   const showErrors = state.touched || dirty || !validation.valid
+
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
 
   const setDraft = (update: SetStateAction<SystemDraft>) =>
     dispatch({ type: 'set-draft', update })
@@ -462,7 +483,6 @@ function SystemEditorSession({ config, actions, toolsContainer }: SystemEditorPa
                 />
               </label>
             )}
-            <span className="faint">Used by stroboscopic analysis; not inferred.</span>
             {showErrors && validation.errors.periodicForcing ? <span className="field-error" data-testid="system-periodic-forcing-error">{validation.errors.periodicForcing}</span> : null}
           </div>
         ) : null}

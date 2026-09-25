@@ -88,4 +88,25 @@ describe('App shell', () => {
       )
     )
   })
+
+  it('gives every palette row an icon and closes open viewport menus', async () => {
+    const base = createSystem({ name: 'Palette_Icons' })
+    const { system } = addScene(base, 'Phase_Portrait')
+    await renderApp({ system })
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('viewport-add'))
+    })
+    expect(screen.getByTestId('viewport-create-scene')).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+    })
+    const palette = screen.getByTestId('command-palette')
+    await waitFor(() => expect(screen.queryByTestId('viewport-create-scene')).toBeNull())
+    const rows = within(palette).getAllByRole('option')
+    const sceneRow = rows.find((row) => row.textContent?.includes('Phase_Portrait'))
+    expect(sceneRow?.querySelector('svg.ui-icon')).not.toBeNull()
+    expect(rows.every((row) => row.querySelector('svg.ui-icon'))).toBe(true)
+  })
 })

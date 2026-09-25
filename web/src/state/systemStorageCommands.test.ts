@@ -130,6 +130,37 @@ describe('system storage commands', () => {
     expect(await store.list()).toHaveLength(1)
   })
 
+  it('closes the open system when it is deleted', async () => {
+    const open = createSystem({ name: 'Open_Delete' })
+    const other = createSystem({ name: 'Other_Delete' })
+    const store = new MemorySystemStore()
+    await store.save(open)
+    await store.save(other)
+    const harness = setupStorageCommands({ store, initialSystem: open })
+
+    await harness.commands.deleteSystem(other.id)
+    expect(harness.getState().currentSystem?.id).toBe(open.id)
+
+    await harness.commands.deleteSystem(open.id)
+    expect(harness.getState().currentSystem).toBeNull()
+    expect(harness.getState().latestSystem).toBeNull()
+    expect(harness.getState().systems.map((entry) => entry.id)).toEqual([])
+  })
+
+  it('rejects creating a system whose name is already taken', async () => {
+    const existing = createSystem({ name: 'Lorenz' })
+    const store = new MemorySystemStore()
+    await store.save(existing)
+    const harness = setupStorageCommands({ store })
+
+    await harness.commands.createSystem(' lorenz ')
+
+    expect(harness.getState().error).toBe('"Lorenz" already exists.')
+    expect(harness.getState().currentSystem).toBeNull()
+    expect(harness.getState().busy).toBe(false)
+    expect(await store.list()).toHaveLength(1)
+  })
+
   it('exports archives through the injected browser download effect', async () => {
     const system = createSystem({ name: 'Export_Command' })
     const store = new MemorySystemStore()

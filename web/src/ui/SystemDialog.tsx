@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useRef } from 'react'
 import type { SystemSummary } from '../system/types'
 import { Icon } from './Icon'
 import { SystemLibrary, type SystemLibraryActions } from './SystemLibrary'
+import { useModalDialog } from './useModalDialog'
 import './dialogs.css'
 
 type SystemDialogProps = SystemLibraryActions & {
@@ -12,14 +13,9 @@ type SystemDialogProps = SystemLibraryActions & {
 }
 
 export function SystemDialog({ open, onClose, ...library }: SystemDialogProps) {
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  // The library focuses its first row itself; the hook adds Esc, backdrop and focus restore.
+  const backdropProps = useModalDialog(open, dialogRef, onClose)
 
   if (!open) return null
 
@@ -29,11 +25,9 @@ export function SystemDialog({ open, onClose, ...library }: SystemDialogProps) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="systems-title"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
+      {...backdropProps}
     >
-      <div className="dialog dialog--workspace sys-dialog">
+      <div className="dialog dialog--workspace sys-dialog" ref={dialogRef}>
         <header className="dialog__header sys-dialog__header">
           <h2 id="systems-title">Systems</h2>
           <button className="dialog__close" onClick={onClose} aria-label="Close dialog">

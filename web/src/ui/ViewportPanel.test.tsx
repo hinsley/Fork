@@ -1049,6 +1049,37 @@ describe('ViewportPanel view state wiring', () => {
     expect(onUpdateSystem).toHaveBeenCalledTimes(1)
   })
 
+  it('reverts an empty or invalid parameter draft on blur', async () => {
+    const user = userEvent.setup()
+    const scene = addScene(createSystem({ name: 'Param_Strip_Blur' }), 'Scene')
+    const system = scene.system
+    system.config.paramNames = ['mu', 'nu']
+    system.config.params = [0.2, 1]
+    const onUpdateSystem = vi.fn()
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onUpdateSystem={onUpdateSystem}
+      />
+    )
+
+    const mu = screen.getByTestId('param-strip-value-0')
+    await user.clear(mu)
+    await user.tab()
+    expect(mu).toHaveValue('0.2')
+    // Brief flash marks the rejected edit, then clears.
+    expect(mu.closest('label')).toHaveClass('is-invalid')
+
+    await user.click(mu)
+    await user.keyboard('1/0')
+    await user.tab()
+    expect(mu).toHaveValue('0.2')
+    expect(onUpdateSystem).not.toHaveBeenCalled()
+  })
+
   it('hides the parameter strip when the system has no parameters', () => {
     const scene = addScene(createSystem({ name: 'No_Params' }), 'Scene')
     scene.system.config.paramNames = []
@@ -2188,6 +2219,69 @@ describe('ViewportPanel view state wiring', () => {
     expect(hasFunctionCurve).toBe(false)
   })
 
+  it('omits the relative-mass axis key from 1D map layouts without a state grid', () => {
+    const config: SystemConfig = {
+      name: 'Logistic',
+      equations: ['r * x * (1 - x)'],
+      params: [3.9],
+      paramNames: ['r'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    const scene = addScene(createSystem({ name: 'Logistic_System', config }), 'Cobweb')
+
+    renderPanel(scene.system)
+
+    const layout = plotlyCalls.filter((entry) => entry.plotId === scene.nodeId).at(-1)?.layout
+    expect(layout).toBeTruthy()
+    // Plotly treats a present-but-undefined `yaxis2` as an axis and crashes ("reading 'anchor'").
+    expect(Object.keys(layout ?? {})).not.toContain('yaxis2')
+    expect(screen.getByTestId(`viewport-axes-${scene.nodeId}`)).toHaveTextContent('xₙ → xₙ₊₁')
+  })
+
+  it('frames 1D map state grids with the cobweb diagonal and names the mass axis', () => {
+    const config: SystemConfig = {
+      name: 'Logistic grid',
+      equations: ['r * x * (1 - x)'],
+      params: [3.9],
+      paramNames: ['r'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: config.name, config })
+    const grid = addObject(system, {
+      type: 'state_grid',
+      name: 'Grid_1D',
+      systemName: config.name,
+      axes: [{ variableName: 'x', min: 0, max: 1, resolution: 4 }],
+      sampling: { type: 'cartesian_cell_centers' },
+      analysis: {
+        type: 'expansion_entropy',
+        steps: 1,
+        dt: 0.01,
+        checkpointStride: 1,
+        stabilizationStride: 1,
+      },
+      createdAt: nowIso(),
+    } as StateGridObject)
+    system = grid.system
+    const scene = addScene(system, 'Grid cobweb')
+
+    renderPanel(scene.system)
+
+    const call = plotlyCalls.filter((entry) => entry.plotId === scene.nodeId).at(-1)
+    expect(call?.layout?.yaxis2).toMatchObject({ overlaying: 'y', side: 'right' })
+    const diagonal = call?.data.find(
+      (trace) => 'line' in trace && (trace.line as { dash?: string } | undefined)?.dash === 'dot'
+    ) as { x?: number[] } | undefined
+    expect(diagonal?.x).toEqual([0, 1])
+    expect(screen.getByTestId(`viewport-axes-${scene.nodeId}`)).toHaveTextContent(
+      'xₙ → xₙ₊₁ · mass'
+    )
+  })
+
   it('keeps cobweb suffixes inside MathJax-wrapped variable labels', () => {
     const config: SystemConfig = {
       name: 'Map4DMath',
@@ -2394,7 +2488,10 @@ describe('ViewportPanel view state wiring', () => {
     )
     expect(props).toBeTruthy()
     expect(props?.layout?.scene?.camera).toBeUndefined()
-    expect(props?.layout?.scene?.aspectmode).toBe('cube')
+    expect(props?.layout?.scene?.aspectmode).toBe('manual')
+    const ratio = props?.layout?.scene?.aspectratio
+    expect(ratio?.x).toBe(ratio?.y)
+    expect(ratio?.y).toBe(ratio?.z)
     expect(props?.viewRevision).toBe(2)
     expect(props?.initialView).toMatchObject({
       'scene.camera': {

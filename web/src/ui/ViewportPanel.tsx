@@ -99,6 +99,7 @@ import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/p
 import { appendMathJaxWrappedSuffix } from '../utils/mathText'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 import { clampMenuX, clampMenuY } from './contextMenu'
+import { DISMISS_MENUS_EVENT } from './dismissMenus'
 import {
   insertPeriodicLineBreaks,
   normalizePeriodicVariables,
@@ -1447,6 +1448,22 @@ function collectMap1DRange(system: VisibleObjectSource, axisIndex: number): [num
       if (typeof value !== 'number' || !Number.isFinite(value)) continue
       min = Math.min(min, value)
       max = Math.max(max, value)
+      continue
+    }
+    const grid =
+      object.type === 'state_grid'
+        ? object
+        : object.type === 'invariant_measure'
+          ? system.objects[object.sourceStateGridId]
+          : null
+    if (grid?.type === 'state_grid') {
+      // A state grid's box spans the cobweb domain, so the map graph and
+      // diagonal are drawn alongside its relative-mass overlay.
+      const variableName = system.config.varNames[safeAxisIndex]
+      const axis = grid.axes.find((entry) => entry.variableName === variableName)
+      if (!axis || !Number.isFinite(axis.min) || !Number.isFinite(axis.max)) continue
+      min = Math.min(min, axis.min, axis.max)
+      max = Math.max(max, axis.min, axis.max)
     }
   }
 
@@ -7076,11 +7093,17 @@ function buildDiagramTraces(
   }
 }
 
+/** Narrowest width / height at which the default 3D camera shows every tick label. */
+const SCENE_3D_MIN_ASPECT = 1
+const SCENE_3D_CUBE_SCALE = 0.8
+
 function buildSceneBaseLayout(
   config: SystemConfig,
   axisVariables: SceneAxisVariables | null | undefined,
   plotlyTheme: PlotlyThemeTokens,
-  showStateGridMeasureAxis = false
+  showStateGridMeasureAxis = false,
+  /** width / height of the plot, for 3D scenes (see below). */
+  plotAspect = 1
 ): Partial<Layout> {
   const base = {
     autosize: true,
@@ -7102,9 +7125,16 @@ function buildSceneBaseLayout(
   const zLabel = resolvedAxisVariables[2] ?? config.varNames[2] ?? 'z'
 
   if (projection?.kind === 'phase_3d') {
+    // gl3d fits the cube to the scene's height, so in a tall, narrow tile the
+    // tick labels and axis titles fall off the sides. Keep the scene square
+    // (centred vertically) there, and give it the whole tile (no 2D margins).
+    const squareHeight = Math.min(1, Math.max(0.2, plotAspect / SCENE_3D_MIN_ASPECT))
+    const inset = (1 - squareHeight) / 2
     return {
       ...base,
+      margin: { l: 0, r: 0, t: 0, b: 0 },
       scene: {
+        domain: { x: [0, 1], y: [inset, 1 - inset] },
         xaxis: {
           title: { text: xLabel, font: { color: plotlyTheme.text } },
           tickfont: { color: plotlyTheme.text },
@@ -7121,7 +7151,10 @@ function buildSceneBaseLayout(
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         bgcolor: plotlyTheme.background,
-        aspectmode: 'cube',
+        // A cube like `aspectmode: 'cube'`, scaled down so the default camera
+        // frames it with its tick labels instead of clipping the near corners.
+        aspectmode: 'manual',
+        aspectratio: { x: SCENE_3D_CUBE_SCALE, y: SCENE_3D_CUBE_SCALE, z: SCENE_3D_CUBE_SCALE },
       },
     }
   }
@@ -7132,14 +7165,15 @@ function buildSceneBaseLayout(
     return {
       ...base,
       margin: showStateGridMeasureAxis
-        ? { l: 40, r: 58, t: 52, b: 40 }
+        ? { l: 40, r: 58, t: 28, b: 40 }
         : base.margin,
       showlegend: showStateGridMeasureAxis,
+      // Hug the plot's top edge; Plotly grows the top margin if the legend wraps.
       legend: {
         font: { color: plotlyTheme.text },
         orientation: 'h',
         x: 0,
-        y: 1.16,
+        y: 1,
         xanchor: 'left',
         yanchor: 'bottom',
       },
@@ -7153,17 +7187,21 @@ function buildSceneBaseLayout(
         tickfont: { color: plotlyTheme.text },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
-      yaxis2: showStateGridMeasureAxis
+      // Plotly treats any present `yaxisN` key as an axis to lay out, so an
+      // `undefined` value crashes supplyDefaults ("reading 'anchor'").
+      ...(showStateGridMeasureAxis
         ? {
-            title: { text: 'Relative mass', font: { color: plotlyTheme.text } },
-            tickfont: { color: plotlyTheme.text },
-            overlaying: 'y',
-            side: 'right',
-            range: [0, 1.05],
-            showgrid: false,
-            zerolinecolor: 'rgba(120,120,120,0.3)',
+            yaxis2: {
+              title: { text: 'Relative mass', font: { color: plotlyTheme.text } },
+              tickfont: { color: plotlyTheme.text },
+              overlaying: 'y' as const,
+              side: 'right' as const,
+              range: [0, 1.05],
+              showgrid: false,
+              zerolinecolor: 'rgba(120,120,120,0.3)',
+            },
           }
-        : undefined,
+        : {}),
     }
   }
 
@@ -7597,13 +7635,19 @@ function ViewportTile({
       (!diagram.xAxis || !diagram.yAxis)
   )
 
+  // Bucketed so resizing a 3D tile re-lays out Plotly only on visible changes.
+  const scene3dAspect =
+    sceneProjection?.kind === 'phase_3d' && plotSize && plotSize.height > 0
+      ? Math.round(Math.min(SCENE_3D_MIN_ASPECT, plotSize.width / plotSize.height) * 20) / 20
+      : 1
   const layout = useMemo(() => {
     if (scene) {
       return buildSceneBaseLayout(
         systemConfig,
         scene.axisVariables,
         plotlyTheme,
-        showStateGridMeasureAxis
+        showStateGridMeasureAxis,
+        scene3dAspect
       )
     }
     if (diagram) {
@@ -7619,6 +7663,7 @@ function ViewportTile({
     plotlyTheme,
     scene,
     showInlineDiagramAxes,
+    scene3dAspect,
     showStateGridMeasureAxis,
     systemConfig,
     systemScenes,
@@ -7716,7 +7761,9 @@ function ViewportTile({
       if (!selection) return '—'
       if (selection.length === 1) {
         const name = selection[0]
-        return systemConfig.type === 'map' ? `${name}ₙ → ${name}ₙ₊₁` : `t · ${name}`
+        if (systemConfig.type !== 'map') return `t · ${name}`
+        // State grids / invariant measures add a relative-mass axis on the right.
+        return showStateGridMeasureAxis ? `${name}ₙ → ${name}ₙ₊₁ · mass` : `${name}ₙ → ${name}ₙ₊₁`
       }
       return selection.join(' · ')
     }
@@ -7730,7 +7777,7 @@ function ViewportTile({
       return labels.join(' · ')
     }
     return ''
-  }, [analysis, diagram, scene, systemConfig.type, systemConfig.varNames])
+  }, [analysis, diagram, scene, showStateGridMeasureAxis, systemConfig.type, systemConfig.varNames])
 
   const itemCount = useMemo(() => {
     if (scene) {
@@ -7773,11 +7820,14 @@ function ViewportTile({
         setAxisPickerOpen(false)
       }
     }
+    const handleDismiss = () => setAxisPickerOpen(false)
     window.addEventListener('pointerdown', handlePointerDown)
     window.addEventListener('keydown', handleKeyDown, true)
+    window.addEventListener(DISMISS_MENUS_EVENT, handleDismiss)
     return () => {
       window.removeEventListener('pointerdown', handlePointerDown)
       window.removeEventListener('keydown', handleKeyDown, true)
+      window.removeEventListener(DISMISS_MENUS_EVENT, handleDismiss)
     }
   }, [axisPickerOpen])
 
@@ -8327,10 +8377,12 @@ export function ViewportPanel({
     window.addEventListener('pointerdown', handlePointerDown)
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('blur', handleBlur)
+    window.addEventListener(DISMISS_MENUS_EVENT, handleBlur)
     return () => {
       window.removeEventListener('pointerdown', handlePointerDown)
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('blur', handleBlur)
+      window.removeEventListener(DISMISS_MENUS_EVENT, handleBlur)
     }
   }, [createMenu, nodeContextMenu])
 

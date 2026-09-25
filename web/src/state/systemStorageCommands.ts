@@ -102,7 +102,15 @@ export function createSystemStorageCommands({
     }
     dispatch({ type: 'SET_BUSY', busy: true })
     try {
-      const system = createSystem({ name: normalizeDisplayName(name) })
+      const normalized = normalizeDisplayName(name)
+      const existing = (await store.list()).find(
+        (entry) => entry.name.toLowerCase() === normalized.toLowerCase()
+      )
+      if (existing) {
+        dispatch({ type: 'SET_ERROR', error: `"${existing.name}" already exists.` })
+        return
+      }
+      const system = createSystem({ name: normalized })
       dispatch({ type: 'SET_SYSTEM', system })
       await store.save(system)
       await refreshSystems()
@@ -168,6 +176,8 @@ export function createSystemStorageCommands({
     dispatch({ type: 'SET_BUSY', busy: true })
     try {
       await store.remove(id)
+      // Never leave the workspace on a system that no longer exists.
+      if (getCurrentSystem()?.id === id) closeSystem()
     } catch (err) {
       reportError(err, 'Delete failed')
     } finally {

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { SystemConfig } from '../system/types'
 import { parseConstantExpression } from '../system/constantExpression'
 import { validateSystemConfig } from '../state/systemValidation'
@@ -59,17 +59,36 @@ function ParameterField({
   const shown = draft ?? current
   const readOnly = !onUpdateSystem
   const cancelBlurCommit = useRef(false)
+  // Brief red flash after an invalid draft is reverted on blur.
+  const [flash, setFlash] = useState(false)
+  useEffect(() => {
+    if (!flash) return
+    const timer = window.setTimeout(() => setFlash(false), 900)
+    return () => window.clearTimeout(timer)
+  }, [flash])
 
   const reset = () => {
     setDraft(null)
     setError(null)
   }
 
-  const commit = () => {
+  /**
+   * Enter keeps an invalid draft (red, reason in the tooltip) so it can be fixed;
+   * blur reverts it to the committed value so the field never disagrees with the system.
+   */
+  const commit = (source: 'enter' | 'blur') => {
     if (draft === null) return
+    const reject = (message: string) => {
+      if (source === 'blur') {
+        reset()
+        setFlash(true)
+        return
+      }
+      setError(message)
+    }
     const parsed = parseConstantExpression(draft)
     if (parsed === null || !Number.isFinite(parsed)) {
-      setError('Enter a finite number or constant expression (e.g. tau / 4).')
+      reject('Enter a finite number or constant expression (e.g. tau / 4).')
       return
     }
     if (parsed === value) {
@@ -82,7 +101,7 @@ function ParameterField({
     }
     const validation = validateSystemConfig(next)
     if (!validation.valid) {
-      setError(firstValidationMessage(validation.errors) ?? 'Invalid parameter value.')
+      reject(firstValidationMessage(validation.errors) ?? 'Invalid parameter value.')
       return
     }
     reset()
@@ -91,7 +110,7 @@ function ParameterField({
 
   return (
     <label
-      className={`param-strip__item${error ? ' is-invalid' : ''}${draft !== null ? ' is-dirty' : ''}`}
+      className={`param-strip__item${error || flash ? ' is-invalid' : ''}${draft !== null ? ' is-dirty' : ''}`}
       title={error ?? `${name} = ${current}`}
     >
       <span className="param-strip__name">{name}</span>
@@ -107,6 +126,7 @@ function ParameterField({
         onChange={(event) => {
           setDraft(event.target.value)
           setError(null)
+          setFlash(false)
         }}
         onFocus={(event) => event.target.select()}
         onBlur={() => {
@@ -114,12 +134,12 @@ function ParameterField({
             cancelBlurCommit.current = false
             return
           }
-          commit()
+          commit('blur')
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
             event.preventDefault()
-            commit()
+            commit('enter')
           } else if (event.key === 'Escape') {
             event.preventDefault()
             event.stopPropagation()

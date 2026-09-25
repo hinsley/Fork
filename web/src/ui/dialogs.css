@@ -750,6 +750,10 @@
   font-size: 0.76rem;
 }
 
+.system-editor__string-feedback.field-error {
+  color: var(--error);
+}
+
 /* Footer */
 .system-editor__footer {
   display: flex;

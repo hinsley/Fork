@@ -121,6 +121,12 @@ export function SystemStringTools({
                   setInput(event.target.value)
                   setError(null)
                 }}
+                onKeyDown={(event) => {
+                  // Esc closes the importer first; a second Esc closes the dialog.
+                  if (event.key !== 'Escape') return
+                  event.preventDefault()
+                  closeImport()
+                }}
                 placeholder={"x' = sigma * (y - x)\ny' = x - y\nsigma = 10"}
                 spellCheck={false}
                 autoFocus
