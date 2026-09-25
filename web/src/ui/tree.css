@@ -155,9 +155,13 @@
   stroke-width: 2;
 }
 
+/*
+ * Space priority: the name gives way first (down to ~6 characters, or its own
+ * length when shorter), then the data summary; chips and badges never shrink.
+ */
 .tree-node__label {
   flex: 0 1 auto;
-  min-width: 2.5em;
+  min-width: calc(var(--tree-name-min, 6ch) + 4px);
   padding: 0 2px;
   overflow: hidden;
   border: 0;
@@ -202,6 +206,37 @@
   user-select: text;
 }
 
+/* Rejected rename (name taken): red outline + a short shake, restarted per attempt. */
+.tree-node__rename--invalid {
+  border-color: var(--danger);
+  outline: 1px solid var(--danger);
+}
+
+.tree-node__rename--shake-0 {
+  animation: tree-rename-shake-0 240ms ease;
+}
+
+.tree-node__rename--shake-1 {
+  animation: tree-rename-shake-1 240ms ease;
+}
+
+@keyframes tree-rename-shake-0 {
+  20%, 60% { transform: translateX(-3px); }
+  40%, 80% { transform: translateX(3px); }
+}
+
+@keyframes tree-rename-shake-1 {
+  20%, 60% { transform: translateX(-3px); }
+  40%, 80% { transform: translateX(3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-node__rename--shake-0,
+  .tree-node__rename--shake-1 {
+    animation: none;
+  }
+}
+
 .tree-node__flag {
   display: inline-grid;
   flex: 0 0 auto;
@@ -219,9 +254,8 @@
 }
 
 /*
- * Right-aligned summary. Its parts are row flex items (display: contents) so the
- * data text truncates first (ellipsis), then the name; chips and badges keep
- * their size and are never clipped.
+ * Right-aligned summary. Its parts are row flex items (display: contents);
+ * chips and badges keep their size and are never clipped.
  */
 .tree-node__summary {
   display: contents;
@@ -233,13 +267,43 @@
   min-width: 2px;
 }
 
+/*
+ * The data text truncates with an ellipsis but never below ~6 characters: once
+ * the slot is narrower than that, the text wraps onto a clipped second line
+ * behind a zero-width first item, so the slot shows nothing instead of "T 3…".
+ */
 .tree-node__data {
-  flex: 0 1000 auto;
+  display: flex;
+  /*
+   * Near-zero shrink: while the name can still give way the data keeps its
+   * full width (any fractional share would already trigger the ellipsis);
+   * once the name is at its minimum the data absorbs the rest.
+   */
+  flex: 0 0.000001 auto;
+  flex-wrap: wrap;
+  align-items: center;
   min-width: 0;
+  height: 20px;
   overflow: hidden;
   color: var(--text-muted);
   font-size: 0.72rem;
+}
+
+.tree-node__data::before {
+  content: '';
+  flex: 0 0 0;
+  height: 20px;
+}
+
+/* A small basis so line breaking only kicks in below the readable minimum. */
+.tree-node__data-text {
+  flex: 1 1 6.5ch;
+  min-width: 6.5ch;
+  overflow: hidden;
+  line-height: 20px;
+  text-align: right;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tree-node__data--pending {

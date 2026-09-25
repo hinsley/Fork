@@ -1053,3 +1053,32 @@
     padding: 12px 16px;
   }
 }
+
+/* Viewport source lists (scene items, diagram branches, event-map sources). */
+.source-checklist__head .source-checklist__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.inspector-browser .inspector-section .source-checklist__head .source-checklist__mode,
+.source-checklist__head .source-checklist__mode {
+  width: auto;
+  min-height: 0;
+  height: 22px;
+  padding: 0 2px 0 6px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+/* Shown because nothing is checked: checked, but visibly implicit. */
+.scene-object-row--implicit input[type='checkbox'] {
+  opacity: 0.5;
+}
+
+.scene-object-row--implicit .scene-object-row__name {
+  color: var(--text-muted);
+}

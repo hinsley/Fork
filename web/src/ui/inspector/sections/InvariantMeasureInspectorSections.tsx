@@ -11,14 +11,13 @@ import {
 } from '../../../system/invariantMeasureEigenmodes'
 import {
   fmt,
-  fmtComplex,
   fmtCount,
   fmtEigenvalues,
   fmtPercent,
   fmtRelativeTime,
   fmtSci,
 } from '../../../utils/format'
-import { computeInvariantMeasureStats } from './invariantMeasureStats'
+import { computeInvariantMeasureStats, groupEigenmodes } from './invariantMeasureStats'
 import { InlineSection, KeyValues } from '../InspectorChrome'
 
 export function InvariantMeasureInspectorSections({
@@ -169,29 +168,36 @@ function InvariantMeasureEigenmodeAnalysis({
   const requestedCount = Math.trunc(modeCount)
   const requestValid =
     requestedCount >= 1 && requestedCount <= maxSupported
-  const selectedMode = analysis?.modes.find(
-    (mode) => mode.rank === invariantMeasure.eigenmodeView?.modeRank
-  ) ?? null
+  const grouped = useMemo(
+    () => (analysis ? groupEigenmodes(analysis.modes) : { rows: [], eigenvalueCount: 0 }),
+    [analysis]
+  )
+  const selectedRank = invariantMeasure.eigenmodeView?.modeRank
+  const selectedRow =
+    grouped.rows.find((row) => selectedRank != null && row.ranks.includes(selectedRank)) ?? null
+  const selectedMode = selectedRow?.mode ?? null
 
   const spectrum = useMemo(() => {
-    if (!analysis || analysis.modes.length === 0) return null
+    if (!analysis || grouped.rows.length === 0) return null
     const x: number[] = []
     const y: number[] = []
     const labels: string[] = []
     const ranks: number[] = []
     const colors: string[] = []
-    for (const mode of analysis.modes) {
+    for (const row of grouped.rows) {
+      const { mode } = row
+      const color = mode.rank === selectedMode?.rank ? '#f59e0b' : '#3b82f6'
       x.push(mode.eigenvalueRe)
-      y.push(mode.eigenvalueIm)
-      labels.push(`Mode ${mode.rank}`)
+      y.push(row.complex ? mode.eigenvalueIm : 0)
+      labels.push(`Mode ${row.index}`)
       ranks.push(mode.rank)
-      colors.push(mode.rank === selectedMode?.rank ? '#f59e0b' : '#3b82f6')
-      if (mode.conjugatePair && Math.abs(mode.eigenvalueIm) > 0) {
+      colors.push(color)
+      if (row.complex) {
         x.push(mode.eigenvalueRe)
         y.push(-mode.eigenvalueIm)
-        labels.push(`Mode ${mode.rank} conjugate`)
+        labels.push(`Mode ${row.index} conjugate`)
         ranks.push(mode.rank)
-        colors.push(mode.rank === selectedMode?.rank ? '#f59e0b' : '#3b82f6')
+        colors.push(color)
       }
     }
     const data: Data[] = [
@@ -251,7 +257,7 @@ function InvariantMeasureEigenmodeAnalysis({
       ],
     }
     return { data, layout }
-  }, [analysis, plotlyTheme, result.dominantEigenvalue, selectedMode?.rank])
+  }, [analysis, grouped.rows, plotlyTheme, result.dominantEigenvalue, selectedMode?.rank])
 
   const updateView = (
     update: Partial<NonNullable<InvariantMeasureObject['eigenmodeView']>>
@@ -329,7 +335,7 @@ function InvariantMeasureEigenmodeAnalysis({
           disabled={running || Boolean(invariantEigenmodeUnavailableReason) || !requestValid}
           data-testid="invariant-eigenmode-compute"
         >
-          {running ? 'Computing modes…' : `Compute ${requestedCount} modes`}
+          {running ? 'Computing…' : 'Compute'}
         </button>
       </div>
     </InspectorDisclosure>
@@ -343,7 +349,11 @@ function InvariantMeasureEigenmodeAnalysis({
           rows={[
             {
               label: 'Computed',
-              value: `${analysis.computedModes} modes · ${analysis.representedEigenpairs} pairs`,
+              value:
+                grouped.eigenvalueCount === grouped.rows.length
+                  ? `${grouped.rows.length} modes`
+                  : `${grouped.rows.length} modes · ${grouped.eigenvalueCount} eigenvalues`,
+              title: 'Conjugate pairs count as one mode',
               testId: 'invariant-eigenmode-subset',
             },
             analysis.spectralGapStatus !== 'available'
@@ -379,7 +389,7 @@ function InvariantMeasureEigenmodeAnalysis({
             </tr>
           </thead>
           <tbody>
-            {analysis.modes.map((mode) => (
+            {grouped.rows.map(({ mode, index, complex }) => (
               <tr
                 key={mode.rank}
                 role="button"
@@ -397,12 +407,9 @@ function InvariantMeasureEigenmodeAnalysis({
                 )}${mode.converged ? '' : ' · not converged'}`}
                 data-testid={`invariant-eigenmode-${mode.rank}`}
               >
-                <td className={mode.converged ? undefined : 'faint'}>
-                  Mode {mode.rank}
-                  {mode.conjugatePair ? ' pair' : ''}
-                </td>
+                <td className={mode.converged ? undefined : 'faint'}>{index}</td>
                 <td>
-                  {mode.conjugatePair
+                  {complex
                     ? fmtEigenvalues(
                         [
                           { re: mode.eigenvalueRe, im: mode.eigenvalueIm },
@@ -410,7 +417,7 @@ function InvariantMeasureEigenmodeAnalysis({
                         ],
                         { digits: 4 }
                       )[0]
-                    : fmtComplex({ re: mode.eigenvalueRe, im: mode.eigenvalueIm }, { digits: 4 })}
+                    : fmt(mode.eigenvalueRe, { digits: 4 })}
                 </td>
                 <td>{fmt(mode.modulus, { digits: 4 })}</td>
               </tr>
@@ -424,7 +431,7 @@ function InvariantMeasureEigenmodeAnalysis({
               <span
                 title="Signed right eigenvector (density relaxation), not a probability density. Opacity shows magnitude."
               >
-                Overlay · mode {selectedMode.rank}
+                Overlay · mode {selectedRow?.index ?? selectedMode.rank}
               </span>
               <button
                 type="button"
@@ -435,7 +442,7 @@ function InvariantMeasureEigenmodeAnalysis({
                 Hide
               </button>
             </div>
-            {selectedMode.conjugatePair ? (
+            {selectedRow?.complex ? (
               <>
                 <div className="segmented-control" role="group" aria-label="Complex mode component">
                   {(['real', 'imaginary', 'phase'] as const).map((component) => (

@@ -407,7 +407,7 @@ export function LimitCycleInspectorSections({
               disabled={runDisabled}
               data-testid="limit-cycle-floquet-modes-compute"
             >
-              Compute Floquet modes
+              Compute
             </button>
           </div>
         </InspectorDisclosure>

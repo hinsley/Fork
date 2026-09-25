@@ -279,7 +279,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                     disabled={runDisabled || Boolean(autonomousAnalysisError)}
                     data-testid="equilibrium-solve-submit"
                   >
-                    Solve {equilibriumLabel}
+                    Solve
                   </button>
                 </div>
                 {equilibrium.lastRun && !equilibrium.lastRun.success ? (

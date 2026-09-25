@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  findOrbitDivergenceIndex,
   formatBifurcationBadges,
+  resolveRenderedPointSummary,
   rowSummaryMatches,
   summarizeBranch,
   summarizeObject,
@@ -96,6 +98,25 @@ describe('summarizeObject', () => {
     expect(summarizeObject(orbit({ data, t_start: 0, t_end: 1000 }), map)?.text).toBe('n 1000')
   })
 
+  it('flags orbits whose state became non-finite as diverged', () => {
+    const data = [
+      [0, 1],
+      [0.5, 2],
+      [1, Number.POSITIVE_INFINITY],
+      [1.5, Number.NaN],
+    ]
+    expect(findOrbitDivergenceIndex(data)).toBe(2)
+    expect(summarizeObject(orbit({ data, t_end: 1.5 }), flow)).toEqual({
+      text: 't 0–1.5 · 4',
+      status: 'diverged',
+      tone: 'unstable',
+    })
+    // JSON persistence turns ∞ into null.
+    const persisted = [[0, 1], [1, null as unknown as number]]
+    expect(findOrbitDivergenceIndex(persisted)).toBe(1)
+    expect(findOrbitDivergenceIndex([[0, 1], [1, 2]])).toBe(-1)
+  })
+
   it('marks orbits that were never run', () => {
     expect(summarizeObject(orbit({ data: [] }), flow)).toEqual({ text: '—', tone: 'muted' })
   })
@@ -179,6 +200,69 @@ describe('summarizeObject', () => {
     })
   })
 
+  it('labels torus instability and summarizes the rendered branch point', () => {
+    const cycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'lc1',
+      systemName: 'S',
+      origin: { type: 'hopf', equilibriumObjectName: 'Eq', equilibriumBranchName: 'b', pointIndex: 3 },
+      ntst: 20,
+      ncol: 4,
+      period: 0.6528,
+      state: [],
+      createdAt: 'x',
+    }
+    expect(
+      summarizeObject(
+        {
+          ...cycle,
+          floquetMultipliers: [
+            { re: 1, im: 0 },
+            { re: 1.1, im: 0.5 },
+            { re: 1.1, im: -0.5 },
+          ],
+        },
+        flow
+      )
+    ).toEqual({ text: 'T 0.6528', status: 'unstable (torus)', tone: 'unstable' })
+    const lcBranch = branch({
+      name: 'lc1_rho',
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          point(24, 'None', {
+            state: [1, 2, 0.668116],
+            eigenvalues: [
+              { re: 1, im: 0 },
+              { re: 1.01807, im: 0 },
+            ],
+          }),
+        ],
+        bifurcations: [],
+        indices: [0],
+      },
+    })
+    const rendered = resolveRenderedPointSummary(
+      { lc1: { type: 'branch', branchId: 'b1', pointIndex: 0 } },
+      { b1: lcBranch },
+      'lc1',
+      'limit_cycle'
+    )
+    expect(summarizeObject(cycle, flow, rendered)).toEqual({
+      text: 'T 0.6681',
+      status: 'unstable 1u',
+      tone: 'unstable',
+    })
+    expect(
+      resolveRenderedPointSummary(
+        { lc1: { type: 'object' } },
+        { b1: lcBranch },
+        'lc1',
+        'limit_cycle'
+      )
+    ).toBeUndefined()
+  })
+
   it('summarizes forced periodic responses', () => {
     const response: ForcedPeriodicResponseObject = {
       type: 'forced_periodic_response',
@@ -217,6 +301,42 @@ describe('summarizeObject', () => {
         flow
       )
     ).toEqual({ text: 'T 6.283 ×2', status: 'stable', tone: 'stable' })
+    const forcedBranch = branch({
+      name: 'fpr_omega',
+      branchType: 'forced_periodic_response',
+      data: {
+        points: [
+          point(2, 'None', {
+            forcing_period: 3.1416,
+            eigenvalues: [
+              { re: 1.5, im: 0 },
+              { re: 0.2, im: 0 },
+            ],
+          }),
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'ForcedPeriodicResponse',
+          symbol: 't',
+          phase: 0,
+          response_multiple: 2,
+          steps_per_forcing_period: 100,
+          integrator: 'rk4',
+        },
+      },
+    })
+    const rendered = resolveRenderedPointSummary(
+      { fpr: { type: 'branch', branchId: 'fb', pointIndex: 0 } },
+      { fb: forcedBranch },
+      'fpr',
+      'forced_periodic_response'
+    )
+    expect(summarizeObject(response, flow, rendered)).toEqual({
+      text: 'T 3.142 ×2',
+      status: 'saddle 1u',
+      tone: 'saddle',
+    })
   })
 
   it('summarizes isoclines by their defining level set', () => {

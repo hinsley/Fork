@@ -1,5 +1,6 @@
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
 import type { Scene } from '../../../system/types'
+import { SourceChecklist } from './SourceChecklist'
 
 export function SceneInspectorSections({
   scope,
@@ -14,6 +15,7 @@ export function SceneInspectorSections({
     sceneFilteredEntries,
     sceneSearch,
     sceneSelectedEntries,
+    sceneSelectableEntries,
     sceneSelectedIds,
     sceneSelectedSet,
     setSceneSearch,
@@ -120,71 +122,36 @@ export function SceneInspectorSections({
                   </div>
                 </div>
               ) : null}
-              <div className="inspector-subsection">
-                <h4 className="section-head">
-                  <span>Items</span>
-                  {sceneSelectedIds.length === 0 ? (
-                    <span className="chip" data-testid="scene-showing-chip">
-                      {scene.display === 'selection' ? 'showing: selection' : 'showing: all visible'}
-                    </span>
-                  ) : (
-                    <span className="chip">{`${sceneSelectedIds.length} selected`}</span>
-                  )}
-                </h4>
-                <label title="Used when no items are checked below">
-                  Fallback
-                  <select
-                    value={scene.display}
-                    onChange={(event) =>
-                      onUpdateScene(scene.id, {
-                        display: event.target.value as Scene['display'],
-                      })
-                    }
-                    data-testid="scene-display"
-                  >
-                    <option value="all">All visible</option>
-                    <option value="selection">Current selection</option>
-                  </select>
-                </label>
-                <input
-                  value={sceneSearch}
-                  onChange={(event) => setSceneSearch(event.target.value)}
-                  placeholder="Filter objects and branches…"
-                  aria-label="Search objects and branches"
-                  data-testid="scene-object-search"
-                />
-                {displayedEntries.length > 0 ? (
-                  <div className="scene-object-list">
-                    {displayedEntries.map((entry) => {
-                      const checked = sceneSelectedSet.has(entry.id)
-                      return (
-                        <label
-                          key={`scene-entry-${entry.id}`}
-                          className="scene-object-row"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => {
-                              const next = checked
-                                ? sceneSelectedIds.filter((id) => id !== entry.id)
-                                : [...sceneSelectedIds, entry.id]
-                              onUpdateScene(scene.id, { selectedNodeIds: next })
-                            }}
-                          />
-                          <span className="scene-object-row__name">{entry.name}</span>
-                          <span className="scene-object-row__meta">
-                            {entry.type.replace('_', ' ')}
-                            {entry.visible ? '' : ' · hidden'}
-                          </span>
-                        </label>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <p className="faint">—</p>
-                )}
-              </div>
+              <SourceChecklist
+                title="Items"
+                entries={displayedEntries.map((entry) => ({
+                  id: entry.id,
+                  name: entry.name,
+                  meta: `${entry.type.replace('_', ' ')}${entry.visible ? '' : ' · hidden'}`,
+                }))}
+                selectedIds={sceneSelectedIds}
+                implicitIds={
+                  scene.display === 'selection'
+                    ? null
+                    : (sceneSelectableEntries ?? sceneFilteredEntries)
+                        .filter((entry) => entry.visible)
+                        .map((entry) => entry.id)
+                }
+                onChange={(next) => onUpdateScene(scene.id, { selectedNodeIds: next })}
+                mode={{
+                  value: scene.display === 'selection' ? 'selection' : 'all',
+                  onChange: (display) => onUpdateScene(scene.id, { display: display as Scene['display'] }),
+                  testId: 'scene-display',
+                }}
+                search={{
+                  value: sceneSearch,
+                  onChange: setSceneSearch,
+                  placeholder: 'Filter objects and branches…',
+                  ariaLabel: 'Search objects and branches',
+                  testId: 'scene-object-search',
+                }}
+                chipTestId="scene-showing-chip"
+              />
             </div>
           ) : null}
   </>

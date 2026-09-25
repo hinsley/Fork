@@ -145,6 +145,7 @@ import { isValidDisplayName, suggestDefaultName } from '../../utils/naming'
 import {
   buildSubsystemSnapshot,
   continuationParameterOptions,
+  formatContinuationParameterDisplayLabel,
   formatParameterRefLabel,
   isSubsystemSnapshotCompatible,
   isVariableFrozen,
@@ -180,6 +181,8 @@ import {
 } from './selectionSession'
 import type { WorkflowActionEntry } from './selectionSessionState'
 import { useWorkflowFocus } from './useWorkflowFocus'
+import { normalizeOrbitDuration } from './orbitRunDraft'
+import { findRenameConflict } from '../../state/systemTreeCommands'
 import {
   buildCollocationAdaptivitySettings,
   type CollocationAdaptivityDraft,
@@ -745,9 +748,6 @@ function parseAxisValue(value: string): BifurcationAxis | null {
   return { kind, name }
 }
 
-function formatAxisLabel(kind: BifurcationAxis['kind'], name: string): string {
-  return `${kind === 'parameter' ? 'Parameter' : 'State space variable'}: ${name}`
-}
 
 type InspectorMetricRow = {
   label: string
@@ -1061,7 +1061,9 @@ function makeOrbitRunDraft(system: SystemConfig, orbit?: OrbitObject): OrbitRunD
   const initialState = hasData
     ? orbit!.data[0].slice(1).map((value) => value.toString())
     : system.varNames.map(() => '0')
-  const duration = hasData ? orbit!.t_end - orbit!.t_start : defaultDuration
+  const duration = hasData
+    ? normalizeOrbitDuration(orbit!.t_end - orbit!.t_start, system.type === 'map' ? 1 : orbit!.dt)
+    : defaultDuration
   return {
     initialState: adjustArray(initialState, system.varNames.length, () => '0'),
     initialContext: (orbit?.t_start ?? 0).toString(),
@@ -2192,8 +2194,12 @@ function useInspectorSelectionController({
     if (!selectionNode) return
     const trimmedName = selectionNameDraft.trim()
     if (trimmedName === selectionNode.name) return
+    // A taken name is rejected (with a toast); show the kept name again.
+    if (!isValidDisplayName(trimmedName) || findRenameConflict(system, selectionNode.id, trimmedName)) {
+      setSelectionNameDraft(selectionNode.name)
+    }
     onRename(selectionNode.id, trimmedName)
-  }, [onRename, selectionNameDraft, selectionNode])
+  }, [onRename, selectionNameDraft, selectionNode, system])
   const scene = selectedNodeId
     ? system.scenes.find((entry) => entry.id === selectedNodeId)
     : undefined
@@ -2369,11 +2375,13 @@ function useInspectorSelectionController({
   const axisOptions = useMemo(() => {
     const paramOptions = system.config.paramNames.map((name) => ({
       value: formatAxisValue({ kind: 'parameter', name }),
-      label: formatAxisLabel('parameter', name),
+      label: name,
+      kind: 'parameter' as const,
     }))
     const stateOptions = system.config.varNames.map((name) => ({
       value: formatAxisValue({ kind: 'state', name }),
-      label: formatAxisLabel('state', name),
+      label: name,
+      kind: 'state' as const,
     }))
     return [...paramOptions, ...stateOptions]
   }, [system.config.paramNames, system.config.varNames])
@@ -2493,6 +2501,47 @@ function useInspectorSelectionController({
   const isStoredForcedPeriodicResponseTarget =
     !forcedPeriodicResponseRenderTarget ||
     forcedPeriodicResponseRenderTarget.type === 'object'
+  // Values of the branch point the scene draws, so the glance matches the plot.
+  const forcedPeriodicResponseRenderData = useMemo(() => {
+    if (
+      forcedPeriodicResponseRenderTarget?.type !== 'branch' ||
+      !forcedPeriodicResponseRenderBranch
+    ) {
+      return null
+    }
+    const renderBranch = forcedPeriodicResponseRenderBranch
+    const point = renderBranch.data.points[forcedPeriodicResponseRenderTarget.pointIndex]
+    if (!point) return null
+    const snapshot =
+      renderBranch.subsystemSnapshot &&
+      isSubsystemSnapshotCompatible(system.config, renderBranch.subsystemSnapshot)
+        ? renderBranch.subsystemSnapshot
+        : null
+    const metadata = renderBranch.data.branch_type
+    const responseMultiple =
+      metadata?.type === 'ForcedPeriodicResponse' ? metadata.response_multiple : null
+    const parameterName = renderBranch.parameterRef
+      ? formatContinuationParameterDisplayLabel(
+          formatParameterRefLabel(renderBranch.parameterRef)
+        )
+      : renderBranch.parameterName
+    return {
+      state: snapshot ? stateVectorToDisplay(snapshot, point.state) : point.state,
+      multipliers: normalizeEigenvalueArray(point.eigenvalues),
+      forcingPeriod:
+        typeof point.forcing_period === 'number' && Number.isFinite(point.forcing_period)
+          ? point.forcing_period
+          : null,
+      responseMultiple,
+      parameterName,
+      paramValue: point.param_value,
+      cyclePointCount: point.cycle_points?.length ?? 0,
+    }
+  }, [
+    forcedPeriodicResponseRenderBranch,
+    forcedPeriodicResponseRenderTarget,
+    system.config,
+  ])
   const periodicOrbitParentId = useMemo(() => {
     if (!branch) return null
     const isPeriodicOrbitObject = (objectId: string): boolean => {
@@ -4486,34 +4535,18 @@ function useInspectorSelectionController({
       }
     }
 
+    // Scenes and diagrams: the item list's own head says what is shown.
     if (scene) {
-      return {
-        label: 'Scene',
-        detail:
-          scene.display === 'selection'
-            ? 'Selection focus'
-            : 'All visible objects and branches',
-      }
+      return { label: 'Scene', detail: null }
     }
 
     if (diagram) {
-      const branchCount = diagram.selectedBranchIds.length
-      const detail =
-        branchCount > 0
-          ? `${branchCount} branch${branchCount === 1 ? '' : 'es'} enabled`
-          : branchEntries.length > 0
-            ? 'All visible branches'
-            : 'No branches available'
-      return {
-        label: 'Bifurcation',
-        detail,
-      }
+      return { label: 'Bifurcation', detail: null }
     }
 
     return null
   }, [
     branch,
-    branchEntries.length,
     branchSortedOrder,
     branchStateDimension,
     diagram,
@@ -8694,6 +8727,7 @@ function useInspectorSelectionController({
     forcedPeriodicResponse,
     forcedPeriodicResponseDraft,
     forcedPeriodicResponseError,
+    forcedPeriodicResponseRenderData,
     forcedPeriodicResponseRenderLabel,
     forcedPeriodicResponseStale,
     existingBranchNames,
@@ -8930,6 +8964,7 @@ function useInspectorSelectionController({
     scene,
     sceneAxisSelection,
     sceneFilteredEntries,
+    sceneSelectableEntries,
     sceneSearch,
     sceneSelectedEntries,
     sceneSelectedIds,
