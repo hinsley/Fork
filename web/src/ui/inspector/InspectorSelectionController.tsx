@@ -5118,8 +5118,8 @@ function useInspectorSelectionController({
     workflowActions.push({
       id: 'orbit-run-toggle',
       group: 'Compute',
-      label: 'Run',
-      title: 'Run orbit',
+      label: 'Simulation',
+      title: 'Simulation',
       description: 'Integrate or iterate this orbit from a chosen initial state.',
       primary: true,
     })

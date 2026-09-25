@@ -130,8 +130,6 @@ function orbitModel(scope: InspectorSelectionController): ObjectHeaderModel | nu
     lyapunovDimension,
     writeClipboardText,
     formatPointValues,
-    handleExtendOrbit,
-    runDisabled,
   } = scope
   if (!orbit) return null
   const count = orbit.data.length
@@ -202,22 +200,6 @@ function orbitModel(scope: InspectorSelectionController): ObjectHeaderModel | nu
           </div>
         ) : null}
       </>
-    ),
-    barExtra: (
-      <button
-        type="button"
-        className="btn"
-        onClick={handleExtendOrbit}
-        disabled={runDisabled}
-        title={
-          isDiscreteMap
-            ? `Extend from n = ${orbit.t_end}`
-            : `Extend from t = ${fmt(orbit.t_end)}`
-        }
-        data-testid="orbit-extend-quick"
-      >
-        Extend
-      </button>
     ),
   }
 }

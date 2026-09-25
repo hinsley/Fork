@@ -35,7 +35,6 @@ export function OrbitInspectorSections({
     continuationParameterLabels,
     covariantDraft,
     covariantError,
-    formatNumber,
     formatPointValues,
     frozenVariableHeaderNames,
     handleClvColorChange,
@@ -95,7 +94,7 @@ export function OrbitInspectorSections({
             <>
               <InspectorDisclosure
                 key={`${selectionKey}-orbit-run`}
-                title="Run orbit"
+                title="Simulation"
                 testId="orbit-run-toggle"
                 defaultOpen={false}
                 actionOnly
@@ -159,28 +158,29 @@ export function OrbitInspectorSections({
                     </label>
                   ) : null}
                   {orbitError ? <div className="field-error">{orbitError}</div> : null}
-                  <button
-                    className="inspector-primary-action"
-                    onClick={handleRunOrbit}
-                    disabled={runDisabled}
-                    data-testid="orbit-run-submit"
-                  >
-                    Run
-                  </button>
-                  {orbit.data.length > 0 ? (
+                  <div className="inspector-submit-row">
                     <button
-                      onClick={handleExtendOrbit}
+                      className="inspector-primary-action"
+                      onClick={handleRunOrbit}
                       disabled={runDisabled}
-                      title={
-                        systemDraft.type === 'map'
-                          ? `Extend from n = ${orbit.t_end}`
-                          : `Extend from t = ${formatNumber(orbit.t_end, 6)}`
-                      }
-                      data-testid="orbit-extend-submit"
+                      data-testid="orbit-run-submit"
                     >
-                      Extend
+                      Run
                     </button>
-                  ) : null}
+                    {orbit.data.length > 0 ? (
+                      <button
+                        className="btn inspector-submit-row__secondary"
+                        onClick={handleExtendOrbit}
+                        disabled={runDisabled}
+                        title="Continue the current orbit for the duration above"
+                        data-testid="orbit-extend-submit"
+                      >
+                        {systemDraft.type === 'map'
+                          ? `Extend from n = ${orbit.t_end}`
+                          : `Extend from t = ${fmt(orbit.t_end)}`}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               </InspectorDisclosure>
 

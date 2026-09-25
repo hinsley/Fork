@@ -721,6 +721,12 @@
   flex: 1 1 auto;
 }
 
+.inspector-submit-row > .inspector-submit-row__secondary {
+  flex: 1 1 auto;
+  justify-content: center;
+  height: auto;
+}
+
 .inspector-browser .inspector-primary-action {
   width: 100%;
 }

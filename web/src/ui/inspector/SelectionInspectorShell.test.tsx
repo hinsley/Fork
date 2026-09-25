@@ -147,10 +147,11 @@ describe('selection inspector workflow shell', () => {
     render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
 
     const actions = screen.getByTestId('inspector-actions')
-    expect(within(actions).getAllByTestId(/^action-/)[0]).toHaveTextContent('Run')
+    expect(within(actions).getAllByTestId(/^action-/)[0]).toHaveTextContent('Simulation')
     expect(screen.getByTestId('action-orbit-run-toggle')).toBeVisible()
     expect(screen.getByTestId('action-oseledets-toggle')).toBeVisible()
-    expect(screen.getByTestId('orbit-extend-quick')).toBeVisible()
+    // Extend lives in the Simulation form, not the action bar.
+    expect(screen.queryByTestId('orbit-extend-quick')).toBeNull()
     // Appearance, parameters and frozen variables live in the header.
     expect(within(actions).queryByTestId('action-appearance-toggle')).toBeNull()
     expect(screen.getByTestId('action-appearance-toggle')).toHaveAttribute('aria-label', 'Appearance')
