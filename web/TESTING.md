@@ -53,6 +53,11 @@ test('happy path', async ({ page }) => {
 
 ## Stable selectors
 - Key UI elements include `data-testid`:
-  - `objects-tree`, `inspector-panel`, `branch-viewer-panel`, `plotly-viewport`
+  - `objects-tree`, `inspector-panel`, `plotly-viewport-<id>`, `viewport-workspace`
   - `create-orbit`, `create-equilibrium`, `system-name-input`, `create-system`
-  - `splitter-left`, `splitter-right`
+  - `splitter-left`, `splitter-right`, `open-system-settings` (toolbar system chip)
+  - Inspector: `inspector-name`, `action-<workflowId>` (action bar or its `inspector-actions-more`
+    overflow), `inspector-workflow-back`, `branch-point-panel`, `branch-bifurcation-<index>`
+- Harness helpers hide layout details: `clickInspectorAction` opens the overflow menu when an action
+  is not a primary button, `expandDetails` opens collapsed "Advanced" sections, and `goto` waits for
+  the last-system restore outside deterministic mode.

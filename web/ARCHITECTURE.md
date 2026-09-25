@@ -113,7 +113,9 @@ existing CLI surface area and the Rust/WASM core.
 ### Panels + Layout
 - `src/ui/`:
   - DCC-style panel layout (split panes, collapsible panels).
-  - Objects tree, Inspector panel, Branch Viewer panel.
+  - Objects tree (single-line rows with data summaries), Inspector (pinned header, at-a-glance
+    data, action bar; branches show an inline summary and point panel), viewport stack with a
+    parameter strip, command palette (Ctrl/Cmd+K).
   - Toolbar/statusbar and performance overlay.
 
 ## Data Model (Web)
