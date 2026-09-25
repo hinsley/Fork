@@ -797,9 +797,8 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     const renderButton = await screen.findByTestId('branch-point-render-lc')
-    expect(renderButton).toHaveTextContent('Render Forced Response Here')
+    expect(renderButton).toHaveTextContent('Show response')
     await user.click(renderButton)
     expect(onSetRenderTarget).toHaveBeenCalledWith(withResponse.nodeId, {
       type: 'branch',
@@ -897,7 +896,7 @@ describe('InspectorDetailsPanel', () => {
     })
 
     renderInspectorForStateSpaceStride(system, fixture.nodeId, vi.fn())
-    await user.click(screen.getByTestId('action-branch-summary-toggle'))
+    await user.click(screen.getByTestId('branch-summary-toggle'))
 
     expect(screen.getByTestId('collocation-adaptation-report')).toHaveTextContent(
       '4 → 6'
@@ -987,7 +986,6 @@ describe('InspectorDetailsPanel', () => {
     })
 
     renderInspectorForStateSpaceStride(system, fixture.nodeId, vi.fn())
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
     await user.click(screen.getByTestId('branch-point-details-toggle'))
 
@@ -1091,9 +1089,7 @@ describe('InspectorDetailsPanel', () => {
         onCreate
       )
 
-      await user.click(screen.getByTestId('action-branch-points-toggle'))
       await user.click(screen.getByTestId('branch-bifurcation-0'))
-      await user.click(screen.getByTestId('inspector-workflow-back'))
 
       expect(screen.getByTestId('action-limit-cycle-codim1-curve-toggle')).toHaveTextContent(
         `${label} curve`
@@ -1228,9 +1224,7 @@ describe('InspectorDetailsPanel', () => {
       onCreate
     )
 
-    await user.click(screen.getByTestId('action-branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
-    await user.click(screen.getByTestId('inspector-workflow-back'))
 
     expect(screen.getByTestId('action-limit-cycle-codim1-curve-toggle')).toHaveTextContent(
       'NS curve'
@@ -1523,49 +1517,50 @@ describe('InspectorDetailsPanel', () => {
       suggestion: 'Improve the initial guess or increase corrector iterations.',
     }
     renderInspectorForStateSpaceStride(fixture.system, fixture.nodeId, vi.fn())
-    await user.click(screen.getByRole('button', { name: 'Inspect' }))
-    await user.click(screen.getByTestId('action-branch-summary-toggle'))
+    expect(screen.getByTestId('branch-termination')).toHaveTextContent(
+      'The corrector reached the minimum step size.'
+    )
+    expect(screen.getByTestId('branch-point-input')).toBeVisible()
+    await user.click(screen.getByTestId('branch-summary-toggle'))
     expect(screen.getByTestId('calculation-diagnostic')).toBeVisible()
     expect(screen.getByText(/accepted points retained/)).toBeVisible()
-    await user.click(screen.getByTestId('inspector-workflow-back'))
-    await user.click(screen.getByTestId('action-branch-points-toggle'))
     expect(screen.getByTestId('branch-point-input')).toBeVisible()
   })
 
 
-  it('nests Point Details inside Branch Navigator', async () => {
+  it('renders the branch point panel inline on the root page', async () => {
     const user = userEvent.setup()
     const branchResult = createStateSpaceStrideBranchFixture('homoclinic_curve')
 
     renderInspectorForStateSpaceStride(branchResult.system, branchResult.nodeId, vi.fn())
 
-    await user.click(screen.getByRole('button', { name: 'Inspect' }))
     expect(screen.getByTestId('inspector-name')).toBeVisible()
-    await user.click(screen.getByTestId('action-branch-points-toggle'))
-    expect(screen.queryByTestId('inspector-name')).toBeNull()
-
-    const navigatorToggle = screen.getByTestId('branch-points-toggle')
-    const navigatorDetails = navigatorToggle.closest('details')
-    expect(navigatorDetails).toHaveClass('inspector-disclosure--action-only')
+    const panel = screen.getByTestId('branch-point-panel')
+    expect(panel).toBeVisible()
+    expect(screen.queryByTestId('branch-points-toggle')).toBeNull()
+    expect(screen.queryByTestId('action-branch-points-toggle')).toBeNull()
+    expect(screen.queryByTestId('action-branch-summary-toggle')).toBeNull()
 
     const pointToggle = screen.getByTestId('branch-point-details-toggle')
     const pointDetails = pointToggle.closest('details')
     expect(pointDetails).toBeTruthy()
-    expect(pointDetails).not.toBe(navigatorDetails)
-    expect(navigatorDetails?.contains(pointDetails)).toBe(true)
+    expect(pointDetails).not.toHaveAttribute('open')
+    expect(panel.contains(pointDetails)).toBe(true)
+    await user.click(pointToggle)
+    expect(pointDetails).toHaveAttribute('open')
+    expect(screen.getByTestId('inspector-name')).toBeVisible()
   })
 
   it('shows selected two-parameter continuation values in the branch navigator', async () => {
-    const user = userEvent.setup()
     const branchResult = createStateSpaceStrideBranchFixture('homoclinic_curve')
 
     renderInspectorForStateSpaceStride(branchResult.system, branchResult.nodeId, vi.fn())
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
-
-    expect(
-      screen.getByText('Continuation parameters: mu=0.200000, nu=0.100000')
-    ).toBeVisible()
+    const panel = within(screen.getByTestId('branch-point-panel'))
+    expect(panel.getByText('mu')).toBeVisible()
+    expect(panel.getByText('0.2')).toBeVisible()
+    expect(panel.getByText('nu')).toBeVisible()
+    expect(panel.getByText('0.1')).toBeVisible()
   })
 
   it('shows codimension-two refinement diagnostics for a selected branch point', async () => {
@@ -1645,12 +1640,12 @@ describe('InspectorDetailsPanel', () => {
       onCreateCodim2BranchFromPoint
     )
 
-    await user.click(screen.getByRole('button', { name: 'Inspect' }))
-    await user.click(screen.getByTestId('action-branch-points-toggle'))
     await user.click(screen.getByTestId('branch-point-details-toggle'))
 
+    expect(screen.getByTestId('branch-point-bif-chip')).toHaveTextContent('GH')
+    expect(screen.getByTestId('branch-point-bif-chip')).toHaveTextContent('Generalized Hopf')
     expect(screen.getByText('Codimension-two refinement')).toBeVisible()
-    expect(screen.getAllByText('GeneralizedHopf')).toHaveLength(2)
+    expect(screen.getAllByText('GeneralizedHopf')).toHaveLength(1)
     expect(screen.getByText('Refined')).toBeVisible()
     expect(screen.getByText('first_lyapunov_coefficient')).toBeVisible()
     expect(screen.getByText('2.0000e-11')).toBeVisible()
@@ -1673,8 +1668,6 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByText('Simultaneous codimension-two events')).toBeVisible()
     expect(screen.getByText(/second imaginary pair=-4\.0000e-12/)).toBeVisible()
     expect(screen.getByTestId('codim2-switch-lpc')).not.toBeVisible()
-    await user.click(screen.getByTestId('inspector-workflow-back'))
-    await user.click(screen.getByRole('button', { name: 'Bifurcations' }))
     await user.click(screen.getByTestId('action-codim2-branch-switch-toggle'))
     expect(screen.getByTestId('codim2-switch-lpc')).toBeVisible()
     await user.click(screen.getByTestId('codim2-switch-lpc'))
@@ -3728,7 +3721,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-1'))
     await user.click(screen.getByTestId('limit-cycle-from-pd-toggle'))
 
@@ -4530,7 +4522,7 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.queryByTestId('isoperiodic-curve-toggle')).toBeNull()
   })
 
-  it('labels limit cycle point details as Floquet Multipliers', async () => {
+  it('labels limit cycle point spectra as Floquet multipliers', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({ name: 'LC_Label_System' })
     const configuredSystem = {
@@ -4621,14 +4613,12 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByRole('button', { name: 'Inspect' }))
-    await user.click(screen.getByTestId('action-branch-points-toggle'))
-    expect(screen.getByText('Point Details')).toBeVisible()
+    const multipliers = screen.getByTestId('branch-point-eigenvalues')
+    expect(within(multipliers).getByText('|μ|')).toBeVisible()
+    expect(within(multipliers).getByText('0.5')).toBeVisible()
+    expect(screen.getByTestId('branch-point-details-toggle')).toHaveTextContent('More')
+    expect(screen.getByTestId('branch-eigenvalue-plot')).not.toBeVisible()
     await user.click(screen.getByTestId('branch-point-details-toggle'))
-
-    expect(screen.getByText('Amplitude (min to max)')).toBeVisible()
-    expect(screen.getByText('Mean & RMS')).toBeVisible()
-    expect(screen.getByText('Floquet Multipliers')).toBeVisible()
     expect(screen.getByTestId('branch-eigenvalue-plot')).toBeVisible()
   })
 
@@ -4676,7 +4666,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     const button = await screen.findByTestId('branch-point-render-lc')
     await user.click(button)
 
@@ -4804,8 +4793,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByRole('button', { name: 'Inspect' }))
-    await user.click(screen.getByTestId('action-branch-summary-toggle'))
+    await user.click(screen.getByTestId('branch-summary-toggle'))
     expect(screen.getByText('Manifold solver diagnostics')).toBeVisible()
     expect(screen.getByText('Ring Build Failed')).toBeVisible()
     expect(screen.getByText('Leaf delta floor')).toBeVisible()
@@ -4914,7 +4902,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     const button = await screen.findByTestId('branch-point-render-lc')
     await user.click(button)
 
@@ -5016,22 +5003,17 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
     await user.click(screen.getByTestId('branch-point-details-toggle'))
 
-    const details = screen.getByTestId('branch-point-details-toggle').closest('details')
-    if (!details) {
-      throw new Error('Missing point details disclosure.')
-    }
-    const detailsScope = within(details)
-    const xRow = detailsScope.getByText('x').closest('.inspector-metrics__row')
-    const yRow = detailsScope.getByText('y').closest('.inspector-metrics__row')
+    const panel = within(screen.getByTestId('branch-point-panel'))
+    const xRow = panel.getByText('x').closest('.branch-kv__pair')
+    const yRow = panel.getByText('y').closest('.branch-kv__pair')
     expect(xRow).toBeTruthy()
     expect(yRow).toBeTruthy()
-    expect(xRow?.querySelector('.inspector-metrics__value')?.textContent).toBe('1.25000')
-    expect(yRow?.querySelector('.inspector-metrics__value')?.textContent).toBe('-0.750000')
-    expect(detailsScope.getByTestId('branch-eigenvalue-plot')).toBeVisible()
+    expect(xRow?.querySelector('dd')?.textContent).toBe('1.25')
+    expect(yRow?.querySelector('dd')?.textContent).toBe('−0.75')
+    expect(panel.getByTestId('branch-eigenvalue-plot')).toBeVisible()
   })
 
   it('displays continued frozen-variable values per branch point in state details', async () => {
@@ -5128,45 +5110,26 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
-    await user.click(screen.getByTestId('branch-point-details-toggle'))
-
-    const details = screen.getByTestId('branch-point-details-toggle').closest('details')
-    if (!details) throw new Error('Missing point details disclosure.')
-    const detailsScope = within(details)
-
+    const panel = within(screen.getByTestId('branch-point-panel'))
     const readStateValues = () => {
-      const findStateRow = (label: string) =>
-        detailsScope
-          .getAllByText(label)
-          .map((entry) => entry.closest('.inspector-metrics__row'))
-          .find((row) => {
-            const valueText = row?.querySelector('.inspector-metrics__value')?.textContent ?? ''
-            return !valueText.includes('to') && !valueText.includes('mean')
-          })
-      const xRow = findStateRow('x*')
-      const yRow = findStateRow('y')
-      const zRow = findStateRow('z*')
-      return {
-        x: xRow?.querySelector('.inspector-metrics__value')?.textContent,
-        y: yRow?.querySelector('.inspector-metrics__value')?.textContent,
-        z: zRow?.querySelector('.inspector-metrics__value')?.textContent,
-      }
+      const read = (label: string) =>
+        panel.getByText(label).closest('.branch-kv__pair')?.querySelector('dd')?.textContent
+      return { x: read('x*'), y: read('y'), z: read('z*') }
     }
 
     await waitFor(() => {
       const values = readStateValues()
-      expect(values.x).toBe('0.250000')
-      expect(values.y).toBe('0.100000')
-      expect(values.z).toBe('-1.50000')
+      expect(values.x).toBe('0.25')
+      expect(values.y).toBe('0.1')
+      expect(values.z).toBe('−1.5')
     })
 
     await user.click(screen.getByTestId('branch-bifurcation-1'))
     await waitFor(() => {
       const values = readStateValues()
-      expect(values.x).toBe('0.550000')
-      expect(values.y).toBe('0.300000')
-      expect(values.z).toBe('-1.50000')
+      expect(values.x).toBe('0.55')
+      expect(values.y).toBe('0.3')
+      expect(values.z).toBe('−1.5')
     })
   })
 
@@ -5254,25 +5217,27 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-point-details-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
 
-    const details = screen.getByTestId('branch-point-details-toggle').closest('details')
-    if (!details) throw new Error('Missing point details disclosure.')
-    const detailsScope = within(details)
+    const readRange = (label: string) => {
+      const metrics = within(screen.getByTestId('branch-point-cycle-metrics'))
+      const cells = metrics.getByText(label).closest('tr')?.querySelectorAll('td') ?? []
+      return [cells[1]?.textContent, cells[2]?.textContent]
+    }
 
     await waitFor(() => {
-      expect(detailsScope.getByText('0.300000 to 0.300000 (0.00000)')).toBeVisible()
-      expect(detailsScope.getByText('1.50000 to 1.80000 (0.300000)')).toBeVisible()
-      expect(detailsScope.getByText('2.20000 to 2.20000 (0.00000)')).toBeVisible()
+      expect(screen.getByTestId('branch-point-cycle-metrics')).toBeVisible()
+      expect(readRange('x*')).toEqual(['0.3', '0.3'])
+      expect(readRange('y')).toEqual(['1.5', '1.8'])
+      expect(readRange('z*')).toEqual(['2.2', '2.2'])
     })
 
     await user.click(screen.getByTestId('branch-bifurcation-1'))
     await waitFor(() => {
-      expect(detailsScope.getByText('0.500000 to 0.500000 (0.00000)')).toBeVisible()
-      expect(detailsScope.getByText('2.50000 to 2.90000 (0.400000)')).toBeVisible()
-      expect(detailsScope.getByText('2.20000 to 2.20000 (0.00000)')).toBeVisible()
+      expect(readRange('x*')).toEqual(['0.5', '0.5'])
+      expect(readRange('y')).toEqual(['2.5', '2.9'])
+      expect(readRange('z*')).toEqual(['2.2', '2.2'])
     })
   })
 
@@ -5369,7 +5334,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-point-details-toggle'))
 
     const cycleTable = screen.getByRole('region', { name: 'Cycle point data' })
@@ -5431,19 +5395,18 @@ describe('InspectorDetailsPanel', () => {
 
     render(<Wrapper />)
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     const input = screen.getByTestId('branch-point-input')
     await user.clear(input)
     await user.type(input, '1')
     await user.click(screen.getByTestId('branch-point-jump'))
 
-    expect(screen.getByText('Selected point: 1 ([1] memaddr)')).toBeVisible()
+    expect(screen.getByTestId('branch-point-input')).toHaveValue(1)
 
     const button = screen.getByTestId('branch-point-render-lc')
     await user.click(button)
 
     await waitFor(() => {
-      expect(screen.getByText('Selected point: 1 ([1] memaddr)')).toBeVisible()
+      expect(screen.getByTestId('branch-point-input')).toHaveValue(1)
     })
     await waitFor(() => {
       expect(screen.queryByTestId('branch-point-render-lc')).toBeNull()
@@ -5451,7 +5414,6 @@ describe('InspectorDetailsPanel', () => {
   })
 
   it('hides the render button when the selected point is already rendered', async () => {
-    const user = userEvent.setup()
     const { system } = createPeriodDoublingSystem()
     const branchId = Object.keys(system.branches)[0]
     const branch = branchId ? system.branches[branchId] : undefined
@@ -5496,7 +5458,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     expect(screen.queryByTestId('branch-point-render-lc')).toBeNull()
   })
 
@@ -6056,7 +6017,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-1'))
     await user.click(screen.getByTestId('limit-cycle-from-pd-toggle'))
     await user.clear(screen.getByTestId('limit-cycle-from-pd-name'))
@@ -6204,7 +6164,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-1'))
     await user.click(screen.getByTestId('limit-cycle-from-pd-toggle'))
 
@@ -6305,7 +6264,6 @@ describe('InspectorDetailsPanel', () => {
 
     expect(screen.queryByTestId('codim1-curve-toggle')).toBeNull()
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-1'))
 
     const codimToggle = await screen.findByTestId('codim1-curve-toggle')
@@ -6671,7 +6629,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
     expect(screen.queryByTestId('limit-cycle-from-hopf-toggle')).toBeNull()
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
     await user.click(screen.getByTestId('branch-point-details-toggle'))
     expect(screen.getByTestId('homoclinic-event-diagnostics')).toHaveTextContent(
@@ -8026,14 +7983,13 @@ describe('InspectorDetailsPanel', () => {
 
     render(<Wrapper />)
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
-    expect(screen.getByText('Selected point: 1 ([1] memaddr)')).toBeVisible()
+    expect(screen.getByTestId('branch-point-input')).toHaveValue(1)
 
     await user.click(screen.getByTestId('branch-extend-toggle'))
     await user.click(screen.getByTestId('branch-extend-submit'))
 
     await waitFor(() => {
-      expect(screen.getByText('Selected point: 2 ([2] memaddr)')).toBeVisible()
+      expect(screen.getByTestId('branch-point-input')).toHaveValue(2)
     })
   })
 
@@ -8132,7 +8088,6 @@ describe('InspectorDetailsPanel', () => {
 
     render(<Wrapper />)
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     expect((screen.getByTestId('branch-point-input') as HTMLInputElement).value).toBe('2')
 
     await user.click(screen.getByTestId('branch-extend-toggle'))
@@ -8145,7 +8100,6 @@ describe('InspectorDetailsPanel', () => {
   })
 
   it('selects the most negative endpoint for backward-only equilibrium branches', async () => {
-    const user = userEvent.setup()
     const { system, branchNodeId } = createDemoSystem()
     const baseBranch = system.branches[branchNodeId]
     if (!baseBranch) {
@@ -8210,8 +8164,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
-    expect(screen.getByText('Selected point: -2 ([0] memaddr)')).toBeVisible()
+    expect(screen.getByTestId('branch-point-input')).toHaveValue(-2)
   })
 
   it('submits homoclinic-from-large-cycle requests', async () => {
@@ -8299,7 +8252,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
     await user.click(screen.getByTestId('homoclinic-from-large-cycle-toggle'))
     expect(screen.getByTestId('homoclinic-from-large-cycle-free-time')).toBeDisabled()
@@ -8429,7 +8381,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
     await user.click(screen.getByTestId('homoclinic-from-homoclinic-toggle'))
     expect(screen.getByTestId('homoclinic-from-homoclinic-free-eps1')).toBeDisabled()
@@ -8658,7 +8609,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
     await user.click(screen.getByTestId('homotopy-saddle-from-equilibrium-toggle'))
     await user.click(screen.getByTestId('homotopy-saddle-from-equilibrium-submit'))
@@ -8760,7 +8710,6 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
     await user.click(screen.getByTestId('homoclinic-from-homotopy-saddle-toggle'))
     expect(screen.getByTestId('homoclinic-from-homotopy-saddle-free-time')).toBeDisabled()

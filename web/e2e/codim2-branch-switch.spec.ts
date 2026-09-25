@@ -39,7 +39,6 @@ test('switches a generalized-Hopf point to an LPC curve', async ({ page }) => {
   await harness.selectTreeNode('Branch: eq_codim2')
   await harness.openDisclosure('branch-points-toggle')
   await page.locator('[data-testid^="branch-bifurcation-"]').first().click()
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-codim1-curve-toggle')
   await page.getByTestId('hopf-curve-name').fill('hopf_codim2')
   await page.getByTestId('hopf-curve-param2').selectOption('beta')
@@ -60,7 +59,10 @@ test('switches a generalized-Hopf point to an LPC curve', async ({ page }) => {
     .first()
   await expect(generalizedHopf).toBeVisible({ timeout: 30_000 })
   await generalizedHopf.click()
+  await expect(page.getByTestId('branch-point-bif-chip')).toContainText('GH')
   await page.getByTestId('branch-point-details-toggle').click()
+  await expect(page.getByText('Codimension-two refinement')).toBeVisible()
+  await clickInspectorAction(page, 'action-codim2-branch-switch-toggle')
   await expect(page.getByTestId('codim2-switch-lpc')).toBeVisible()
   await page.getByTestId('codim2-switch-lpc').click()
 
@@ -69,7 +71,8 @@ test('switches a generalized-Hopf point to an LPC curve', async ({ page }) => {
     // 60 seconds when the full Playwright suite runs five solver workers.
     timeout: 90_000,
   })
-  await clickInspectorAction(page, 'action-branch-summary-toggle')
-  await expect(page.getByText('Switched from')).toBeVisible()
-  await expect(page.getByText('GeneralizedHopf')).toBeVisible()
+  await expect(page.getByTestId('branch-codim2-seed')).toContainText('GH')
+  await expect(page.getByTestId('branch-codim2-seed')).toContainText('hopf_codim2')
+  await harness.openDisclosure('branch-summary-toggle')
+  await expect(page.getByText('Predictor residual')).toBeVisible()
 })

@@ -63,14 +63,13 @@ test('continue limit cycle from Hopf along a selected parameter', async ({ page 
   let hopfFound = false
   for (let i = 0; i < bifCount; i += 1) {
     await bifurcations.nth(i).click()
-    if (await page.getByText('Stability: Hopf').isVisible()) {
+    if (/Hopf/.test((await page.getByTestId('branch-point-bif-chip').textContent()) ?? '')) {
       hopfFound = true
       break
     }
   }
   expect(hopfFound).toBeTruthy()
 
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-limit-cycle-from-hopf-toggle')
   await page.getByTestId('limit-cycle-from-hopf-name').fill('lc_hopf_beta')
   await page.getByTestId('limit-cycle-from-hopf-branch-name').fill('lc_hopf_beta_branch')

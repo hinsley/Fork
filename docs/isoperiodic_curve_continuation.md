@@ -68,7 +68,7 @@ For isoperiodic curve edge cases where the local endpoint edge bends toward inde
 
 ## Floquet Multipliers on Isoperiodic Curve Points
 
-Isoperiodic curve points store multipliers/eigenvalues in the same point-eigenvalue field used by LC-family branches, so Point Details can display multipliers for selected isoperiodic curve points.
+Isoperiodic curve points store multipliers/eigenvalues in the same point-eigenvalue field used by LC-family branches, so the branch point panel lists the multipliers of the selected isoperiodic curve point.
 
 If you see:
 

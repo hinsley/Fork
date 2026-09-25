@@ -1,8 +1,5 @@
 import type { ContinuationObject, ContinuationPoint, SystemConfig } from '../system/types'
-import {
-  normalizeEigenvalueArray,
-  resolveContinuationPointParam2Value,
-} from '../system/continuation'
+import { resolveContinuationPointParam2Value } from '../system/continuation'
 import { formatParameterRefLabel } from '../system/subsystemGateway'
 
 export type ContinuationParameterReadout = {
@@ -18,11 +15,6 @@ export type Codim1ParamNames = {
 export function formatContinuationDisplayNumber(value: number, digits = 6): string {
   if (!Number.isFinite(value)) return 'n/a'
   return value.toPrecision(digits)
-}
-
-function formatContinuationDisplayNumberSafe(value: number | undefined): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 'NaN'
-  return formatContinuationDisplayNumber(value)
 }
 
 export function resolveCodim1ParamNames(
@@ -146,30 +138,4 @@ export function resolveBranchPointParams(
     }
     return value ?? Number.NaN
   })
-}
-
-export function summarizeContinuationPointEigenvalues(
-  point: ContinuationPoint,
-  branchType?: string
-): string {
-  const eigenvalues = normalizeEigenvalueArray(point.eigenvalues)
-  const label =
-    branchType === 'limit_cycle' ||
-    branchType === 'isoperiodic_curve' ||
-    branchType === 'lpc_curve' ||
-    branchType === 'pd_curve' ||
-    branchType === 'ns_curve'
-      ? 'Multipliers'
-      : 'Eigenvalues'
-  if (eigenvalues.length === 0) return `${label}: []`
-  const formatted = eigenvalues
-    .slice(0, 3)
-    .map(
-      (ev) =>
-        `${formatContinuationDisplayNumberSafe(ev.re)}+${formatContinuationDisplayNumberSafe(
-          ev.im
-        )}i`
-    )
-  const suffix = eigenvalues.length > 3 ? ' …' : ''
-  return `${label}: ${formatted.join(', ')}${suffix}`
 }

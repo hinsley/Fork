@@ -3,7 +3,6 @@ import type { ContinuationObject, ContinuationPoint } from '../system/types'
 import {
   resolveBranchPointParams,
   resolveContinuationParameterReadout,
-  summarizeContinuationPointEigenvalues,
 } from './branchPointDisplay'
 
 function makeTwoParameterBranch(): ContinuationObject {
@@ -71,18 +70,5 @@ describe('branch point display helpers', () => {
       0.2,
       0.1,
     ])
-  })
-
-  it('keeps multiplier labeling for cycle-like continuation points', () => {
-    const point: ContinuationPoint = {
-      state: [],
-      param_value: 1,
-      stability: 'None',
-      eigenvalues: [{ re: 0.5, im: -0.25 }],
-    }
-
-    expect(summarizeContinuationPointEigenvalues(point, 'pd_curve')).toBe(
-      'Multipliers: 0.500000+-0.250000i'
-    )
   })
 })

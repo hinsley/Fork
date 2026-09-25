@@ -154,12 +154,12 @@ for (const fixture of fixtures) {
 
     await harness.openDisclosure('branch-points-toggle')
     await page.getByTestId('branch-point-details-toggle').click()
-    const inspector = page.getByTestId('inspector-panel-body')
     let markerIndex = -1
     for (let index = 0; index < count; index += 1) {
       await page.getByTestId('branch-point-input').fill(String(index))
       await page.getByTestId('branch-point-jump').click()
-      if ((await inspector.textContent())?.includes(fixture.marker)) {
+      const chip = page.getByTestId('branch-point-bif-chip')
+      if ((await chip.count()) > 0 && (await chip.getAttribute('data-tag')) === fixture.marker) {
         markerIndex = index
         break
       }

@@ -79,7 +79,6 @@ async function continueDetectedCycleCurve(page: Page, fixture: CycleCurveFixture
     .first()
   await expect(bifurcation).toBeVisible({ timeout: 40_000 })
   await bifurcation.click()
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-limit-cycle-codim1-curve-toggle')
 
   await page.getByTestId('limit-cycle-codim1-curve-name').fill(fixture.curveName)

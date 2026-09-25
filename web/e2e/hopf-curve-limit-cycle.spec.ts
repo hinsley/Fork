@@ -60,9 +60,8 @@ test('continue limit cycle from a hopf-curve branch point', async ({ page }) => 
   const bifurcationButton = page.locator('[data-testid^="branch-bifurcation-"]').first()
   await expect(bifurcationButton).toBeVisible({ timeout: 20_000 })
   await bifurcationButton.click()
-  await expect(page.getByText('Stability: Hopf')).toBeVisible()
+  await expect(page.getByTestId('branch-point-bif-chip')).toContainText('Hopf')
 
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-codim1-curve-toggle')
   await page.getByTestId('hopf-curve-name').fill('hopf_curve_lc')
   await page.getByTestId('hopf-curve-param2').selectOption('p2')
@@ -86,7 +85,6 @@ test('continue limit cycle from a hopf-curve branch point', async ({ page }) => 
   await page.getByTestId('branch-point-input').fill('0')
   await page.getByTestId('branch-point-jump').click()
 
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-limit-cycle-from-hopf-toggle')
   await page.getByTestId('limit-cycle-from-hopf-name').fill('lc_hopf_curve')
   await page.getByTestId('limit-cycle-from-hopf-branch-name').fill('lc_hopf_curve_branch')
