@@ -171,11 +171,14 @@ export function OrbitInspectorSections({
                     <button
                       onClick={handleExtendOrbit}
                       disabled={runDisabled}
+                      title={
+                        systemDraft.type === 'map'
+                          ? `Extend from n = ${orbit.t_end}`
+                          : `Extend from t = ${formatNumber(orbit.t_end, 6)}`
+                      }
                       data-testid="orbit-extend-submit"
                     >
-                      {systemDraft.type === 'map'
-                        ? `Extend from n = ${orbit.t_end}`
-                        : `Extend from t = ${formatNumber(orbit.t_end, 6)}`}
+                      Extend
                     </button>
                   ) : null}
                 </div>
@@ -342,7 +345,7 @@ export function OrbitInspectorSections({
                     disabled={runDisabled}
                     data-testid="lyapunov-submit"
                   >
-                    Compute exponents
+                    Compute
                   </button>
                 </div>
                 <div className="inspector-section">
@@ -433,7 +436,7 @@ export function OrbitInspectorSections({
                     disabled={runDisabled}
                     data-testid="clv-submit"
                   >
-                    Compute covariant vectors
+                    Compute
                   </button>
                 </div>
                 {clvHasData ? (
@@ -1118,8 +1121,8 @@ export function OrbitInspectorSections({
                               }))
                             }
                           >
-                            <option value="forward">Forward</option>
-                            <option value="backward">Backward</option>
+                            <option value="forward">→ Increasing</option>
+                            <option value="backward">← Decreasing</option>
                           </select>
                         </label>
                         <label>
@@ -1238,7 +1241,7 @@ export function OrbitInspectorSections({
                           disabled={runDisabled}
                           data-testid="heteroclinic-from-orbit-submit"
                         >
-                          Continue Heteroclinic Curve
+                          Continue
                         </button>
                       </>
                     ) : null}

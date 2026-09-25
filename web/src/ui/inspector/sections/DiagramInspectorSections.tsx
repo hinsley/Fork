@@ -1,4 +1,35 @@
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
+import { SourceChecklist } from './SourceChecklist'
+
+type AxisOption = { value: string; label: string; kind: 'parameter' | 'state' }
+
+/** Axis choices grouped by kind, with bare names like the viewport header picker. */
+function AxisOptionGroups({ options }: { options: AxisOption[] }) {
+  const params = options.filter((option) => option.kind === 'parameter')
+  const states = options.filter((option) => option.kind === 'state')
+  return (
+    <>
+      {params.length > 0 ? (
+        <optgroup label="Parameters">
+          {params.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </optgroup>
+      ) : null}
+      {states.length > 0 ? (
+        <optgroup label="Variables">
+          {states.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </optgroup>
+      ) : null}
+    </>
+  )
+}
 
 export function DiagramInspectorSections({
   scope,
@@ -47,12 +78,8 @@ export function DiagramInspectorSections({
                       }
                       data-testid="diagram-x-param"
                     >
-                      <option value="">Unassigned</option>
-                      {axisOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
+                      <option value="">—</option>
+                      <AxisOptionGroups options={axisOptions} />
                     </select>
                   </label>
                   <label>
@@ -66,69 +93,38 @@ export function DiagramInspectorSections({
                       }
                       data-testid="diagram-y-param"
                     >
-                      <option value="">Unassigned</option>
-                      {axisOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
+                      <option value="">—</option>
+                      <AxisOptionGroups options={axisOptions} />
                     </select>
                   </label>
                 </div>
-              ) : (
-                <p className="faint">—</p>
-              )}
+              ) : null}
               {branchEntries.length > 0 || diagramSelectedIds.length > 0 ? (
-                <div className="inspector-subsection">
-                  <h4 className="section-head">
-                    <span>Branches</span>
-                    <span className="chip" data-testid="diagram-showing-chip">
-                      {diagramSelectedIds.length === 0
-                        ? 'showing: all visible'
-                        : `${diagramSelectedIds.length} selected`}
-                    </span>
-                  </h4>
-                  <input
-                    value={diagramSearch}
-                    onChange={(event) => setDiagramSearch(event.target.value)}
-                    placeholder="Filter branches…"
-                    aria-label="Search branches"
-                    data-testid="diagram-branch-search"
-                  />
-                  {displayedEntries.length > 0 ? (
-                    <div className="scene-object-list">
-                      {displayedEntries.map((entry) => {
-                        const checked = diagramSelectedSet.has(entry.id)
-                        return (
-                          <label
-                            key={`diagram-entry-${entry.id}`}
-                            className="scene-object-row"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                const next = checked
-                                  ? diagramSelectedIds.filter((id) => id !== entry.id)
-                                  : [...diagramSelectedIds, entry.id]
-                                onUpdateBifurcationDiagram(diagram.id, {
-                                  selectedBranchIds: next,
-                                })
-                              }}
-                            />
-                            <span className="scene-object-row__name">{entry.name}</span>
-                            <span className="scene-object-row__meta">
-                              {entry.type}{entry.points === null ? '' : ` · ${entry.points} points`}
-                              {entry.visible ? '' : ' · hidden'}
-                            </span>
-                          </label>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <p className="faint">—</p>
-                  )}
-                </div>
+                <SourceChecklist
+                  title="Branches"
+                  entries={displayedEntries.map((entry) => ({
+                    id: entry.id,
+                    name: entry.name,
+                    meta: `${entry.type}${entry.points === null ? '' : ` · ${entry.points} points`}${
+                      entry.visible ? '' : ' · hidden'
+                    }`,
+                  }))}
+                  selectedIds={diagramSelectedIds}
+                  implicitIds={branchEntries
+                    .filter((entry) => entry.visible)
+                    .map((entry) => entry.id)}
+                  onChange={(next) =>
+                    onUpdateBifurcationDiagram(diagram.id, { selectedBranchIds: next })
+                  }
+                  search={{
+                    value: diagramSearch,
+                    onChange: setDiagramSearch,
+                    placeholder: 'Filter branches…',
+                    ariaLabel: 'Search branches',
+                    testId: 'diagram-branch-search',
+                  }}
+                  chipTestId="diagram-showing-chip"
+                />
               ) : null}
             </div>
           ) : null}

@@ -866,7 +866,7 @@ describe('continuation helpers', () => {
         { re: 1, im: 0 },
         { re: 1.2, im: 0 },
       ])
-    ).toBe('unstable (1D)')
+    ).toBe('unstable 1u')
     expect(
       interpretLimitCycleStability([
         { re: 1, im: 0 },
@@ -878,13 +878,13 @@ describe('continuation helpers', () => {
         { re: 1, im: 0 },
         { re: -1.005, im: 0 },
       ])
-    ).toBe('unstable (1D)')
+    ).toBe('unstable 1u')
     expect(
       interpretLimitCycleStability([
         { re: 1.001, im: 0 },
         { re: 1.005, im: 0 },
       ])
-    ).toBe('unstable (1D)')
+    ).toBe('unstable 1u')
     expect(interpretLimitCycleStability([{ re: 1, im: 0.2 }])).toBe('unknown')
   })
 })

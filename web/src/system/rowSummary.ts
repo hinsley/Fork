@@ -15,6 +15,7 @@ import type {
   ParameterRef,
   RowSummary,
   RowSummaryTone,
+  System,
   SystemConfig,
 } from './types'
 import { fmt, fmtCompactCount } from '../utils/format'
@@ -24,7 +25,7 @@ import {
   classifyEquilibrium,
   type BifurcationTone,
 } from './stability'
-import { interpretLimitCycleStability } from './continuation'
+import { interpretLimitCycleStability, normalizeEigenvalueArray } from './continuation'
 import {
   formatContinuationParameterDisplayLabel,
   formatParameterRefLabel,
@@ -59,15 +60,47 @@ function compact(summary: RowSummary): RowSummary {
   return out
 }
 
-function describeLimitCycleStability(
+/** Stability chip for a cycle from its Floquet multipliers (`stable`, `unstable 1u`, `unstable (torus)`). */
+export function describeLimitCycleStability(
   multipliers: ContinuationEigenvalue[] | undefined
 ): { label: string; tone: RowSummaryTone } | null {
   const label = interpretLimitCycleStability(multipliers)
   if (label === 'unknown') return null
-  if (label === 'stable') return { label, tone: 'stable' }
-  const dims = /^unstable \((\d+)D\)$/.exec(label)
-  if (dims) return { label: `unstable ${dims[1]}u`, tone: 'unstable' }
-  return { label: label.replace(/[()]/g, ''), tone: 'unstable' }
+  return { label, tone: label === 'stable' ? 'stable' : 'unstable' }
+}
+
+/** Stability chip for a forced periodic response from its strobe-map multipliers. */
+export function describeForcedResponseStability(
+  multipliers: ContinuationEigenvalue[] | undefined
+): { label: string; tone: RowSummaryTone } | null {
+  const stability = classifyEquilibrium(multipliers, 'map')
+  return stability.kind === 'unknown' ? null : { label: stability.label, tone: stability.kind }
+}
+
+function isFiniteRow(row: number[] | undefined): boolean {
+  if (!row || row.length === 0) return false
+  for (const value of row) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return false
+  }
+  return true
+}
+
+/**
+ * Index of the first orbit sample whose time or state is non-finite (the orbit
+ * blew up), or -1 when the final sample is finite. Non-finite values persist
+ * once reached, so a binary search suffices.
+ */
+export function findOrbitDivergenceIndex(data: number[][] | undefined): number {
+  const rows = data ?? []
+  if (rows.length === 0 || isFiniteRow(rows[rows.length - 1])) return -1
+  let lo = 0
+  let hi = rows.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (isFiniteRow(rows[mid])) lo = mid + 1
+    else hi = mid
+  }
+  return lo
 }
 
 function summarizeOrbit(
@@ -87,6 +120,9 @@ function summarizeOrbit(
   const leading = object.lyapunovExponents?.[0]
   if (typeof leading === 'number' && Number.isFinite(leading)) {
     text += ` · λ₁ ${short(leading)}`
+  }
+  if (findOrbitDivergenceIndex(object.data) >= 0) {
+    return { text, status: 'diverged', tone: 'unstable' }
   }
   return { text }
 }
@@ -118,31 +154,87 @@ function summarizeEquilibrium(
   return { status: 'unsolved', tone: 'muted' }
 }
 
+/**
+ * The branch point a limit cycle or forced response is rendered at (its
+ * "@ branch #i" target). The inspector glance shows this point's values, so
+ * the tree row summarizes the same point.
+ */
+export type RenderedPointSummary = {
+  period?: number
+  multipliers?: ContinuationEigenvalue[]
+  forcingPeriod?: number
+  responseMultiple?: number
+}
+
+export function resolveRenderedPointSummary(
+  renderTargets: System['ui']['limitCycleRenderTargets'],
+  branches: System['branches'],
+  objectId: string,
+  objectType: AnalysisObject['type']
+): RenderedPointSummary | undefined {
+  if (objectType !== 'limit_cycle' && objectType !== 'forced_periodic_response') return undefined
+  const target = renderTargets?.[objectId]
+  if (target?.type !== 'branch') return undefined
+  const branch = branches[target.branchId]
+  const point = branch?.data.points[target.pointIndex]
+  if (!branch || !point) return undefined
+  const multipliers = normalizeEigenvalueArray(point.eigenvalues)
+  if (objectType === 'limit_cycle') {
+    const period = point.state[point.state.length - 1]
+    return { period: Number.isFinite(period) ? period : undefined, multipliers }
+  }
+  const metadata = branch.data.branch_type
+  return {
+    forcingPeriod:
+      typeof point.forcing_period === 'number' && Number.isFinite(point.forcing_period)
+        ? point.forcing_period
+        : undefined,
+    responseMultiple:
+      metadata?.type === 'ForcedPeriodicResponse' ? metadata.response_multiple : undefined,
+    multipliers,
+  }
+}
+
 function summarizeLimitCycle(
-  object: Extract<AnalysisObject, { type: 'limit_cycle' }>
+  object: Extract<AnalysisObject, { type: 'limit_cycle' }>,
+  rendered?: RenderedPointSummary
 ): RowSummary {
   const stability = describeLimitCycleStability(
-    object.floquetMultipliers ?? object.floquetModes?.multipliers
+    rendered
+      ? rendered.multipliers
+      : object.floquetMultipliers ?? object.floquetModes?.multipliers
   )
+  const period = rendered ? rendered.period : object.period
   return compact({
-    text: Number.isFinite(object.period) ? `T ${fmt(object.period, { digits: 4 })}` : undefined,
+    text:
+      typeof period === 'number' && Number.isFinite(period)
+        ? `T ${fmt(period, { digits: 4 })}`
+        : undefined,
     status: stability?.label,
     tone: stability?.tone,
   })
 }
 
 function summarizeForcedResponse(
-  object: Extract<AnalysisObject, { type: 'forced_periodic_response' }>
+  object: Extract<AnalysisObject, { type: 'forced_periodic_response' }>,
+  rendered?: RenderedPointSummary
 ): RowSummary {
   const solution = object.solution
+  if (rendered) {
+    const stability = describeForcedResponseStability(rendered.multipliers)
+    const multiple = rendered.responseMultiple ?? solution?.response_multiple ?? 1
+    let text: string | undefined
+    if (typeof rendered.forcingPeriod === 'number') {
+      text = `T ${fmt(rendered.forcingPeriod, { digits: 4 })}`
+      if (multiple > 1) text += ` ×${multiple}`
+    }
+    return compact({ text, status: stability?.label, tone: stability?.tone })
+  }
   if (!solution) return { status: 'unsolved', tone: 'muted' }
   let text = `T ${fmt(solution.forcing_period, { digits: 4 })}`
   if (solution.response_multiple > 1) text += ` ×${solution.response_multiple}`
-  const stability = classifyEquilibrium(solution.multipliers, 'map')
-  if (stability.kind !== 'unknown') {
-    return { text, status: stability.label, tone: stability.kind }
-  }
-  return { text }
+  const stability = describeForcedResponseStability(solution.multipliers)
+  return stability ? { text, status: stability.label, tone: stability.tone } : { text }
 }
 
 function summarizeIsocline(object: Extract<AnalysisObject, { type: 'isocline' }>): RowSummary {
@@ -172,7 +264,8 @@ function summarizeStateGrid(object: Extract<AnalysisObject, { type: 'state_grid'
 
 export function summarizeObject(
   object: AnalysisObject | null | undefined,
-  config: SummaryConfig
+  config: SummaryConfig,
+  rendered?: RenderedPointSummary
 ): RowSummary | undefined {
   if (!object) return undefined
   let summary: RowSummary | undefined
@@ -184,10 +277,10 @@ export function summarizeObject(
       summary = summarizeEquilibrium(object, config)
       break
     case 'limit_cycle':
-      summary = summarizeLimitCycle(object)
+      summary = summarizeLimitCycle(object, rendered)
       break
     case 'forced_periodic_response':
-      summary = summarizeForcedResponse(object)
+      summary = summarizeForcedResponse(object, rendered)
       break
     case 'isocline':
       summary = summarizeIsocline(object)

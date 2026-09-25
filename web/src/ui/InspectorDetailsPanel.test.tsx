@@ -437,7 +437,10 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.queryByTestId('invariant-eigenmode-count-preset')).not.toBeInTheDocument()
     expect(screen.getByTestId('invariant-measure-spectrum-plot')).toBeInTheDocument()
     expect(screen.getByTestId('invariant-spectral-gap')).toHaveTextContent('0.1')
-    expect(screen.getByTestId('invariant-eigenmode-1')).toHaveTextContent('Mode 1 pair')
+    expect(screen.getByTestId('invariant-eigenmode-1')).toHaveTextContent('0.45 ± 0.7794i')
+    expect(screen.getByTestId('invariant-eigenmode-subset')).toHaveTextContent(
+      '2 modes · 3 eigenvalues'
+    )
     expect(screen.getByTestId('invariant-eigenmode-1')).toHaveAttribute(
       'title',
       expect.stringMatching(/density relaxation/i)
@@ -453,9 +456,7 @@ describe('InspectorDetailsPanel', () => {
     fireEvent.click(screen.getByTestId('action-invariant-measure-eigenmodes-toggle'))
     expect(screen.getByTestId('invariant-eigenmode-count')).toHaveValue(4)
     expect(screen.getByTestId('invariant-eigenmode-compute')).toBeEnabled()
-    expect(screen.getByTestId('invariant-eigenmode-compute')).toHaveTextContent(
-      'Compute 4 modes'
-    )
+    expect(screen.getByTestId('invariant-eigenmode-compute')).toHaveTextContent('Compute')
     fireEvent.click(screen.getByTestId('invariant-eigenmode-compute'))
     await waitFor(() => {
       expect(onCompute).toHaveBeenCalledWith(

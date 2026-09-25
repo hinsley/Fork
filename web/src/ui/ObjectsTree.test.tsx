@@ -10,6 +10,8 @@ import {
   addObject,
   createSystem,
   moveNodeIntoParent,
+  removeNode,
+  selectNode,
   toggleNodeExpanded,
 } from '../system/model'
 import type { ContinuationObject, OrbitObject } from '../system/types'
@@ -1774,6 +1776,141 @@ describe('ObjectsTree', () => {
 
       fireEvent.keyDown(first, { key: 'F2' })
       expect(screen.getByTestId(`node-rename-input-${demo.objectNodeId}`)).toHaveValue('Orbit A')
+    })
+
+    it('rejects an inline rename to a name a sibling already uses', async () => {
+      const user = userEvent.setup()
+      const demo = createDemoSystem()
+      const orbitB: OrbitObject = {
+        type: 'orbit',
+        name: 'Orbit B',
+        systemName: demo.system.config.name,
+        data: [],
+        t_start: 0,
+        t_end: 1,
+        dt: 0.1,
+      }
+      const second = addObject(demo.system, orbitB)
+      const { props } = renderTree(second.system)
+      fireEvent.keyDown(screen.getByTestId(`object-tree-node-${second.nodeId}`), { key: 'F2' })
+      const input = screen.getByTestId(`node-rename-input-${second.nodeId}`)
+      await user.clear(input)
+      await user.type(input, 'Orbit A{enter}')
+      expect(props.onRename).not.toHaveBeenCalled()
+      expect(input).toBeInTheDocument()
+      expect(input).toHaveAttribute('aria-invalid', 'true')
+      expect(input).toHaveAttribute('title', 'Orbit "Orbit A" already exists.')
+      await user.type(input, '2{enter}')
+      expect(props.onRename).toHaveBeenCalledWith(second.nodeId, 'Orbit A2')
+      expect(screen.queryByTestId(`node-rename-input-${second.nodeId}`)).toBeNull()
+    })
+
+    it('keeps keyboard focus in the tree after deleting a row', () => {
+      const demo = createDemoSystem()
+      const orbitB: OrbitObject = {
+        type: 'orbit',
+        name: 'Orbit B',
+        systemName: demo.system.config.name,
+        data: [],
+        t_start: 0,
+        t_end: 1,
+        dt: 0.1,
+      }
+      const second = addObject(demo.system, orbitB)
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+      const onSelect = vi.fn()
+
+      function Harness() {
+        const [system, setSystem] = useState(second.system)
+        return (
+          <ObjectsTree
+            system={system}
+            selectedNodeId={system.ui.selectedNodeId}
+            onSelect={onSelect}
+            onToggleVisibility={vi.fn()}
+            onRename={vi.fn()}
+            onToggleExpanded={vi.fn()}
+            onReorderNode={vi.fn()}
+            onCreateOrbit={vi.fn()}
+            onCreateEquilibrium={vi.fn()}
+            onDeleteNode={(id) => setSystem((current) => removeNode(current, id))}
+          />
+        )
+      }
+
+      render(<Harness />)
+      const first = screen.getByTestId(`object-tree-node-${demo.objectNodeId}`)
+      first.focus()
+      // The orbit's branch is deleted with it, so focus skips to the next orbit.
+      fireEvent.keyDown(first, { key: 'Delete' })
+      confirmSpy.mockRestore()
+      expect(screen.queryByTestId(`object-tree-node-${demo.objectNodeId}`)).toBeNull()
+      expect(onSelect).toHaveBeenLastCalledWith(second.nodeId)
+      expect(screen.getByTestId(`object-tree-node-${second.nodeId}`)).toHaveFocus()
+    })
+
+    it('starts renaming a folder created outside the tree', async () => {
+      const demo = createDemoSystem()
+
+      function Harness() {
+        const [system, setSystem] = useState(demo.system)
+        const createFolder = () => {
+          const created = addFolder(system, 'Folder_3')
+          setSystem(selectNode(created.system, created.nodeId))
+        }
+        return (
+          <>
+          <button type="button" onClick={createFolder}>
+            external folder
+          </button>
+          <ObjectsTree
+            system={system}
+            selectedNodeId={system.ui.selectedNodeId}
+            onSelect={vi.fn()}
+            onToggleVisibility={vi.fn()}
+            onRename={vi.fn()}
+            onToggleExpanded={vi.fn()}
+            onReorderNode={vi.fn()}
+            onCreateOrbit={vi.fn()}
+            onCreateEquilibrium={vi.fn()}
+            onDeleteNode={vi.fn()}
+          />
+          </>
+        )
+      }
+
+      render(<Harness />)
+      expect(screen.queryByDisplayValue('Folder_3')).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'external folder' }))
+      const input = await screen.findByDisplayValue('Folder_3')
+      expect(input.getAttribute('data-testid')).toMatch(/^node-rename-input-/)
+      expect(input).toHaveFocus()
+    })
+
+    it('merges a failure warning into the status chip and marks custom parameters with p', () => {
+      let system = createSystem({ name: 'Flags' })
+      system = {
+        ...system,
+        config: { ...system.config, paramNames: ['a'], params: [1] },
+      }
+      const failed = addObject(system, {
+        type: 'equilibrium',
+        name: 'Eq_Failed',
+        systemName: 'Flags',
+        customParameters: [2],
+        lastRun: {
+          timestamp: 'x',
+          success: false,
+          diagnostic: { kind: 'singular_jacobian', message: 'Newton solve: Jacobian is singular.' },
+        },
+      } as never)
+      renderTree(failed.system)
+      const row = screen.getByTestId(`object-tree-row-${failed.nodeId}`)
+      const status = row.querySelector('.tree-node__status')
+      expect(status).toHaveTextContent('failed')
+      expect(status).toHaveAttribute('title', 'Newton solve: Jacobian is singular.')
+      expect(row.querySelector('.tree-node__warn')).toBeNull()
+      expect(screen.getByTestId(`object-tree-custom-${failed.nodeId}`)).toHaveTextContent('p')
     })
 
     it('renames on double click', async () => {

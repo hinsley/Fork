@@ -498,9 +498,7 @@ describe('StateGridInspector', () => {
     )
 
     fireEvent.click(screen.getByTestId('action-state-grid-transfer-toggle'))
-    expect(screen.getByTestId('state-grid-invariant-measure-workflow')).toHaveTextContent(
-      'Create invariant measure'
-    )
+    expect(screen.getByTestId('state-grid-create-invariant-measure')).toHaveTextContent('Create')
     expect(screen.getByTestId('state-grid-transfer-starting-point-0')).toHaveValue(0)
     expect(screen.getByTestId('state-grid-transfer-starting-point-1')).toHaveValue(0)
     fireEvent.change(screen.getByTestId('state-grid-transfer-starting-point-0'), {

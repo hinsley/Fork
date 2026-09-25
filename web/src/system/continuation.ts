@@ -479,7 +479,7 @@ export function interpretLimitCycleStability(
 
   if (unstableCount === 0) return 'stable'
   if (hasNeimarkSacker) return 'unstable (torus)'
-  return `unstable (${unstableCount}D)`
+  return `unstable ${unstableCount}u`
 }
 
 export function normalizeBranchEigenvalues(

@@ -3145,7 +3145,8 @@ export function AppProvider({
         const steps =
           system.type === 'map'
             ? Math.max(1, Math.ceil(request.duration))
-            : Math.max(1, Math.ceil(request.duration / dt))
+            : // Tolerate float noise so e.g. 1.1 / 0.1 = 11.000000000000002 stays 11 steps.
+              Math.max(1, Math.ceil(request.duration / dt - 1e-9))
 
         const baseParams = resolveObjectParams(system, orbit.customParameters)
         const { snapshot, runConfig } = buildObjectSubsystemRunConfig(system, orbit, baseParams)

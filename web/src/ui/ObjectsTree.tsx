@@ -24,10 +24,12 @@ import { hasCustomObjectParams } from '../system/parameters'
 import { formatEquilibriumLabel } from '../system/labels'
 import {
   formatBifurcationBadges,
+  resolveRenderedPointSummary,
   rowSummaryMatches,
   summarizeBranch,
   summarizeObject,
 } from '../system/rowSummary'
+import { findRenameConflict } from '../state/systemTreeCommands'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 import { clampMenuX, clampMenuY, focusMenuItem } from './contextMenu'
 import { Icon, type IconName } from './Icon'
@@ -228,6 +230,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
   ) {
     const [editingId, setEditingId] = useState<string | null>(null)
     const [draftName, setDraftName] = useState('')
+    const [renameError, setRenameError] = useState<string | null>(null)
+    const [renameShake, setRenameShake] = useState(0)
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const [touchDragging, setTouchDragging] = useState(false)
     const [dropPreview, setDropPreview] = useState<
@@ -270,6 +274,9 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const pendingFocusRef = useRef<string | null>(null)
     const menuOpenedByKeyboardRef = useRef(false)
     const createdFolderRenameRef = useRef<string | null>(null)
+    const pendingDeleteFocusRef = useRef<{ deletedId: string; nextId: string | null } | null>(
+      null
+    )
     const equilibriumLabel = formatEquilibriumLabel(system.config.type)
     const createEquilibriumLabel =
       system.config.type === 'map' ? 'Fixed point / cycle' : equilibriumLabel
@@ -296,6 +303,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const startRename = (node: TreeNode) => {
       setEditingId(node.id)
       setDraftName(node.name)
+      setRenameError(null)
     }
 
     const focusNodeLabel = useCallback((nodeId: string) => {
@@ -318,6 +326,18 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         pendingFocusRef.current = null
       }
     })
+
+    // After a delete lands, select and focus the neighbouring row. Selecting
+    // earlier would run against the pre-delete system and undo the removal.
+    useEffect(() => {
+      const pending = pendingDeleteFocusRef.current
+      if (!pending || system.nodes[pending.deletedId]) return
+      pendingDeleteFocusRef.current = null
+      if (pending.nextId && system.nodes[pending.nextId]) {
+        onSelect(pending.nextId)
+        focusNodeLabel(pending.nextId)
+      }
+    }, [focusNodeLabel, onSelect, system.nodes])
 
     const closeMenus = useCallback(() => {
       setNodeContextMenu(null)
@@ -435,12 +455,25 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       }
     }, [])
 
-    const commitRename = (node: TreeNode) => {
+    /**
+     * Commits the inline rename. A name another sibling already uses is
+     * rejected: from Enter the input stays open and shakes; on blur the old
+     * name is kept (the rename command reports the conflict).
+     */
+    const commitRename = (node: TreeNode, source: 'enter' | 'blur'): boolean => {
       const trimmed = draftName.trim()
       if (trimmed && trimmed !== node.name) {
+        const conflict = findRenameConflict(system, node.id, trimmed)
+        if (conflict && source === 'enter') {
+          setRenameError(conflict)
+          setRenameShake((count) => count + 1)
+          return false
+        }
         onRename(node.id, trimmed)
       }
+      setRenameError(null)
       setEditingId(null)
+      return true
     }
 
     const openNodeContextMenu = (
@@ -872,7 +905,9 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         : derivedChildren
     }
 
+    const renderTargets = system.ui.limitCycleRenderTargets
     // Row summaries: hydrated payloads win, otherwise the persisted index digest.
+    // Cycles rendered at a branch point summarize that point, like the inspector.
     const summaries = useMemo(() => {
       const map = new Map<string, RowSummary | undefined>()
       Object.values(system.nodes).forEach((node) => {
@@ -880,7 +915,13 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           const object = system.objects[node.id]
           map.set(
             node.id,
-            object ? summarizeObject(object, system.config) : system.index.objects[node.id]?.summary
+            object
+              ? summarizeObject(
+                  object,
+                  system.config,
+                  resolveRenderedPointSummary(renderTargets, system.branches, node.id, object.type)
+                )
+              : system.index.objects[node.id]?.summary
           )
         } else if (node.kind === 'branch') {
           const branch = system.branches[node.id]
@@ -891,7 +932,14 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         }
       })
       return map
-    }, [system.nodes, system.objects, system.branches, system.index, system.config])
+    }, [
+      system.nodes,
+      system.objects,
+      system.branches,
+      system.index,
+      system.config,
+      renderTargets,
+    ])
 
     const treeNodeCount = useMemo(
       () =>
@@ -963,10 +1011,28 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       focusNodeLabel(nodeId)
     }
 
+    /** Row to focus once `nodeId` (and its subtree) is gone: the next row, else the previous. */
+    const rowAfterDelete = (nodeId: string): string | null => {
+      const isInSubtree = (id: string) => {
+        let cursor: string | null | undefined = id
+        while (cursor) {
+          if (cursor === nodeId) return true
+          cursor = parentOf.get(cursor)
+        }
+        return false
+      }
+      const index = visibleOrder.indexOf(nodeId)
+      if (index < 0) return null
+      const next = visibleOrder.slice(index + 1).find((id) => !isInSubtree(id))
+      return next ?? visibleOrder[index - 1] ?? null
+    }
+
     const requestDelete = (nodeId: string) => {
       const node = system.nodes[nodeId]
       if (!node) return
       if (confirmDelete({ name: node.name, kind: getDeleteKindLabel(node, system) })) {
+        // Keep keyboard focus in the tree instead of dropping it to <body>.
+        pendingDeleteFocusRef.current = { deletedId: nodeId, nextId: rowAfterDelete(nodeId) }
         onDeleteNode(nodeId)
       }
     }
@@ -1053,12 +1119,18 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       return (
         <span className="tree-node__summary" id={summaryId}>
           {summary.text ? (
-            <span className={`tree-node__data num${pending ? ' tree-node__data--pending' : ''}`}>
-              {summary.text}
+            <span
+              className={`tree-node__data num${pending ? ' tree-node__data--pending' : ''}`}
+              title={summary.text}
+            >
+              <span className="tree-node__data-text">{summary.text}</span>
             </span>
           ) : null}
           {summary.status ? (
-            <span className={`chip chip--${summary.tone ?? 'muted'} tree-node__status`}>
+            <span
+              className={`chip chip--${summary.tone ?? 'muted'} tree-node__status`}
+              title={summary.warn}
+            >
               {summary.status}
             </span>
           ) : null}
@@ -1082,7 +1154,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               +{badges.overflow}
             </span>
           ) : null}
-          {summary.warn ? (
+          {summary.warn && !summary.status ? (
             <span className="chip chip--warning tree-node__warn" title={summary.warn}>
               !
             </span>
@@ -1264,25 +1336,36 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               </span>
               {isEditing ? (
                 <input
-                  className="tree-node__rename"
+                  className={`tree-node__rename${
+                    renameError
+                      ? ` tree-node__rename--invalid tree-node__rename--shake-${renameShake % 2}`
+                      : ''
+                  }`}
                   value={draftName}
                   autoFocus
-                  onFocus={(event) => event.currentTarget.select()}
+                  onFocus={(event) => {
+                    if (!renameError) event.currentTarget.select()
+                  }}
                   onClick={(event) => event.stopPropagation()}
-                  onChange={(event) => setDraftName(event.target.value)}
-                  onBlur={() => commitRename(node)}
+                  onChange={(event) => {
+                    setDraftName(event.target.value)
+                    setRenameError(null)
+                  }}
+                  onBlur={() => commitRename(node, 'blur')}
                   onKeyDown={(event) => {
                     event.stopPropagation()
                     if (event.key === 'Enter') {
-                      commitRename(node)
-                      focusNodeLabel(nodeId)
+                      if (commitRename(node, 'enter')) focusNodeLabel(nodeId)
                     }
                     if (event.key === 'Escape') {
+                      setRenameError(null)
                       setEditingId(null)
                       focusNodeLabel(nodeId)
                     }
                   }}
                   aria-label={`Rename ${node.name}`}
+                  aria-invalid={renameError ? true : undefined}
+                  title={renameError ?? undefined}
                   data-testid={`node-rename-input-${nodeId}`}
                 />
               ) : (
@@ -1302,6 +1385,11 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
                   }}
                   tabIndex={nodeId === tabStopId ? 0 : -1}
                   title={node.name}
+                  style={
+                    {
+                      '--tree-name-min': `${Math.min(Array.from(node.name).length, 6)}ch`,
+                    } as CSSProperties
+                  }
                   id={`object-tree-label-${nodeId}`}
                   aria-label={getNodeLabel(node, system)}
                   aria-describedby={summaryContent ? summaryId : undefined}
@@ -1317,7 +1405,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
                   data-testid={`object-tree-custom-${nodeId}`}
                   title="Custom parameters"
                 >
-                  c
+                  p
                 </span>
               ) : null}
               {hasFrozenVariables ? (
@@ -1393,6 +1481,29 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       createdFolderRenameRef.current = null
       if (editingId === pendingId) setDraftName(node.name)
     }, [editingId, system.nodes])
+
+    // Folders created outside the tree (the panel's folder button, the command
+    // palette) are selected by the create command; start naming them right away,
+    // like folders created from the tree menus.
+    const knownFoldersRef = useRef<{ systemId: string; ids: Set<string> } | null>(null)
+    useEffect(() => {
+      const ids = new Set(
+        Object.values(system.nodes)
+          .filter((node) => node.kind === 'folder')
+          .map((node) => node.id)
+      )
+      const known = knownFoldersRef.current
+      knownFoldersRef.current = { systemId: system.id, ids }
+      if (!known || known.systemId !== system.id) return
+      const created = [...ids].filter((id) => !known.ids.has(id))
+      if (created.length !== 1) return
+      const createdId = created[0]!
+      const node = system.nodes[createdId]
+      if (!node || system.ui.selectedNodeId !== createdId || editingId === createdId) return
+      setEditingId(createdId)
+      setDraftName(node.name)
+      setRenameError(null)
+    }, [editingId, system.id, system.nodes, system.ui.selectedNodeId])
 
     const runMenuAction = (action: () => void) => {
       closeMenus()

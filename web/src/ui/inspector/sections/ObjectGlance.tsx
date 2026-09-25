@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
 import type { ComplexValue } from '../../../system/types'
 import { classifyEquilibrium } from '../../../system/stability'
-import { interpretLimitCycleStability } from '../../../system/continuation'
 import { resolveTrivialFloquetModeIndex } from '../../../system/floquetModes'
 import {
   fmt,
@@ -17,6 +16,11 @@ import {
 import { Icon } from '../../Icon'
 import { KeyValues, type HeaderChip } from '../InspectorChrome'
 import { computeInvariantMeasureStats } from './invariantMeasureStats'
+import {
+  describeForcedResponseStability,
+  describeLimitCycleStability,
+  findOrbitDivergenceIndex,
+} from '../../../system/rowSummary'
 import { RenderTargetChip, StateVector, ValueList } from './GlanceParts'
 
 export type ObjectHeaderModel = {
@@ -48,14 +52,6 @@ function mergedModuli(values: ComplexValue[]): string[] {
   return out
 }
 
-function stabilityChipFromLabel(label: string): HeaderChip {
-  if (label === 'stable') return { label, tone: 'stable' }
-  if (label.startsWith('unstable')) return { label, tone: 'unstable' }
-  return { label, tone: 'unknown' }
-}
-
-
-
 function equilibriumModel(scope: InspectorSelectionController): ObjectHeaderModel | null {
   const {
     equilibrium,
@@ -73,9 +69,13 @@ function equilibriumModel(scope: InspectorSelectionController): ObjectHeaderMode
   if (!solution) {
     return {
       chip: failed
-        ? { label: 'failed', tone: 'warning', title: 'Last solve attempt failed' }
+        ? {
+            label: 'failed',
+            tone: 'warning',
+            title: equilibrium.lastRun?.diagnostic?.message ?? 'Last solve attempt failed',
+          }
         : { label: 'unsolved', tone: 'muted' },
-      meta: ['Not solved'],
+      meta: [],
       glance: null,
     }
   }
@@ -138,12 +138,27 @@ function orbitModel(scope: InspectorSelectionController): ObjectHeaderModel | nu
   if (count === 0) {
     return {
       chip: { label: 'empty', tone: 'muted' },
-      meta: ['0 points'],
+      meta: [],
       glance: null,
     }
   }
-  const last = orbit.data[count - 1] ?? []
+  const divergedAt = findOrbitDivergenceIndex(orbit.data)
+  const diverged = divergedAt >= 0
+  // A blown-up orbit ends in ∞/NaN; show the last finite sample instead.
+  const lastFinite = diverged ? orbit.data[divergedAt - 1] : undefined
+  const last = (diverged ? lastFinite : orbit.data[count - 1]) ?? []
   const finalState = last.slice(1)
+  const divergedTime = orbit.data[divergedAt]?.[0]
+  const chip: HeaderChip | null = diverged
+    ? {
+        label: 'diverged',
+        tone: 'unstable',
+        title:
+          typeof divergedTime === 'number' && Number.isFinite(divergedTime)
+            ? `State became non-finite at ${isDiscreteMap ? 'n' : 't'} = ${fmt(divergedTime)}`
+            : 'State became non-finite',
+      }
+    : null
   const names = orbitPreviewVarNames.length > 0 ? orbitPreviewVarNames : frozenVariableHeaderNames
   const meta = [
     `${fmtCount(count)} points`,
@@ -154,17 +169,19 @@ function orbitModel(scope: InspectorSelectionController): ObjectHeaderModel | nu
   if (!isDiscreteMap) meta.push(`dt ${fmt(orbit.dt)}`)
   const exponents = orbit.lyapunovExponents ?? []
   return {
-    chip: null,
+    chip,
     meta,
     glance: (
       <>
-        <StateVector
-          title="Final state"
-          names={names}
-          values={finalState}
-          onCopy={() => void writeClipboardText(formatPointValues(finalState))}
-          testId="orbit-glance-final-state"
-        />
+        {diverged && !lastFinite ? null : (
+          <StateVector
+            title={diverged ? 'Last finite state' : 'Final state'}
+            names={names}
+            values={finalState}
+            onCopy={() => void writeClipboardText(formatPointValues(finalState))}
+            testId="orbit-glance-final-state"
+          />
+        )}
         {exponents.length > 0 ? (
           <div className="inspector-glance__group" data-testid="orbit-glance-lyapunov">
             <div className="section-head">
@@ -219,7 +236,7 @@ function limitCycleModel(scope: InspectorSelectionController): ObjectHeaderModel
     formatLimitCycleOrigin,
   } = scope
   if (!limitCycle) return null
-  const stability = interpretLimitCycleStability(limitCycleDisplayMultipliers)
+  const stability = describeLimitCycleStability(limitCycleDisplayMultipliers)
   const renderedState = limitCycleRenderPoint?.state
   const renderedPeriod =
     renderedState && renderedState.length > 0 ? renderedState[renderedState.length - 1] : undefined
@@ -230,7 +247,7 @@ function limitCycleModel(scope: InspectorSelectionController): ObjectHeaderModel
   const trivialIndex = resolveTrivialFloquetModeIndex(limitCycleDisplayMultipliers)
   const nontrivial = limitCycleDisplayMultipliers.filter((_, index) => index !== trivialIndex)
   return {
-    chip: stabilityChipFromLabel(stability),
+    chip: stability ?? { label: 'unknown', tone: 'unknown' },
     meta: [formatLimitCycleOrigin(limitCycle.origin)],
     glance: (
       <>
@@ -285,6 +302,7 @@ function forcedResponseModel(scope: InspectorSelectionController): ObjectHeaderM
   const {
     forcedPeriodicResponse,
     forcedPeriodicResponseStale,
+    forcedPeriodicResponseRenderData,
     forcedPeriodicResponseRenderLabel,
     isStoredForcedPeriodicResponseTarget,
     onSetLimitCycleRenderTarget,
@@ -308,36 +326,52 @@ function forcedResponseModel(scope: InspectorSelectionController): ObjectHeaderM
       resetTestId="forced-response-render-stored"
     />
   ) : null
-  if (!solution) {
+  // Rendered at a branch point: show that point, like limit cycles do.
+  const rendered = !isStoredForcedPeriodicResponseTarget ? forcedPeriodicResponseRenderData : null
+  if (!solution && !rendered) {
     return {
       chip: { label: 'unsolved', tone: 'muted' },
-      meta: ['Not solved'],
+      meta: [],
       glance: renderTarget,
     }
   }
-  const maxModulus = solution.multipliers.reduce(
+  const view = rendered
+    ? {
+        state: rendered.state,
+        multipliers: rendered.multipliers,
+        forcingPeriod: rendered.forcingPeriod,
+        responseMultiple: rendered.responseMultiple ?? solution?.response_multiple ?? null,
+        points: rendered.cyclePointCount,
+      }
+    : {
+        state: solution!.state,
+        multipliers: solution!.multipliers,
+        forcingPeriod: solution!.forcing_period,
+        responseMultiple: solution!.response_multiple,
+        points: solution!.cycle_points.length,
+      }
+  const maxModulus = view.multipliers.reduce(
     (max, value) => Math.max(max, Math.hypot(value.re, value.im)),
     0
   )
-  const chip: HeaderChip =
-    solution.multipliers.length === 0
-      ? { label: 'unknown', tone: 'unknown' }
-      : maxModulus > 1 + 1e-9
-        ? { label: 'unstable', tone: 'unstable' }
-        : maxModulus < 1 - 1e-9
-          ? { label: 'stable', tone: 'stable' }
-          : { label: 'non-hyperbolic', tone: 'nonhyperbolic' }
+  const stability = describeForcedResponseStability(view.multipliers) ?? {
+    label: 'unknown',
+    tone: 'unknown' as const,
+  }
+  const responsePeriod =
+    view.forcingPeriod !== null && view.responseMultiple !== null
+      ? view.forcingPeriod * view.responseMultiple
+      : null
   return {
-    chip,
-    meta: [
-      'Solved',
-      `${fmtCount(solution.iterations)} it`,
-      `‖F‖ ${fmtSci(solution.residual_norm)}`,
-    ],
+    chip: { label: stability.label, tone: stability.tone },
+    meta:
+      rendered || !solution
+        ? []
+        : ['Solved', `${fmtCount(solution.iterations)} it`, `‖F‖ ${fmtSci(solution.residual_norm)}`],
     glance: (
       <>
         {renderTarget}
-        {forcedPeriodicResponseStale ? (
+        {!rendered && forcedPeriodicResponseStale ? (
           <span
             className="chip chip--warning"
             title="Settings changed since this response was solved"
@@ -350,17 +384,32 @@ function forcedResponseModel(scope: InspectorSelectionController): ObjectHeaderM
           columns={2}
           testId="forced-response-glance"
           rows={[
-            { label: 'Forcing period', value: fmt(solution.forcing_period) },
+            rendered?.parameterName
+              ? {
+                  label: rendered.parameterName,
+                  value: fmt(rendered.paramValue),
+                  title: 'Continuation parameter',
+                  testId: 'forced-response-glance-param',
+                }
+              : null,
+            {
+              label: 'Forcing period',
+              value: view.forcingPeriod !== null ? fmt(view.forcingPeriod) : '—',
+              testId: 'forced-response-glance-forcing-period',
+            },
             {
               label: 'Response period',
-              value: fmt(solution.forcing_period * solution.response_multiple),
+              value: responsePeriod !== null ? fmt(responsePeriod) : '—',
             },
-            { label: 'Multiple', value: String(solution.response_multiple) },
+            {
+              label: 'Multiple',
+              value: view.responseMultiple !== null ? String(view.responseMultiple) : '—',
+            },
             { label: 'max |μ|', value: fmt(maxModulus) },
-            { label: 'Points', value: fmtCount(solution.cycle_points.length), title: 'Trajectory points' },
+            { label: 'Points', value: fmtCount(view.points), title: 'Trajectory points' },
           ]}
         />
-        {solution.minimal_response_multiple < solution.response_multiple ? (
+        {!rendered && solution && solution.minimal_response_multiple < solution.response_multiple ? (
           <span
             className="chip chip--warning"
             title={`This solution has the lower response multiple ${solution.minimal_response_multiple}`}
@@ -372,12 +421,13 @@ function forcedResponseModel(scope: InspectorSelectionController): ObjectHeaderM
         <StateVector
           title="Strobe state"
           names={systemDraft.varNames}
-          values={solution.state}
-          onCopy={() => void writeClipboardText(formatPointValues(solution.state))}
+          values={view.state}
+          onCopy={() => void writeClipboardText(formatPointValues(view.state))}
+          testId="forced-response-glance-state"
         />
         <ValueList
           title="Multipliers"
-          values={solution.multipliers.map((value, index) => `μ${index + 1} = ${fmtComplex(value)}`)}
+          values={view.multipliers.map((value, index) => `μ${index + 1} = ${fmtComplex(value)}`)}
           testId="forced-response-glance-multipliers"
         />
       </>
@@ -395,7 +445,8 @@ function isoclineModel(scope: InspectorSelectionController): ObjectHeaderModel |
   } = scope
   if (!isocline) return null
   const computedAt = isocline.lastComputed?.computedAt
-  const chip: HeaderChip = !computedAt
+  // A fresh result needs no chip: the meta line already says when it was computed.
+  const chip: HeaderChip | null = !computedAt
     ? { label: 'not computed', tone: 'muted', testId: 'isocline-not-computed' }
     : isoclineStale
       ? {
@@ -404,7 +455,7 @@ function isoclineModel(scope: InspectorSelectionController): ObjectHeaderModel |
           title: 'Settings changed since the last compute',
           testId: 'isocline-stale-indicator',
         }
-      : { label: 'computed', tone: 'stable', title: computedAt, testId: 'isocline-last-computed' }
+      : null
   const needsCompute = !computedAt || isoclineStale
   return {
     chip,

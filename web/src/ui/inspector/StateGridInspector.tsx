@@ -790,7 +790,7 @@ export function StateGridInspector({
             <button className="inspector-primary-action" type="button"
               disabled={!onCreateParticles} onClick={() => onCreateParticles?.(nodeId)}
               title="Particles inherit this grid's bounds, parameters, and frozen variables"
-              data-testid="state-grid-create-particles">Create particles</button>
+              data-testid="state-grid-create-particles">Create</button>
           </section>
         </InspectorDisclosure> : null}
 
@@ -1055,7 +1055,7 @@ export function StateGridInspector({
               disabled={running || !onComputeTransferOperator || !Number.isFinite(totalPoints)}
               data-testid="state-grid-create-invariant-measure"
             >
-              {running ? 'Creating…' : 'Create invariant measure'}
+              {running ? 'Creating…' : 'Create'}
             </button>
             {running ? (
               <button

@@ -17,6 +17,7 @@ import {
 } from '../analysis/analysisViewportUtils'
 import { OpacityPercentInput } from './OpacityPercentInput'
 import { InspectorSubDisclosure } from './inspector/selectionSession'
+import { SourceChecklist } from './inspector/sections/SourceChecklist'
 
 type AnalysisViewportInspectorProps = {
   system: System
@@ -398,72 +399,33 @@ export function AnalysisViewportInspector({
 
   return (
     <div className="inspector-section">
-      <div className="inspector-subsection">
-        <h4 className="section-head">
-          <span>Sources</span>
-          <span className="chip" data-testid="analysis-showing-chip">
-            {viewport.sourceNodeIds.length > 0
-              ? `${viewport.sourceNodeIds.length} selected`
-              : viewport.display === 'selection'
-                ? 'showing: selection'
-                : 'showing: all visible'}
-          </span>
-        </h4>
-        <label title="Used when no sources are checked below. Axis expressions can use state variables and parameters.">
-          Fallback
-          <select
-            value={viewport.display}
-            onChange={(event) =>
-              onUpdateAnalysisViewport(viewport.id, {
-                display: event.target.value as AnalysisViewport['display']
-              })
-            }
-            data-testid="analysis-display"
-          >
-            <option value="all">All visible</option>
-            <option value="selection">Current selection</option>
-          </select>
-        </label>
-        <input
-          value={sourceSearch}
-          onChange={(event) => setSourceSearch(event.target.value)}
-          placeholder="Filter compatible sources…"
-          aria-label="Search compatible sources"
-        />
-        {displayedEntries.length > 0 ? (
-          <div className="scene-object-list">
-            {displayedEntries.map((entry) => {
-              const checked = selectedSourceSet.has(entry.id)
-              return (
-                <label
-                  key={`analysis-entry-${entry.id}`}
-                  className="scene-object-row"
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => {
-                      const next = checked
-                        ? viewport.sourceNodeIds.filter((id) => id !== entry.id)
-                        : [...viewport.sourceNodeIds, entry.id]
-                      onUpdateAnalysisViewport(viewport.id, {
-                        sourceNodeIds: next
-                      })
-                    }}
-                  />
-                  <span className="scene-object-row__name">{entry.name}</span>
-                  <span className="scene-object-row__meta">
-                    {entry.typeLabel}
-                    {entry.visible ? '' : ' · hidden'}
-                  </span>
-                </label>
-              )
-            })}
-          </div>
-        ) : (
-          <p className="faint">—</p>
-        )}
-      </div>
+      <SourceChecklist
+        title="Sources"
+        entries={displayedEntries.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          meta: `${entry.typeLabel}${entry.visible ? '' : ' · hidden'}`,
+        }))}
+        selectedIds={viewport.sourceNodeIds}
+        implicitIds={
+          viewport.display === 'selection'
+            ? null
+            : sourceEntries.filter((entry) => entry.visible).map((entry) => entry.id)
+        }
+        onChange={(next) => onUpdateAnalysisViewport(viewport.id, { sourceNodeIds: next })}
+        mode={{
+          value: viewport.display === 'selection' ? 'selection' : 'all',
+          onChange: (display) => onUpdateAnalysisViewport(viewport.id, { display }),
+          testId: 'analysis-display',
+        }}
+        search={{
+          value: sourceSearch,
+          onChange: setSourceSearch,
+          placeholder: 'Filter compatible sources…',
+          ariaLabel: 'Search compatible sources',
+        }}
+        chipTestId="analysis-showing-chip"
+      />
 
       <div className="inspector-subsection">
         <h4 className="section-head">Event</h4>
@@ -675,11 +637,7 @@ export function AnalysisViewportInspector({
                 </div>
               ))}
             </>
-          ) : (
-            <p className="faint" data-testid="analysis-constraints-empty">
-              —
-            </p>
-          )}
+          ) : null}
           <button
             type="button"
             onClick={() => updateConstraints([...positivityConstraints, ''])}

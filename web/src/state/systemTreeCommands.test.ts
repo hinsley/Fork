@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { addObject, addScene, createSystem } from '../system/model'
+import { addFolder, addObject, addScene, createSystem } from '../system/model'
 import type { OrbitObject, System, SystemConfig } from '../system/types'
 import {
   createSystemTreeCommands,
+  findRenameConflict,
   type SystemTreeCommandDeps,
 } from './systemTreeCommands'
 
@@ -99,6 +100,33 @@ describe('system tree commands', () => {
     expect(harness.getState().currentSystem?.nodes[added.nodeId]?.name).toBe('Orbit_A')
     expect(harness.scheduleSystemSave).not.toHaveBeenCalled()
     expect(harness.scheduleUiSave).not.toHaveBeenCalled()
+  })
+
+  it('rejects renames to a name another object or folder already uses', () => {
+    const base = createSystem({ name: 'Duplicate_Rename_Command' })
+    const first = addObject(base, makeOrbit('Orbit_A', base.config))
+    const second = addObject(first.system, makeOrbit('Orbit_B', base.config))
+    const folderA = addFolder(second.system, 'Folder_A')
+    const folderB = addFolder(folderA.system, 'Folder_B')
+    const scene = addScene(folderB.system, 'Scene_A')
+    const harness = setupTreeCommands(scene.system)
+
+    expect(findRenameConflict(scene.system, second.nodeId, ' Orbit_A ')).toBe(
+      'Orbit "Orbit_A" already exists.'
+    )
+    expect(harness.commands.renameNode(second.nodeId, 'Orbit_A')).toBe(false)
+    expect(harness.getState().error).toBe('Orbit "Orbit_A" already exists.')
+    expect(harness.getState().currentSystem?.nodes[second.nodeId]?.name).toBe('Orbit_B')
+    expect(harness.scheduleSystemSave).not.toHaveBeenCalled()
+
+    expect(harness.commands.renameNode(folderB.nodeId, 'Folder_A')).toBe(false)
+    expect(harness.getState().currentSystem?.nodes[folderB.nodeId]?.name).toBe('Folder_B')
+
+    // Different kinds may share a name; renaming to the current name is fine.
+    expect(findRenameConflict(scene.system, scene.nodeId, 'Orbit_A')).toBeNull()
+    expect(findRenameConflict(scene.system, second.nodeId, 'Orbit_B')).toBeNull()
+    expect(harness.commands.renameNode(second.nodeId, 'Orbit_C')).toBe(true)
+    expect(harness.getState().currentSystem?.nodes[second.nodeId]?.name).toBe('Orbit_C')
   })
 
   it('renames scene nodes through the UI save path', () => {

@@ -173,7 +173,6 @@ describe('AnalysisViewportInspector', () => {
 
     fireEvent.click(screen.getByTestId('analysis-add-constraint'))
     const input = await screen.findByTestId('analysis-constraint-expression-0')
-    expect(screen.queryByTestId('analysis-constraints-empty')).toBeNull()
 
     fireEvent.change(input, { target: { value: '' } })
     await waitFor(() => {
@@ -191,9 +190,7 @@ describe('AnalysisViewportInspector', () => {
 
     fireEvent.click(screen.getByTestId('analysis-remove-constraint-0'))
     await waitFor(() => {
-      expect(
-        screen.getByTestId('analysis-constraints-empty')
-      ).toBeInTheDocument()
+      expect(screen.queryByTestId('analysis-constraint-expression-0')).toBeNull()
     })
   })
 

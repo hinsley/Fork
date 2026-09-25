@@ -30,7 +30,8 @@ type ScheduleSave = (system: System) => void
 
 export type SystemTreeCommands = {
   selectNode: (nodeId: string | null) => void
-  renameNode: (nodeId: string, name: string) => void
+  /** Returns false when the name was rejected (invalid or already taken). */
+  renameNode: (nodeId: string, name: string) => boolean
   toggleVisibility: (nodeId: string) => void
   toggleExpanded: (nodeId: string) => void
   moveNode: (nodeId: string, direction: 'up' | 'down') => void
@@ -74,6 +75,42 @@ function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type
   return 'Item'
 }
 
+function branchParentObjectId(system: System, nodeId: string): string | null {
+  return (
+    system.branches[nodeId]?.parentObjectId ??
+    system.index.branches[nodeId]?.parentObjectId ??
+    system.nodes[nodeId]?.parentId ??
+    null
+  )
+}
+
+function isViewportNode(node: TreeNode): boolean {
+  return node.kind === 'scene' || node.kind === 'diagram' || node.kind === 'analysis'
+}
+
+/**
+ * Error for renaming `nodeId` to `name` when another entity of the same scope
+ * already uses it, mirroring create-time uniqueness: objects and folders are
+ * unique system-wide, branches per parent object, viewports among viewports.
+ */
+export function findRenameConflict(system: System, nodeId: string, name: string): string | null {
+  const node = system.nodes[nodeId]
+  if (!node) return null
+  const target = normalizeDisplayName(name)
+  if (!target || target === node.name) return null
+  const parentObjectId = node.kind === 'branch' ? branchParentObjectId(system, nodeId) : null
+  const conflict = Object.values(system.nodes).some((other) => {
+    if (other.id === nodeId || other.name !== target) return false
+    if (node.kind === 'branch') {
+      return other.kind === 'branch' && branchParentObjectId(system, other.id) === parentObjectId
+    }
+    if (isViewportNode(node)) return isViewportNode(other)
+    return other.kind === node.kind
+  })
+  if (!conflict) return null
+  return `${getNodeLabel(node, system.config.type)} "${target}" already exists.`
+}
+
 function shouldSaveUiOnly(node: TreeNode | undefined): boolean {
   return node?.kind === 'scene' || node?.kind === 'diagram' || node?.kind === 'analysis'
 }
@@ -104,16 +141,21 @@ export function createSystemTreeCommands({
 
   const renameNode = (nodeId: string, name: string) => {
     const current = getCurrentSystem()
-    if (!current) return
+    if (!current) return false
 
     const trimmedName = normalizeDisplayName(name)
     const node = current.nodes[nodeId]
     const nameError = validateObjectName(trimmedName, getNodeLabel(node, current.config.type))
     if (nameError) {
       dispatch({ type: 'SET_ERROR', error: nameError })
-      return
+      return false
     }
-    if (!node) return
+    if (!node) return false
+    const conflict = findRenameConflict(current, nodeId, trimmedName)
+    if (conflict) {
+      dispatch({ type: 'SET_ERROR', error: conflict })
+      return false
+    }
 
     const system = renameSystemNode(current, nodeId, trimmedName)
     dispatch({ type: 'SET_SYSTEM', system })
@@ -122,6 +164,7 @@ export function createSystemTreeCommands({
     } else {
       scheduleSystemSave(system)
     }
+    return true
   }
 
   const toggleVisibility = (nodeId: string) => {
