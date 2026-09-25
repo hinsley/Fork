@@ -13,7 +13,6 @@ test('branch to a period-doubled limit cycle', async ({ page }) => {
   await harness.openDisclosure('branch-points-toggle')
   await page.getByTestId('branch-bifurcation-1').click()
 
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-limit-cycle-from-pd-toggle')
   await expect(page.getByTestId('inspector-workflow-advanced')).toHaveCount(0)
   await expect(page.getByTestId('limit-cycle-from-pd-amplitude')).toBeVisible()

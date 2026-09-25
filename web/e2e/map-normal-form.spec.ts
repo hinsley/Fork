@@ -14,7 +14,6 @@ async function selectMapBranchPoint(page: Page) {
     .first()
   await expect(branchPoint).toBeVisible({ timeout: 30_000 })
   await branchPoint.click()
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-normal-form-workflow-toggle')
 }
 

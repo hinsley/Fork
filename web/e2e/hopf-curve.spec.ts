@@ -60,9 +60,8 @@ test('continue hopf curve from detected hopf point', async ({ page }) => {
   const bifurcationButton = page.locator('[data-testid^="branch-bifurcation-"]').first()
   await expect(bifurcationButton).toBeVisible({ timeout: 20_000 })
   await bifurcationButton.click()
-  await expect(page.getByText('Stability: Hopf')).toBeVisible()
+  await expect(page.getByTestId('branch-point-bif-chip')).toContainText('Hopf')
 
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-codim1-curve-toggle')
   await page.getByTestId('hopf-curve-name').fill('hopf_curve_e2e')
   await page.getByTestId('hopf-curve-param2').selectOption('p2')

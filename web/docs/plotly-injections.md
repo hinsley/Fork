@@ -222,7 +222,8 @@ selection changes or the object is removed.
   translucent white name panel.
 - `web/src/ui/inspector/InspectorSelectionController.tsx` constructs the shared
   eigenvalue/multiplier mini-plot data and layouts; the selection shell,
-  equilibrium section, and branch-data section render those layouts through
+  equilibrium section, and the branch point panel's "More" disclosure
+  (`inspector/sections/branch/BranchPointPanel.tsx`) render those layouts through
   `PlotlyViewport`. These plots set `dragmode: 'pan'`, compute fixed
   `xaxis.range`/`yaxis.range` values for the complex plane, and add unit
   circle/disc overlays for multiplier/eigenvalue views. Equilibrium eigenvalue

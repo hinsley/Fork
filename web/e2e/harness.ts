@@ -81,6 +81,11 @@ export class ForkHarness {
   }
 
   async openDisclosure(testId: string) {
+    // Branch points render inline on the branch's root page (no workflow page).
+    if (testId === 'branch-points-toggle') {
+      await this.page.getByTestId('branch-point-panel').waitFor({ state: 'visible' })
+      return
+    }
     const summary = this.page.getByTestId(testId)
     const action = this.page.getByTestId(`action-${testId}`)
     if (await action.count()) {

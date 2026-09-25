@@ -25,8 +25,6 @@ export const WORKFLOW_IDS = [
   'limit-cycle-floquet-toggle',
   'limit-cycle-manifold-toggle',
   'isocline-toggle',
-  'branch-summary-toggle',
-  'branch-points-toggle',
   'normal-form-workflow-toggle',
   'codim2-branch-switch-toggle',
   'manifold-extend-toggle',

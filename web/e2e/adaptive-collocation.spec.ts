@@ -58,6 +58,7 @@ test('persists a real-WASM adaptive collocation report and exact final mesh', as
   await page.getByTestId('limit-cycle-from-orbit-corrector-steps').fill('14')
   await page.getByTestId('limit-cycle-from-orbit-corrector-tolerance').fill('1e-10')
   await page.getByTestId('limit-cycle-from-orbit-step-tolerance').fill('1e-10')
+  await page.getByTestId('limit-cycle-from-orbit-adaptive-mesh-toggle').click()
   await page.getByTestId('limit-cycle-from-orbit-adaptive-defect-tolerance').fill('0.02')
   await page.getByTestId('limit-cycle-from-orbit-adaptive-max-refinements').fill('5')
   await page.getByTestId('limit-cycle-from-orbit-adaptive-max-mesh-points').fill('96')

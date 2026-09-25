@@ -54,7 +54,6 @@ test('creates, renders, reloads, and extends a homoclinic branch with HBK diagno
   await page.getByTestId('branch-point-input').fill('0')
   await page.getByTestId('branch-point-jump').click()
 
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-homoclinic-from-large-cycle-toggle')
   await page.getByTestId('homoclinic-from-large-cycle-name').fill(homoclinicBranchName)
   await page.getByTestId('homoclinic-from-large-cycle-param1').selectOption('mu')
@@ -97,7 +96,6 @@ test('creates, renders, reloads, and extends a homoclinic branch with HBK diagno
   const reloadedDiagnostics = await selectHomoclinicEvent(page, /NNS - Neutral Saddle/i)
   await expect(reloadedDiagnostics).toContainText('NNS · Neutral saddle')
 
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-branch-extend-toggle')
   await page.getByTestId('branch-extend-max-steps').fill('2')
   await page.getByTestId('branch-extend-step-size').fill('0.002')

@@ -158,6 +158,11 @@ import {
 import { AnalysisViewportInspector } from '../AnalysisViewportInspector'
 import { BranchNavigatorContent } from '../BranchNavigator'
 import {
+  formatBranchSummaryDetail,
+  recallBranchPoint,
+  rememberBranchPoint,
+} from './sections/branch/branchInsights'
+import {
   resolveBranchPointParams,
   resolveCodim1ParamNames,
   resolveContinuationParameterReadout,
@@ -2429,7 +2434,7 @@ function useInspectorSelectionController({
   const prevBranchMaxLogicalIndexRef = useRef<number | null>(null)
   const internalBranchPointSelectionRef = useRef(false)
   const [branchPointIndex, setBranchPointIndex] = useState<number | null>(null)
-  const [branchNavigatorOpen, setBranchNavigatorOpen] = useState(false)
+  const [branchPointRevealToken, setBranchPointRevealToken] = useState(0)
   const branchPointIndexRef = useRef<number | null>(null)
   const selectedBranchPoint = useMemo(() => {
     if (!branch || branchPointIndex === null) return null
@@ -4272,9 +4277,15 @@ function useInspectorSelectionController({
       renderTargetIndex !== null &&
       renderTargetIndex >= 0 &&
       renderTargetIndex < branchIndices.length
-    const initialIndex = renderTargetValid
-      ? renderTargetIndex
-      : endpointDefaultArrayIndex
+    const rememberedIndex = branchId
+      ? recallBranchPoint(system.id, branchId, branchIndices.length)
+      : null
+    const initialIndex =
+      rememberedIndex !== null
+        ? rememberedIndex
+        : renderTargetValid
+          ? renderTargetIndex
+          : endpointDefaultArrayIndex
     setBranchPointIndex(initialIndex)
     const logicalIndex = branchIndices[initialIndex]
     setBranchPointInput(
@@ -4301,15 +4312,15 @@ function useInspectorSelectionController({
     hasBranch,
     selectedNodeId,
     syncBranchPointSelection,
+    system.id,
   ])
 
   useEffect(() => {
     branchPointIndexRef.current = branchPointIndex
-  }, [branchPointIndex])
-
-  useEffect(() => {
-    setBranchNavigatorOpen(false)
-  }, [selectionKey])
+    if (hasBranch && selectedNodeId && branchPointIndex !== null) {
+      rememberBranchPoint(system.id, selectedNodeId, branchPointIndex)
+    }
+  }, [branchPointIndex, hasBranch, selectedNodeId, system.id])
 
   const systemConfig = useMemo(() => buildSystemConfig(systemDraft), [systemDraft])
   const systemValidation = useMemo(() => validateSystemConfig(systemConfig), [systemConfig])
@@ -4467,7 +4478,12 @@ function useInspectorSelectionController({
     if (branch) {
       return {
         label: 'Branch',
-        detail: `${formatBranchType(branch, systemDraft.type)} · ${branch.data.points.length} points`,
+        detail: formatBranchSummaryDetail(
+          branch,
+          formatBranchType(branch, systemDraft.type),
+          branchSortedOrder,
+          branchStateDimension
+        ),
       }
     }
 
@@ -4496,7 +4512,17 @@ function useInspectorSelectionController({
     }
 
     return null
-  }, [branch, branchEntries.length, diagram, equilibriumLabel, object, scene, systemDraft.type])
+  }, [
+    branch,
+    branchEntries.length,
+    branchSortedOrder,
+    branchStateDimension,
+    diagram,
+    equilibriumLabel,
+    object,
+    scene,
+    systemDraft.type,
+  ])
 
   const hasParamOverride = Array.isArray(paramOverrideTarget?.customParameters)
   const hasCustomParamOverride = hasCustomObjectParams(
@@ -5195,22 +5221,9 @@ function useInspectorSelectionController({
         'Compute nontrivial modes of the stored transfer operator.',
     })
   }
-  if (branch) {
-    workflowActions.push(
-      {
-        id: 'branch-summary-toggle',
-        group: 'Inspect',
-        label: 'Inspect summary',
-        description: 'Inspect branch metadata, settings, and solver diagnostics.',
-      },
-      {
-        id: 'branch-points-toggle',
-        group: 'Inspect',
-        label: 'Inspect data',
-        description: 'Navigate branch points and inspect the selected point.',
-      }
-    )
-  }
+  // Point-dependent branch actions render as buttons in the branch point panel
+  // (BranchPointPanel) instead of the root action list.
+  const branchPointActions: WorkflowActionEntry[] = []
   if (showNormalFormWorkflow) {
     workflowActions.push({
       id: 'normal-form-workflow-toggle',
@@ -5220,7 +5233,7 @@ function useInspectorSelectionController({
     })
   }
   if (showCodim2BranchSwitch) {
-    workflowActions.push({
+    branchPointActions.push({
       id: 'codim2-branch-switch-toggle',
       group: 'Bifurcations',
       label: 'Branch switching',
@@ -5244,23 +5257,29 @@ function useInspectorSelectionController({
     })
   }
   if (showBranchContinueFromPoint) {
-    workflowActions.push({
+    branchPointActions.push({
       id: 'branch-continue-toggle',
       group: 'Continuation',
-      label: 'Continue from point',
+      label: 'Continue from here',
       description: 'Start another continuation branch from the selected point.',
     })
   }
   if (showCodim1CurveContinuations) {
-    workflowActions.push({
+    branchPointActions.push({
       id: 'codim1-curve-toggle',
       group: 'Bifurcations',
-      label: 'Codimension-1 curve',
+      label: showFoldCurveContinuation
+        ? 'Fold curve'
+        : showHopfCurveContinuation
+          ? 'Hopf curve'
+          : showNSCurveContinuation
+            ? 'NS curve'
+            : 'Codimension-1 curve',
       description: 'Continue an eligible fold, Hopf, or Neimark-Sacker point.',
     })
   }
   if (showLimitCycleCodim1CurveContinuation && limitCycleCodim1Curve) {
-    workflowActions.push({
+    branchPointActions.push({
       id: 'limit-cycle-codim1-curve-toggle',
       group: 'Bifurcations',
       label: `${limitCycleCodim1Curve.label} curve`,
@@ -5279,18 +5298,18 @@ function useInspectorSelectionController({
     })
   }
   if (showLimitCycleFromHopf) {
-    workflowActions.push({
+    branchPointActions.push({
       id: 'limit-cycle-from-hopf-toggle',
       group: 'Bifurcations',
-      label: 'Limit cycle from Hopf',
+      label: 'Limit cycle',
       description: 'Initialize a periodic orbit and its continuation branch.',
     })
   }
   if (showLimitCycleFromPD) {
-    workflowActions.push({
+    branchPointActions.push({
       id: 'limit-cycle-from-pd-toggle',
       group: 'Bifurcations',
-      label: limitCycleFromPDLabel,
+      label: 'Doubled cycle',
       description: 'Initialize the doubled cycle and continue it.',
     })
   }
@@ -5328,6 +5347,15 @@ function useInspectorSelectionController({
         ? 'Create the homoclinic branch from a completed StageD point.'
         : 'Requires a completed StageD point.',
     })
+  }
+
+  const activeBranchPointAction = branchPointActions.find(
+    (entry) => entry.id === workflowFocus?.activeWorkflow
+  )
+  if (activeBranchPointAction) {
+    // Keeps the workflow toolbar title; the root action list is hidden while a
+    // workflow is open, so this never renders as a root action.
+    workflowActions.push(activeBranchPointAction)
   }
 
   const handleRunOrbit = async () => {
@@ -6605,7 +6633,7 @@ function useInspectorSelectionController({
     if (!branch || !branchPointSelection || !selectedNodeId) return
     if (branchPointSelection.branchId !== selectedNodeId) return
     if (!isInternalSelection) {
-      setBranchNavigatorOpen(true)
+      setBranchPointRevealToken((token) => token + 1)
     }
     const targetIndex = branchPointSelection.pointIndex
     if (targetIndex === branchPointIndexRef.current) return
@@ -6617,7 +6645,6 @@ function useInspectorSelectionController({
     branchPointSelection,
     setBranchPoint,
     selectedNodeId,
-    setBranchNavigatorOpen,
     view,
   ])
 
@@ -8649,7 +8676,8 @@ function useInspectorSelectionController({
     branchExtensionError,
     branchIndices,
     branchMultiplierPlot,
-    branchNavigatorOpen,
+    branchPointActions,
+    branchPointRevealToken,
     branchParameterName,
     branchParams,
     branchPointError,
@@ -8658,6 +8686,7 @@ function useInspectorSelectionController({
     branchSortedIndex,
     branchSortedOrder,
     branchStartPoint,
+    branchStateDimension,
     branchSupportsContinueFromPoint,
     buildSuggestedBranchName,
     canExtendBranch,
@@ -8973,7 +9002,6 @@ function useInspectorSelectionController({
     selectionTypeLabel,
     setBranchContinuationDraft,
     setBranchExtensionDraft,
-    setBranchNavigatorOpen,
     setBranchPoint,
     setBranchPointInput,
     setContinuationDraft,
