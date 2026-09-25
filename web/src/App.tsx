@@ -453,6 +453,10 @@ function App() {
                 onComputeEventSeriesFromOrbit={actions.computeEventSeriesFromOrbit}
                 onComputeEventSeriesFromSamples={actions.computeEventSeriesFromSamples}
                 isoclineGeometryCache={state.isoclineGeometryCache}
+                onUpdateScene={actions.updateScene}
+                onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
+                onUpdateSystem={actions.updateSystem}
+                onOpenEmbed={() => setEmbedDialogOpen(true)}
               />
             </Panel>
           </div>
