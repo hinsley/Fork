@@ -129,7 +129,7 @@ async function createAdditionalStateSpaceScene(page: Page) {
   const testId = await firstPlot.getAttribute('data-testid')
   const sceneId = testId?.replace('plotly-viewport-', '')
   if (!sceneId) throw new Error('The first State Space scene has no test identifier.')
-  await page.getByTestId(`viewport-insert-${sceneId}`).click()
+  await page.getByTestId('viewport-add').click()
   await page.getByTestId('viewport-create-scene').click()
   await expect(plots).toHaveCount(2)
 }

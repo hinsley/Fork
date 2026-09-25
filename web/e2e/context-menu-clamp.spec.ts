@@ -54,7 +54,7 @@ test('object and viewport menus remain reachable at the bottom edge', async ({ p
       menu: page.getByTestId('object-context-menu'),
     },
     {
-      trigger: page.getByRole('button', { name: 'Add viewport', exact: true }),
+      trigger: page.getByTestId('viewport-add'),
       event: 'click',
       menu: page.getByTestId('viewport-create-menu'),
     },

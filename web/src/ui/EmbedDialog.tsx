@@ -16,8 +16,15 @@ import {
   standaloneEmbedFilename,
 } from '../embed/standaloneHtml'
 import type { PlotlyFigureCaptureState } from '../viewports/plotly/figureCapture'
+import { resolveViewportWeight } from './viewportLayout'
+import { Icon } from './Icon'
 
-const DEFAULT_EXPORTED_VIEWPORT_HEIGHT = 360
+const MAX_EXPORTED_VIEWPORT_HEIGHT = 1200
+
+/** Workspace weights share the default pixel scale, so a weight doubles as the export height. */
+function exportedViewportHeight(heights: Record<string, number>, id: string): number {
+  return Math.min(MAX_EXPORTED_VIEWPORT_HEIGHT, Math.round(resolveViewportWeight(heights, id)))
+}
 
 export function EmbedDialog({
   open,
@@ -57,7 +64,7 @@ function EmbedDialogContent({
         return []
       }
       const type =
-        node.kind === 'scene' ? 'State Space' : node.kind === 'diagram' ? 'Bifurcation' : 'Event Map'
+        node.kind === 'scene' ? 'State space' : node.kind === 'diagram' ? 'Bifurcation diagram' : 'Event map'
       return [{ id, name: node.name, type }]
     })
   }, [system])
@@ -118,7 +125,7 @@ function EmbedDialogContent({
         return [
           {
             ...entry,
-            height: system.ui.viewportHeights[id] ?? DEFAULT_EXPORTED_VIEWPORT_HEIGHT,
+            height: exportedViewportHeight(system.ui.viewportHeights, id),
             figure: capture.figure,
             ...(capture.fallbackImage ? { fallbackImage: capture.fallbackImage } : {}),
           },
@@ -159,7 +166,7 @@ function EmbedDialogContent({
         markupRef.current?.select()
         document.execCommand('copy')
       }
-      setCopyStatus('Embed code copied.')
+      setCopyStatus('Copied.')
     } catch (error) {
       setCopyStatus(error instanceof Error ? error.message : 'Unable to copy embed code.')
     }
@@ -169,18 +176,17 @@ function EmbedDialogContent({
     <div className="dialog-backdrop embed-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="embed-dialog-title">
       <div className="dialog dialog--workspace embed-dialog" data-testid="embed-dialog">
         <header className="dialog__header">
-          <div>
-            <h2 id="embed-dialog-title">Create embed</h2>
-            <span className="dialog__context">{system.name}</span>
-          </div>
-          <button className="dialog__close" onClick={onClose} aria-label="Close embed dialog">✕</button>
+          <h2 id="embed-dialog-title">Embed</h2>
+          <button className="dialog__close" onClick={onClose} aria-label="Close embed dialog" title="Close">
+            <Icon name="close" />
+          </button>
         </header>
 
         <div className="embed-dialog__body">
           <section className="embed-dialog__settings">
             <h3>Viewports</h3>
             {viewportEntries.length === 0 ? (
-              <p className="empty-state">Create a viewport before embedding this system.</p>
+              <p className="empty-state">No viewports.</p>
             ) : (
               <div className="embed-dialog__viewport-list">
                 {viewportEntries.map((entry) => (
@@ -202,15 +208,6 @@ function EmbedDialogContent({
                 ))}
               </div>
             )}
-
-            <label className="embed-dialog__field">
-              <span>Hosted HTML path</span>
-              <input
-                value={source}
-                onChange={(event) => setSource(event.target.value)}
-                data-testid="embed-source"
-              />
-            </label>
 
             <div className="embed-dialog__grid">
               <label className="embed-dialog__field">
@@ -243,8 +240,8 @@ function EmbedDialogContent({
                   value={interaction}
                   onChange={(event) => setInteraction(event.target.value as EmbedInteraction)}
                 >
-                  <option value="plot">Pan, zoom, rotate, hover</option>
-                  <option value="none">Static presentation</option>
+                  <option value="plot">Interactive</option>
+                  <option value="none">Static</option>
                 </select>
               </label>
               <label className="embed-dialog__field">
@@ -276,14 +273,20 @@ function EmbedDialogContent({
               />
               <span>
                 <strong>Bundle dependencies <span className="embed-dialog__experimental">Experimental</span></strong>
-                <small>
-                  Includes dependencies, converts 2D GPU traces to SVG, and adds static 3D
-                  fallbacks for restrictive hosts.
-                </small>
+                <small>Inline dependencies; SVG for GPU traces, static 3D fallback.</small>
               </span>
             </label>
 
             <h3 id="embed-code-label">Embed code</h3>
+            <label className="embed-dialog__field embed-dialog__field--inline">
+              <span>HTML path</span>
+              <input
+                value={source}
+                onChange={(event) => setSource(event.target.value)}
+                title="Where the downloaded HTML will be hosted (iframe src)"
+                data-testid="embed-source"
+              />
+            </label>
             <textarea
               ref={markupRef}
               readOnly
@@ -299,13 +302,13 @@ function EmbedDialogContent({
                 disabled={!allReady || isBundling}
                 data-testid="download-embed-html"
               >
-                {isBundling ? 'Bundling dependencies…' : 'Download embed HTML'}
+                {isBundling ? 'Bundling…' : 'Download embed HTML'}
               </button>
               <button
                 onClick={() => void copyMarkup()}
                 disabled={selectedIds.length === 0}
               >
-                Copy embed code
+                Copy code
               </button>
             </div>
             {captureErrors.length > 0 ? (
@@ -313,7 +316,7 @@ function EmbedDialogContent({
                 {captureErrors.map((error) => error.message).join(' ')}
               </p>
             ) : selectedIds.length > 0 && !allReady ? (
-              <p role="status">Preparing selected viewports…</p>
+              <p role="status">Preparing…</p>
             ) : null}
             {downloadError ? (
               <p className="field-error" role="alert">{downloadError}</p>
@@ -334,7 +337,7 @@ function EmbedDialogContent({
                   onFigureCapture={handleFigureCapture}
                 />
               ) : (
-                <div className="embed-status">Select at least one viewport.</div>
+                <div className="embed-status">Select a viewport.</div>
               )}
             </div>
           </section>

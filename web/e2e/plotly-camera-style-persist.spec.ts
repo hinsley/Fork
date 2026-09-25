@@ -391,8 +391,7 @@ test('3D camera persists across style updates', async ({ page }) => {
   expect(distance(secondAfterplotCam, defaultCam)).toBeGreaterThan(0.2)
 
   const viewportCountBefore = await page.locator('[data-testid^="plotly-viewport-"]').count()
-  const insertAfterViewport = page.getByTestId(`viewport-insert-${plotId}`)
-  await insertAfterViewport.click()
+  await page.getByTestId('viewport-add').click()
   await page.getByTestId('viewport-create-scene').click()
   await expect(page.locator('[data-testid^="plotly-viewport-"]')).toHaveCount(
     viewportCountBefore + 1
