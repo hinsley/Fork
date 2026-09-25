@@ -29,8 +29,7 @@ test('builder downloads a standalone stacked Plotly HTML page', async ({ page })
   await page.getByTestId('viewport-create-bifurcation').click()
 
   await page.getByTestId('open-systems').click()
-  await page.getByRole('button', { name: 'Export' }).click()
-  await page.getByRole('button', { name: 'Create embed' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Create embed' }).click()
   await expect(page.getByTestId('embed-dialog')).toBeVisible()
   await expect(page.getByTestId('embed-source')).toHaveValue('./Demo_System_embed.html')
   await expect(page.getByTestId('embed-code')).toHaveValue(/<iframe/)
@@ -103,8 +102,7 @@ test('generated static presentation disables Plotly interaction', async ({ page 
   await page.getByTestId('viewport-insert-empty').click()
   await page.getByTestId('viewport-create-scene').click()
   await page.getByTestId('open-systems').click()
-  await page.getByRole('button', { name: 'Export' }).click()
-  await page.getByRole('button', { name: 'Create embed' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Create embed' }).click()
   await page.getByLabel('Interaction').selectOption('none')
 
   const downloadButton = page.getByTestId('download-embed-html')
@@ -131,8 +129,7 @@ test('bundled export renders under restrictive CSP without network dependencies'
   await page.getByTestId('viewport-insert-empty').click()
   await page.getByTestId('viewport-create-scene').click()
   await page.getByTestId('open-systems').click()
-  await page.getByRole('button', { name: 'Export' }).click()
-  await page.getByRole('button', { name: 'Create embed' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Create embed' }).click()
   await page.getByRole('checkbox', {
     name: /^Bundle dependencies/,
   }).check()
@@ -215,9 +212,8 @@ test('bundled 3D export falls back to its captured camera without WebGL', async 
   await page
     .locator('.dialog__list-row')
     .filter({ has: page.getByRole('button', { name: 'Lorenz', exact: true }) })
-    .getByRole('button', { name: 'Export' })
+    .getByRole('button', { name: 'Create embed' })
     .click()
-  await page.getByRole('button', { name: 'Create embed' }).click()
   await page.getByRole('checkbox', {
     name: /^Bundle dependencies/,
   }).check()

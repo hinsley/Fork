@@ -27,12 +27,16 @@ export class MemorySystemStore implements SystemStore {
   private systems = new Map<string, System>()
 
   async list(): Promise<SystemSummary[]> {
-    return Array.from(this.systems.values()).map((system) => ({
-      id: system.id,
-      name: system.name,
-      updatedAt: system.updatedAt,
-      type: system.config.type,
-    }))
+    return Array.from(this.systems.values())
+      .map((system) => ({
+        id: system.id,
+        name: system.name,
+        updatedAt: system.updatedAt,
+        type: system.config.type,
+        varNames: [...system.config.varNames],
+        paramNames: [...system.config.paramNames],
+      }))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   }
 
   async load(id: string): Promise<System> {

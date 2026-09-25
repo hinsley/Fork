@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import App from './App'
 import { MockForkCoreClient } from './compute/mockClient'
@@ -7,7 +7,7 @@ import { createSystem } from './system/model'
 import { MemorySystemStore } from './system/store'
 
 describe('App home', () => {
-  it('returns to the technical homepage without deleting the open system', async () => {
+  it('returns to the systems list without deleting the open system', async () => {
     const system = createSystem({ name: 'Home_Test' })
     const store = new MemorySystemStore()
     await store.save(system)
@@ -39,16 +39,12 @@ describe('App home', () => {
     })
 
     expect(screen.queryByTestId('workspace')).toBeNull()
-    expect(
-      screen.getByText(
-        'Dynamical systems & bifurcation analysis'
-      )
-    ).toBeInTheDocument()
-    expect(screen.getByTestId('open-systems-empty')).toHaveTextContent('Open a system')
-    expect(screen.getByRole('link', { name: 'Documentation' })).toHaveAttribute(
-      'href',
-      'https://github.com/hinsley/Fork/tree/main/tutorial'
-    )
+    const home = screen.getByTestId('home')
+    expect(within(home).getByTestId('system-library')).toBeInTheDocument()
+    expect(within(home).getByRole('button', { name: 'Home_Test' })).toHaveTextContent('Flow')
+    expect(within(home).getByTestId('create-system')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByTestId('open-systems')).toBeNull()
     expect(await store.list()).toHaveLength(1)
   })
 })

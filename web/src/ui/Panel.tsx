@@ -25,6 +25,7 @@ export function Panel({
     <section
       className={`panel ${open ? 'panel--open' : 'panel--closed'} ${className ?? ''}`.trim()}
       data-testid={testId}
+      aria-label={hideHeader ? title : undefined}
     >
       {hideHeader ? null : (
         <header className="panel__header">

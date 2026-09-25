@@ -20,11 +20,9 @@ test('reset fork clears stored systems after confirmation', async ({ page }) => 
   await page.getByTestId('reset-fork').click()
 
   await page.waitForLoadState('domcontentloaded')
-  await expect(page.getByTestId('open-systems-empty')).toBeVisible()
-
-  await page.getByTestId('open-systems-empty').click()
-  await page.getByRole('dialog').waitFor()
+  const library = page.getByTestId('home').getByTestId('system-library')
+  await expect(library).toBeVisible()
   await expect(
-    page.getByRole('dialog').getByRole('button', { name: 'ResetTestSystem', exact: true })
+    library.getByRole('button', { name: 'ResetTestSystem', exact: true })
   ).toHaveCount(0)
 })

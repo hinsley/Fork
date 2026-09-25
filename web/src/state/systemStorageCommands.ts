@@ -80,13 +80,17 @@ export function createSystemStorageCommands({
   clearBrowserStorage: clearStorage = clearBrowserStorage,
   reloadBrowser: reload = reloadBrowser,
 }: SystemStorageCommandDeps): SystemStorageCommands {
+  const reportError = (err: unknown, context?: string) => {
+    const message = err instanceof Error ? err.message : String(err)
+    dispatch({ type: 'SET_ERROR', error: context ? `${context}: ${message}` : message })
+  }
+
   const refreshSystems = async () => {
     try {
       const systems = await store.list()
       dispatch({ type: 'SET_SYSTEMS', systems })
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      dispatch({ type: 'SET_ERROR', error: message })
+      reportError(err)
     }
   }
 
@@ -103,8 +107,7 @@ export function createSystemStorageCommands({
       await store.save(system)
       await refreshSystems()
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      dispatch({ type: 'SET_ERROR', error: message })
+      reportError(err)
     } finally {
       dispatch({ type: 'SET_BUSY', busy: false })
     }
@@ -123,6 +126,8 @@ export function createSystemStorageCommands({
           branchIds: [selectedNodeId],
         })
       }
+    } catch (err) {
+      reportError(err, 'Open failed')
     } finally {
       dispatch({ type: 'SET_BUSY', busy: false })
     }
@@ -137,9 +142,14 @@ export function createSystemStorageCommands({
     const system = getCurrentSystem()
     if (!system) return
     dispatch({ type: 'SET_BUSY', busy: true })
-    await store.save(system)
-    await refreshSystems()
-    dispatch({ type: 'SET_BUSY', busy: false })
+    try {
+      await store.save(system)
+      await refreshSystems()
+    } catch (err) {
+      reportError(err, 'Save failed')
+    } finally {
+      dispatch({ type: 'SET_BUSY', busy: false })
+    }
   }
 
   const exportSystem = async (id: string) => {
@@ -148,8 +158,7 @@ export function createSystemStorageCommands({
       const result = await store.exportSystemArchive(id)
       download(result)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      dispatch({ type: 'SET_ERROR', error: message })
+      reportError(err, 'Export failed')
     } finally {
       dispatch({ type: 'SET_BUSY', busy: false })
     }
@@ -157,9 +166,14 @@ export function createSystemStorageCommands({
 
   const deleteSystem = async (id: string) => {
     dispatch({ type: 'SET_BUSY', busy: true })
-    await store.remove(id)
-    await refreshSystems()
-    dispatch({ type: 'SET_BUSY', busy: false })
+    try {
+      await store.remove(id)
+    } catch (err) {
+      reportError(err, 'Delete failed')
+    } finally {
+      await refreshSystems()
+      dispatch({ type: 'SET_BUSY', busy: false })
+    }
   }
 
   const resetFork = async () => {
@@ -171,8 +185,7 @@ export function createSystemStorageCommands({
       dispatch({ type: 'SET_SYSTEMS', systems: [] })
       reload()
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      dispatch({ type: 'SET_ERROR', error: message })
+      reportError(err)
       dispatch({ type: 'SET_BUSY', busy: false })
     }
   }
@@ -183,6 +196,8 @@ export function createSystemStorageCommands({
       const system = await store.importSystemArchive(file)
       dispatch({ type: 'SET_SYSTEM', system })
       await refreshSystems()
+    } catch (err) {
+      reportError(err, 'Import failed')
     } finally {
       dispatch({ type: 'SET_BUSY', busy: false })
     }
