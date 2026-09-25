@@ -725,8 +725,8 @@ export function AnalysisViewportPlot({
         traces: EMPTY_TRACES,
         message:
           viewport.display === 'selection'
-            ? 'Select an orbit, limit cycle, or 1D manifold source to populate this view.'
-            : 'No compatible visible sources are available for this analysis viewport.'
+            ? 'No source: select an orbit, limit cycle, or 1D manifold'
+            : 'No compatible visible sources'
       }
       setTraceState(next)
       cacheRef.current.set(signature, next)
@@ -788,7 +788,7 @@ export function AnalysisViewportPlot({
                 ? rejected.reason instanceof Error
                   ? normalizeAnalysisExpressionError(rejected.reason.message)
                   : String(rejected.reason)
-                : 'No event hits matched the current source, event, and axis settings.'
+                : 'No event hits'
         }
         setTraceState(next)
         cacheRef.current.set(signature, next)

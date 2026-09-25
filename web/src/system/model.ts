@@ -186,6 +186,27 @@ export const DEFAULT_RENDER: RenderStyle = {
   manifoldSurfaceVisible: true
 }
 
+/**
+ * Default colours for new objects and branches, cycled so neighbouring items
+ * are distinguishable in the tree and in plots. The first entry matches
+ * DEFAULT_RENDER.color.
+ */
+export const DEFAULT_COLOR_CYCLE = [
+  '#e06c3f',
+  '#2f8fce',
+  '#2aa876',
+  '#c24fa0',
+  '#c9971a',
+  '#7a5cd6',
+  '#d9534f',
+  '#1f9e9e',
+] as const
+
+function nextDefaultColor(system: System): string {
+  const used = Object.keys(system.index.objects).length + Object.keys(system.index.branches).length
+  return DEFAULT_COLOR_CYCLE[used % DEFAULT_COLOR_CYCLE.length]
+}
+
 function fnv1a32(value: string): number {
   let hash = 0x811c9dc5
   for (let index = 0; index < value.length; index += 1) {
@@ -307,6 +328,7 @@ export function addObject(
     objectType: obj.type,
     parentId: null
   })
+  node.render.color = nextDefaultColor(next)
   const updatedAt = nowIso()
   next.nodes[node.id] = node
   next.rootIds.push(node.id)
@@ -425,6 +447,7 @@ export function addBranch(
     objectType: 'continuation',
     parentId: parentNodeId
   })
+  node.render.color = nextDefaultColor(next)
   const updatedAt = nowIso()
   next.nodes[node.id] = node
   const normalized: ContinuationObject = {

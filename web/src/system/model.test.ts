@@ -37,6 +37,25 @@ import type {
 } from './types'
 
 describe('system model', () => {
+  it('cycles default colours for new objects', () => {
+    const system = createSystem({ name: 'Colours' })
+    const base: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit',
+      systemName: system.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const first = addObject(system, { ...base, name: 'First' })
+    const second = addObject(first.system, { ...base, name: 'Second' })
+    const firstColor = second.system.nodes[first.nodeId].render.color
+    const secondColor = second.system.nodes[second.nodeId].render.color
+    expect(firstColor).toBe('#e06c3f')
+    expect(secondColor).not.toBe(firstColor)
+  })
+
   it('adds objects, renames, and toggles visibility', () => {
     const system = createSystem({ name: 'Demo' })
     const orbit: OrbitObject = {
