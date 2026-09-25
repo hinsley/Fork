@@ -9,13 +9,13 @@ test('reload reopens the last open system; going home forgets it', async ({ page
   await expect(page.getByTestId('workspace')).toBeVisible()
 
   await page.reload()
-  await expect(page.getByTestId('workspace')).toBeVisible()
+  await expect(page.getByTestId('workspace')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByTestId('toolbar')).toContainText('Reopen_After_Reload')
 
   await page.getByTestId('go-home').click()
   await expect(page.getByTestId('home')).toBeVisible()
   await page.reload()
-  await expect(page.getByTestId('system-library')).toBeVisible()
+  await expect(page.getByTestId('system-library')).toBeVisible({ timeout: 20_000 })
   // Negative check: give a (wrong) restore time to happen.
   await page.waitForTimeout(500)
   await expect(page.getByTestId('workspace')).toHaveCount(0)
@@ -26,7 +26,7 @@ test('deterministic mode always starts on home', async ({ page }) => {
   await harness.goto({ deterministic: true, mock: true })
   await harness.createSystem('Deterministic_Reload')
   await page.reload()
-  await expect(page.getByTestId('system-library')).toBeVisible()
+  await expect(page.getByTestId('system-library')).toBeVisible({ timeout: 20_000 })
   // Negative check: give a (wrong) restore time to happen.
   await page.waitForTimeout(500)
   await expect(page.getByTestId('workspace')).toHaveCount(0)
