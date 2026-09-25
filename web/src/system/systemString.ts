@@ -63,7 +63,10 @@ export function parseSystemString(input: string): SystemStringDefinition {
   }
   const definitions = new Map<string, DefinedName>()
 
-  input.split(/\r\n?|\n/).forEach((rawLine, index) => {
+  const statements = input
+    .split(/\r\n?|\n/)
+    .flatMap((rawLine, index) => rawLine.split(';').map((segment) => ({ segment, index })))
+  statements.forEach(({ segment: rawLine, index }) => {
     const lineNumber = index + 1
     const line = rawLine.trim()
     if (!line) return

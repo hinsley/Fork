@@ -13,6 +13,15 @@ describe('system strings', () => {
     })
   })
 
+  it('accepts semicolon-separated assignments on one line', () => {
+    expect(parseSystemString("x' = y; y' = -mu*x; mu = 2")).toEqual({
+      varNames: ['x', 'y'],
+      equations: ['y', '-mu*x'],
+      paramNames: ['mu'],
+      params: [2],
+    })
+  })
+
   it('allows equations and parameters in any order while preserving their own order', () => {
     expect(parseSystemString("b = 2\ny' = x\na = 1\nx' = y")).toEqual({
       varNames: ['y', 'x'],

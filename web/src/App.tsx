@@ -4,7 +4,8 @@ import './App.css'
 import './ui/inspector/inspector.css'
 import { useAppContext } from './state/appContext'
 import { Panel } from './ui/Panel'
-import { Icon, type IconName } from './ui/Icon'
+import { Icon } from './ui/Icon'
+import { getNodeGlyph } from './ui/nodeGlyph'
 import { ObjectsTree, type ObjectsTreeHandle } from './ui/ObjectsTree'
 import { InspectorPanel } from './ui/InspectorPanel'
 import { ViewportPanel } from './ui/ViewportPanel'
@@ -93,43 +94,6 @@ function nodeHint(system: System, nodeId: string): string {
   return humanize(node.objectType ?? node.kind)
 }
 
-/** Same type glyphs as the objects tree. */
-function nodeIcon(system: System, nodeId: string): IconName {
-  const node = system.nodes[nodeId]
-  if (!node) return 'orbit'
-  switch (node.kind) {
-    case 'folder':
-      return 'folder'
-    case 'scene':
-      return 'scene'
-    case 'diagram':
-      return 'diagram'
-    case 'analysis':
-      return 'analysis'
-    case 'branch': {
-      const branchType =
-        system.branches[nodeId]?.branchType ?? system.index.branches[nodeId]?.branchType
-      return branchType?.includes('manifold') ? 'manifold' : 'branch'
-    }
-  }
-  switch (node.objectType) {
-    case 'equilibrium':
-      return 'equilibrium'
-    case 'limit_cycle':
-    case 'forced_periodic_response':
-      return 'cycle'
-    case 'isocline':
-      return 'isocline'
-    case 'state_grid':
-      return 'grid'
-    case 'invariant_measure':
-      return 'measure'
-    case 'particles':
-      return 'particles'
-    default:
-      return 'orbit'
-  }
-}
 
 const LAST_SYSTEM_KEY = 'fork-last-system'
 
@@ -369,7 +333,7 @@ function App() {
               id: `node-${node.id}`,
               label: node.name,
               hint: nodeHint(system, node.id),
-              icon: nodeIcon(system, node.id),
+              icon: getNodeGlyph(node, system).icon,
               run: () => {
                 selectNode(node.id)
                 revealInspector()
