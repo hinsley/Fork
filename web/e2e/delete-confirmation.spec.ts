@@ -86,5 +86,5 @@ test('viewport delete asks for confirmation', async ({ page }) => {
 
   handleConfirm(page, ['delete', 'Scene_1'], 'accept')
   await page.getByTestId('viewport-context-delete').click()
-  await expect(page.getByText('No viewports yet.')).toBeVisible()
+  await expect(page.getByTestId('viewport-insert-empty')).toBeVisible()
 })
