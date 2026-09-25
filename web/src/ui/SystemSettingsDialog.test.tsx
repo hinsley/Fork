@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSystem } from '../system/model'
-import { SystemSettingsDialog } from './SystemSettingsDialog'
+import { DISCARD_SYSTEM_CHANGES_MESSAGE, SystemSettingsDialog } from './SystemSettingsDialog'
 import type { SystemEditorActions } from './inspector/types'
 
 let capturedProps: Record<string, unknown> | null = null
@@ -49,6 +49,41 @@ describe('SystemSettingsDialog', () => {
 
     await user.click(screen.getByTestId('close-system-settings'))
     expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('closes on Esc and backdrop click, confirming before discarding changes', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(
+      <SystemSettingsDialog
+        open
+        system={createSystem({ name: 'Test_System' })}
+        onClose={onClose}
+        actions={makeActions()}
+      />
+    )
+    const dialog = screen.getByTestId('system-settings-dialog')
+    expect(dialog.contains(document.activeElement)).toBe(true)
+
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledTimes(1)
+    await user.click(dialog)
+    expect(onClose).toHaveBeenCalledTimes(2)
+    expect(confirm).not.toHaveBeenCalled()
+
+    const onDirtyChange = capturedProps?.onDirtyChange as (dirty: boolean) => void
+    act(() => onDirtyChange(true))
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByTestId('close-system-settings'))
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(confirm).toHaveBeenCalledWith(DISCARD_SYSTEM_CHANGES_MESSAGE)
+    expect(onClose).toHaveBeenCalledTimes(2)
+
+    confirm.mockReturnValue(true)
+    await user.click(dialog)
+    expect(onClose).toHaveBeenCalledTimes(3)
+    confirm.mockRestore()
   })
 
   it('returns null without an open system', () => {

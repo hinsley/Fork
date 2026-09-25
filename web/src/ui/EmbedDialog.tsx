@@ -18,6 +18,7 @@ import {
 import type { PlotlyFigureCaptureState } from '../viewports/plotly/figureCapture'
 import { resolveViewportWeight } from './viewportLayout'
 import { Icon } from './Icon'
+import { useModalDialog } from './useModalDialog'
 
 const MAX_EXPORTED_VIEWPORT_HEIGHT = 1200
 
@@ -87,6 +88,8 @@ function EmbedDialogContent({
   const [copyStatus, setCopyStatus] = useState<string | null>(null)
   const [captures, setCaptures] = useState<Record<string, PlotlyFigureCaptureState>>({})
   const markupRef = useRef<HTMLTextAreaElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const backdropProps = useModalDialog(true, dialogRef, onClose, { initialFocus: 'container' })
 
   const markup = buildIframeMarkup({
     source,
@@ -173,8 +176,14 @@ function EmbedDialogContent({
   }
 
   return (
-    <div className="dialog-backdrop embed-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="embed-dialog-title">
-      <div className="dialog dialog--workspace embed-dialog" data-testid="embed-dialog">
+    <div
+      className="dialog-backdrop embed-dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="embed-dialog-title"
+      {...backdropProps}
+    >
+      <div className="dialog dialog--workspace embed-dialog" data-testid="embed-dialog" ref={dialogRef}>
         <header className="dialog__header">
           <h2 id="embed-dialog-title">Embed</h2>
           <button className="dialog__close" onClick={onClose} aria-label="Close embed dialog" title="Close">
@@ -260,7 +269,10 @@ function EmbedDialogContent({
               </label>
             </div>
 
-            <label className="embed-dialog__bundle-option">
+            <label
+              className="embed-dialog__bundle-option"
+              title="Inline dependencies; SVG for GPU traces, static 3D fallback"
+            >
               <input
                 type="checkbox"
                 aria-label="Bundle dependencies (Experimental)"
@@ -273,7 +285,6 @@ function EmbedDialogContent({
               />
               <span>
                 <strong>Bundle dependencies <span className="embed-dialog__experimental">Experimental</span></strong>
-                <small>Inline dependencies; SVG for GPU traces, static 3D fallback.</small>
               </span>
             </label>
 

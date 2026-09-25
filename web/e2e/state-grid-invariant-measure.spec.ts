@@ -113,6 +113,32 @@ test('State Grid creates a separately rendered and persisted invariant-measure o
   expect(trace?.massSum).toBeCloseTo(1, 10)
   expect(trace?.hoverTemplate).toContain('mass=')
 
+  // The cobweb frame (diagonal + map graph over the grid box) is drawn next to
+  // the relative-mass overlay, and the header names both.
+  await expect
+    .poll(() =>
+      plot.evaluate((element) => {
+        const host = (
+          (element as HTMLElement & { data?: unknown[] }).data
+            ? element
+            : element.querySelector('.js-plotly-plot')
+        ) as (HTMLElement & { data?: Array<{ line?: { dash?: string }; x?: number[] }> }) | null
+        const diagonal = host?.data?.find((entry) => entry.line?.dash === 'dot')
+        return diagonal?.x ?? null
+      })
+    )
+    .toEqual([0, 1])
+  await expect(page.locator('[data-testid^="viewport-axes-"]').first()).toHaveText('xₙ → xₙ₊₁ · mass')
+  // Legend hugs the plot area instead of floating far above it.
+  const legendGap = await plot.evaluate((element) => {
+    const root = element.querySelector('.js-plotly-plot') ?? element
+    const legend = root.querySelector('.legend')?.getBoundingClientRect()
+    const area = root.querySelector('.nsewdrag')?.getBoundingClientRect()
+    return legend && area ? area.top - legend.bottom : null
+  })
+  expect(legendGap).not.toBeNull()
+  expect(legendGap!).toBeLessThan(16)
+
   await clickInspectorAction(page, 'action-appearance-toggle')
   await page.getByTestId('inspector-visibility').click()
   await expect.poll(() => plotHasTrace(plot, measureName)).toBe(false)

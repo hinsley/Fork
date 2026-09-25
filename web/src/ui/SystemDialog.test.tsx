@@ -281,4 +281,71 @@ describe('SystemDialog', () => {
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
+
+  it('rejects duplicate names inline and suffixes the default name', async () => {
+    const user = userEvent.setup()
+    const onCreateSystem = vi.fn()
+    render(
+      <SystemDialog
+        open
+        systems={[
+          { id: 'sys-1', name: 'Lorenz', updatedAt: '2024-01-01T00:00:00Z', type: 'flow' },
+          { id: 'sys-2', name: 'NewSystem', updatedAt: '2024-01-01T00:00:00Z', type: 'flow' },
+        ]}
+        onOpenSystem={vi.fn()}
+        onExportSystem={vi.fn()}
+        onCreateEmbed={vi.fn()}
+        onCreateSystem={onCreateSystem}
+        onDeleteSystem={vi.fn()}
+        onImportSystem={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    const nameInput = screen.getByTestId('system-name-input')
+    expect(nameInput).toHaveValue('NewSystem_2')
+
+    await user.clear(nameInput)
+    await user.type(nameInput, 'lorenz')
+    await user.click(screen.getByTestId('create-system'))
+    expect(screen.getByRole('alert')).toHaveTextContent('"Lorenz" already exists.')
+    expect(nameInput).toHaveAttribute('aria-invalid', 'true')
+    expect(onCreateSystem).not.toHaveBeenCalled()
+
+    await user.type(nameInput, '_2')
+    expect(screen.queryByRole('alert')).toBeNull()
+    await user.click(screen.getByTestId('create-system'))
+    expect(onCreateSystem).toHaveBeenCalledWith('lorenz_2')
+  })
+
+  it('closes on Esc and on a backdrop click, restoring focus', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    const opener = document.createElement('button')
+    document.body.appendChild(opener)
+    opener.focus()
+    const props = {
+      systems: [{ id: 'sys-1', name: 'Lorenz', updatedAt: '2024-01-01T00:00:00Z', type: 'flow' as const }],
+      onOpenSystem: vi.fn(),
+      onExportSystem: vi.fn(),
+      onCreateEmbed: vi.fn(),
+      onCreateSystem: vi.fn(),
+      onDeleteSystem: vi.fn(),
+      onImportSystem: vi.fn(),
+      onClose,
+    }
+    const { rerender } = render(<SystemDialog open {...props} />)
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true)
+
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('dialog'))
+    expect(onClose).toHaveBeenCalledTimes(2)
+    await user.click(screen.getByRole('button', { name: 'Lorenz' }))
+    expect(onClose).toHaveBeenCalledTimes(2)
+
+    rerender(<SystemDialog open={false} {...props} />)
+    expect(opener).toHaveFocus()
+    opener.remove()
+  })
 })

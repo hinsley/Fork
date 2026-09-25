@@ -7,7 +7,8 @@ export type ThemePreference = ResolvedTheme | 'system'
 const STORAGE_KEY = 'fork-theme'
 const DARK_QUERY = '(prefers-color-scheme: dark)'
 
-function readStoredPreference(): ThemePreference {
+/** Stored preference; first run follows the OS. Deterministic (test) mode pins light. */
+export function readStoredPreference(): ThemePreference {
   if (typeof window === 'undefined' || isDeterministicMode()) return 'light'
   try {
     const stored = window.localStorage?.getItem(STORAGE_KEY)
@@ -15,7 +16,7 @@ function readStoredPreference(): ThemePreference {
   } catch {
     // Storage can be unavailable (private mode, blocked site data).
   }
-  return 'light'
+  return 'system'
 }
 
 function systemPrefersDark(): boolean {

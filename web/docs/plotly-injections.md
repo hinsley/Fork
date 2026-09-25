@@ -162,8 +162,17 @@ state, or rendering injection.
   variable and intentionally do **not** render a governing map function graph.
 - `web/src/ui/ViewportPanel.tsx`: 1-axis map scenes containing a State Grid or
   invariant measure add an overlaid `yaxis2` labeled `Relative mass`, enable a
-  horizontal layer legend, and use the secondary axis for grid, stationary
-  distribution, and eigenmode markers.
+  horizontal layer legend (anchored at the plot's top edge, `y: 1`), and use
+  the secondary axis for grid, stationary distribution, and eigenmode markers.
+  The grid box also sets the cobweb range, so the map graph and diagonal are
+  drawn. Without a grid the `yaxis2` key is omitted entirely: Plotly treats a
+  present-but-`undefined` `yaxisN` as an axis and throws
+  (`reading 'anchor'`).
+- `web/src/ui/ViewportPanel.tsx`: 3-axis scenes use `aspectmode: 'manual'`
+  with a uniform `aspectratio` of 0.8 (a scaled-down cube), zero 2D margins,
+  and, when the tile is taller than wide, a square `scene.domain` centred
+  vertically, so the default camera keeps tick labels and axis titles inside
+  narrow tiles. The camera itself is never injected here.
 - `web/src/ui/ViewportPanel.tsx`: orbit scene traces set explicit
   `hovertemplate` strings so hover labels use the active scene axis variable
   names (not Plotly defaults) and include trajectory position metadata:

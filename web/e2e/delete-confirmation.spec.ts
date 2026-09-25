@@ -35,6 +35,28 @@ test('system delete asks for confirmation', async ({ page }) => {
   handleConfirm(page, ['delete', systemName], 'accept')
   await systemRow.getByRole('button', { name: 'Delete', exact: true }).click()
   await expect(systemRow).toHaveCount(0)
+
+  // Deleting the open system closes it: home, no stale workspace or dialog.
+  await expect(page.getByTestId('home')).toBeVisible()
+  await expect(page.getByTestId('workspace')).toHaveCount(0)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(
+    page.getByTestId('system-library').getByRole('button', { name: systemName, exact: true })
+  ).toHaveCount(0)
+})
+
+test('creating a system with an existing name is rejected inline', async ({ page }) => {
+  const harness = createHarness(page)
+  await harness.goto({ deterministic: true, mock: true })
+
+  const library = page.getByTestId('system-library')
+  const lorenzRows = library.getByRole('button', { name: 'Lorenz', exact: true })
+  await expect(lorenzRows).toHaveCount(1)
+  await library.getByTestId('system-name-input').fill('lorenz')
+  await library.getByTestId('create-system').click()
+  await expect(library.getByRole('alert')).toHaveText('"Lorenz" already exists.')
+  await expect(page.getByTestId('workspace')).toHaveCount(0)
+  await expect(lorenzRows).toHaveCount(1)
 })
 
 test('object delete asks for confirmation', async ({ page }) => {

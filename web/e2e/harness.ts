@@ -55,7 +55,17 @@ export class ForkHarness {
   }
 
   /** The systems list: inline on home, otherwise inside the Systems dialog. */
+  /** After a (re)load outside deterministic mode the app may reopen the last system. */
+  async waitForRestore() {
+    await this.page
+      .locator('[data-testid="system-library"], [data-testid="workspace"]')
+      .first()
+      .waitFor({ state: 'visible' })
+    await this.page.locator('html:not([data-restoring])').waitFor({ state: 'attached' })
+  }
+
   private async openSystemsDialog(): Promise<Locator> {
+    await this.waitForRestore()
     const library = this.page.getByTestId('system-library')
     await this.page.waitForSelector(
       '[data-testid="open-systems"], [data-testid="system-library"]',

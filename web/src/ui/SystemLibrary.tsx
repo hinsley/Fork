@@ -30,6 +30,28 @@ function systemMeta(system: SystemSummary) {
   }
 }
 
+const DEFAULT_SYSTEM_NAME = 'NewSystem'
+
+function nameKey(name: string): string {
+  return normalizeDisplayName(name).toLowerCase()
+}
+
+/** Inline error for a name already used by a saved system (case-insensitive). */
+function duplicateSystemNameError(name: string, systems: SystemSummary[]): string | null {
+  const key = nameKey(name)
+  const existing = systems.find((system) => nameKey(system.name) === key)
+  return existing ? `"${existing.name}" already exists.` : null
+}
+
+/** `NewSystem`, then `NewSystem_2`, `NewSystem_3`, … like default object names. */
+function defaultSystemName(systems: SystemSummary[]): string {
+  const taken = new Set(systems.map((system) => nameKey(system.name)))
+  if (!taken.has(nameKey(DEFAULT_SYSTEM_NAME))) return DEFAULT_SYSTEM_NAME
+  let index = 2
+  while (taken.has(nameKey(`${DEFAULT_SYSTEM_NAME}_${index}`))) index += 1
+  return `${DEFAULT_SYSTEM_NAME}_${index}`
+}
+
 /** Create/import bar plus one dense row per saved system. Used by home and the Systems dialog. */
 export function SystemLibrary({
   systems,
@@ -42,7 +64,9 @@ export function SystemLibrary({
   onDeleteSystem,
   onImportSystem,
 }: SystemLibraryProps) {
-  const [name, setName] = useState('NewSystem')
+  // null = untouched: show a default that never collides with a saved system.
+  const [typedName, setTypedName] = useState<string | null>(null)
+  const name = typedName ?? defaultSystemName(systems)
   const [nameError, setNameError] = useState<string | null>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
@@ -58,10 +82,14 @@ export function SystemLibrary({
     listRef.current?.querySelector<HTMLButtonElement>('.sys-lib__open')?.focus()
   }, [autoFocusFirst])
 
+  const nameErrorFor = (value: string) =>
+    validateSystemName(value) ?? duplicateSystemNameError(value, systems)
+
   const handleCreate = () => {
-    const error = validateSystemName(name)
+    const error = nameErrorFor(name)
     setNameError(error)
     if (error) return
+    setTypedName(null)
     onCreateSystem(normalizeDisplayName(name))
   }
 
@@ -92,8 +120,8 @@ export function SystemLibrary({
           aria-label="New system name"
           onChange={(event) => {
             const nextName = event.target.value
-            setName(nextName)
-            if (nameError) setNameError(validateSystemName(nextName))
+            setTypedName(nextName)
+            if (nameError) setNameError(nameErrorFor(nextName))
           }}
           data-testid="system-name-input"
           aria-invalid={Boolean(nameError)}

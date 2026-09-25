@@ -480,6 +480,11 @@ button.job__target:hover {
   font-weight: 600;
 }
 
+/* `normal` line-height on the mono font clips underscores (g_L) under overflow:hidden. */
+.sys-lib .sys-lib__open > * {
+  line-height: 1.5;
+}
+
 .sys-lib__type {
   color: var(--text-muted);
   font-size: 0.74rem;

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import './ui/primitives.css'
 import './App.css'
 import './ui/inspector/inspector.css'
 import { useAppContext } from './state/appContext'
 import { Panel } from './ui/Panel'
-import { Icon } from './ui/Icon'
+import { Icon, type IconName } from './ui/Icon'
 import { ObjectsTree, type ObjectsTreeHandle } from './ui/ObjectsTree'
 import { InspectorPanel } from './ui/InspectorPanel'
 import { ViewportPanel } from './ui/ViewportPanel'
@@ -19,6 +19,8 @@ import { formatSystemChip } from './ui/shellFormat'
 import { isEditableTarget } from './ui/shortcuts'
 import { useThemePreference } from './ui/useThemePreference'
 import { useMediaQuery } from './ui/useMediaQuery'
+import { dismissOpenMenus } from './ui/dismissMenus'
+import { isDeterministicMode } from './utils/determinism'
 import { suggestDefaultName } from './utils/naming'
 import { formatEquilibriumLabel } from './system/labels'
 import type { System } from './system/types'
@@ -91,6 +93,63 @@ function nodeHint(system: System, nodeId: string): string {
   return humanize(node.objectType ?? node.kind)
 }
 
+/** Same type glyphs as the objects tree. */
+function nodeIcon(system: System, nodeId: string): IconName {
+  const node = system.nodes[nodeId]
+  if (!node) return 'orbit'
+  switch (node.kind) {
+    case 'folder':
+      return 'folder'
+    case 'scene':
+      return 'scene'
+    case 'diagram':
+      return 'diagram'
+    case 'analysis':
+      return 'analysis'
+    case 'branch': {
+      const branchType =
+        system.branches[nodeId]?.branchType ?? system.index.branches[nodeId]?.branchType
+      return branchType?.includes('manifold') ? 'manifold' : 'branch'
+    }
+  }
+  switch (node.objectType) {
+    case 'equilibrium':
+      return 'equilibrium'
+    case 'limit_cycle':
+    case 'forced_periodic_response':
+      return 'cycle'
+    case 'isocline':
+      return 'isocline'
+    case 'state_grid':
+      return 'grid'
+    case 'invariant_measure':
+      return 'measure'
+    case 'particles':
+      return 'particles'
+    default:
+      return 'orbit'
+  }
+}
+
+const LAST_SYSTEM_KEY = 'fork-last-system'
+
+function readLastSystemId(): string | null {
+  try {
+    return window.localStorage?.getItem(LAST_SYSTEM_KEY) ?? null
+  } catch {
+    return null
+  }
+}
+
+function writeLastSystemId(id: string | null) {
+  try {
+    if (id) window.localStorage?.setItem(LAST_SYSTEM_KEY, id)
+    else window.localStorage?.removeItem(LAST_SYSTEM_KEY)
+  } catch {
+    // Storage unavailable (private mode, blocked site data): reload lands on home.
+  }
+}
+
 function App() {
   const { state, actions } = useAppContext()
   const { system, systems, busy, error, continuationProgress } = state
@@ -122,9 +181,53 @@ function App() {
   const objectsTreeRef = useRef<ObjectsTreeHandle | null>(null)
   const workspaceRef = useRef<HTMLDivElement | null>(null)
 
+  // Reopen the last system after a reload (never in deterministic test mode).
+  const restorePhase = useRef<'pending' | 'done'>(
+    isDeterministicMode() ? 'done' : 'pending'
+  )
+  const [systemsLoaded, setSystemsLoaded] = useState(false)
+  // Marks <html data-restoring> in the same commit as the first paint so e2e
+  // helpers can wait until the restore has settled.
+  useLayoutEffect(() => {
+    if (restorePhase.current === 'pending') document.documentElement.dataset.restoring = '1'
+  }, [])
+
   useEffect(() => {
-    void actions.refreshSystems()
+    let cancelled = false
+    const refreshed = actions.refreshSystems()
+    if (restorePhase.current === 'pending') {
+      void refreshed.then(() => {
+        if (!cancelled) setSystemsLoaded(true)
+      })
+    }
+    return () => {
+      cancelled = true
+    }
   }, [actions])
+
+  useEffect(() => {
+    if (!systemsLoaded || restorePhase.current !== 'pending') return
+    restorePhase.current = 'done'
+    const settle = () => {
+      delete document.documentElement.dataset.restoring
+    }
+    const lastId = readLastSystemId()
+    if (!system && lastId && systems.some((entry) => entry.id === lastId)) {
+      void actions.openSystem(lastId).finally(settle)
+    } else {
+      settle()
+    }
+  }, [actions, system, systems, systemsLoaded])
+
+  const activeSystemId = system?.id ?? null
+  useEffect(() => {
+    if (isDeterministicMode() || restorePhase.current !== 'done') return
+    writeLastSystemId(activeSystemId)
+  }, [activeSystemId, systemsLoaded])
+
+  useEffect(() => {
+    if (paletteOpen) dismissOpenMenus()
+  }, [paletteOpen])
 
   const objectsOpen = narrow
     ? narrowPanel === 'objects'
@@ -266,7 +369,7 @@ function App() {
               id: `node-${node.id}`,
               label: node.name,
               hint: nodeHint(system, node.id),
-              icon: node.kind === 'folder' ? 'folder' : undefined,
+              icon: nodeIcon(system, node.id),
               run: () => {
                 selectNode(node.id)
                 revealInspector()
@@ -446,7 +549,12 @@ function App() {
       closeSystemsDialog()
       setEmbedDialogOpen(true)
     },
-    onDeleteSystem: (id: string) => void actions.deleteSystem(id),
+    onDeleteSystem: async (id: string) => {
+      const deletingOpenSystem = system?.id === id
+      await actions.deleteSystem(id)
+      // The workspace closes with it; land on home rather than a dialog over it.
+      if (deletingOpenSystem) closeSystemsDialog()
+    },
     onImportSystem: async (file: File) => {
       await actions.importSystem(file)
       closeSystemsDialog()
