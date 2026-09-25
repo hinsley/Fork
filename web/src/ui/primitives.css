@@ -1,0 +1,341 @@
+/*
+ * Shared UI primitives for the data-first layout. Every panel uses these
+ * instead of bespoke one-off styles so that chips, key/value grids, numbers
+ * and icon buttons look the same everywhere.
+ */
+
+:root {
+  --mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --tone-stable: var(--accent);
+  --tone-stable-soft: var(--accent-soft);
+  --tone-unstable: var(--danger);
+  --tone-unstable-soft: color-mix(in srgb, var(--danger) 12%, transparent);
+  --tone-saddle: var(--warning);
+  --tone-saddle-soft: color-mix(in srgb, var(--warning) 14%, transparent);
+  --tone-neutral: var(--text-muted);
+  --tone-neutral-soft: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  --tone-fold: #c7663b;
+  --tone-hopf: var(--accent-cool);
+  --tone-flip: #9b6bd6;
+  --tone-branch: #b38a1d;
+  --tone-codim2: #d0457f;
+  --row-h: 24px;
+  --gap-1: 4px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+}
+
+/* Numbers: tabular, monospace, never wrap. */
+.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+/* Status / category chip. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--tone-neutral);
+  background: var(--tone-neutral-soft);
+}
+
+.chip--stable {
+  color: var(--tone-stable);
+  background: var(--tone-stable-soft);
+}
+
+.chip--unstable {
+  color: var(--tone-unstable);
+  background: var(--tone-unstable-soft);
+}
+
+.chip--saddle,
+.chip--nonhyperbolic,
+.chip--warning {
+  color: var(--tone-saddle);
+  background: var(--tone-saddle-soft);
+}
+
+.chip--unknown,
+.chip--muted {
+  color: var(--text-faint);
+  background: var(--tone-neutral-soft);
+}
+
+/* Bifurcation code chip (`H`, `LP`, `PD`, …). */
+.bif {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  background: var(--text-muted);
+}
+
+.bif--fold { background: var(--tone-fold); }
+.bif--hopf { background: var(--tone-hopf); }
+.bif--flip { background: var(--tone-flip); }
+.bif--branch { background: var(--tone-branch); }
+.bif--codim2 { background: var(--tone-codim2); }
+
+/* Key/value grid: label column + value column, repeated. */
+.kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: baseline;
+  margin: 0;
+  min-width: 0;
+}
+
+.kv--2 {
+  grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr);
+}
+
+.kv > dt {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.kv > dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+/* Compact data table (eigenvalues, bifurcations…). */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+}
+
+.data-table th {
+  padding: 2px 6px;
+  text-align: right;
+  font-weight: 500;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.data-table td {
+  padding: 2px 6px;
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.data-table th:first-child,
+.data-table td:first-child {
+  text-align: left;
+}
+
+.data-table tr.is-selected td {
+  background: var(--accent-soft);
+}
+
+.data-table tr.is-unstable td {
+  color: var(--tone-unstable);
+}
+
+.data-table tbody tr[role='button'],
+.data-table tbody tr.is-clickable {
+  cursor: pointer;
+}
+
+.data-table tbody tr[role='button']:hover td,
+.data-table tbody tr.is-clickable:hover td {
+  background: var(--button-bg-hover);
+}
+
+/* Square icon-only button. */
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.icon-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--button-bg-hover);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.icon-btn.is-active,
+.icon-btn[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.icon-btn--sm {
+  width: 20px;
+  height: 20px;
+}
+
+/* Horizontal row of buttons (primary actions). */
+.action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--button-bg);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--button-bg-hover);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn--primary {
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+
+.btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+/* Muted inline text (units, secondary values). */
+.muted {
+  color: var(--text-muted);
+}
+
+.faint {
+  color: var(--text-faint);
+}
+
+/* Section heading inside panels: small caps label with optional trailing controls. */
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Truncate a single line. */
+.truncate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Popover / menu surface. */
+.menu-surface {
+  min-width: 160px;
+  padding: 4px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: var(--shadow-soft);
+}
+
+.menu-surface [role='menuitem'],
+.menu-surface .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-surface [role='menuitem']:hover:not(:disabled),
+.menu-surface .menu-item:hover:not(:disabled),
+.menu-surface [role='menuitem']:focus-visible {
+  background: var(--button-bg-hover);
+}
+
+.menu-surface [role='menuitem']:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.menu-surface hr {
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--panel-border);
+}
+
+.kbd {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--text-faint);
+}

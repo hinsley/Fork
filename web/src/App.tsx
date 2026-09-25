@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import './ui/primitives.css'
 import './App.css'
 import './ui/inspector/inspector.css'
 import { useAppContext } from './state/appContext'
