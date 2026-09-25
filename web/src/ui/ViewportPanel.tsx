@@ -8553,7 +8553,7 @@ export function ViewportPanel({
   ) : null
 
   const parameterStrip =
-    mode === 'editor' ? (
+    mode === 'editor' && systemConfig.paramNames.length > 0 ? (
       <ParameterStrip config={systemConfig} onUpdateSystem={onUpdateSystem} />
     ) : null
 

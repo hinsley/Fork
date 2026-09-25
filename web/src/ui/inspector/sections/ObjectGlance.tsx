@@ -6,7 +6,6 @@ import { interpretLimitCycleStability } from '../../../system/continuation'
 import { resolveTrivialFloquetModeIndex } from '../../../system/floquetModes'
 import {
   fmt,
-  fmtCompactCount,
   fmtComplex,
   fmtCount,
   fmtEigenvalues,
@@ -155,7 +154,7 @@ function orbitModel(scope: InspectorSelectionController): ObjectHeaderModel | nu
   if (!isDiscreteMap) meta.push(`dt ${fmt(orbit.dt)}`)
   const exponents = orbit.lyapunovExponents ?? []
   return {
-    chip: { label: `${fmtCompactCount(count)} pts`, tone: 'neutral' },
+    chip: null,
     meta,
     glance: (
       <>

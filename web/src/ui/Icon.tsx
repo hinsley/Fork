@@ -110,7 +110,8 @@ export function Icon({
 }) {
   return (
     <svg className={`ui-icon ${className}`.trim()} width={size} height={size} viewBox="0 0 24 24"
-      fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
+      fill="none" stroke="currentColor" strokeWidth={name === 'more' ? 3 : 1.6}
+      strokeLinecap="round"
       strokeLinejoin="round" aria-hidden="true" focusable="false">
       <path d={paths[name]} />
     </svg>
