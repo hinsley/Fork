@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useReducer, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react'
 import { isDeterministicMode } from '../../utils/determinism'
 import {
   isWorkflowId,
@@ -24,12 +24,6 @@ export function WorkflowFocusProvider({
   children: ReactNode
   onActiveWorkflowChange?: () => void
 }) {
-  const [collapsedActionGroups, setCollapsedActionGroups] = useState<
-    Partial<Record<WorkflowActionEntry['group'], boolean>>
-  >({})
-  const toggleActionGroup = useCallback((group: WorkflowActionEntry['group']) => {
-    setCollapsedActionGroups((previous) => ({ ...previous, [group]: !(previous[group] ?? true) }))
-  }, [])
   const [state, dispatch] = useReducer(selectionSessionReducer, {
     activeWorkflow: null,
     navigationDirection: null,
@@ -38,7 +32,14 @@ export function WorkflowFocusProvider({
   })
   const navigate = useCallback(
     (targetWorkflow: WorkflowId | null) => {
-      if (state.navigationPhase !== 'idle' || targetWorkflow === state.activeWorkflow) return
+      if (state.navigationPhase !== 'idle') {
+        // Never drop a click that lands mid-animation: settle on the new target at once.
+        if (targetWorkflow !== state.targetWorkflow) {
+          dispatch({ type: 'navigate-immediately', targetWorkflow })
+        }
+        return
+      }
+      if (targetWorkflow === state.activeWorkflow) return
       if (!shouldAnimateNavigation()) {
         dispatch({ type: 'navigate-immediately', targetWorkflow })
         return
@@ -49,7 +50,7 @@ export function WorkflowFocusProvider({
         targetWorkflow,
       })
     },
-    [state.activeWorkflow, state.navigationPhase]
+    [state.activeWorkflow, state.navigationPhase, state.targetWorkflow]
   )
   useEffect(() => {
     if (state.navigationPhase === 'idle') return
@@ -73,10 +74,8 @@ export function WorkflowFocusProvider({
       ...state,
       openWorkflow: (workflow) => navigate(workflow),
       closeWorkflow: () => navigate(null),
-      collapsedActionGroups,
-      toggleActionGroup,
     }),
-    [collapsedActionGroups, navigate, state, toggleActionGroup]
+    [navigate, state]
   )
   return <WorkflowFocusContext.Provider value={value}>{children}</WorkflowFocusContext.Provider>
 }
@@ -100,70 +99,6 @@ export function InspectorSubDisclosure({
   )
 }
 
-export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[] }) {
-  const focus = useWorkflowFocus()
-  const listId = useId()
-  if (!focus || focus.activeWorkflow || entries.length === 0) return null
-
-  const groups = [
-    'Configure',
-    'Inspect',
-    'Compute',
-    'Continuation',
-    'Manifolds',
-    'Bifurcations',
-  ] as const
-  return (
-    <section className="inspector-actions" data-testid="inspector-actions">
-      {groups.map((group) => {
-        const groupEntries = entries.filter((entry) => entry.group === group)
-        if (groupEntries.length === 0) return null
-        const expanded = focus.collapsedActionGroups[group] === false
-        const contentId = `${listId}-${group}`
-        return (
-          <div className="inspector-actions__group" key={group}>
-            <h4>
-              <button
-                type="button"
-                className="inspector-actions__toggle"
-                aria-expanded={expanded}
-                aria-controls={contentId}
-                onClick={() => focus.toggleActionGroup(group)}
-              >
-                <span className="inspector-actions__chevron" aria-hidden="true">›</span>
-                {group}
-              </button>
-            </h4>
-            <div className="inspector-actions__items" id={contentId} hidden={!expanded}>
-              {groupEntries.map((entry) => (
-                <button
-                  type="button"
-                  className="inspector-action-row"
-                  onClick={() => focus.openWorkflow(entry.id)}
-                  disabled={entry.disabled}
-                  title={entry.description}
-                  aria-description={entry.description}
-                  data-testid={`action-${entry.id}`}
-                  key={entry.id}
-                >
-                  <span>
-                    <strong className="inspector-action-row__title">
-                      <span>{entry.label}</span>
-                      {entry.tag ? <span className="tree-node__tag">{entry.tag}</span> : null}
-                    </strong>
-                    {entry.disabled ? <small>{entry.description}</small> : null}
-                  </span>
-                  <span aria-hidden="true">›</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )
-      })}
-    </section>
-  )
-}
-
 export function WorkflowFocusToolbar({
   entries,
 }: {
@@ -174,13 +109,17 @@ export function WorkflowFocusToolbar({
   const entry = entries.find((candidate) => candidate.id === focus.activeWorkflow)
   return (
     <div className="inspector-workflow-toolbar" data-testid="inspector-workflow-focus">
-      <button type="button" onClick={focus.closeWorkflow} aria-label="Back" title="Back" data-testid="inspector-workflow-back">
+      <button
+        type="button"
+        className="icon-btn"
+        onClick={focus.closeWorkflow}
+        aria-label="Back"
+        title="Back"
+        data-testid="inspector-workflow-back"
+      >
         <span aria-hidden="true">←</span>
       </button>
-      <div>
-        <span>{entry?.group ?? 'Action'}</span>
-        <strong>{entry?.label ?? 'Workflow'}</strong>
-      </div>
+      <strong className="truncate">{entry?.title ?? entry?.label ?? 'Workflow'}</strong>
     </div>
   )
 }

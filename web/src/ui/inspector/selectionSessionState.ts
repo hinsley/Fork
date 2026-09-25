@@ -1,27 +1,19 @@
 export const WORKFLOW_IDS = [
-  'frozen-variables-toggle',
-  'parameters-toggle',
   'state-grid-setup-toggle',
   'state-grid-entropy-toggle',
   'state-grid-transfer-toggle',
   'state-grid-particles-toggle',
   'particles-animation-toggle',
-  'invariant-measure-data-toggle',
   'invariant-measure-eigenmodes-toggle',
-  'appearance-toggle',
   'orbit-run-toggle',
-  'orbit-data-toggle',
   'oseledets-toggle',
   'limit-cycle-toggle',
   'heteroclinic-from-orbit-toggle',
   'equilibrium-solver-toggle',
-  'equilibrium-data-toggle',
   'equilibrium-continuation-toggle',
   'equilibrium-manifold-toggle',
   'forced-response-solver-toggle',
-  'forced-response-data-toggle',
   'forced-response-continuation-toggle',
-  'limit-cycle-data-toggle',
   'limit-cycle-floquet-toggle',
   'limit-cycle-manifold-toggle',
   'isocline-toggle',
@@ -52,6 +44,10 @@ export type WorkflowActionEntry = {
   description: string
   tag?: string
   disabled?: boolean
+  /** Rendered as a visible button in the action bar instead of the overflow menu. */
+  primary?: boolean
+  /** Longer heading shown while the workflow is open (defaults to `label`). */
+  title?: string
 }
 
 export type WorkflowNavigationDirection = 'forward' | 'backward'

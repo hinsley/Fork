@@ -32,7 +32,6 @@ export function IsoclineInspectorSections({
     isoclineResolvedExpression,
     isoclineSourceKind,
     isoclineSourceVariable,
-    isoclineStale,
     paramOverrideDraft,
     paramOverrideError,
     parseDraftNumber,
@@ -129,7 +128,7 @@ export function IsoclineInspectorSections({
                 )}
 
                 <label>
-                  Isocline value
+                  Level
                   <input
                     type="text"
                     inputMode="decimal"
@@ -145,14 +144,14 @@ export function IsoclineInspectorSections({
                     data-testid="isocline-level"
                   />
                 </label>
-                <p className="empty-state" data-testid="isocline-resolved-expression">
-                  f(x, p) = {isoclineResolvedExpression || '∅'}
-                </p>
 
                 <div className="inspector-subsection">
-                  <h4 className="inspector-subheading">
-                    Active variables ({Math.min(isocline.axes.length, isoclineMaxActiveVariables)}/
-                    {isoclineMaxActiveVariables})
+                  <h4 className="section-head">
+                    <span>Active variables</span>
+                    <span className="num">
+                      {Math.min(isocline.axes.length, isoclineMaxActiveVariables)}/
+                      {isoclineMaxActiveVariables}
+                    </span>
                   </h4>
                   <div className="isocline-axis-selector">
                     {systemDraft.varNames.map((name) => {
@@ -251,13 +250,13 @@ export function IsoclineInspectorSections({
                       </table>
                     </div>
                   ) : (
-                    <p className="empty-state">Select at least one active variable.</p>
+                    <p className="field-warning">Select an active variable.</p>
                   )}
                 </div>
 
                 {isoclineFrozenVariables.length > 0 ? (
                   <div className="inspector-subsection" data-testid="isocline-frozen-table">
-                    <h4 className="inspector-subheading">Frozen variables</h4>
+                    <h4 className="section-head">Frozen variables</h4>
                     <div
                       className="state-table__wrap"
                       role="region"
@@ -300,13 +299,12 @@ export function IsoclineInspectorSections({
 
                 <div className="inspector-subsection" data-testid="isocline-parameter-table">
                   <StateTable
-                    title="Isocline parameters"
+                    title="Parameters"
                     varNames={systemDraft.paramNames}
                     values={paramOverrideDraft}
                     onChange={handleParamOverrideChange}
                     onCopy={() => void writeClipboardText(formatPointValues(paramOverrideDraft))}
                     onPaste={handlePasteParamOverride}
-                    emptyMessage="No parameters defined yet."
                     testIdPrefix="param-override"
                   />
                   {hasParamOverride ? (
@@ -317,27 +315,13 @@ export function IsoclineInspectorSections({
                         onClick={handleClearParamOverride}
                         data-testid="param-override-clear"
                       >
-                        Restore default parameters
+                        Restore defaults
                       </button>
                     </div>
                   ) : null}
                   {paramOverrideError ? <div className="field-error">{paramOverrideError}</div> : null}
                 </div>
 
-                {!isocline.lastComputed ? (
-                  <p className="empty-state" data-testid="isocline-not-computed">
-                    Not computed yet.
-                  </p>
-                ) : (
-                  <p className="empty-state" data-testid="isocline-last-computed">
-                    Last computed at {isocline.lastComputed.computedAt}
-                  </p>
-                )}
-                {isoclineStale ? (
-                  <div className="field-warning" data-testid="isocline-stale-indicator">
-                    Settings changed since the last compute.
-                  </div>
-                ) : null}
                 {isoclineError ? <div className="field-error">{isoclineError}</div> : null}
                 <button
                   className="inspector-primary-action"
@@ -346,7 +330,7 @@ export function IsoclineInspectorSections({
                   disabled={isoclineComputing}
                   data-testid="isocline-compute"
                 >
-                  {isoclineComputing ? 'Computing...' : 'Compute'}
+                  {isoclineComputing ? 'Computing…' : 'Compute'}
                 </button>
               </div>
             </InspectorDisclosure>

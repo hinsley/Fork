@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { clickInspectorAction, createHarness } from './harness'
+import { clickInspectorAction, createHarness, expandDetails } from './harness'
 
 test('continues a detected cycle fold as a real LPC curve', async ({ page }) => {
   test.setTimeout(150_000)
@@ -45,6 +45,7 @@ test('continues a detected cycle fold as a real LPC curve', async ({ page }) => 
   await page.getByTestId('limit-cycle-from-orbit-ncol').fill('3')
   await page.getByTestId('limit-cycle-from-orbit-step-size').fill('0.005')
   await page.getByTestId('limit-cycle-from-orbit-max-steps').fill('12')
+  await expandDetails(page, 'limit-cycle-from-orbit-advanced')
   await page.getByTestId('limit-cycle-from-orbit-min-step-size').fill('1e-6')
   await page.getByTestId('limit-cycle-from-orbit-max-step-size').fill('0.01')
   await page.getByTestId('limit-cycle-from-orbit-corrector-steps').fill('12')

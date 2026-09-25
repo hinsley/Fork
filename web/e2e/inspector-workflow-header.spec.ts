@@ -37,11 +37,15 @@ test('inspector child contexts animate forward and backward within the panel', a
   await expect(page.getByTestId('inspector-name')).toBeVisible()
   await clickInspectorAction(page, 'action-orbit-run-toggle')
   await expect(page.getByTestId('inspector-workflow-back')).toBeVisible()
-  await expect(page.getByTestId('inspector-name')).toHaveCount(0)
+  // The entity header stays pinned above the workflow; the action bar yields to it.
+  await expect(page.getByTestId('inspector-name')).toBeVisible()
+  await expect(page.getByTestId('inspector-entity-header')).toHaveCSS('position', 'sticky')
+  await expect(page.getByTestId('inspector-actions')).toHaveCount(0)
   await expect(panel).toHaveAttribute('data-navigation-phase', 'idle')
 
   await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByTestId('inspector-name')).toBeVisible()
+  await expect(page.getByTestId('inspector-actions')).toBeVisible()
   await expect(panel).toHaveAttribute('data-navigation-phase', 'idle')
 
   const records = await page.evaluate(() => {

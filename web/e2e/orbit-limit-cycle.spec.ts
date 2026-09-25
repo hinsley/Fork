@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { clickInspectorAction, createHarness } from './harness'
+import { clickInspectorAction, createHarness, expandDetails } from './harness'
 
 test('continue limit cycle from orbit data', async ({ page }) => {
   test.setTimeout(150_000)
@@ -50,6 +50,7 @@ test('continue limit cycle from orbit data', async ({ page }) => {
   await page.getByTestId('limit-cycle-from-orbit-ncol').fill('4')
   await page.getByTestId('limit-cycle-from-orbit-step-size').fill('0.01')
   await page.getByTestId('limit-cycle-from-orbit-max-steps').fill('20')
+  await expandDetails(page, 'limit-cycle-from-orbit-advanced')
   await page.getByTestId('limit-cycle-from-orbit-min-step-size').fill('1e-5')
   await page.getByTestId('limit-cycle-from-orbit-max-step-size').fill('0.1')
   await page.getByTestId('limit-cycle-from-orbit-corrector-steps').fill('10')

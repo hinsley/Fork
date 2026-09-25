@@ -41,16 +41,14 @@ test('solves a real-WASM time-forced flow and preserves autonomous guards', asyn
   await page.getByTestId('forced-response-period-steps').fill('120')
   await page.getByTestId('forced-response-solve-submit').click()
   await page.getByTestId('inspector-workflow-back').click()
-  await clickInspectorAction(page, 'action-forced-response-data-toggle')
   await expect(page.getByText('Forcing period', { exact: true })).toBeVisible({
     timeout: 20_000,
   })
-  await expect(page.getByText('3.1415927').first()).toBeVisible()
+  await expect(page.getByText('3.14159').first()).toBeVisible()
   await expect(page.getByText(/μ1 =/)).toBeVisible()
 
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-forced-response-continuation-toggle')
-  await page.getByLabel('Max points').fill('3')
+  await page.getByLabel('Max pts').fill('3')
   await page.getByTestId('forced-response-branch-submit').click()
   await clickInspectorAction(page, 'action-branch-points-toggle')
   await page.getByTestId('branch-point-prev').click()
@@ -70,9 +68,10 @@ test('solves a real-WASM time-forced flow and preserves autonomous guards', asyn
   await expect(page.getByTestId('equilibrium-solve-submit')).toBeDisabled()
 
   await page.getByTestId('inspector-workflow-back').click()
+  // Frozen variables open as a header popover, not a workflow.
   await clickInspectorAction(page, 'action-frozen-variables-toggle')
   await page.getByTestId('frozen-equation-context-toggle').check()
-  await page.getByTestId('inspector-workflow-back').click()
+  await page.keyboard.press('Escape')
   await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await expect(page.getByTestId('equilibrium-solve-submit')).toBeEnabled()
 })
@@ -96,10 +95,9 @@ test('solves a real-WASM period-two iteration-forced map', async ({ page }) => {
   await page.getByTestId('forced-response-phase').fill('1')
   await page.getByTestId('forced-response-solve-submit').click()
   await page.getByTestId('inspector-workflow-back').click()
-  await clickInspectorAction(page, 'action-forced-response-data-toggle')
   await expect(page.getByText('Forcing period', { exact: true })).toBeVisible({
     timeout: 20_000,
   })
-  await expect(page.getByText('Trajectory points')).toBeVisible()
+  await expect(page.getByTestId('forced-response-glance')).toContainText('Points3')
   await expect(page.getByText(/μ1 =/)).toBeVisible()
 })

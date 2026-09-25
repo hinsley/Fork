@@ -17,9 +17,17 @@ import {
 import { StateTable } from './StateTable'
 import {
   InspectorDisclosure,
-  WorkflowActionList,
   WorkflowFocusToolbar,
 } from './selectionSession'
+import {
+  ActionBar,
+  EntityHeader,
+  KeyValues,
+  SnowflakeIcon,
+  type HeaderPanel,
+} from './InspectorChrome'
+import { Icon } from '../Icon'
+import { fmt, fmtCount } from '../../utils/format'
 import { useWorkflowFocus } from './useWorkflowFocus'
 import type { WorkflowActionEntry } from './selectionSessionState'
 
@@ -170,56 +178,42 @@ export function StateGridInspector({
           : Object.keys(frozenValues).length > 0) ||
         result.dynamicsType !== system.config.type)
   )
+  const transferUnavailableReason = transferContextError
+    ? 'Invariant measures are not implemented for non-autonomous flows yet.'
+    : transferSolverSupported
+      ? null
+      : isFlow
+        ? 'Invariant measures require the RK4 or Tsit5 flow solver.'
+        : 'Invariant measures require the discrete map solver.'
   const workflowActions: WorkflowActionEntry[] = [
-    ...(isFlow ? [{ id: 'state-grid-particles-toggle' as const, group: 'Compute' as const,
-      label: 'Particles', description: 'Animate particles inside this grid.' }] : []),
-    {
-      id: 'appearance-toggle',
-      group: 'Configure',
-      label: 'Appearance',
-      description: 'Change visibility, color, opacity, and point size.',
-    },
-    {
-      id: 'frozen-variables-toggle',
-      group: 'Configure',
-      label: 'Frozen Variables',
-      description: 'Choose variables to hold constant for this object.',
-    },
-    {
-      id: 'parameters-toggle',
-      group: 'Configure',
-      label: 'Parameters',
-      description: 'Override the system parameter values for this object.',
-      tag: object.customParameters ? 'custom' : undefined,
-    },
-    {
-      id: 'state-grid-setup-toggle',
-      group: 'Configure',
-      label: 'State Grid setup',
-      description: 'Set bounds and resolution for the free state variables.',
-    },
     ...((isMap || isFlow)
       ? [{
           id: 'state-grid-transfer-toggle' as const,
           group: 'Compute' as const,
           label: 'Invariant measure',
-          description: transferContextError
-            ? 'Invariant measures are not implemented for non-autonomous flows yet.'
-            : transferSolverSupported
-              ? isFlow
-                ? 'Compute the conditional operator of a fixed sampled flow map.'
-                : 'Compute the conditional State Grid transfer operator.'
-              : isFlow
-                ? 'Invariant measures require the RK4 or Tsit5 flow solver.'
-                : 'Invariant measures require the discrete map solver.',
+          description: transferUnavailableReason ??
+            (isFlow
+              ? 'Compute the conditional operator of a fixed sampled flow map.'
+              : 'Compute the conditional State Grid transfer operator.'),
           disabled: !transferEnabled,
+          primary: true,
         }]
       : []),
     {
       id: 'state-grid-entropy-toggle',
       group: 'Compute',
-      label: 'Expansion entropy',
+      label: 'Entropy',
+      title: 'Expansion entropy',
       description: 'Configure and run the finite-region expansion-entropy calculation.',
+      primary: true,
+    },
+    ...(isFlow ? [{ id: 'state-grid-particles-toggle' as const, group: 'Compute' as const,
+      label: 'Particles', description: 'Animate particles inside this grid.', primary: true }] : []),
+    {
+      id: 'state-grid-setup-toggle',
+      group: 'Configure',
+      label: 'Grid setup',
+      description: 'Set bounds and resolution for the free state variables.',
     },
   ]
   const storedTransferSettings = object.transferOperator?.settings
@@ -472,210 +466,105 @@ export function StateGridInspector({
       ? ` inspector-navigation-page--${workflowFocus.navigationPhase}-${workflowFocus.navigationDirection}`
       : ''
   const actionOnly = Boolean(workflowFocus)
-  const workloadSummary = (
-    <>
-      <div className="inspector-metrics" data-testid="state-grid-workload">
-        <div className="inspector-metrics__row">
-          <span className="inspector-metrics__label">Total grid points</span>
-          <strong className="inspector-metrics__value" data-testid="state-grid-total-points">
-            {formatCount(totalPoints)}
-          </strong>
-        </div>
-        <div className="inspector-metrics__row">
-          <span className="inspector-metrics__label">
-            {isMap ? 'Map/tangent iterations' : 'Forward/tangent steps'}
-          </span>
-          <span className="inspector-metrics__value">{formatCount(integrationWork)}</span>
-        </div>
+  const frozenCount = Object.keys(frozenValues).length
+
+  const appearanceContent = node ? (
+    <div className="inspector-section" data-testid="appearance-section">
+      <div className="inspector-form-grid">
+        <label>
+          Color
+          <input
+            type="color"
+            value={node.render.color}
+            onChange={(event) => onUpdateRender(nodeId, { color: event.target.value })}
+            data-testid="inspector-color"
+          />
+        </label>
+        <label>
+          Opacity %
+          <OpacityPercentInput
+            value={node.render.opacity}
+            onChange={(opacity) => onUpdateRender(nodeId, { opacity })}
+            ariaLabel="Color opacity percentage"
+            testId="inspector-color-opacity"
+          />
+        </label>
+        <label>
+          Point size
+          <input
+            type="number"
+            min={2}
+            max={12}
+            value={node.render.pointSize}
+            onChange={(event) =>
+              onUpdateRender(nodeId, { pointSize: Number(event.target.value) })
+            }
+            data-testid="inspector-point-size"
+          />
+        </label>
       </div>
-      {workloadLevel !== 'small' ? (
-        <p
-          className={workloadLevel === 'large' ? 'inspector-error' : 'inspector-help'}
-          data-testid="state-grid-workload-warning"
-        >
-          {workloadLevel === 'large'
-            ? 'Large Cartesian product. Runtime and memory pressure grow exponentially with state dimension.'
-            : 'Moderate Cartesian product. Increasing one resolution multiplies the full workload.'}
-        </p>
-      ) : null}
-    </>
+    </div>
+  ) : null
+
+  const frozenContent = (
+    <section className="inspector-section" data-testid="frozen-variables-section">
+      <table className="data-table inspector-frozen-table" aria-label="Frozen variables">
+        <thead>
+          <tr>
+            <th>Variable</th>
+            <th>Frozen</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {system.config.varNames.map((variableName) => {
+            const isFrozen = Object.prototype.hasOwnProperty.call(frozenValues, variableName)
+            return (
+              <tr key={variableName}>
+                <td>{variableName}</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={isFrozen}
+                    disabled={!isFrozen && freeVariableNames.size <= 1}
+                    onChange={(event) => {
+                      const next = { ...frozenValues }
+                      if (event.target.checked) next[variableName] = 0
+                      else delete next[variableName]
+                      onUpdateObjectFrozenVariables(nodeId, next)
+                    }}
+                    data-testid={`frozen-variable-toggle-${variableName}`}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    className="state-table__input"
+                    value={frozenValues[variableName] ?? 0}
+                    disabled={!isFrozen}
+                    onChange={(event) => {
+                      const value = Number(event.target.value)
+                      if (!Number.isFinite(value)) return
+                      onUpdateObjectFrozenVariables(nodeId, {
+                        ...frozenValues,
+                        [variableName]: value,
+                      })
+                    }}
+                    data-testid={`frozen-variable-value-${variableName}`}
+                  />
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </section>
   )
 
-  return (
-    <div
-      className={`inspector-panel inspector-browser${workflowFocus?.activeWorkflow ? ' inspector-browser--workflow' : ''}`}
-      data-testid="state-grid-inspector"
-      data-active-workflow={workflowFocus?.activeWorkflow ?? undefined}
-      data-navigation-direction={workflowFocus?.navigationDirection ?? undefined}
-      data-navigation-phase={workflowFocus?.navigationPhase ?? 'idle'}
-    >
-      <div
-        className={`inspector-group inspector-navigation-page${navigationClass}`}
-        key={workflowFocus?.activeWorkflow ?? 'state-grid-root'}
-      >
-        {!workflowFocus?.activeWorkflow ? (
-          <div className="inspector-section inspector-entity-header">
-            <div className="inspector-meta">
-              <span>State Grid</span>
-              <span>{isMap ? 'Discrete map' : 'Flow'}</span>
-            </div>
-            <label>
-              <span className="inspector-entity-header__name-label">Name</span>
-              <input
-                value={nameDraft}
-                onChange={(event) => setNameDraft(event.target.value)}
-                onBlur={() => {
-                  const trimmed = nameDraft.trim()
-                  if (trimmed && trimmed !== object.name) onRename(nodeId, trimmed)
-                }}
-                data-testid="state-grid-name"
-              />
-            </label>
-          </div>
-        ) : null}
-
-        <WorkflowFocusToolbar entries={workflowActions} />
-        <WorkflowActionList entries={workflowActions} />
-
-        {node ? (
-          <InspectorDisclosure
-            title="Appearance"
-            testId="appearance-toggle"
-            actionOnly={actionOnly}
-            defaultOpen={!workflowFocus}
-          >
-            <div className="inspector-section" data-testid="appearance-section">
-              <label>
-                Visibility
-                <button
-                  type="button"
-                  onClick={() => onToggleVisibility(nodeId)}
-                  data-testid="inspector-visibility"
-                >
-                  {node.visibility ? 'Visible' : 'Hidden'}
-                </button>
-              </label>
-              <label>
-                Color
-                <input
-                  type="color"
-                  value={node.render.color}
-                  onChange={(event) => onUpdateRender(nodeId, { color: event.target.value })}
-                  data-testid="inspector-color"
-                />
-              </label>
-              <label>
-                Opacity (%)
-                <OpacityPercentInput
-                  value={node.render.opacity}
-                  onChange={(opacity) => onUpdateRender(nodeId, { opacity })}
-                  ariaLabel="Color opacity percentage"
-                  testId="inspector-color-opacity"
-                />
-              </label>
-              <label>
-                Point Size
-                <input
-                  type="number"
-                  min={2}
-                  max={12}
-                  value={node.render.pointSize}
-                  onChange={(event) =>
-                    onUpdateRender(nodeId, { pointSize: Number(event.target.value) })
-                  }
-                  data-testid="inspector-point-size"
-                />
-              </label>
-            </div>
-          </InspectorDisclosure>
-        ) : null}
-
-        {!workflowFocus?.activeWorkflow ? (
-          <section className="inspector-section" data-testid="state-grid-summary">
-            {workloadSummary}
-            <details className="inspector-disclosure">
-              <summary className="inspector-disclosure__summary">Sampling</summary>
-              <p className="inspector-help">
-                A bounded regular Cartesian grid in the full state space. Resolution is the number of
-                cell-center samples on each coordinate. A State Space scene previews all{' '}
-                {formatCount(totalPoints)} cell centers with equal weight and the selected Appearance.
-              </p>
-            </details>
-          </section>
-        ) : null}
-
-        <InspectorDisclosure
-          title="Frozen Variables"
-          testId="frozen-variables-toggle"
-          actionOnly={actionOnly}
-          defaultOpen={!workflowFocus}
-        >
-          <section className="inspector-section" data-testid="frozen-variables-section">
-          <div className="state-table__wrap" role="region" aria-label="Frozen variables">
-            <table className="state-table__grid">
-              <thead>
-                <tr>
-                  <th>Variable</th>
-                  <th>Frozen</th>
-                  <th>Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {system.config.varNames.map((variableName) => {
-                  const isFrozen = Object.prototype.hasOwnProperty.call(
-                    frozenValues,
-                    variableName
-                  )
-                  return (
-                    <tr key={variableName}>
-                      <td>{variableName}</td>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={isFrozen}
-                          disabled={!isFrozen && freeVariableNames.size <= 1}
-                          onChange={(event) => {
-                            const next = { ...frozenValues }
-                            if (event.target.checked) next[variableName] = 0
-                            else delete next[variableName]
-                            onUpdateObjectFrozenVariables(nodeId, next)
-                          }}
-                          data-testid={`frozen-variable-toggle-${variableName}`}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          value={frozenValues[variableName] ?? 0}
-                          disabled={!isFrozen}
-                          onChange={(event) => {
-                            const value = Number(event.target.value)
-                            if (!Number.isFinite(value)) return
-                            onUpdateObjectFrozenVariables(nodeId, {
-                              ...frozenValues,
-                              [variableName]: value,
-                            })
-                          }}
-                          data-testid={`frozen-variable-value-${variableName}`}
-                        />
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          </section>
-        </InspectorDisclosure>
-
-        <InspectorDisclosure
-          title="Parameters"
-          testId="parameters-toggle"
-          actionOnly={actionOnly}
-          defaultOpen={!workflowFocus}
-        >
-          <section className="inspector-section" data-testid="param-override-section">
-          <h3>Parameter values</h3>
+  const parametersContent = (
+    <section className="inspector-section" data-testid="param-override-section">
+      {system.config.paramNames.length > 0 ? (
+        <div className="inspector-form-grid">
           {system.config.paramNames.map((parameterName, index) => (
             <label key={parameterName}>
               {parameterName}
@@ -693,90 +582,214 @@ export function StateGridInspector({
               />
             </label>
           ))}
-          {object.customParameters ? (
-            <button
-              type="button"
-              className="inspector-inline-button"
-              onClick={() => onUpdateObjectParams(nodeId, null)}
-              data-testid="param-override-clear"
-            >
-              Restore default parameters
-            </button>
-          ) : null}
-          </section>
-        </InspectorDisclosure>
+        </div>
+      ) : (
+        <p className="faint">—</p>
+      )}
+      {object.customParameters ? (
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => onUpdateObjectParams(nodeId, null)}
+          data-testid="param-override-clear"
+        >
+          Restore defaults
+        </button>
+      ) : null}
+    </section>
+  )
+
+  const headerPanels: HeaderPanel[] = [
+    ...(appearanceContent
+      ? [{
+          id: 'appearance' as const,
+          label: 'Appearance',
+          icon: (
+            <span className="inspector-swatch-icon">
+              <Icon name="palette" />
+              <span
+                className="inspector-swatch-icon__dot"
+                style={{ background: node?.render.color }}
+                aria-hidden="true"
+              />
+            </span>
+          ),
+          content: appearanceContent,
+        }]
+      : []),
+    {
+      id: 'parameters',
+      label: object.customParameters ? 'Parameters (custom)' : 'Parameters',
+      icon: <Icon name="sliders" />,
+      highlighted: Boolean(object.customParameters),
+      badge: object.customParameters ? 'p' : undefined,
+      content: parametersContent,
+    },
+    {
+      id: 'frozen-variables',
+      label: 'Frozen variables',
+      icon: <SnowflakeIcon />,
+      highlighted: frozenCount > 0,
+      badge: frozenCount > 0 ? frozenCount : undefined,
+      content: frozenContent,
+    },
+  ]
+
+  const summaryRows = (
+    <div className="inspector-glance" data-testid="state-grid-summary">
+      <KeyValues
+        rows={freeAxes.map((axis) => ({
+          label: axis.variableName,
+          value: `[${fmt(axis.min)}, ${fmt(axis.max)}] × ${fmtCount(axis.resolution)}`,
+        }))}
+      />
+      <KeyValues
+        columns={2}
+        testId="state-grid-workload"
+        rows={[
+          {
+            label: 'Points',
+            value: (
+              <>
+                <span data-testid="state-grid-total-points">{formatCount(totalPoints)}</span>
+                {workloadLevel !== 'small' ? (
+                  <span
+                    className={`chip ${workloadLevel === 'large' ? 'chip--unstable' : 'chip--warning'}`}
+                    title="Runtime and memory grow with the Cartesian product of resolutions"
+                    data-testid="state-grid-workload-warning"
+                  >
+                    {workloadLevel}
+                  </span>
+                ) : null}
+              </>
+            ),
+          },
+          {
+            label: 'Work',
+            value: formatCount(integrationWork),
+            title: isMap ? 'Map/tangent iterations' : 'Forward/tangent steps',
+          },
+          result
+            ? {
+                label: result.horizonKind === 'iteration' ? 'h(n)' : 'h(T)',
+                value: (
+                  <>
+                    {typeof finalEstimate === 'number' && Number.isFinite(finalEstimate)
+                      ? fmt(finalEstimate)
+                      : '−∞'}
+                    {resultStale ? <span className="chip chip--warning">stale</span> : null}
+                  </>
+                ),
+                title: 'Last expansion-entropy estimate',
+              }
+            : null,
+        ]}
+      />
+    </div>
+  )
+
+  return (
+    <div
+      className={`inspector-panel inspector-browser${workflowFocus?.activeWorkflow ? ' inspector-browser--workflow' : ''}`}
+      data-testid="state-grid-inspector"
+      data-active-workflow={workflowFocus?.activeWorkflow ?? undefined}
+      data-navigation-direction={workflowFocus?.navigationDirection ?? undefined}
+      data-navigation-phase={workflowFocus?.navigationPhase ?? 'idle'}
+    >
+      <div
+        className={`inspector-group inspector-navigation-page${navigationClass}`}
+        key={workflowFocus?.activeWorkflow ?? 'state-grid-root'}
+      >
+        <EntityHeader
+          name={nameDraft}
+          onNameChange={setNameDraft}
+          onNameCommit={() => {
+            const trimmed = nameDraft.trim()
+            if (trimmed && trimmed !== object.name) onRename(nodeId, trimmed)
+          }}
+          onNameCancel={() => setNameDraft(object.name)}
+          typeLabel="State grid"
+          chip={{ label: isMap ? 'map' : 'flow', tone: 'neutral', title: 'State grid' }}
+          detail={[`${freeAxes.length}D grid`]}
+          visible={node?.visibility ?? true}
+          onToggleVisibility={node ? () => onToggleVisibility(nodeId) : undefined}
+          panels={headerPanels}
+        />
+
+        {summaryRows}
+
+        <WorkflowFocusToolbar entries={workflowActions} />
+        <ActionBar entries={workflowActions} />
 
         <InspectorDisclosure
-          title="State Grid setup"
+          title="Grid setup"
           testId="state-grid-setup-toggle"
           actionOnly={actionOnly}
           defaultOpen={!workflowFocus}
         >
           <section className="inspector-section">
-        {workflowFocus?.activeWorkflow === 'state-grid-setup-toggle' ? workloadSummary : null}
-        <h4 className="inspector-subheading">Bounds and resolution</h4>
-        <div
-          className="state-grid-axis-table"
-          role="table"
-          aria-label="Bounds and resolution"
-        >
-          <div className="state-grid-axis-table__header" role="row">
-            <span role="columnheader">Variable</span>
-            <span role="columnheader">Min</span>
-            <span role="columnheader">Max</span>
-            <span role="columnheader">Resolution</span>
-          </div>
-          {object.axes.map((axis, index) => freeVariableNames.has(axis.variableName) ? (
             <div
-              className="state-grid-axis-table__row"
-              role="row"
-              key={axis.variableName}
+              className="state-grid-axis-table"
+              role="table"
+              aria-label="Bounds and resolution"
             >
-              <strong role="cell">{axis.variableName}</strong>
-              <span role="cell">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  aria-label={`${axis.variableName} minimum`}
-                  value={axisDrafts[axis.variableName]?.min ?? axis.min.toString()}
-                  onChange={(event) => updateAxis(index, 'min', event.target.value)}
-                  data-testid={`state-grid-${axis.variableName}-min`}
-                />
-              </span>
-              <span role="cell">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  aria-label={`${axis.variableName} maximum`}
-                  value={axisDrafts[axis.variableName]?.max ?? axis.max.toString()}
-                  onChange={(event) => updateAxis(index, 'max', event.target.value)}
-                  data-testid={`state-grid-${axis.variableName}-max`}
-                />
-              </span>
-              <span role="cell">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  min={1}
-                  step={1}
-                  aria-label={`${axis.variableName} resolution`}
-                  value={axisDrafts[axis.variableName]?.resolution ?? axis.resolution.toString()}
-                  onChange={(event) => updateAxis(index, 'resolution', event.target.value)}
-                  data-testid={`state-grid-${axis.variableName}-resolution`}
-                />
-              </span>
+              <div className="state-grid-axis-table__header" role="row">
+                <span role="columnheader">Variable</span>
+                <span role="columnheader">Min</span>
+                <span role="columnheader">Max</span>
+                <span role="columnheader">Resolution</span>
+              </div>
+              {object.axes.map((axis, index) => freeVariableNames.has(axis.variableName) ? (
+                <div
+                  className="state-grid-axis-table__row"
+                  role="row"
+                  key={axis.variableName}
+                >
+                  <strong role="cell">{axis.variableName}</strong>
+                  <span role="cell">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      aria-label={`${axis.variableName} minimum`}
+                      value={axisDrafts[axis.variableName]?.min ?? axis.min.toString()}
+                      onChange={(event) => updateAxis(index, 'min', event.target.value)}
+                      data-testid={`state-grid-${axis.variableName}-min`}
+                    />
+                  </span>
+                  <span role="cell">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      aria-label={`${axis.variableName} maximum`}
+                      value={axisDrafts[axis.variableName]?.max ?? axis.max.toString()}
+                      onChange={(event) => updateAxis(index, 'max', event.target.value)}
+                      data-testid={`state-grid-${axis.variableName}-max`}
+                    />
+                  </span>
+                  <span role="cell">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      min={1}
+                      step={1}
+                      aria-label={`${axis.variableName} resolution`}
+                      value={axisDrafts[axis.variableName]?.resolution ?? axis.resolution.toString()}
+                      onChange={(event) => updateAxis(index, 'resolution', event.target.value)}
+                      data-testid={`state-grid-${axis.variableName}-resolution`}
+                    />
+                  </span>
+                </div>
+              ) : null)}
             </div>
-          ) : null)}
-        </div>
           </section>
         </InspectorDisclosure>
 
         {isFlow ? <InspectorDisclosure title="Particles" testId="state-grid-particles-toggle"
           actionOnly={actionOnly} defaultOpen={!workflowFocus}>
           <section className="inspector-section">
-            <p className="inspector-help">Animate the flow inside this grid. Particles inherit its bounds, parameters, and frozen variables.</p>
             <button className="inspector-primary-action" type="button"
               disabled={!onCreateParticles} onClick={() => onCreateParticles?.(nodeId)}
+              title="Particles inherit this grid's bounds, parameters, and frozen variables"
               data-testid="state-grid-create-particles">Create particles</button>
           </section>
         </InspectorDisclosure> : null}
@@ -787,139 +800,142 @@ export function StateGridInspector({
           actionOnly={actionOnly}
           defaultOpen={!workflowFocus}
         >
-          <section className="inspector-section">
-        <h4 className="inspector-subheading">Expansion Entropy</h4>
-        <p className="inspector-help">
-          {isMap
-            ? 'Hunt–Ott estimate restricted to this region, iteration horizon, and finite grid. Escaped trajectories contribute zero after the first map iterate outside the closed region. This is not unrestricted or exact topological entropy.'
-            : 'Hunt–Ott estimate restricted to this region, time horizon, and finite grid. Escaped trajectories contribute zero. Escape is checked after each integration step. This is not unrestricted or exact topological entropy.'}
-        </p>
-        <label>
-          {isMap ? 'Iterations' : 'Integration steps'}
-          <input
-            type="number"
-            min={1}
-            step={1}
-            value={object.analysis.steps}
-            onChange={(event) => updateAnalysis('steps', event.target.value)}
-            data-testid="state-grid-entropy-steps"
-          />
-        </label>
-        {!isMap ? (
-          <label>
-            Step size
-            <input
-              type="number"
-              min="0"
-              value={object.analysis.dt}
-              onChange={(event) => updateAnalysis('dt', event.target.value)}
-              data-testid="state-grid-entropy-dt"
-            />
-          </label>
-        ) : null}
-        <label>
-          Convergence checkpoint stride
-          <input
-            type="number"
-            min={1}
-            step={1}
-            value={object.analysis.checkpointStride}
-            onChange={(event) => updateAnalysis('checkpointStride', event.target.value)}
-            data-testid="state-grid-entropy-checkpoint-stride"
-          />
-        </label>
-        <label>
-          Tangent stabilization stride
-          <input
-            type="number"
-            min={1}
-            step={1}
-            value={object.analysis.stabilizationStride}
-            onChange={(event) => updateAnalysis('stabilizationStride', event.target.value)}
-            data-testid="state-grid-entropy-stabilization-stride"
-          />
-        </label>
-        <div className="inspector-inline-actions">
-          <button
-            className="inspector-primary-action"
-            type="button"
-            onClick={() => void run()}
-            disabled={running || !Number.isFinite(totalPoints)}
-            data-testid="state-grid-run-expansion-entropy"
+          <section
+            className="inspector-section"
+            title={
+              isMap
+                ? 'Hunt–Ott estimate restricted to this region, iteration horizon, and grid. Escaped trajectories contribute zero.'
+                : 'Hunt–Ott estimate restricted to this region, time horizon, and grid. Escaped trajectories contribute zero.'
+            }
           >
-            {running ? 'Calculating…' : 'Calculate expansion entropy'}
-          </button>
-          {running ? (
-            <button
-              type="button"
-              onClick={() => controllerRef.current?.abort()}
-              data-testid="state-grid-cancel-expansion-entropy"
-            >
-              Cancel
-            </button>
-          ) : null}
-        </div>
-        {error ? <p className="inspector-error">{error}</p> : null}
-      </section>
-
-      <section className="inspector-section" data-testid="state-grid-expansion-entropy-result">
-        <h3>{isMap ? 'Finite-iteration result' : 'Finite-time result'}</h3>
-        {result ? (
-          <>
-            {resultStale ? (
-              <p className="inspector-error">Stored result is stale for the current grid or system parameters.</p>
-            ) : null}
-            <div className="inspector-metrics">
-              <div className="inspector-metrics__row">
-                <span className="inspector-metrics__label">
-                  {result.horizonKind === 'iteration' ? 'Final h(n)' : 'Final h(T)'}
-                </span>
-                <strong className="inspector-metrics__value" data-testid="state-grid-final-estimate">
-                  {typeof finalEstimate === 'number' && Number.isFinite(finalEstimate)
-                    ? finalEstimate.toPrecision(6)
-                    : '−∞'}
-                </strong>
-              </div>
-              <div className="inspector-metrics__row">
-                <span className="inspector-metrics__label">Final survivors</span>
-                <span className="inspector-metrics__value">
-                  {result.survivorCounts.at(-1)?.toLocaleString() ?? 0} /{' '}
-                  {result.totalSamples.toLocaleString()}
-                </span>
-              </div>
-            </div>
-            <p className="inspector-help">
-              Scope:{' '}
-              {result.horizonKind === 'iteration' ? 'finite iteration' : 'finite time'}, finite
-              ensemble (State Grid), and region restricted.
-            </p>
-            {result.executionMode ? (
-              <p className="inspector-help">
-                Runtime: {result.executionMode === 'parallel'
-                  ? `${result.workerCount ?? 1} Rust/WASM workers`
-                  : 'serial Rust/WASM fallback'}.
-              </p>
-            ) : null}
-            {result.conditioningWarning ? (
-              <p className="inspector-error">
-                Tangent conditioning exceeded the reliable floating-point range for at least one
-                sample. Shorten the horizon or stabilization stride and compare results.
-              </p>
-            ) : null}
-            {plot ? (
-              <div className="inspector-plot">
-                <PlotlyViewport
-                  plotId={`state-grid-expansion-entropy-${nodeId}`}
-                  data={plot.data}
-                  layout={plot.layout}
-                  testId="state-grid-expansion-entropy-plot"
+            <label>
+              {isMap ? 'Iterations' : 'Steps'}
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={object.analysis.steps}
+                onChange={(event) => updateAnalysis('steps', event.target.value)}
+                data-testid="state-grid-entropy-steps"
+              />
+            </label>
+            {!isMap ? (
+              <label>
+                dt
+                <input
+                  type="number"
+                  min="0"
+                  value={object.analysis.dt}
+                  onChange={(event) => updateAnalysis('dt', event.target.value)}
+                  data-testid="state-grid-entropy-dt"
                 />
-              </div>
+              </label>
             ) : null}
-          </>
-        ) : (
-          <p className="empty-state">No expansion-entropy result stored yet.</p>
-        )}
+            <label title="Convergence checkpoint stride">
+              Checkpoints
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={object.analysis.checkpointStride}
+                onChange={(event) => updateAnalysis('checkpointStride', event.target.value)}
+                data-testid="state-grid-entropy-checkpoint-stride"
+              />
+            </label>
+            <label title="Tangent stabilization stride">
+              Stabilization
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={object.analysis.stabilizationStride}
+                onChange={(event) => updateAnalysis('stabilizationStride', event.target.value)}
+                data-testid="state-grid-entropy-stabilization-stride"
+              />
+            </label>
+            {error ? <p className="inspector-error">{error}</p> : null}
+            <div className="inspector-submit-row">
+              <button
+                className="inspector-primary-action"
+                type="button"
+                onClick={() => void run()}
+                disabled={running || !Number.isFinite(totalPoints)}
+                data-testid="state-grid-run-expansion-entropy"
+              >
+                {running ? 'Computing…' : 'Compute'}
+              </button>
+              {running ? (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => controllerRef.current?.abort()}
+                  data-testid="state-grid-cancel-expansion-entropy"
+                >
+                  Cancel
+                </button>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="inspector-section" data-testid="state-grid-expansion-entropy-result">
+            <h4 className="section-head">
+              <span>Result</span>
+              {result && resultStale ? (
+                <span className="chip chip--warning" title="Grid or system parameters changed">
+                  stale
+                </span>
+              ) : null}
+            </h4>
+            {result ? (
+              <>
+                <KeyValues
+                  columns={2}
+                  rows={[
+                    {
+                      label: result.horizonKind === 'iteration' ? 'h(n)' : 'h(T)',
+                      value: (
+                        <span data-testid="state-grid-final-estimate">
+                          {typeof finalEstimate === 'number' && Number.isFinite(finalEstimate)
+                            ? fmt(finalEstimate)
+                            : '−∞'}
+                        </span>
+                      ),
+                    },
+                    {
+                      label: 'Survivors',
+                      value: `${fmtCount(result.survivorCounts.at(-1) ?? 0)} / ${fmtCount(result.totalSamples)}`,
+                    },
+                    result.executionMode
+                      ? {
+                          label: 'Runtime',
+                          value:
+                            result.executionMode === 'parallel'
+                              ? `${result.workerCount ?? 1} workers`
+                              : 'serial',
+                          title: 'Rust/WASM execution',
+                        }
+                      : null,
+                  ]}
+                />
+                {result.conditioningWarning ? (
+                  <p className="inspector-error">
+                    Tangent conditioning overflowed; shorten the horizon or stabilization stride.
+                  </p>
+                ) : null}
+                {plot ? (
+                  <div className="inspector-plot">
+                    <PlotlyViewport
+                      plotId={`state-grid-expansion-entropy-${nodeId}`}
+                      data={plot.data}
+                      layout={plot.layout}
+                      testId="state-grid-expansion-entropy-plot"
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <p className="faint">—</p>
+            )}
           </section>
         </InspectorDisclosure>
 
@@ -931,12 +947,6 @@ export function StateGridInspector({
           defaultOpen={!workflowFocus}
         >
           <section className="inspector-section" data-testid="state-grid-invariant-measure-workflow">
-          <h4 className="inspector-subheading">Invariant measure</h4>
-          <p className="inspector-help">
-            Create a separate invariant-measure object from this State Grid. The result keeps its
-            own rendering and computation snapshot, while this grid remains available for later
-            analyses.
-          </p>
           <StateTable
             title="Starting point"
             varNames={freeAxes.map((axis) => axis.variableName)}
@@ -958,13 +968,8 @@ export function StateGridInspector({
             }}
             testIdPrefix="state-grid-transfer-starting-point"
           />
-          <p className="inspector-help">
-            The ambient cell containing this point is the only initial cover cell. Newly reached
-            cells are added within the State Grid before the conditional operator is built on the
-            grown cover.
-          </p>
-          <label>
-            Samples per cell
+          <label title="Deterministic samples per cell">
+            Samples / cell
             <input
               type="number"
               min={1}
@@ -977,8 +982,8 @@ export function StateGridInspector({
             />
           </label>
           {isMap ? (
-            <label>
-              Map iterations per transition
+            <label title="Map iterations per transition">
+              Iterations
               <input
                 type="number"
                 min={1}
@@ -989,8 +994,8 @@ export function StateGridInspector({
               />
             </label>
           ) : (
-            <label>
-              Flow-map time per transition
+            <label title="Flow-map time per transition (sampled flow map, not a return map)">
+              Map time
               <input
                 type="number"
                 min={0}
@@ -1002,8 +1007,8 @@ export function StateGridInspector({
             </label>
           )}
           {isFlow ? (
-            <label>
-              Integration step size
+            <label title="Maximum integration step size">
+              dt
               <input
                 type="number"
                 min={0}
@@ -1014,8 +1019,8 @@ export function StateGridInspector({
               />
             </label>
           ) : null}
-          <label>
-            Stationary iteration limit
+          <label title="Stationary iteration limit">
+            Max iterations
             <input
               type="number"
               min={1}
@@ -1027,8 +1032,8 @@ export function StateGridInspector({
               data-testid="state-grid-transfer-stationary-iterations"
             />
           </label>
-          <label>
-            Convergence tolerance
+          <label title="Convergence tolerance">
+            Tolerance
             <input
               type="number"
               min="0"
@@ -1037,12 +1042,12 @@ export function StateGridInspector({
               data-testid="state-grid-transfer-tolerance"
             />
           </label>
-          <p className="inspector-help">
-            {isFlow
-              ? 'Each transition advances the autonomous flow for the fixed map time using integration steps no larger than the configured step size. This is a sampled flow map, not a return map.'
-              : 'Endpoints outside the closed grid are discarded. Each surviving source column is normalized by its own in-grid sample count.'}
-          </p>
-          <div className="inspector-inline-actions">
+          {error ? (
+            <p className="inspector-error" data-testid="state-grid-transfer-error">
+              {error}
+            </p>
+          ) : null}
+          <div className="inspector-submit-row">
             <button
               className="inspector-primary-action"
               type="button"
@@ -1055,6 +1060,7 @@ export function StateGridInspector({
             {running ? (
               <button
                 type="button"
+                className="btn"
                 onClick={() => controllerRef.current?.abort()}
                 data-testid="state-grid-cancel-invariant-measure"
               >
@@ -1062,11 +1068,6 @@ export function StateGridInspector({
               </button>
             ) : null}
           </div>
-          {error ? (
-            <p className="inspector-error" data-testid="state-grid-transfer-error">
-              {error}
-            </p>
-          ) : null}
           </section>
         </InspectorDisclosure>
         ) : null}

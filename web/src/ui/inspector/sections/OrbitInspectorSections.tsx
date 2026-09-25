@@ -4,6 +4,15 @@ import { InspectorSubDisclosure } from '../selectionSession'
 import { CollocationAdaptivityFields } from './branch/CollocationAdaptivityFields'
 import { PeriodicLinearSolverField } from './branch/PeriodicLinearSolverField'
 import { OpacityPercentInput } from '../../OpacityPercentInput'
+import { fmt, fmtCount, fmtRange } from '../../../utils/format'
+import {
+  AdvancedFields,
+  CopyButton,
+  DataDetails,
+  DataPager,
+  InlineSection,
+  KeyValues,
+} from '../InspectorChrome'
 
 export function OrbitInspectorSections({
   scope,
@@ -12,7 +21,6 @@ export function OrbitInspectorSections({
 }) {
   const {
     InspectorDisclosure,
-    InspectorMetrics,
     StateTable,
     autonomousAnalysisError,
     buildSuggestedBranchName,
@@ -27,7 +35,6 @@ export function OrbitInspectorSections({
     continuationParameterLabels,
     covariantDraft,
     covariantError,
-    formatFixed,
     formatNumber,
     formatPointValues,
     frozenVariableHeaderNames,
@@ -51,7 +58,6 @@ export function OrbitInspectorSections({
     heteroclinicFromOrbitDraft,
     heteroclinicFromOrbitError,
     heteroclinicFromOrbitNameSuggestion,
-    lyapunovDimension,
     lyapunovDraft,
     lyapunovError,
     onOrbitPointSelect,
@@ -97,7 +103,7 @@ export function OrbitInspectorSections({
                 <div className="inspector-section">
                   {runDisabled ? (
                     <div className="field-warning">
-                      Apply valid system changes before running orbits.
+                      Apply valid system changes first.
                     </div>
                   ) : null}
                   <StateTable
@@ -114,7 +120,7 @@ export function OrbitInspectorSections({
                     testIdPrefix="orbit-run-ic"
                   />
                   <label>
-                    {systemDraft.type === 'map' ? 'Initial index (n₀)' : 'Initial time (t₀)'}
+                    {systemDraft.type === 'map' ? 'n₀' : 't₀'}
                     <input
                       type="number"
                       step={systemDraft.type === 'map' ? 1 : 'any'}
@@ -141,7 +147,7 @@ export function OrbitInspectorSections({
                   </label>
                   {systemDraft.type === 'flow' ? (
                     <label>
-                      Step size (dt)
+                      dt
                       <input
                         type="number"
                         value={orbitDraft.dt}
@@ -159,20 +165,8 @@ export function OrbitInspectorSections({
                     disabled={runDisabled}
                     data-testid="orbit-run-submit"
                   >
-                    Run Orbit
+                    Run
                   </button>
-                  {orbit.data.length > 0 ? (
-                    <div
-                      className="workflow-result-card"
-                      role="status"
-                      data-testid="orbit-run-result"
-                    >
-                      <strong>Orbit ready</strong>
-                      <span>
-                        {orbit.data.length.toLocaleString()} points
-                      </span>
-                    </div>
-                  ) : null}
                   {orbit.data.length > 0 ? (
                     <button
                       onClick={handleExtendOrbit}
@@ -187,216 +181,115 @@ export function OrbitInspectorSections({
                 </div>
               </InspectorDisclosure>
 
-              {orbit.data.length > 0 ? (
-                <InspectorDisclosure
-                key={`${selectionKey}-orbit-data`}
-                title="Inspect data"
-                testId="orbit-data-toggle"
-                actionOnly
-              >
-                <InspectorSubDisclosure title="Summary" testId="orbit-data-summary-toggle">
-                  <div className="inspector-section">
-                    <InspectorMetrics
-                      rows={[
-                        { label: 'System', value: orbit.systemName },
-                        { label: 'Data points', value: orbit.data.length.toLocaleString() },
-                        {
-                          label: systemDraft.type === 'map' ? 'Iteration range' : 'Time range',
-                          value:
-                            orbit.data.length > 0
-                              ? `${formatFixed(orbit.t_start, 3)} to ${formatFixed(orbit.t_end, 3)}`
-                              : 'n/a',
-                        },
-                        { label: 'Step size (dt)', value: formatFixed(orbit.dt, 4) },
-                        ...(lyapunovDimension !== null
-                          ? [
-                              {
-                                label: 'Lyapunov dimension',
-                                value: formatNumber(lyapunovDimension, 6),
-                              },
-                            ]
-                          : []),
-                      ]}
+              {orbit.parameters && orbit.parameters.length > 0 ? (
+                <InlineSection
+                  title="Parameters"
+                  testId="orbit-data-parameters"
+                  actions={
+                    <CopyButton
+                      label="Copy parameters"
+                      onCopy={() =>
+                        void writeClipboardText(formatPointValues(orbit.parameters ?? []))
+                      }
                     />
-                  </div>
-                </InspectorSubDisclosure>
-                <InspectorSubDisclosure
-                  title="Parameters (last run)"
-                  testId="orbit-data-parameters-toggle"
+                  }
                 >
-                  <div className="inspector-section">
-                    {orbit.parameters && orbit.parameters.length > 0 ? (
-                      <InspectorMetrics
-                        rows={orbit.parameters.map((value, index) => ({
-                          label: systemDraft.paramNames[index] || `p${index + 1}`,
-                          value: formatNumber(value, 6),
-                        }))}
-                      />
-                    ) : (
-                      <p className="empty-state">Parameters not recorded yet.</p>
-                    )}
-                    {orbit.parameters && orbit.parameters.length > 0 ? (
-                      <div className="inspector-inline-actions">
-                        <button
-                          type="button"
-                          className="inspector-inline-button"
-                          onClick={() =>
-                            void writeClipboardText(formatPointValues(orbit.parameters ?? []))
-                          }
-                        >
-                          Copy
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                </InspectorSubDisclosure>
-                <InspectorSubDisclosure title="Data preview" testId="orbit-data-preview-toggle">
-                  <div className="inspector-section">
-                  {orbit.data.length > 0 ? (
-                    <div className="orbit-preview">
-                      <div className="orbit-preview__controls">
-                        <div className="inspector-row inspector-row--nav">
-                          <button
-                            type="button"
-                            onClick={() => setOrbitPreviewPageIndex(0)}
-                            disabled={orbitPreviewPage <= 0}
-                            data-testid="orbit-preview-start"
-                          >
-                            Start
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setOrbitPreviewPageIndex(orbitPreviewPage - 1)}
-                            disabled={orbitPreviewPage <= 0}
-                            data-testid="orbit-preview-prev"
-                          >
-                            Previous
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setOrbitPreviewPageIndex(orbitPreviewPage + 1)}
-                            disabled={orbitPreviewPage >= orbitPreviewPageCount - 1}
-                            data-testid="orbit-preview-next"
-                          >
-                            Next
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setOrbitPreviewPageIndex(orbitPreviewPageCount - 1)}
-                            disabled={orbitPreviewPage >= orbitPreviewPageCount - 1}
-                            data-testid="orbit-preview-end"
-                          >
-                            End
-                          </button>
-                        </div>
-                        <span className="orbit-preview__page">
-                          Page {orbitPreviewPage + 1} of {orbitPreviewPageCount}
+                  <KeyValues
+                    columns={2}
+                    rows={orbit.parameters.map((value, index) => ({
+                      label: systemDraft.paramNames[index] || `p${index + 1}`,
+                      value: fmt(value),
+                    }))}
+                  />
+                </InlineSection>
+              ) : null}
+
+              {orbit.data.length > 0 ? (
+                <DataDetails
+                  title={`Samples · ${fmtCount(orbit.data.length)}`}
+                  testId="orbit-data-preview-toggle"
+                >
+                  <DataPager
+                    page={orbitPreviewPage}
+                    pageCount={orbitPreviewPageCount}
+                    onPage={setOrbitPreviewPageIndex}
+                    jumpValue={orbitPreviewInput}
+                    onJumpChange={(value) => {
+                      setOrbitPreviewInput(value)
+                      setOrbitPreviewError(null)
+                    }}
+                    onJump={handleOrbitPreviewJump}
+                    error={orbitPreviewError}
+                    summary={`${orbitPreviewStart + 1}–${orbitPreviewEnd} of ${fmtCount(
+                      orbit.data.length
+                    )}`}
+                    testIdPrefix="orbit-preview"
+                  />
+                  {selectedOrbitPoint ? (
+                    <div className="inspector-selected-point">
+                      <span className="chip">
+                        {`Selected point #${selectedOrbitPointIndex}`}
+                      </span>
+                      {selectedOrbitPoint[0] !== undefined ? (
+                        <span className="num muted">
+                          {`${isDiscreteMap ? 'n' : 't'} ${fmt(selectedOrbitPoint[0])}`}
                         </span>
-                        <label>
-                          Jump to page
-                          <div className="inspector-row orbit-preview__jump">
-                            <input
-                              type="number"
-                              min={1}
-                              max={orbitPreviewPageCount}
-                              value={orbitPreviewInput}
-                              onChange={(event) => {
-                                setOrbitPreviewInput(event.target.value)
-                                setOrbitPreviewError(null)
+                      ) : null}
+                      {selectedOrbitState ? (
+                        <CopyButton
+                          label="Copy state"
+                          onCopy={() =>
+                            void writeClipboardText(formatPointValues(selectedOrbitState))
+                          }
+                        />
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div
+                    className="inspector-table-scroll"
+                    role="region"
+                    aria-label="Orbit data preview"
+                  >
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>{isDiscreteMap ? 'n' : 't'}</th>
+                          {orbitPreviewVarNames.map((name, index) => (
+                            <th key={`orbit-preview-col-${index}`}>{name}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orbitPreviewRows.map((point, rowIndex) => {
+                          const pointIndex = orbitPreviewStart + rowIndex
+                          const isSelected = pointIndex === selectedOrbitPointIndex
+                          return (
+                            <tr
+                              key={`orbit-preview-row-${pointIndex}`}
+                              className={`is-clickable${isSelected ? ' is-selected' : ''}`}
+                              onClick={() => {
+                                if (!onOrbitPointSelect || !selectedNodeId) return
+                                onOrbitPointSelect({
+                                  orbitId: selectedNodeId,
+                                  pointIndex,
+                                })
                               }}
-                              data-testid="orbit-preview-page-input"
-                            />
-                            <button
-                              type="button"
-                              onClick={handleOrbitPreviewJump}
-                              data-testid="orbit-preview-page-jump"
                             >
-                              Jump
-                            </button>
-                          </div>
-                        </label>
-                        {orbitPreviewError ? (
-                          <div className="field-error">{orbitPreviewError}</div>
-                        ) : null}
-                        <div className="orbit-preview__summary">
-                          Showing {orbitPreviewStart + 1}–{orbitPreviewEnd} of{' '}
-                          {orbit.data.length.toLocaleString()}
-                        </div>
-                        {selectedOrbitPoint ? (
-                          <div className="inspector-inline-actions">
-                            <span className="inspector-meta">
-                              Selected point #{selectedOrbitPointIndex}{' '}
-                              {selectedOrbitPoint[0] !== undefined
-                                ? `· t=${formatFixed(selectedOrbitPoint[0], 3)}`
-                                : ''}
-                            </span>
-                            {selectedOrbitState ? (
-                              <button
-                                type="button"
-                                className="inspector-inline-button"
-                                onClick={() =>
-                                  void writeClipboardText(
-                                    formatPointValues(selectedOrbitState)
-                                  )
-                                }
-                              >
-                                Copy state
-                              </button>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div
-                        className="orbit-preview__table"
-                        role="region"
-                        aria-label="Orbit data preview"
-                      >
-                        <table className="orbit-preview__table-grid">
-                          <thead>
-                            <tr>
-                              <th>#</th>
-                              <th>{isDiscreteMap ? 'n' : 't'}</th>
-                              {orbitPreviewVarNames.map((name, index) => (
-                                <th key={`orbit-preview-col-${index}`}>{name}</th>
+                              <td>{pointIndex}</td>
+                              <td>{fmt(point[0])}</td>
+                              {orbitPreviewVarNames.map((_, varIndex) => (
+                                <td key={`orbit-preview-cell-${rowIndex}-${varIndex}`}>
+                                  {fmt(point[varIndex + 1] ?? Number.NaN)}
+                                </td>
                               ))}
                             </tr>
-                          </thead>
-                          <tbody>
-                            {orbitPreviewRows.map((point, rowIndex) => {
-                              const pointIndex = orbitPreviewStart + rowIndex
-                              const isSelected = pointIndex === selectedOrbitPointIndex
-                              return (
-                                <tr
-                                  key={`orbit-preview-row-${pointIndex}`}
-                                  className={isSelected ? 'is-selected' : undefined}
-                                  onClick={() => {
-                                    if (!onOrbitPointSelect || !selectedNodeId) return
-                                    onOrbitPointSelect({
-                                      orbitId: selectedNodeId,
-                                      pointIndex,
-                                    })
-                                  }}
-                                >
-                                  <td>{pointIndex}</td>
-                                  <td>{formatFixed(point[0], 3)}</td>
-                                  {orbitPreviewVarNames.map((_, varIndex) => (
-                                    <td key={`orbit-preview-cell-${rowIndex}-${varIndex}`}>
-                                      {formatFixed(point[varIndex + 1] ?? Number.NaN, 4)}
-                                    </td>
-                                  ))}
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="empty-state">No orbit samples stored yet.</p>
-                  )}
+                          )
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                </InspectorSubDisclosure>
-                </InspectorDisclosure>
+                </DataDetails>
               ) : null}
 
               {orbit.data.length >= 2 ? (
@@ -410,37 +303,12 @@ export function OrbitInspectorSections({
                 <div className="inspector-section">
                   {runDisabled ? (
                     <div className="field-warning">
-                      Apply valid system changes before computing Lyapunov data.
+                      Apply valid system changes first.
                     </div>
                   ) : null}
-                  {!orbit.data || orbit.data.length < 2 ? (
-                    <p className="empty-state">Run an orbit to enable Lyapunov analysis.</p>
-                  ) : null}
-                  <h4 className="inspector-subheading">Lyapunov exponents</h4>
-                  {orbit.lyapunovExponents && orbit.lyapunovExponents.length > 0 ? (
-                    <InspectorMetrics
-                      rows={[
-                        ...orbit.lyapunovExponents.map((value, index) => ({
-                          label: `λ${index + 1}`,
-                          value: formatFixed(value, 6),
-                        })),
-                        ...(lyapunovDimension !== null
-                          ? [
-                              {
-                                label: 'Lyapunov dimension',
-                                value: formatNumber(lyapunovDimension, 6),
-                              },
-                            ]
-                          : []),
-                      ]}
-                    />
-                  ) : (
-                    <p className="empty-state">Lyapunov exponents not computed yet.</p>
-                  )}
-                  <label>
-                    {systemDraft.type === 'map'
-                      ? 'Transient iterations to discard'
-                      : 'Transient time to discard'}
+                  <h4 className="section-head">Exponents</h4>
+                  <label title={systemDraft.type === 'map' ? 'Transient iterations to discard' : 'Transient time to discard'}>
+                    Transient
                     <input
                       type="number"
                       value={lyapunovDraft.transient}
@@ -453,8 +321,8 @@ export function OrbitInspectorSections({
                       data-testid="lyapunov-transient"
                     />
                   </label>
-                  <label>
-                    Steps between QR decompositions
+                  <label title="Steps between QR decompositions">
+                    QR stride
                     <input
                       type="number"
                       value={lyapunovDraft.qrStride}
@@ -474,52 +342,36 @@ export function OrbitInspectorSections({
                     disabled={runDisabled}
                     data-testid="lyapunov-submit"
                   >
-                    Compute Lyapunov Exponents
+                    Compute exponents
                   </button>
                 </div>
                 <div className="inspector-section">
-                  <h4 className="inspector-subheading">Covariant Lyapunov vectors</h4>
+                  <h4 className="section-head">Covariant vectors</h4>
                   {orbit.covariantVectors && orbit.covariantVectors.vectors.length > 0 ? (
-                    <>
-                      <InspectorMetrics
-                        rows={[
-                          {
-                            label: 'Checkpoints',
-                            value: orbit.covariantVectors.vectors.length.toLocaleString(),
-                          },
-                          { label: 'Dimension', value: orbit.covariantVectors.dim },
-                          {
-                            label: 'Time span',
-                            value:
-                              orbit.covariantVectors.times.length > 0
-                                ? `${formatFixed(orbit.covariantVectors.times[0], 3)} to ${formatFixed(
-                                    orbit.covariantVectors.times[
-                                      orbit.covariantVectors.times.length - 1
-                                    ],
-                                    3
-                                  )}`
-                                : 'n/a',
-                          },
-                        ]}
-                      />
-                      {orbit.covariantVectors.vectors[0] ? (
-                        <div className="inspector-data">
-                          {orbit.covariantVectors.vectors[0].map((vec, index) => (
-                            <div key={`clv-${index}`}>
-                              v{index + 1}: [{vec.map((value) => formatFixed(value, 4)).join(', ')}
-                              ]
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <p className="empty-state">Covariant Lyapunov vectors not computed yet.</p>
-                  )}
-                  <label>
-                    {systemDraft.type === 'map'
-                      ? 'Transient iterations to discard'
-                      : 'Transient time to discard'}
+                    <KeyValues
+                      columns={2}
+                      rows={[
+                        {
+                          label: 'Checkpoints',
+                          value: fmtCount(orbit.covariantVectors.vectors.length),
+                        },
+                        { label: 'Dim', value: String(orbit.covariantVectors.dim) },
+                        orbit.covariantVectors.times.length > 0
+                          ? {
+                              label: systemDraft.type === 'map' ? 'n' : 't',
+                              value: fmtRange(
+                                orbit.covariantVectors.times[0],
+                                orbit.covariantVectors.times[
+                                  orbit.covariantVectors.times.length - 1
+                                ]
+                              ),
+                            }
+                          : null,
+                      ]}
+                    />
+                  ) : null}
+                  <label title={systemDraft.type === 'map' ? 'Transient iterations to discard' : 'Transient time to discard'}>
+                    Transient
                     <input
                       type="number"
                       value={covariantDraft.transient}
@@ -532,10 +384,8 @@ export function OrbitInspectorSections({
                       data-testid="clv-transient"
                     />
                   </label>
-                  <label>
-                    {systemDraft.type === 'map'
-                      ? 'Forward transient (pre-window steps)'
-                      : 'Forward transient (pre-window)'}
+                  <label title="Forward transient before the window">
+                    Forward
                     <input
                       type="number"
                       value={covariantDraft.forward}
@@ -548,10 +398,8 @@ export function OrbitInspectorSections({
                       data-testid="clv-forward"
                     />
                   </label>
-                  <label>
-                    {systemDraft.type === 'map'
-                      ? 'Backward transient (post-window steps)'
-                      : 'Backward transient (post-window)'}
+                  <label title="Backward transient after the window">
+                    Backward
                     <input
                       type="number"
                       value={covariantDraft.backward}
@@ -564,8 +412,8 @@ export function OrbitInspectorSections({
                       data-testid="clv-backward"
                     />
                   </label>
-                  <label>
-                    Steps between QR decompositions
+                  <label title="Steps between QR decompositions">
+                    QR stride
                     <input
                       type="number"
                       value={covariantDraft.qrStride}
@@ -585,12 +433,12 @@ export function OrbitInspectorSections({
                     disabled={runDisabled}
                     data-testid="clv-submit"
                   >
-                    Compute Covariant Vectors
+                    Compute covariant vectors
                   </button>
                 </div>
                 {clvHasData ? (
                   <InspectorSubDisclosure
-                    title="CLV Plotting"
+                    title="CLV plotting"
                     testId="clv-plot-toggle"
                   >
                     <div className="inspector-section">
@@ -610,8 +458,8 @@ export function OrbitInspectorSections({
                           data-testid="clv-plot-enabled"
                         />
                       </label>
-                      <label>
-                        Stride (plot every Nth checkpoint)
+                      <label title="Plot every Nth checkpoint">
+                        Stride
                         <input
                           type="number"
                           min={1}
@@ -622,8 +470,8 @@ export function OrbitInspectorSections({
                           data-testid="clv-plot-stride"
                         />
                       </label>
-                      <label>
-                        Arrow length (fraction of orbit size)
+                      <label title="Arrow length as a fraction of the orbit size">
+                        Length
                         <input
                           type="number"
                           min={0}
@@ -636,7 +484,7 @@ export function OrbitInspectorSections({
                         />
                       </label>
                       <label>
-                        Arrowhead scale
+                        Head scale
                         <input
                           type="number"
                           min={0}
@@ -648,8 +496,8 @@ export function OrbitInspectorSections({
                           data-testid="clv-plot-head-scale"
                         />
                       </label>
-                      <label>
-                        Arrow thickness (px)
+                      <label title="Arrow thickness in pixels">
+                        Thickness px
                         <input
                           type="number"
                           min={0.5}
@@ -663,7 +511,6 @@ export function OrbitInspectorSections({
                       </label>
                     </div>
                     <div className="inspector-section">
-                      <h4 className="inspector-subheading">Vector colors</h4>
                       {clvIndices.length > 0 ? (
                         <div className="inspector-list">
                           {clvIndices.map((index, idx) => {
@@ -703,9 +550,7 @@ export function OrbitInspectorSections({
                             )
                           })}
                         </div>
-                      ) : (
-                        <p className="empty-state">Covariant vectors not computed yet.</p>
-                      )}
+                      ) : null}
                     </div>
                   </InspectorSubDisclosure>
                 ) : null}
@@ -721,21 +566,17 @@ export function OrbitInspectorSections({
                   actionOnly
                 >
                   <div className="inspector-section">
-                    <h4 className="inspector-subheading">Continue from Orbit</h4>
                     {autonomousAnalysisError ? (
                       <div className="field-warning" data-testid="autonomous-workflow-warning">
                         {autonomousAnalysisError}
                       </div>
                     ) : continuationParameterCount === 0 ? (
-                      <p className="empty-state">Add a parameter before continuing.</p>
+                      <p className="field-warning">Needs a parameter.</p>
                     ) : null}
                     {runDisabled ? (
                       <div className="field-warning">
-                        Apply valid system changes before continuing.
+                        Apply valid system changes first.
                       </div>
-                    ) : null}
-                    {orbit && orbit.data.length === 0 ? (
-                      <p className="empty-state">Run an orbit before continuing.</p>
                     ) : null}
                     {autonomousAnalysisError ||
                     continuationParameterCount === 0 ||
@@ -743,7 +584,7 @@ export function OrbitInspectorSections({
                     orbit.data.length === 0 ? null : (
                     <>
                       <label>
-                        Limit cycle name
+                        Cycle name
                         <input
                           value={limitCycleFromOrbitDraft.limitCycleName}
                           onChange={(event) =>
@@ -757,7 +598,7 @@ export function OrbitInspectorSections({
                         />
                       </label>
                       <label>
-                        Branch name
+                        Branch
                         <input
                           value={limitCycleFromOrbitDraft.branchName}
                           onChange={(event) =>
@@ -771,7 +612,7 @@ export function OrbitInspectorSections({
                         />
                       </label>
                       <label>
-                        Continuation parameter
+                        Parameter
                         <select
                           value={limitCycleFromOrbitDraft.parameterName}
                           onChange={(event) => {
@@ -806,8 +647,8 @@ export function OrbitInspectorSections({
                           ))}
                         </select>
                       </label>
-                      <label>
-                        Cycle detection tolerance
+                      <label title="Cycle detection tolerance">
+                        Detect tol
                         <input
                           type="number"
                           value={limitCycleFromOrbitDraft.tolerance}
@@ -820,7 +661,7 @@ export function OrbitInspectorSections({
                           data-testid="limit-cycle-from-orbit-tolerance"
                         />
                       </label>
-                      <label>
+                      <label title="Mesh intervals along the cycle">
                         NTST
                         <input
                           type="number"
@@ -833,9 +674,8 @@ export function OrbitInspectorSections({
                           }
                           data-testid="limit-cycle-from-orbit-ntst"
                         />
-                        <span className="field-help">Mesh intervals along the cycle.</span>
                       </label>
-                      <label>
+                      <label title="Collocation points per mesh interval">
                         NCOL
                         <input
                           type="number"
@@ -848,7 +688,6 @@ export function OrbitInspectorSections({
                           }
                           data-testid="limit-cycle-from-orbit-ncol"
                         />
-                        <span className="field-help">Collocation points per mesh interval.</span>
                       </label>
                       <label>
                         Direction
@@ -862,12 +701,12 @@ export function OrbitInspectorSections({
                           }
                           data-testid="limit-cycle-from-orbit-direction"
                         >
-                          <option value="forward">Forward (Increasing Param)</option>
-                          <option value="backward">Backward (Decreasing Param)</option>
+                          <option value="forward">→ Increasing</option>
+                          <option value="backward">← Decreasing</option>
                         </select>
                       </label>
                       <label>
-                        Initial step size
+                        Step
                         <input
                           type="number"
                           value={limitCycleFromOrbitDraft.stepSize}
@@ -881,7 +720,7 @@ export function OrbitInspectorSections({
                         />
                       </label>
                       <label>
-                        Max points
+                        Max pts
                         <input
                           type="number"
                           value={limitCycleFromOrbitDraft.maxSteps}
@@ -894,8 +733,9 @@ export function OrbitInspectorSections({
                           data-testid="limit-cycle-from-orbit-max-steps"
                         />
                       </label>
+                      <AdvancedFields testId="limit-cycle-from-orbit-advanced">
                       <label>
-                        Min step size
+                        Min step
                         <input
                           type="number"
                           value={limitCycleFromOrbitDraft.minStepSize}
@@ -909,7 +749,7 @@ export function OrbitInspectorSections({
                         />
                       </label>
                       <label>
-                        Max step size
+                        Max step
                         <input
                           type="number"
                           value={limitCycleFromOrbitDraft.maxStepSize}
@@ -923,7 +763,7 @@ export function OrbitInspectorSections({
                         />
                       </label>
                       <label>
-                        Corrector steps
+                        Corr. steps
                         <input
                           type="number"
                           value={limitCycleFromOrbitDraft.correctorSteps}
@@ -937,7 +777,7 @@ export function OrbitInspectorSections({
                         />
                       </label>
                       <label>
-                        Corrector tolerance
+                        Corr. tol
                         <input
                           type="number"
                           value={limitCycleFromOrbitDraft.correctorTolerance}
@@ -951,7 +791,7 @@ export function OrbitInspectorSections({
                         />
                       </label>
                       <label>
-                        Step tolerance
+                        Step tol
                         <input
                           type="number"
                           value={limitCycleFromOrbitDraft.stepTolerance}
@@ -981,6 +821,7 @@ export function OrbitInspectorSections({
                         }
                         testIdPrefix="limit-cycle-from-orbit"
                       />
+                      </AdvancedFields>
                       {limitCycleFromOrbitError ? (
                         <div className="field-error">{limitCycleFromOrbitError}</div>
                       ) : null}
@@ -994,7 +835,7 @@ export function OrbitInspectorSections({
                         }
                         data-testid="limit-cycle-from-orbit-submit"
                       >
-                        Continue Limit Cycle
+                        Continue
                       </button>
                     </>
                     )}
@@ -1010,19 +851,11 @@ export function OrbitInspectorSections({
                   actionOnly
                 >
                   <div className="inspector-section">
-                    <h4 className="inspector-subheading">Continue a two-equilibrium connection</h4>
-                    <p className="field-help">
-                      The orbit must run from the source saddle toward the target saddle. Both
-                      endpoints must be solved at the orbit&apos;s parameter values.
-                    </p>
                     {continuationParameterCount < 2 ? (
-                      <p className="empty-state">Add two parameters before continuing.</p>
+                      <p className="field-warning">Needs two parameters.</p>
                     ) : null}
                     {heteroclinicEquilibriumOptions.length < 2 ? (
-                      <p className="empty-state">Solve two equilibrium objects first.</p>
-                    ) : null}
-                    {orbit.data.length < 2 ? (
-                      <p className="empty-state">Run an orbit before continuing.</p>
+                      <p className="field-warning" title="The orbit must run from the source saddle toward the target saddle; both endpoints solved at the orbit's parameters.">Needs two solved equilibria.</p>
                     ) : null}
                     {continuationParameterCount >= 2 &&
                     heteroclinicEquilibriumOptions.length >= 2 &&

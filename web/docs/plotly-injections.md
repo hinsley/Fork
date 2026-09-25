@@ -33,6 +33,13 @@ convergence plots and Floquet mode plots) remain mounted while a different workf
 the plots are hidden with CSS instead of unmounted, and `purgePlot()` now runs only when the
 selection changes or the object is removed.
 
+Object data is rendered inline on the selection page rather than in "Inspect data" workflows:
+the equilibrium eigenvalue plot (`sections/EquilibriumInspectorSections.tsx`), the limit-cycle
+multiplier plot (`sections/LimitCycleInspectorSections.tsx`) and the invariant-measure spectrum
+(`sections/InvariantMeasureInspectorSections.tsx`) sit in collapsible `<details>` blocks or inline
+sections. They pass ordinary data and layout objects to `PlotlyViewport` and add no Plotly event,
+state, or rendering injection.
+
 ## Runtime touchpoints
 
 ### Plotly lifecycle and render config

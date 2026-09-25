@@ -8,7 +8,6 @@ export function ForcedPeriodicResponseInspectorSections({
 }) {
   const {
     InspectorDisclosure,
-    InspectorMetrics,
     StateTable,
     continuationDraft,
     continuationError,
@@ -16,17 +15,9 @@ export function ForcedPeriodicResponseInspectorSections({
     forcedPeriodicResponse,
     forcedPeriodicResponseDraft,
     forcedPeriodicResponseError,
-    forcedPeriodicResponseRenderLabel,
-    forcedPeriodicResponseStale,
-    formatComplexValue,
-    formatNumber,
-    formatScientific,
     handleCreateForcedPeriodicResponseBranch,
     handleSolveForcedPeriodicResponse,
-    isStoredForcedPeriodicResponseTarget,
-    onSetLimitCycleRenderTarget,
     runDisabled,
-    selectedNodeId,
     selectionKey,
     setContinuationDraft,
     setForcedPeriodicResponseDraft,
@@ -39,26 +30,6 @@ export function ForcedPeriodicResponseInspectorSections({
 
   return (
     <>
-      <div className="inspector-section" data-testid="forced-response-render-target">
-        <h4 className="inspector-subheading">Rendered at</h4>
-        <div className="inspector-data">{forcedPeriodicResponseRenderLabel}</div>
-        {onSetLimitCycleRenderTarget && !isStoredForcedPeriodicResponseTarget ? (
-          <div className="inspector-row">
-            <button
-              type="button"
-              onClick={() =>
-                selectedNodeId
-                  ? onSetLimitCycleRenderTarget(selectedNodeId, { type: 'object' })
-                  : null
-              }
-              data-testid="forced-response-render-stored"
-            >
-              Render stored response
-            </button>
-          </div>
-        ) : null}
-      </div>
-
       <InspectorDisclosure
         key={`${selectionKey}-forced-response-solver`}
         title="Solve forced response"
@@ -71,12 +42,10 @@ export function ForcedPeriodicResponseInspectorSections({
             <div className="field-error">Declare periodic forcing in the system editor.</div>
           ) : null}
           {scope.currentFrozenEquationContext ? (
-            <div className="field-warning">
-              Stroboscopic analysis requires live t/n. Unfreeze the equation forcing context.
-            </div>
+            <div className="field-warning">Unfreeze the equation forcing context (needs live t/n).</div>
           ) : null}
           <StateTable
-            title="Strobe state guess"
+            title="Strobe guess"
             varNames={systemDraft.varNames}
             values={forcedPeriodicResponseDraft.initialGuess}
             onChange={(initialGuess) =>
@@ -87,7 +56,7 @@ export function ForcedPeriodicResponseInspectorSections({
             testIdPrefix="forced-response-guess"
           />
           <label>
-            {systemDraft.type === 'flow' ? 'Strobe phase fraction' : 'Strobe phase residue'}
+            {systemDraft.type === 'flow' ? 'Phase fraction' : 'Phase residue'}
             <input
               type="number"
               step={systemDraft.type === 'map' ? 1 : 'any'}
@@ -102,7 +71,7 @@ export function ForcedPeriodicResponseInspectorSections({
             />
           </label>
           <label>
-            Response multiple
+            Multiple
             <input
               type="number"
               min={1}
@@ -118,8 +87,8 @@ export function ForcedPeriodicResponseInspectorSections({
             />
           </label>
           {systemDraft.type === 'flow' ? (
-            <label>
-              Integration steps per forcing period
+            <label title="Integration steps per forcing period">
+              Steps / period
               <input
                 type="number"
                 min={1}
@@ -188,62 +157,10 @@ export function ForcedPeriodicResponseInspectorSections({
             disabled={runDisabled || !forcing || Boolean(scope.currentFrozenEquationContext)}
             data-testid="forced-response-solve-submit"
           >
-            Solve forced response
+            Solve
           </button>
         </div>
       </InspectorDisclosure>
-
-      {solution ? (
-        <InspectorDisclosure
-          key={`${selectionKey}-forced-response-data`}
-          title="Inspect data"
-          testId="forced-response-data-toggle"
-          actionOnly
-        >
-          <div className="inspector-section">
-            {forcedPeriodicResponseStale ? (
-              <div className="field-warning" data-testid="forced-response-stale">
-                This result is stale. Rerun it with the current forcing declaration,
-                strobe settings, parameters, and frozen variables.
-              </div>
-            ) : null}
-            <InspectorMetrics
-              rows={[
-                { label: 'Forcing period', value: formatNumber(solution.forcing_period, 8) },
-                {
-                  label: 'Response period',
-                  value: formatNumber(
-                    solution.forcing_period * solution.response_multiple,
-                    8
-                  ),
-                },
-                { label: 'Response multiple', value: solution.response_multiple },
-                { label: 'Residual', value: formatScientific(solution.residual_norm, 6) },
-                { label: 'Newton iterations', value: solution.iterations },
-                { label: 'Trajectory points', value: solution.cycle_points.length },
-              ]}
-            />
-            {solution.minimal_response_multiple < solution.response_multiple ? (
-              <div className="field-warning" data-testid="forced-response-lower-period">
-                This solution has the lower response multiple{' '}
-                {solution.minimal_response_multiple}.
-              </div>
-            ) : null}
-            <h4 className="inspector-subheading">Multipliers</h4>
-            {solution.multipliers.length > 0 ? (
-              <div className="inspector-list">
-                {solution.multipliers.map((multiplier, index) => (
-                  <span key={`forced-multiplier-${index}`}>
-                    μ{index + 1} = {formatComplexValue(multiplier)}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="empty-state">No multipliers returned.</p>
-            )}
-          </div>
-        </InspectorDisclosure>
-      ) : null}
 
       {solution ? (
         <InspectorDisclosure
@@ -254,7 +171,7 @@ export function ForcedPeriodicResponseInspectorSections({
         >
           <div className="inspector-section">
             <label>
-              Branch name
+              Branch
               <input
                 value={continuationDraft.name}
                 onChange={(event) =>
@@ -267,7 +184,7 @@ export function ForcedPeriodicResponseInspectorSections({
               />
             </label>
             <label>
-              Continuation parameter
+              Parameter
               <select
                 value={continuationDraft.parameterName}
                 onChange={(event) =>
@@ -296,12 +213,12 @@ export function ForcedPeriodicResponseInspectorSections({
                   }))
                 }
               >
-                <option value="forward">Forward</option>
-                <option value="backward">Backward</option>
+                <option value="forward">→ Increasing</option>
+                <option value="backward">← Decreasing</option>
               </select>
             </label>
             <label>
-              Initial step size
+              Step
               <input
                 type="number"
                 value={continuationDraft.stepSize}
@@ -314,7 +231,7 @@ export function ForcedPeriodicResponseInspectorSections({
               />
             </label>
             <label>
-              Max points
+              Max pts
               <input
                 type="number"
                 value={continuationDraft.maxSteps}
@@ -332,12 +249,12 @@ export function ForcedPeriodicResponseInspectorSections({
               onClick={handleCreateForcedPeriodicResponseBranch}
               disabled={
                 continuationParameterLabels.length === 0 ||
-                forcedPeriodicResponseStale ||
+                scope.forcedPeriodicResponseStale ||
                 Boolean(scope.currentFrozenEquationContext)
               }
               data-testid="forced-response-branch-submit"
             >
-              Create branch
+              Continue
             </button>
           </div>
         </InspectorDisclosure>

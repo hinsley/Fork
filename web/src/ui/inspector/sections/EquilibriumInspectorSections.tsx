@@ -9,13 +9,20 @@ import type { EquilibriumManifoldProfileDraft } from '../../manifoldProfileDraft
 import { InspectorSubDisclosure } from '../selectionSession'
 import { OpacityPercentInput } from '../../OpacityPercentInput'
 import { CalculationDiagnosticSummary } from '../CalculationDiagnosticSummary'
+import { fmt, fmtComplex } from '../../../utils/format'
+import {
+  AdvancedFields,
+  CopyButton,
+  DataDetails,
+  InlineSection,
+  KeyValues,
+} from '../InspectorChrome'
 
 type EquilibriumManifoldMode = 'curve_1d' | 'surface_2d'
 
 export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelectionController }) {
   const {
     InspectorDisclosure,
-    InspectorMetrics,
     PlotlyViewport,
     StateTable,
     autonomousAnalysisError,
@@ -28,7 +35,6 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
     equilibriumContinuationBaseName,
     equilibriumCyclePoints,
     equilibriumDeflationTargetOptions,
-    equilibriumDisplayState,
     equilibriumDraft,
     equilibriumEigenPlot,
     equilibriumEigenpairs,
@@ -38,22 +44,14 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
     equilibriumEigenvectorRender,
     equilibriumEigenvectorVisibleSet,
     equilibriumError,
-    equilibriumHasEigenvectors,
     equilibriumLabel,
-    equilibriumLabelLower,
-    equilibriumLabelPluralLower,
     equilibriumManifoldDraft,
     equilibriumManifoldEligibleIndexOptions,
     equilibriumManifoldEligibleRealIndexOptions,
     equilibriumManifoldError,
     equilibriumManifoldModeOptions,
     existingBranchNames,
-    formatComplexValue,
-    formatFixed,
-    formatNumber,
     formatPointValues,
-    formatPolarValue,
-    formatScientific,
     frozenVariableHeaderNames,
     handleCreateEquilibriumBranch,
     handleCreateEquilibriumManifold,
@@ -88,7 +86,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                 <div className="inspector-section">
                   {runDisabled ? (
                     <div className="field-warning">
-                      {`Apply valid system changes before solving ${equilibriumLabelPluralLower}.`}
+                      Apply valid system changes first.
                     </div>
                   ) : null}
                   {autonomousAnalysisError ? (
@@ -111,7 +109,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                     onPaste={handlePasteEquilibriumGuess}
                     testIdPrefix="equilibrium-solve-guess"
                   />
-                  <label>
+                  <label title="Maximum Newton steps">
                     Max steps
                     <input
                       type="number"
@@ -156,13 +154,14 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                     title="Deflation"
                     testId="equilibrium-deflation-toggle"
                   >
-                    <div className="inspector-section">
-                      <p className="field-help">
-                        {systemDraft.type === 'flow'
-                          ? 'Select solved equilibria that this solver should avoid.'
-                          : 'Select solved map cycles that this solver should avoid. Every stored phase point is avoided.'}
-                        {' Each selected target has its own exponent and shift.'}
-                      </p>
+                    <div
+                      className="inspector-section"
+                      title={
+                        systemDraft.type === 'flow'
+                          ? 'Solved equilibria this solver should avoid'
+                          : 'Solved map cycles this solver should avoid (every phase point)'
+                      }
+                    >
                       {equilibriumDeflationTargetOptions.length > 0 ? (
                         <div className="inspector-list">
                           {equilibriumDeflationTargetOptions.map((option) => {
@@ -255,11 +254,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                           })}
                         </div>
                       ) : (
-                        <p className="empty-state">
-                          {`No other solved ${
-                            systemDraft.type === 'flow' ? 'equilibria' : 'cycles'
-                          } are available.`}
-                        </p>
+                        <p className="faint">—</p>
                       )}
                       {equilibriumDraft.deflationTargets.length > 0 ? (
                         <button
@@ -287,208 +282,96 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                     Solve {equilibriumLabel}
                   </button>
                 </div>
-                <div className="inspector-section">
-                  <h4 className="inspector-subheading">Last successful solution</h4>
-                  {equilibrium.solution ? (
-                    <InspectorMetrics
-                      rows={[
-                        {
-                          label: 'Residual',
-                          value: formatScientific(equilibrium.solution.residual_norm, 6),
-                        },
-                        {
-                          label: 'Iterations',
-                          value: equilibrium.solution.iterations,
-                        },
-                      ]}
-                    />
-                  ) : (
-                    <p className="empty-state">No residual available until solved.</p>
-                  )}
-                </div>
-                <div className="inspector-section">
-                  <h4 className="inspector-subheading">Last solver attempt</h4>
-                  {equilibrium.lastRun?.diagnostic ? (
-                    <CalculationDiagnosticSummary diagnostic={equilibrium.lastRun.diagnostic} />
-                  ) : null}
-                  {equilibrium.lastRun && !equilibrium.lastRun.success && equilibrium.solution ? (
-                    <p className="inspector-help">The latest attempt failed. The previous successful solution is unchanged.</p>
-                  ) : null}
-                  {equilibrium.lastRun ? (
-                    <InspectorMetrics
-                      rows={[
-                        { label: 'Timestamp', value: equilibrium.lastRun.timestamp },
-                        {
-                          label: 'Result',
-                          value: equilibrium.lastRun.success ? 'Success' : 'Failed',
-                        },
-                        ...(!equilibrium.lastRun.diagnostic && equilibrium.lastRun.residual_norm !== undefined
-                          ? [
-                              {
-                                label: 'Residual',
-                                value: formatScientific(equilibrium.lastRun.residual_norm, 6),
-                              },
-                            ]
-                          : []),
-                        ...(!equilibrium.lastRun.diagnostic && equilibrium.lastRun.iterations !== undefined
-                          ? [
-                              {
-                                label: 'Iterations',
-                                value: equilibrium.lastRun.iterations,
-                              },
-                            ]
-                          : []),
-                      ]}
-                    />
-                  ) : (
-                    <p className="empty-state">Solver has not been run yet.</p>
-                  )}
-                </div>
+                {equilibrium.lastRun && !equilibrium.lastRun.success ? (
+                  <div className="inspector-section" data-testid="equilibrium-last-attempt">
+                    <div className="section-head">
+                      <span title={equilibrium.lastRun.timestamp}>Last attempt</span>
+                      <span className="chip chip--warning">failed</span>
+                    </div>
+                    {equilibrium.lastRun.diagnostic ? (
+                      <CalculationDiagnosticSummary diagnostic={equilibrium.lastRun.diagnostic} />
+                    ) : null}
+                    {equilibrium.solution ? (
+                      <p className="faint">Stored solution unchanged.</p>
+                    ) : null}
+                  </div>
+                ) : null}
               </InspectorDisclosure>
 
-              {equilibrium.solution ? (
-                <InspectorDisclosure
-                key={`${selectionKey}-equilibrium-data`}
-                title="Inspect data"
-                testId="equilibrium-data-toggle"
-                actionOnly
-              >
-                <InspectorSubDisclosure
-                  title="Coordinates"
-                  testId="equilibrium-data-coordinates-toggle"
+              {equilibrium.solution && equilibrium.parameters && equilibrium.parameters.length > 0 ? (
+                <InlineSection
+                  title="Parameters"
+                  testId="equilibrium-data-parameters"
+                  actions={
+                    <CopyButton
+                      label="Copy parameters"
+                      onCopy={() =>
+                        void writeClipboardText(formatPointValues(equilibrium.parameters ?? []))
+                      }
+                    />
+                  }
                 >
-                  <div className="inspector-section">
-                    {equilibrium.solution && equilibriumDisplayState ? (
-                      <InspectorMetrics
-                        rows={frozenVariableHeaderNames.map((name, index) => ({
-                          label: name,
-                          value: formatNumber(equilibriumDisplayState[index] ?? Number.NaN, 6),
-                        }))}
-                      />
-                    ) : (
-                      <p className="empty-state">{`No stored ${equilibriumLabelLower} solution yet.`}</p>
-                    )}
-                    {equilibrium.solution ? (
-                      <div className="inspector-inline-actions">
-                        <button
-                          type="button"
-                          className="inspector-inline-button"
-                          onClick={() =>
-                            void writeClipboardText(
-                              formatPointValues(equilibriumDisplayState ?? [])
-                            )
-                          }
-                        >
-                          Copy
-                        </button>
-                      </div>
-                    ) : null}
+                  <KeyValues
+                    columns={2}
+                    rows={equilibrium.parameters.map((value, index) => ({
+                      label: systemDraft.paramNames[index] || `p${index + 1}`,
+                      value: fmt(value),
+                    }))}
+                  />
+                </InlineSection>
+              ) : null}
+
+              {equilibrium.solution && isDiscreteMap && equilibriumCyclePoints && equilibriumCyclePoints.length > 1 ? (
+                <DataDetails
+                  title={`Cycle points · ${equilibriumCyclePoints.length}`}
+                  testId="equilibrium-data-cycle-points-toggle"
+                >
+                  <div className="inspector-inline-section__actions">
+                    <CopyButton
+                      label="Copy cycle points"
+                      onCopy={() =>
+                        void writeClipboardText(
+                          equilibriumCyclePoints
+                            .map((point) => formatPointValues(point))
+                            .join('\n')
+                        )
+                      }
+                    />
                   </div>
-                </InspectorSubDisclosure>
-                {isDiscreteMap ? (
-                  <InspectorSubDisclosure
-                    title="Cycle points"
-                    testId="equilibrium-data-cycle-points-toggle"
-                  >
-                    <div className="inspector-section">
-                      {equilibriumCyclePoints && equilibriumCyclePoints.length > 0 ? (
-                        <div
-                          className="orbit-preview__table"
-                          role="region"
-                          aria-label="Cycle point data"
-                        >
-                        <table className="orbit-preview__table-grid">
-                          <thead>
-                            <tr>
-                              <th>#</th>
-                              {frozenVariableHeaderNames.map((name, index) => (
-                                <th key={`equilibrium-cycle-col-${index}`}>
-                                  {name}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {equilibriumCyclePoints.map((point, rowIndex) => (
-                              <tr key={`equilibrium-cycle-row-${rowIndex}`}>
-                                <td>{rowIndex}</td>
-                                {frozenVariableHeaderNames.map((_, varIndex) => (
-                                  <td
-                                    key={`equilibrium-cycle-cell-${rowIndex}-${varIndex}`}
-                                  >
-                                    {formatFixed(point[varIndex] ?? Number.NaN, 4)}
-                                  </td>
-                                ))}
-                              </tr>
+                  <div className="inspector-table-scroll" role="region" aria-label="Cycle point data">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          {frozenVariableHeaderNames.map((name, index) => (
+                            <th key={`equilibrium-cycle-col-${index}`}>{name}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {equilibriumCyclePoints.map((point, rowIndex) => (
+                          <tr key={`equilibrium-cycle-row-${rowIndex}`}>
+                            <td>{rowIndex}</td>
+                            {frozenVariableHeaderNames.map((_, varIndex) => (
+                              <td key={`equilibrium-cycle-cell-${rowIndex}-${varIndex}`}>
+                                {fmt(point[varIndex] ?? Number.NaN)}
+                              </td>
                             ))}
-                          </tbody>
-                        </table>
-                        </div>
-                      ) : (
-                        <p className="empty-state">No cycle points stored yet.</p>
-                      )}
-                      {equilibriumCyclePoints && equilibriumCyclePoints.length > 0 ? (
-                        <div className="inspector-inline-actions">
-                          <button
-                            type="button"
-                            className="inspector-inline-button"
-                            onClick={() =>
-                              void writeClipboardText(
-                                equilibriumCyclePoints
-                                  .map((point) => formatPointValues(point))
-                                  .join('\n')
-                              )
-                            }
-                          >
-                            Copy
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </InspectorSubDisclosure>
-                ) : null}
-                <InspectorSubDisclosure
-                  title="Parameters (last solve)"
-                  testId="equilibrium-data-parameters-toggle"
-                >
-                  <div className="inspector-section">
-                    {equilibrium.parameters && equilibrium.parameters.length > 0 ? (
-                      <InspectorMetrics
-                        rows={equilibrium.parameters.map((value, index) => ({
-                          label: systemDraft.paramNames[index] || `p${index + 1}`,
-                          value: formatNumber(value, 6),
-                        }))}
-                      />
-                    ) : (
-                      <p className="empty-state">Parameters not recorded yet.</p>
-                    )}
-                    {equilibrium.parameters && equilibrium.parameters.length > 0 ? (
-                      <div className="inspector-inline-actions">
-                        <button
-                          type="button"
-                          className="inspector-inline-button"
-                          onClick={() =>
-                            void writeClipboardText(formatPointValues(equilibrium.parameters ?? []))
-                          }
-                        >
-                          Copy
-                        </button>
-                      </div>
-                    ) : null}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                </InspectorSubDisclosure>
-                <InspectorSubDisclosure
-                  title="Eigenpairs"
-                  testId="equilibrium-data-eigenpairs-toggle"
-                >
+                </DataDetails>
+              ) : null}
+
+              {equilibrium.solution && equilibrium.solution.eigenpairs.length > 0 ? (
+                <DataDetails title="Eigenpairs" testId="equilibrium-data-eigenpairs-toggle">
                   <div className="inspector-section">
                   {equilibrium.solution && equilibrium.solution.eigenpairs.length > 0 ? (
                     <div className="inspector-list">
                       {showEquilibriumEigenvectorControls ? (
                         <>
-                          {!equilibriumHasEigenvectors ? (
-                            <p className="empty-state">Eigenvectors not computed yet.</p>
-                          ) : null}
                           <label>
                             Show eigenvectors
                             <input
@@ -502,8 +385,9 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                               data-testid="equilibrium-eigenvector-enabled"
                             />
                           </label>
-                          <label>
-                            Eigenline length (fraction of scene)
+                          <div className="inspector-form-grid">
+                          <label title="Eigenline length as a fraction of the scene">
+                            Line length
                             <input
                               type="number"
                               min={0}
@@ -517,8 +401,8 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                               data-testid="equilibrium-eigenvector-line-length"
                             />
                           </label>
-                          <label>
-                            Eigenline thickness (px)
+                          <label title="Eigenline thickness in pixels">
+                            Line px
                             <input
                               type="number"
                               min={0.5}
@@ -532,8 +416,8 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                               data-testid="equilibrium-eigenvector-line-thickness"
                             />
                           </label>
-                          <label>
-                            Eigenspace disc radius (fraction of scene)
+                          <label title="Eigenspace disc radius as a fraction of the scene">
+                            Disc radius
                             <input
                               type="number"
                               min={0}
@@ -547,8 +431,8 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                               data-testid="equilibrium-eigenvector-disc-radius"
                             />
                           </label>
-                          <label>
-                            Eigenspace disc thickness (px)
+                          <label title="Eigenspace disc thickness in pixels">
+                            Disc px
                             <input
                               type="number"
                               min={0.5}
@@ -562,6 +446,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                               data-testid="equilibrium-eigenvector-disc-thickness"
                             />
                           </label>
+                          </div>
                           {equilibriumEigenvectorIndices.length > 0 ? (
                             <div className="inspector-list">
                               {equilibriumEigenvectorIndices.map((index, idx) => {
@@ -618,9 +503,8 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                           ) : null}
                         </>
                       ) : null}
-                      {/* Mirror the legacy UI by plotting eigenvalues in the complex plane. */}
                       {equilibriumEigenPlot ? (
-                        <div className="inspector-plot">
+                        <div className="inspector-plot inspector-plot--compact">
                           <PlotlyViewport
                             plotId="equilibrium-eigenvalue-plot"
                             data={equilibriumEigenPlot.data}
@@ -635,17 +519,14 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                           key={`eq-eigen-${pairIndex}`}
                         >
                           <div className="inspector-eigenpair__header">
-                            <span className="inspector-subheading">
-                              Eigenpair {pairIndex + 1}
+                            <span className="inspector-eigenpair__index">
+                              λ{pairIndex + 1}
                             </span>
-                            <span className="inspector-eigenpair__value">
-                              <span className="inspector-eigenpair__value-label">Value</span>
-                              <span className="inspector-eigenpair__value-number">
-                                {formatComplexValue(pair.value)}
-                                {isDiscreteMap
-                                  ? ` (${formatPolarValue(pair.value, 4)})`
-                                  : null}
-                              </span>
+                            <span className="inspector-eigenpair__value num">
+                              {fmtComplex(pair.value)}
+                              {isDiscreteMap
+                                ? `  |λ| ${fmt(Math.hypot(pair.value.re, pair.value.im))}`
+                                : null}
                             </span>
                           </div>
                           {pair.vector.length > 0 ? (
@@ -660,23 +541,18 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                                       `v${pairIndex + 1}_${vectorIndex + 1}`}
                                   </span>
                                   <span className="inspector-eigenvector__value">
-                                    {formatComplexValue(entry)}
+                                    {fmtComplex(entry)}
                                   </span>
                                 </div>
                               ))}
                             </div>
-                          ) : (
-                            <p className="empty-state">No eigenvector components stored.</p>
-                          )}
+                          ) : null}
                         </div>
                       ))}
                     </div>
-                  ) : (
-                    <p className="empty-state">No eigenpairs available yet.</p>
-                  )}
+                  ) : null}
                   </div>
-                </InspectorSubDisclosure>
-                </InspectorDisclosure>
+                </DataDetails>
               ) : null}
 
               {equilibrium.solution ? (
@@ -690,21 +566,19 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                 <div className="inspector-section">
                   {runDisabled ? (
                     <div className="field-warning">
-                      Apply valid system changes before continuing.
+                      Apply valid system changes first.
                     </div>
                   ) : null}
                   {autonomousAnalysisError ? (
                     <div className="field-warning">{autonomousAnalysisError}</div>
                   ) : null}
                   {continuationParameterCount === 0 ? (
-                    <p className="empty-state">Add parameters to enable continuation.</p>
+                    <p className="field-warning">Needs a parameter.</p>
                   ) : null}
-                  {!equilibrium.solution ? (
-                    <p className="empty-state">{`Solve the ${equilibriumLabelLower} to continue it.`}</p>
-                  ) : (
+                  {!equilibrium.solution ? null : (
                     <>
                       <label>
-                        Branch name
+                        Branch
                         <input
                           value={continuationDraft.name}
                           onChange={(event) =>
@@ -722,7 +596,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         />
                       </label>
                       <label>
-                        Continuation parameter
+                        Parameter
                         <select
                           value={continuationDraft.parameterName}
                           onChange={(event) => {
@@ -767,12 +641,12 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                           }
                           data-testid="equilibrium-branch-direction"
                         >
-                          <option value="forward">Forward (Increasing Param)</option>
-                          <option value="backward">Backward (Decreasing Param)</option>
+                          <option value="forward">→ Increasing</option>
+                          <option value="backward">← Decreasing</option>
                         </select>
                       </label>
                       <label>
-                        Initial step size
+                        Step
                         <input
                           type="number"
                           value={continuationDraft.stepSize}
@@ -786,7 +660,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         />
                       </label>
                       <label>
-                        Max points
+                        Max pts
                         <input
                           type="number"
                           value={continuationDraft.maxSteps}
@@ -799,8 +673,9 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                           data-testid="equilibrium-branch-max-steps"
                         />
                       </label>
+                      <AdvancedFields testId="equilibrium-branch-advanced">
                       <label>
-                        Min step size
+                        Min step
                         <input
                           type="number"
                           value={continuationDraft.minStepSize}
@@ -814,7 +689,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         />
                       </label>
                       <label>
-                        Max step size
+                        Max step
                         <input
                           type="number"
                           value={continuationDraft.maxStepSize}
@@ -828,7 +703,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         />
                       </label>
                       <label>
-                        Corrector steps
+                        Corr. steps
                         <input
                           type="number"
                           value={continuationDraft.correctorSteps}
@@ -842,7 +717,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         />
                       </label>
                       <label>
-                        Corrector tolerance
+                        Corr. tol
                         <input
                           type="number"
                           value={continuationDraft.correctorTolerance}
@@ -856,7 +731,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         />
                       </label>
                       <label>
-                        Step tolerance
+                        Step tol
                         <input
                           type="number"
                           value={continuationDraft.stepTolerance}
@@ -869,6 +744,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                           data-testid="equilibrium-branch-step-tolerance"
                         />
                       </label>
+                      </AdvancedFields>
                       {continuationError ? (
                         <div className="field-error">{continuationError}</div>
                       ) : null}
@@ -878,7 +754,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         disabled={runDisabled || Boolean(autonomousAnalysisError)}
                         data-testid="equilibrium-branch-submit"
                       >
-                        Create Branch
+                        Continue
                       </button>
                     </>
                   )}
@@ -897,23 +773,16 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                 <div className="inspector-section">
                   {runDisabled ? (
                     <div className="field-warning">
-                      Apply valid system changes before computing manifolds.
+                      Apply valid system changes first.
                     </div>
                   ) : null}
                   {autonomousAnalysisError ? (
                     <div className="field-warning">{autonomousAnalysisError}</div>
                   ) : null}
-                  {systemDraft.type === 'map' ? (
-                    <p className="empty-state">
-                      Map systems currently support 1D equilibrium manifolds only.
-                    </p>
-                  ) : null}
-                  {!equilibrium.solution ? (
-                    <p className="empty-state">{`Solve the ${equilibriumLabelLower} before computing manifolds.`}</p>
-                  ) : (
+                  {!equilibrium.solution ? null : (
                     <>
                       <label>
-                        Branch name
+                        Branch
                         <input
                           value={equilibriumManifoldDraft.name}
                           onChange={(event) =>
@@ -1299,7 +1168,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         </>
                       )}
 
-                      <div className="inspector-divider">Termination caps</div>
+                      <h4 className="section-head">Caps</h4>
                       <label>
                         Max steps
                         <input

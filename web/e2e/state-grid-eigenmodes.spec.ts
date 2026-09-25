@@ -188,8 +188,6 @@ async function runEigenmodeCase(
   await page.getByTestId('inspector-color').fill(appearanceColor)
   await page.getByTestId('inspector-color-opacity').fill('80')
   await page.getByTestId('inspector-point-size').fill('7')
-  await page.getByTestId('inspector-workflow-back').click()
-  await clickInspectorAction(page, 'action-invariant-measure-data-toggle')
   await expect(page.getByTestId('invariant-measure-convergence-status')).toHaveText(
     'Converged'
   )
@@ -197,26 +195,25 @@ async function runEigenmodeCase(
   const coverSize = Number(coverText.split('/')[0].trim().replaceAll(',', ''))
   expect(coverSize).toBeGreaterThan(3)
 
+  await clickInspectorAction(page, 'action-invariant-measure-eigenmodes-toggle')
   await page.getByTestId('invariant-eigenmode-count').fill('3')
   await expect(page.getByTestId('invariant-eigenmode-compute')).toBeEnabled()
   await page.getByTestId('invariant-eigenmode-compute').click()
+  await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByTestId('invariant-eigenmode-subset')).toContainText('modes', {
     timeout: 60_000,
   })
   await expect(page.getByTestId('invariant-eigenmode-1')).toBeVisible()
   await expect(page.getByTestId('invariant-measure-spectrum-plot')).toBeVisible()
   await expect(page.getByTestId('invariant-eigenmode-view-controls')).toContainText(
-    'right eigenvector describes density relaxation'
+    'Overlay · mode 1'
   )
 
   const modeModuli = await page
-    .locator('[data-testid^="invariant-eigenmode-"]')
-    .filter({ hasText: '|λ|' })
+    .locator('tr[data-testid^="invariant-eigenmode-"] td:nth-child(3)')
     .allTextContents()
-  const parsedModuli = modeModuli.map((text) => {
-    const match = text.match(/\|λ\|\s+([+\-\d.eE]+)/)
-    return Number(match?.[1])
-  })
+  expect(modeModuli.length).toBeGreaterThan(0)
+  const parsedModuli = modeModuli.map((text) => Number(text.trim()))
   for (let index = 1; index < parsedModuli.length; index += 1) {
     expect(parsedModuli[index]).toBeLessThanOrEqual(parsedModuli[index - 1] + 1e-12)
   }
@@ -255,7 +252,6 @@ async function runEigenmodeCase(
   }
 
   const updatedPointSize = 11
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-appearance-toggle')
   await page.getByTestId('inspector-point-size').fill(String(updatedPointSize))
   for (const scenePlot of scenePlots) {
@@ -271,8 +267,7 @@ async function runEigenmodeCase(
       mode: [updatedPointSize],
     })
   }
-  await page.getByTestId('inspector-workflow-back').click()
-  await clickInspectorAction(page, 'action-invariant-measure-data-toggle')
+  await page.keyboard.press('Escape')
 
   await page.getByTestId('invariant-eigenmode-hide').click()
   for (const scenePlot of scenePlots) {

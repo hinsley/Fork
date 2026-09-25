@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { clickInspectorAction, createHarness } from './harness'
+import { clickInspectorAction, createHarness, expandDetails } from './harness'
 
 test('continues a real map Neimark-Sacker curve in two parameters', async ({ page }) => {
   test.setTimeout(120_000)
@@ -42,6 +42,7 @@ test('continues a real map Neimark-Sacker curve in two parameters', async ({ pag
   await page.getByTestId('equilibrium-branch-parameter').selectOption('p1')
   await page.getByTestId('equilibrium-branch-step-size').fill('0.05')
   await page.getByTestId('equilibrium-branch-max-steps').fill('8')
+  await expandDetails(page, 'equilibrium-branch-advanced')
   await page.getByTestId('equilibrium-branch-min-step').fill('1e-6')
   await page.getByTestId('equilibrium-branch-max-step').fill('0.08')
   await page.getByTestId('equilibrium-branch-corrector-steps').fill('8')
