@@ -139,6 +139,7 @@ import { createSystemStorageCommands } from './systemStorageCommands'
 import {
   createSystemTreeCommands,
   validateObjectName,
+  type CreateFolderOptions,
 } from './systemTreeCommands'
 import { validateSystemConfig } from './systemValidation'
 import { isValidDisplayName, suggestDefaultName } from '../utils/naming'
@@ -158,6 +159,22 @@ import {
   homoclinicShootingSettingsError,
   type HomoclinicDiscretization,
 } from '../system/homoclinicExtras'
+
+function progressTarget(
+  system: System | null | undefined,
+  nodeId: string,
+  name?: string
+): ContinuationProgressTarget {
+  return {
+    nodeId,
+    name:
+      name ??
+      system?.nodes[nodeId]?.name ??
+      system?.objects[nodeId]?.name ??
+      system?.branches[nodeId]?.name ??
+      '',
+  }
+}
 
 function findObjectIdByName(system: System, name: string): string | null {
   const match = Object.entries(system.objects).find(([, obj]) => obj.name === name)
@@ -1504,9 +1521,16 @@ function buildObjectSubsystemRunConfig(
   }
 }
 
+/** What a running job computes (`name`, e.g. the new branch) and the node it runs on. */
+export type ContinuationProgressTarget = {
+  name: string
+  nodeId: string
+}
+
 export type ContinuationProgressState = {
   label: string
   progress: ContinuationProgress
+  target?: ContinuationProgressTarget
 }
 
 export type OrbitRunRequest = {
@@ -2067,7 +2091,7 @@ export type AppActions = {
   moveNode: (nodeId: string, direction: 'up' | 'down') => void
   reorderNode: (nodeId: string, targetId: string, placement?: ReorderPlacement) => void
   moveNodeIntoParent: (nodeId: string, parentId: string | null) => void
-  createFolder: (parentId?: string | null) => string | null
+  createFolder: (parentId?: string | null, options?: CreateFolderOptions) => string | null
   updateLayout: (layout: Partial<System['ui']['layout']>) => void
   updateViewportHeight: (nodeId: string, height: number) => void
   updateRender: (nodeId: string, render: Partial<TreeNode['render']>) => void
@@ -3327,7 +3351,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Expansion entropy', progress },
+                progress: { label: 'Expansion entropy', progress, target: progressTarget(state.system, request.stateGridId) },
               }),
           }
         )
@@ -3528,7 +3552,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Invariant measure', progress },
+                progress: { label: 'Invariant measure', progress, target: progressTarget(launchSystem, request.stateGridId) },
               }),
           }
         )
@@ -3703,7 +3727,7 @@ export function AppProvider({
               if (opts?.signal?.aborted) return
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Eigenmodes', progress },
+                progress: { label: 'Eigenmodes', progress, target: progressTarget(launchSystem, request.invariantMeasureId) },
               })
             },
           }
@@ -4463,7 +4487,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Forced-response continuation', progress },
+                progress: { label: 'Forced-response continuation', progress, target: progressTarget(current, request.responseId, name) },
               }),
           }
         )
@@ -4873,7 +4897,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: `${equilibriumLabel} continuation`, progress },
+                progress: { label: `${equilibriumLabel} continuation`, progress, target: progressTarget(state.system, request.equilibriumId, name) },
               }),
           }
         )
@@ -5066,7 +5090,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Invariant Manifold (Equilibrium 1D)', progress },
+                progress: { label: 'Invariant Manifold (Equilibrium 1D)', progress, target: progressTarget(state.system, request.equilibriumId, name) },
               }),
           }
         )
@@ -5246,6 +5270,7 @@ export function AppProvider({
           type: 'SET_CONTINUATION_PROGRESS',
           progress: {
             label: 'Extend Invariant Manifold (1D)',
+            target: progressTarget(state.system, request.branchId),
             progress: {
               done: false,
               current_step: 0,
@@ -5266,7 +5291,7 @@ export function AppProvider({
           onProgress: (progress: ContinuationProgress) =>
             dispatch({
               type: 'SET_CONTINUATION_PROGRESS' as const,
-              progress: { label: 'Extend Invariant Manifold (1D)', progress },
+              progress: { label: 'Extend Invariant Manifold (1D)', progress, target: progressTarget(state.system, request.branchId) },
             }),
         }
         let updated = state.system
@@ -5458,6 +5483,7 @@ export function AppProvider({
           type: 'SET_CONTINUATION_PROGRESS',
           progress: {
             label: 'Extend Invariant Manifold (2D)',
+            target: progressTarget(state.system, request.branchId),
             progress: {
               done: false,
               current_step: 0,
@@ -5480,7 +5506,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Extend Invariant Manifold (2D)', progress },
+                progress: { label: 'Extend Invariant Manifold (2D)', progress, target: progressTarget(state.system, request.branchId) },
               }),
           }
         )
@@ -5645,7 +5671,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Invariant Manifold (Equilibrium 2D)', progress },
+                progress: { label: 'Invariant Manifold (Equilibrium 2D)', progress, target: progressTarget(state.system, request.equilibriumId, name) },
               }),
           }
         )
@@ -5913,7 +5939,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Invariant Manifold (Limit Cycle 2D)', progress },
+                progress: { label: 'Invariant Manifold (Limit Cycle 2D)', progress, target: progressTarget(state.system, request.limitCycleId, name) },
               }),
           }
         )
@@ -6081,7 +6107,7 @@ export function AppProvider({
                   onProgress: (progress) =>
                     dispatch({
                       type: 'SET_CONTINUATION_PROGRESS',
-                      progress: { label: `${equilibriumLabel} continuation`, progress },
+                      progress: { label: `${equilibriumLabel} continuation`, progress, target: progressTarget(state.system, request.branchId, name) },
                     }),
                 }
               )
@@ -6119,7 +6145,7 @@ export function AppProvider({
                   onProgress: (progress) =>
                     dispatch({
                       type: 'SET_CONTINUATION_PROGRESS',
-                      progress: { label: 'Limit Cycle continuation', progress },
+                      progress: { label: 'Limit Cycle continuation', progress, target: progressTarget(state.system, request.branchId, name) },
                     }),
                 }
               ),
@@ -6280,7 +6306,7 @@ export function AppProvider({
               onProgress: (progress) =>
                 dispatch({
                   type: 'SET_CONTINUATION_PROGRESS',
-                  progress: { label: 'Forced-response extension', progress },
+                  progress: { label: 'Forced-response extension', progress, target: progressTarget(state.system, request.branchId) },
                 }),
             }
           )
@@ -6366,7 +6392,7 @@ export function AppProvider({
               onProgress: (progress) =>
                 dispatch({
                   type: 'SET_CONTINUATION_PROGRESS',
-                  progress: { label: 'Homoclinic extension', progress },
+                  progress: { label: 'Homoclinic extension', progress, target: progressTarget(state.system, request.branchId) },
                 }),
             }
           )
@@ -6396,7 +6422,7 @@ export function AppProvider({
               onProgress: (progress) =>
                 dispatch({
                   type: 'SET_CONTINUATION_PROGRESS',
-                  progress: { label: 'Extension', progress },
+                  progress: { label: 'Extension', progress, target: progressTarget(state.system, request.branchId) },
                 }),
             }
           )
@@ -6546,7 +6572,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Fold Curve', progress },
+                progress: { label: 'Fold Curve', progress, target: progressTarget(state.system, request.branchId, name) },
               }),
           }
         )
@@ -6712,7 +6738,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: `${hopfCurveLabel} Curve`, progress },
+                progress: { label: `${hopfCurveLabel} Curve`, progress, target: progressTarget(state.system, request.branchId, name) },
               }),
           }
         )
@@ -7098,7 +7124,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: `${request.target} Branch`, progress },
+                progress: { label: `${request.target} Branch`, progress, target: progressTarget(state.system, request.branchId, name) },
               }),
           }
         )
@@ -7331,7 +7357,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Periodic BP Branch', progress },
+                progress: { label: 'Periodic BP Branch', progress, target: progressTarget(state.system, request.branchId, name) },
               }),
           }
         )
@@ -7537,7 +7563,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Isoperiodic Curve', progress },
+                progress: { label: 'Isoperiodic Curve', progress, target: progressTarget(state.system, request.branchId, name) },
               }),
           }
         )
@@ -7854,7 +7880,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: `${curveConfig.label} Curve`, progress },
+                progress: { label: `${curveConfig.label} Curve`, progress, target: progressTarget(state.system, request.branchId, name) },
               }),
           }
         )
@@ -8029,7 +8055,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: `${nsCurveLabel} Curve`, progress },
+                progress: { label: `${nsCurveLabel} Curve`, progress, target: progressTarget(state.system, request.branchId, name) },
               }),
           }
         )
@@ -8252,7 +8278,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Limit Cycle', progress },
+                progress: { label: 'Limit Cycle', progress, target: progressTarget(state.system, request.branchId, branchName) },
               }),
           }
         )
@@ -8470,7 +8496,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Limit Cycle', progress },
+                progress: { label: 'Limit Cycle', progress, target: progressTarget(state.system, request.orbitId, branchName) },
               }),
           }
         )
@@ -8735,7 +8761,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Heteroclinic', progress },
+                progress: { label: 'Heteroclinic', progress, target: progressTarget(state.system, request.orbitId, name) },
               }),
           }
         )
@@ -8923,7 +8949,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Cycle', progress },
+                progress: { label: 'Cycle', progress, target: progressTarget(state.system, request.branchId, branchName) },
               }),
           }
         )
@@ -9130,7 +9156,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Limit Cycle', progress },
+                progress: { label: 'Limit Cycle', progress, target: progressTarget(state.system, request.branchId, branchName) },
               }),
           }
         )
@@ -9402,7 +9428,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Homoclinic', progress },
+                progress: { label: 'Homoclinic', progress, target: progressTarget(state.system, request.branchId, name) },
               }),
           }
         )
@@ -9694,7 +9720,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Homoclinic', progress },
+                progress: { label: 'Homoclinic', progress, target: progressTarget(state.system, request.branchId, name) },
               }),
           }
         )
@@ -9892,7 +9918,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Homotopy-Saddle', progress },
+                progress: { label: 'Homotopy-Saddle', progress, target: progressTarget(state.system, request.branchId, name) },
               }),
           }
         )
@@ -10082,7 +10108,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Homoclinic', progress },
+                progress: { label: 'Homoclinic', progress, target: progressTarget(state.system, request.branchId, name) },
               }),
           }
         )

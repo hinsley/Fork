@@ -10,6 +10,21 @@ import {
 } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import { Icon } from './Icon'
+import './viewports.css'
+import {
+  DiagramAxisControls,
+  SceneAxisControls,
+  type DiagramUpdate,
+  type SceneUpdate,
+} from './ViewportAxisPicker'
+import { ParameterStrip } from './ParameterStrip'
+import {
+  MIN_VIEWPORT_PANE_HEIGHT,
+  resolveViewportWeight,
+  splitViewportPair,
+} from './viewportLayout'
+import { capturePlotImage } from '../viewports/plotly/plotlyAdapter'
+import { resolveAnalysisAxisLabelForSystem } from '../analysis/analysisViewportUtils'
 import type {
   AnalysisViewport,
   AxisRange,
@@ -140,6 +155,14 @@ type ViewportPanelProps = {
   >
   captureStaticFallbacks?: boolean
   onFigureCapture?: (state: PlotlyFigureCaptureState) => void
+  /** Header axis picker for scenes. Without it the axes label only selects the viewport. */
+  onUpdateScene?: (sceneId: string, update: SceneUpdate) => void
+  /** Header / inline axis picker for bifurcation diagrams. */
+  onUpdateBifurcationDiagram?: (diagramId: string, update: DiagramUpdate) => void
+  /** Enables in-place parameter editing in the workspace parameter strip. */
+  onUpdateSystem?: (config: SystemConfig) => Promise<void> | void
+  /** Adds "Embed…" to the viewport menu. */
+  onOpenEmbed?: (viewportId: string) => void
 }
 
 type ViewportEntry = {
@@ -211,9 +234,14 @@ type ViewportTileProps = {
     opts?: { signal?: AbortSignal }
     ) => Promise<EventSeriesResult>
   onReorderViewport: (nodeId: string, targetId: string) => void
-  onResizeStart: (id: string, event: React.PointerEvent) => void
   onToggleViewport: (id: string) => void
   onContextMenu: (event: React.MouseEvent, nodeId: string) => void
+  onOpenMenu: (anchor: HTMLElement, nodeId: string) => void
+  canMaximize: boolean
+  isMaximized: boolean
+  onToggleMaximize: (id: string) => void
+  onUpdateScene?: (sceneId: string, update: SceneUpdate) => void
+  onUpdateBifurcationDiagram?: (diagramId: string, update: DiagramUpdate) => void
   isEditing: boolean
   draftName: string
   onDraftNameChange: (value: string) => void
@@ -1430,6 +1458,7 @@ type DiagramTraceState = {
   traces: Data[]
   hasAxes: boolean
   hasBranches: boolean
+  branchCount: number
   hasData: boolean
   xTitle: string
   yTitle: string
@@ -5858,7 +5887,15 @@ function buildDiagramTraces(
   const yTitle = axisTitle(yAxis)
 
   if (!xAxis || !yAxis) {
-    return { traces, hasAxes, hasBranches, hasData: false, xTitle, yTitle }
+    return {
+      traces,
+      hasAxes,
+      hasBranches,
+      branchCount: branchIds.length,
+      hasData: false,
+      xTitle,
+      yTitle,
+    }
   }
 
   const periodsByStateIndex = statePeriodicPeriods(system.config)
@@ -7032,6 +7069,7 @@ function buildDiagramTraces(
     ),
     hasAxes,
     hasBranches,
+    branchCount: branchIds.length,
     hasData,
     xTitle,
     yTitle,
@@ -7177,7 +7215,8 @@ function buildSceneBaseLayout(
 
 function buildDiagramBaseLayout(
   traceState: DiagramTraceState | null,
-  plotlyTheme: PlotlyThemeTokens
+  plotlyTheme: PlotlyThemeTokens,
+  options: { inlineAxisPicker?: boolean } = {}
 ): Partial<Layout> {
   const hasAxes = traceState?.hasAxes ?? false
   const hasBranches = traceState?.hasBranches ?? false
@@ -7187,7 +7226,7 @@ function buildDiagramBaseLayout(
   let message: string | null = null
 
   if (!hasAxes) {
-    message = 'Select axes to configure this diagram.'
+    message = options.inlineAxisPicker ? null : 'Select axes to configure this diagram.'
   } else if (!hasBranches) {
     message = 'No visible branches available for this diagram.'
   } else if (!hasData) {
@@ -7326,9 +7365,14 @@ function ViewportTile({
   onSelectOrbitPoint,
   onSelectLimitCyclePoint,
   onReorderViewport,
-  onResizeStart,
   onToggleViewport,
   onContextMenu,
+  onOpenMenu,
+  canMaximize,
+  isMaximized,
+  onToggleMaximize,
+  onUpdateScene,
+  onUpdateBifurcationDiagram,
   isEditing,
   draftName,
   onDraftNameChange,
@@ -7546,6 +7590,13 @@ function ViewportTile({
     return null
   }, [diagram, scene, traceSystem])
 
+  const showInlineDiagramAxes = Boolean(
+    diagram &&
+      mode === 'editor' &&
+      onUpdateBifurcationDiagram &&
+      (!diagram.xAxis || !diagram.yAxis)
+  )
+
   const layout = useMemo(() => {
     if (scene) {
       return buildSceneBaseLayout(
@@ -7555,7 +7606,11 @@ function ViewportTile({
         showStateGridMeasureAxis
       )
     }
-    if (diagram) return buildDiagramBaseLayout(diagramTraceState, plotlyTheme)
+    if (diagram) {
+      return buildDiagramBaseLayout(diagramTraceState, plotlyTheme, {
+        inlineAxisPicker: showInlineDiagramAxes,
+      })
+    }
     const fallbackAxisVariables = systemScenes[0]?.axisVariables ?? null
     return buildSceneBaseLayout(systemConfig, fallbackAxisVariables, plotlyTheme)
   }, [
@@ -7563,6 +7618,7 @@ function ViewportTile({
     diagramTraceState,
     plotlyTheme,
     scene,
+    showInlineDiagramAxes,
     showStateGridMeasureAxis,
     systemConfig,
     systemScenes,
@@ -7646,12 +7702,97 @@ function ViewportTile({
     sceneTraces,
   ])
 
-  const label = scene ? 'State Space' : analysis ? 'Event Map' : 'Bifurcation Diagram'
+  const typeLabel = scene ? 'State space' : analysis ? 'Event map' : 'Bifurcation diagram'
+  const typeIcon = scene ? 'scene' : analysis ? 'analysis' : 'diagram'
   const viewportTypeClass = diagram
     ? 'viewport-tile--diagram'
     : analysis
       ? 'viewport-tile--analysis'
       : ''
+
+  const axisSummary = useMemo(() => {
+    if (scene) {
+      const selection = resolveSceneAxisSelection(systemConfig.varNames, scene.axisVariables)
+      if (!selection) return '—'
+      if (selection.length === 1) {
+        const name = selection[0]
+        return systemConfig.type === 'map' ? `${name}ₙ → ${name}ₙ₊₁` : `t · ${name}`
+      }
+      return selection.join(' · ')
+    }
+    if (diagram) {
+      return `${diagram.xAxis?.name ?? '—'} · ${diagram.yAxis?.name ?? '—'}`
+    }
+    if (analysis) {
+      const labels = [analysis.axes.x, analysis.axes.y, analysis.axes.z]
+        .filter((axis): axis is NonNullable<typeof axis> => Boolean(axis))
+        .map((axis) => resolveAnalysisAxisLabelForSystem(axis, systemConfig.type))
+      return labels.join(' · ')
+    }
+    return ''
+  }, [analysis, diagram, scene, systemConfig.type, systemConfig.varNames])
+
+  const itemCount = useMemo(() => {
+    if (scene) {
+      const count = resolveSceneCandidateIds(traceSystem, scene, sceneTraceSelectedNodeId).filter(
+        (candidateId) => isNodeEffectivelyVisible(systemNodes, candidateId)
+      ).length
+      return `${count} ${count === 1 ? 'object' : 'objects'}`
+    }
+    if (diagram) {
+      const count = diagramTraceState?.branchCount ?? 0
+      return `${count} ${count === 1 ? 'branch' : 'branches'}`
+    }
+    if (analysis) {
+      const count = analysis.sourceNodeIds.length
+      return count > 0 ? `${count} ${count === 1 ? 'source' : 'sources'}` : null
+    }
+    return null
+  }, [analysis, diagram, diagramTraceState, scene, sceneTraceSelectedNodeId, systemNodes, traceSystem])
+
+  const axisPickerAvailable = Boolean(
+    mode === 'editor' &&
+      ((scene && onUpdateScene && systemConfig.varNames.length > 0) ||
+        (diagram && onUpdateBifurcationDiagram))
+  )
+  const [axisPickerOpen, setAxisPickerOpen] = useState(false)
+  const axisButtonRef = useRef<HTMLButtonElement | null>(null)
+  const axisPopoverRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!axisPickerOpen) return
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      if (axisPopoverRef.current?.contains(target)) return
+      if (axisButtonRef.current?.contains(target)) return
+      setAxisPickerOpen(false)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        setAxisPickerOpen(false)
+      }
+    }
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown, true)
+    }
+  }, [axisPickerOpen])
+
+  const axisControls =
+    scene && onUpdateScene ? (
+      <SceneAxisControls config={systemConfig} scene={scene} onUpdateScene={onUpdateScene} />
+    ) : diagram && onUpdateBifurcationDiagram ? (
+      <DiagramAxisControls
+        config={systemConfig}
+        diagram={diagram}
+        onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
+      />
+    ) : null
+
+  const stopHeaderEvent = (event: React.SyntheticEvent) => event.stopPropagation()
 
   return (
     <section
@@ -7659,7 +7800,7 @@ function ViewportTile({
         isSelected ? 'viewport-tile--selected' : ''
       } ${isDropTarget ? 'viewport-tile--drop' : ''} ${viewportTypeClass}${
         interaction === 'none' ? ' viewport-tile--noninteractive' : ''
-      }`}
+      }${isMaximized ? ' viewport-tile--maximized' : ''}`}
       data-testid={`viewport-tile-${node.id}`}
       onDragOver={
         mode === 'editor'
@@ -7686,123 +7827,216 @@ function ViewportTile({
       {showHeader ? <header
         className={`viewport-tile__header ${isDragging ? 'is-dragging' : ''}`}
         onClick={mode === 'editor' ? () => onSelectViewport(node.id) : undefined}
+        onDoubleClick={
+          mode === 'editor' && canMaximize
+            ? (event) => {
+                const target = event.target as HTMLElement
+                if (target.closest('button, input, select, textarea')) return
+                onToggleMaximize(node.id)
+              }
+            : undefined
+        }
         onContextMenu={mode === 'editor' ? (event) => onContextMenu(event, node.id) : undefined}
         onKeyDown={mode === 'editor' ? (event) => {
+          if (event.target !== event.currentTarget) return
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
             onSelectViewport(node.id)
           }
         } : undefined}
+        draggable={mode === 'editor' && !isEditing}
+        onDragStart={
+          mode === 'editor'
+            ? (event) => {
+                event.dataTransfer.effectAllowed = 'move'
+                event.dataTransfer.setData('text/plain', node.id)
+                setDraggingId(node.id)
+              }
+            : undefined
+        }
+        onDragEnd={
+          mode === 'editor'
+            ? () => {
+                setDraggingId(null)
+                setDragOverId(null)
+              }
+            : undefined
+        }
         role={mode === 'editor' ? 'button' : undefined}
         tabIndex={mode === 'editor' ? 0 : undefined}
         data-testid={`viewport-header-${node.id}`}
       >
         {mode === 'editor' ? <button
-          className="viewport-tile__toggle"
+          className="viewport-tile__toggle icon-btn icon-btn--sm"
           onClick={(event) => {
             event.stopPropagation()
             onToggleViewport(node.id)
           }}
+          onDoubleClick={stopHeaderEvent}
           aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${node.name} viewport`}
+          aria-expanded={!isCollapsed}
           data-testid={`viewport-toggle-${node.id}`}
         >
-          {isCollapsed ? '▸' : '▾'}
+          <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={14} />
         </button> : null}
-        {mode === 'editor' ? <button
-          className="viewport-tile__handle"
-          draggable
-          onClick={(event) => event.stopPropagation()}
-          onDragStart={(event) => {
-            event.dataTransfer.effectAllowed = 'move'
-            event.dataTransfer.setData('text/plain', node.id)
-            setDraggingId(node.id)
-          }}
-          onDragEnd={() => {
-            setDraggingId(null)
-            setDragOverId(null)
-          }}
-          aria-label={`Drag ${node.name} viewport`}
-          data-testid={`viewport-drag-${node.id}`}
-        >
-          ::
-        </button> : null}
+        <span className="viewport-tile__type" title={typeLabel} aria-label={typeLabel} role="img">
+          <Icon name={typeIcon} size={14} />
+        </span>
         {mode === 'editor' && isEditing ? (
           <input
             className="viewport-tile__rename"
             value={draftName}
             autoFocus
+            aria-label="Viewport name"
             onChange={(event) => onDraftNameChange(event.target.value)}
             onClick={(event) => event.stopPropagation()}
             onBlur={onCommitRename}
             onKeyDown={(event) => {
+              event.stopPropagation()
               if (event.key === 'Enter') onCommitRename()
               if (event.key === 'Escape') onCancelRename()
             }}
             data-testid={`viewport-rename-input-${node.id}`}
           />
         ) : (
-          <div className="viewport-tile__title">
-            <span>{node.name}</span>
-            <span className="viewport-tile__meta">{label}</span>
-          </div>
+          <span className="viewport-tile__name truncate" title={node.name}>{node.name}</span>
         )}
+        {axisSummary ? (
+          mode === 'editor' ? (
+            <button
+              ref={axisButtonRef}
+              type="button"
+              className={`viewport-tile__axes${axisPickerOpen ? ' is-open' : ''}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onSelectViewport(node.id)
+                if (axisPickerAvailable) setAxisPickerOpen((open) => !open)
+              }}
+              onDoubleClick={stopHeaderEvent}
+              aria-haspopup={axisPickerAvailable ? 'dialog' : undefined}
+              aria-expanded={axisPickerAvailable ? axisPickerOpen : undefined}
+              aria-label={`Axes ${axisSummary}`}
+              title="Axes"
+              data-testid={`viewport-axes-${node.id}`}
+            >
+              <span className="truncate">{axisSummary}</span>
+            </button>
+          ) : (
+            <span className="viewport-tile__axes viewport-tile__axes--static truncate">{axisSummary}</span>
+          )
+        ) : null}
+        {itemCount ? <span className="viewport-tile__count">{itemCount}</span> : null}
+        {mode === 'editor' ? (
+          <span className="viewport-tile__actions">
+            {canMaximize ? (
+              <button
+                type="button"
+                className={`icon-btn icon-btn--sm${isMaximized ? ' is-active' : ''}`}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onToggleMaximize(node.id)
+                }}
+                onDoubleClick={stopHeaderEvent}
+                aria-label={isMaximized ? `Restore ${node.name}` : `Maximize ${node.name}`}
+                aria-pressed={isMaximized}
+                title={isMaximized ? 'Restore (Esc)' : 'Maximize (double-click header)'}
+                data-testid={`viewport-maximize-${node.id}`}
+              >
+                <Icon name={isMaximized ? 'minimize' : 'maximize'} size={14} />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="icon-btn icon-btn--sm"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpenMenu(event.currentTarget, node.id)
+              }}
+              onDoubleClick={stopHeaderEvent}
+              aria-label={`${node.name} viewport actions`}
+              aria-haspopup="menu"
+              title="More"
+              data-testid={`viewport-more-${node.id}`}
+            >
+              <Icon name="more" size={14} />
+            </button>
+          </span>
+        ) : null}
+        {axisPickerOpen && axisControls ? (
+          <div
+            ref={axisPopoverRef}
+            className="viewport-axis-popover menu-surface"
+            role="dialog"
+            aria-label={`${node.name} axes`}
+            onClick={stopHeaderEvent}
+            onDoubleClick={stopHeaderEvent}
+            onKeyDown={stopHeaderEvent}
+            onDragStart={(event) => event.preventDefault()}
+            draggable={false}
+            data-testid={`viewport-axis-popover-${node.id}`}
+          >
+            {axisControls}
+          </div>
+        ) : null}
       </header> : null}
       {isCollapsed ? null : (
-        <>
-          <div className="viewport-tile__body">
-            {sceneProjection?.kind === 'map_cobweb_1d' && mapFunctionUnavailableReason ? (
-              <div
-                className="viewport-context-notice"
-                data-testid={`map-function-context-notice-${node.id}`}
-              >
-                {mapFunctionUnavailableReason}
-              </div>
-            ) : null}
-            {particles.warning ? <p className="inspector-help" role="status">Particles: {particles.warning}</p> : null}
-            {particles.error ? <p className="inspector-error" role="alert">Particles: {particles.error}</p> : null}
-            {analysis ? (
-              <AnalysisViewportPlot
-                system={system}
-                viewport={analysis}
-                selectedNodeId={selectedNodeId}
-                plotlyTheme={plotlyTheme}
-                onSelectSource={onSelectObject}
-                onSelectOrbitPoint={onSelectOrbitPoint}
-                onComputeEventSeriesFromOrbit={onComputeEventSeriesFromOrbit}
-                onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
-                captureStaticFallback={captureStaticFallback}
-                onFigureCapture={onFigureCapture}
+        <div className="viewport-tile__body">
+          {sceneProjection?.kind === 'map_cobweb_1d' && mapFunctionUnavailableReason ? (
+            <div
+              className="viewport-context-notice"
+              data-testid={`map-function-context-notice-${node.id}`}
+            >
+              {mapFunctionUnavailableReason}
+            </div>
+          ) : null}
+          {showInlineDiagramAxes && diagram && onUpdateBifurcationDiagram ? (
+            <div
+              className="viewport-axis-setup"
+              data-testid={`viewport-axis-setup-${node.id}`}
+            >
+              <DiagramAxisControls
+                config={systemConfig}
+                diagram={diagram}
+                onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
               />
-            ) : (
-              <PlotlyViewport
-                plotId={node.id}
-                data={data}
-                streamingData={particles.traces}
-                layout={layout}
-                viewRevision={viewRevision}
-                persistView
-                initialView={initialView}
-                testId={`plotly-viewport-${node.id}`}
-                onPointClick={
-                  interaction === 'plot' && (scene || diagram) ? handlePointClick : undefined
-                }
-                onResize={scene ? handleResize : undefined}
-                captureEnabled={captureEnabled}
-                captureStaticFallback={captureStaticFallback}
-                onFigureCapture={onFigureCapture}
-              />
-            )}
-          </div>
-          {mode === 'editor' ? <div
-            className="viewport-resize-handle"
-            onPointerDown={(event) => onResizeStart(node.id, event)}
-            role="separator"
-            aria-orientation="horizontal"
-            aria-label={`Resize ${node.name} viewport`}
-            title="Drag to resize viewport"
-            data-testid={`viewport-resize-${node.id}`}
-          /> : null}
-        </>
+            </div>
+          ) : null}
+          {particles.warning ? <p className="inspector-help" role="status">Particles: {particles.warning}</p> : null}
+          {particles.error ? <p className="inspector-error" role="alert">Particles: {particles.error}</p> : null}
+          {analysis ? (
+            <AnalysisViewportPlot
+              system={system}
+              viewport={analysis}
+              selectedNodeId={selectedNodeId}
+              plotlyTheme={plotlyTheme}
+              onSelectSource={onSelectObject}
+              onSelectOrbitPoint={onSelectOrbitPoint}
+              onComputeEventSeriesFromOrbit={onComputeEventSeriesFromOrbit}
+              onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+              captureStaticFallback={captureStaticFallback}
+              onFigureCapture={onFigureCapture}
+            />
+          ) : (
+            <PlotlyViewport
+              plotId={node.id}
+              data={data}
+              streamingData={particles.traces}
+              layout={layout}
+              viewRevision={viewRevision}
+              persistView
+              initialView={initialView}
+              testId={`plotly-viewport-${node.id}`}
+              onPointClick={
+                interaction === 'plot' && (scene || diagram) ? handlePointClick : undefined
+              }
+              onResize={scene ? handleResize : undefined}
+              captureEnabled={captureEnabled}
+              captureStaticFallback={captureStaticFallback}
+              onFigureCapture={onFigureCapture}
+            />
+          )}
+        </div>
       )}
     </section>
   )
@@ -7839,6 +8073,10 @@ export function ViewportPanel({
   isoclineGeometryCache,
   captureStaticFallbacks = false,
   onFigureCapture,
+  onUpdateScene,
+  onUpdateBifurcationDiagram,
+  onUpdateSystem,
+  onOpenEmbed,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -7859,11 +8097,13 @@ export function ViewportPanel({
   const [mapFunctionSamples, setMapFunctionSamples] = useState<MapFunctionSamples | null>(null)
   const viewportHeights = system.ui.viewportHeights
   const tileRefs = useRef(new Map<string, HTMLDivElement | null>())
-  const resizeRef = useRef<{
-    startY: number
-    startHeight: number
-    id: string
-  } | null>(null)
+  const [dragWeights, setDragWeights] = useState<Record<string, number> | null>(null)
+  const [resizingId, setResizingId] = useState<string | null>(null)
+  const [maximizedId, setMaximizedId] = useState<string | null>(null)
+  const latestResizeRef = useRef({ onResizeViewport, viewportHeights })
+  useLayoutEffect(() => {
+    latestResizeRef.current = { onResizeViewport, viewportHeights }
+  })
   const mapRequestKeyRef = useRef<string | null>(null)
   const mapKeyRef = useRef<string | null>(null)
   const plotlyTheme = useMemo(() => resolvePlotlyThemeTokens(theme), [theme])
@@ -8129,6 +8369,48 @@ export function ViewportPanel({
     setNodeContextMenu({ id: nodeId, x: event.clientX, y: event.clientY })
   }
 
+  const openNodeMenuAt = (anchor: HTMLElement, nodeId: string) => {
+    const rect = anchor.getBoundingClientRect()
+    onSelectViewport(nodeId)
+    setCreateMenu(null)
+    setNodeContextMenu((current) =>
+      current?.id === nodeId ? null : { id: nodeId, x: rect.right - 160, y: rect.bottom + 4 }
+    )
+  }
+
+  const activeMaximizedId =
+    maximizedId &&
+    viewports.length > 1 &&
+    viewports.some((entry) => entry.node.id === maximizedId)
+      ? maximizedId
+      : null
+
+  const toggleMaximize = (nodeId: string) => {
+    if (activeMaximizedId === nodeId) {
+      setMaximizedId(null)
+      return
+    }
+    const node = system.nodes[nodeId]
+    if (node && mode === 'editor' && !node.expanded) onToggleViewport(nodeId)
+    setMaximizedId(nodeId)
+    onSelectViewport(nodeId)
+  }
+
+  useEffect(() => {
+    if (!activeMaximizedId) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) {
+        return
+      }
+      if (document.querySelector('.dialog-backdrop')) return
+      setMaximizedId(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [activeMaximizedId])
+
   const startRename = (node: TreeNode) => {
     setEditingId(node.id)
     setDraftName(node.name)
@@ -8146,37 +8428,87 @@ export function ViewportPanel({
     setEditingId(null)
   }
 
-  const startResize = (id: string, event: React.PointerEvent) => {
-    const node = tileRefs.current.get(id)
-    if (!node) return
+  const startResize = (idA: string, idB: string, event: React.PointerEvent) => {
+    const nodeA = tileRefs.current.get(idA)
+    const nodeB = tileRefs.current.get(idB)
+    if (!nodeA || !nodeB) return
     event.preventDefault()
     event.stopPropagation()
-    if ('setPointerCapture' in event.currentTarget) {
-      event.currentTarget.setPointerCapture(event.pointerId)
+    const handle = event.currentTarget
+    if ('setPointerCapture' in handle) {
+      try {
+        handle.setPointerCapture(event.pointerId)
+      } catch {
+        // Synthetic pointers (tests) cannot be captured.
+      }
     }
-
-    resizeRef.current = {
-      id,
-      startY: event.clientY,
-      startHeight: node.getBoundingClientRect().height,
-    }
+    const startY = event.clientY
+    const heightA = nodeA.getBoundingClientRect().height
+    const heightB = nodeB.getBoundingClientRect().height
+    const weightA = resolveViewportWeight(viewportHeights, idA)
+    const weightB = resolveViewportWeight(viewportHeights, idB)
+    let latest: { weightA: number; weightB: number } | null = null
+    setResizingId(idA)
 
     const handleMove = (moveEvent: PointerEvent) => {
-      if (!resizeRef.current) return
-      const { startY, startHeight, id: targetId } = resizeRef.current
-      const delta = moveEvent.clientY - startY
-      const nextHeight = Math.max(MIN_VIEWPORT_HEIGHT, startHeight + delta)
-      onResizeViewport(targetId, nextHeight)
+      latest = splitViewportPair({
+        heightA,
+        heightB,
+        weightA,
+        weightB,
+        delta: moveEvent.clientY - startY,
+        minHeight: MIN_VIEWPORT_PANE_HEIGHT,
+      })
+      setDragWeights({ [idA]: latest.weightA, [idB]: latest.weightB })
     }
 
     const handleUp = () => {
-      resizeRef.current = null
       window.removeEventListener('pointermove', handleMove)
       window.removeEventListener('pointerup', handleUp)
+      window.removeEventListener('pointercancel', handleUp)
+      setResizingId(null)
+      const committed = latest
+      if (!committed) {
+        setDragWeights(null)
+        return
+      }
+      // The store action reads the system from its render closure, so commit
+      // the two weights in separate renders: A now, B once A has landed.
+      latestResizeRef.current.onResizeViewport(idA, committed.weightA)
+      let attempts = 0
+      const commitSecond = () => {
+        const { onResizeViewport: resize, viewportHeights: heights } = latestResizeRef.current
+        if (heights[idA] !== committed.weightA && attempts < 10) {
+          attempts += 1
+          requestAnimationFrame(commitSecond)
+          return
+        }
+        resize(idB, committed.weightB)
+        setDragWeights(null)
+      }
+      requestAnimationFrame(commitSecond)
     }
 
     window.addEventListener('pointermove', handleMove)
     window.addEventListener('pointerup', handleUp)
+    window.addEventListener('pointercancel', handleUp)
+  }
+
+  const exportPng = async (nodeId: string) => {
+    const node = system.nodes[nodeId]
+    const plot = document.querySelector<HTMLElement>(`[data-testid="plotly-viewport-${nodeId}"]`)
+    if (!node || !plot) return
+    try {
+      const dataUrl = await capturePlotImage(plot)
+      const link = document.createElement('a')
+      link.href = dataUrl
+      link.download = `${node.name.replace(/[^\w.-]+/g, '_') || 'viewport'}.png`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    } catch (error) {
+      console.warn('[ViewportPanel] PNG export failed', error)
+    }
   }
 
   const createMenuNode = mode === 'editor' && createMenu ? (
@@ -8195,17 +8527,7 @@ export function ViewportPanel({
         }}
         data-testid="viewport-create-scene"
       >
-        State space scene
-      </button>
-      <button
-        className="context-menu__item"
-        onClick={() => {
-          onCreateAnalysis?.(createMenu.targetId)
-          setCreateMenu(null)
-        }}
-        data-testid="viewport-create-analysis"
-      >
-        Event map
+        <Icon name="scene" size={14} /> State space
       </button>
       <button
         className="context-menu__item"
@@ -8215,116 +8537,202 @@ export function ViewportPanel({
         }}
         data-testid="viewport-create-bifurcation"
       >
-        Bifurcation diagram
+        <Icon name="diagram" size={14} /> Bifurcation diagram
+      </button>
+      <button
+        className="context-menu__item"
+        onClick={() => {
+          onCreateAnalysis?.(createMenu.targetId)
+          setCreateMenu(null)
+        }}
+        data-testid="viewport-create-analysis"
+      >
+        <Icon name="analysis" size={14} /> Event map
       </button>
     </div>
   ) : null
+
+  const parameterStrip =
+    mode === 'editor' ? (
+      <ParameterStrip config={systemConfig} onUpdateSystem={onUpdateSystem} />
+    ) : null
 
   if (viewports.length === 0) {
     if (mode === 'viewer') {
       return <div className="empty-state viewport-empty">No matching viewports are available.</div>
     }
     return (
-      <>
+      <div className="viewport-workspace" data-testid="viewport-workspace-empty">
+        {parameterStrip ? <div className="viewport-strip">{parameterStrip}</div> : null}
         <div className="empty-state viewport-empty">
           <Icon name="plot" className="viewport-empty__icon" />
-          <p>No viewports yet.</p>
-          <div className="viewport-insert viewport-insert--empty">
-            <button
-              className="viewport-insert__button"
-              onClick={(event) => openCreateMenu(event, null)}
-              aria-label="Create viewport"
-              data-testid="viewport-insert-empty"
-            >
-              <Icon name="plus" /> Create viewport
-            </button>
-          </div>
+          <button
+            className="btn viewport-empty__create"
+            onClick={(event) => openCreateMenu(event, null)}
+            aria-label="Create viewport"
+            data-testid="viewport-insert-empty"
+          >
+            <Icon name="plus" size={14} /> Create viewport
+          </button>
         </div>
         {createMenuNode}
-      </>
+      </div>
     )
   }
 
-  return (
-    <div className="viewport-workspace" data-testid="viewport-workspace">
-      {viewports.map((entry, index) => {
-        const height = viewportHeights[entry.node.id]
-        const isCollapsed = mode === 'editor' && !entry.node.expanded
-        const fillsWorkspace = viewports.length === 1 && !isCollapsed && !height
-        const targetId = viewports[index + 1]?.node.id ?? null
-        const isEditing = editingId === entry.node.id
+  const displayed = activeMaximizedId
+    ? viewports.filter((entry) => entry.node.id === activeMaximizedId)
+    : viewports
+  const effectiveWeight = (id: string) =>
+    dragWeights?.[id] ?? resolveViewportWeight(viewportHeights, id)
+  const isEntryCollapsed = (entry: ViewportEntry) =>
+    mode === 'editor' && !entry.node.expanded && entry.node.id !== activeMaximizedId
+  const contextNode = nodeContextMenu ? system.nodes[nodeContextMenu.id] : null
+  const contextCollapsed = contextNode ? mode === 'editor' && !contextNode.expanded : true
 
-        return (
-          <Fragment key={entry.node.id}>
-            <div
-              className={`viewport-item${isCollapsed ? ' viewport-item--collapsed' : ''}${
-                fillsWorkspace ? ' viewport-item--fill-workspace' : ''
-              }`}
-              ref={(node) => {
-                tileRefs.current.set(entry.node.id, node)
-              }}
-              style={!isCollapsed && height ? { height } : undefined}
-            >
-              <ViewportTile
-                system={system}
-                entry={entry}
-                selectedNodeId={selectedNodeId}
-                branchPointSelection={branchPointSelection}
-                orbitPointSelection={orbitPointSelection}
-                limitCyclePointSelection={limitCyclePointSelection}
-                mapRange={mapRangeValues}
-                mapFunctionSamples={activeMapFunction}
-                mapFunctionUnavailableReason={mapContextResolution.reason}
-                draggingId={draggingId}
-                dragOverId={dragOverId}
-                setDraggingId={setDraggingId}
-                setDragOverId={setDragOverId}
-                onSelectViewport={onSelectViewport}
-                onSelectObject={onSelectObject}
-                onSelectBranchPoint={onSelectBranchPoint}
-                onSelectOrbitPoint={onSelectOrbitPoint}
-                onSelectLimitCyclePoint={onSelectLimitCyclePoint}
-                onComputeEventSeriesFromOrbit={onComputeEventSeriesFromOrbit}
-                onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
-                onReorderViewport={onReorderViewport}
-                onResizeStart={startResize}
-                onToggleViewport={onToggleViewport}
-                onContextMenu={openNodeMenu}
-                isEditing={isEditing}
-                draftName={isEditing ? draftName : entry.node.name}
-                onDraftNameChange={(value) => setDraftName(value)}
-                onCommitRename={() => commitRename(entry.node)}
-                onCancelRename={cancelRename}
-                plotlyTheme={plotlyTheme}
-                isoclineGeometryCache={isoclineGeometryCache}
-                mode={mode}
-                showHeader={showHeaders ?? (mode === 'editor' || viewports.length > 1)}
-                interaction={interaction}
-                captureEnabled={
-                  Boolean(onFigureCapture) &&
-                  !(
-                    entry.scene &&
-                    resolveSceneProjection(systemConfig, entry.scene.axisVariables)?.kind ===
-                      'map_cobweb_1d' &&
-                    !hasMapSamples
-                  )
-                }
-                captureStaticFallback={captureStaticFallbacks}
-                onFigureCapture={onFigureCapture}
-              />
-            </div>
-            {mode === 'editor' ? <div className="viewport-insert" data-testid={`viewport-insert-${entry.node.id}`}>
+  return (
+    <div
+      className={`viewport-workspace${activeMaximizedId ? ' viewport-workspace--maximized' : ''}`}
+      data-testid="viewport-workspace"
+    >
+      {mode === 'editor' ? (
+        <div className="viewport-strip">
+          {parameterStrip}
+          <button
+            type="button"
+            className="icon-btn viewport-strip__add"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect()
+              event.preventDefault()
+              event.stopPropagation()
+              setNodeContextMenu(null)
+              setCreateMenu((current) =>
+                current ? null : { x: rect.right - 180, y: rect.bottom + 4, targetId: null }
+              )
+            }}
+            aria-label="Create viewport"
+            aria-haspopup="menu"
+            title="Create viewport"
+            data-testid="viewport-add"
+          >
+            <Icon name="plus" size={16} />
+          </button>
+        </div>
+      ) : null}
+      {activeMaximizedId ? (
+        <div className="viewport-chips" data-testid="viewport-chips">
+          {viewports.map((entry) => {
+            const active = entry.node.id === activeMaximizedId
+            return (
               <button
-                className="viewport-insert__button"
-                onClick={(event) => openCreateMenu(event, targetId)}
-                aria-label="Create viewport"
+                type="button"
+                key={entry.node.id}
+                className={`viewport-chip${active ? ' is-active' : ''}`}
+                aria-pressed={active}
+                onClick={() => {
+                  if (!entry.node.expanded) onToggleViewport(entry.node.id)
+                  setMaximizedId(entry.node.id)
+                  onSelectViewport(entry.node.id)
+                }}
+                data-testid={`viewport-chip-${entry.node.id}`}
               >
-                +
+                <Icon
+                  name={entry.scene ? 'scene' : entry.analysis ? 'analysis' : 'diagram'}
+                  size={13}
+                />
+                <span className="truncate">{entry.node.name}</span>
               </button>
-            </div> : null}
-          </Fragment>
-        )
-      })}
+            )
+          })}
+        </div>
+      ) : null}
+      <div className="viewport-stack">
+        {displayed.map((entry, index) => {
+          const isCollapsed = isEntryCollapsed(entry)
+          const isEditing = editingId === entry.node.id
+          const next = displayed[index + 1]
+          const showHandle =
+            mode === 'editor' && !isCollapsed && next !== undefined && !isEntryCollapsed(next)
+
+          return (
+            <Fragment key={entry.node.id}>
+              <div
+                className={`viewport-item${isCollapsed ? ' viewport-item--collapsed' : ''}`}
+                ref={(node) => {
+                  tileRefs.current.set(entry.node.id, node)
+                }}
+                style={isCollapsed ? undefined : { flexGrow: effectiveWeight(entry.node.id) }}
+              >
+                <ViewportTile
+                  system={system}
+                  entry={entry}
+                  selectedNodeId={selectedNodeId}
+                  branchPointSelection={branchPointSelection}
+                  orbitPointSelection={orbitPointSelection}
+                  limitCyclePointSelection={limitCyclePointSelection}
+                  mapRange={mapRangeValues}
+                  mapFunctionSamples={activeMapFunction}
+                  mapFunctionUnavailableReason={mapContextResolution.reason}
+                  draggingId={draggingId}
+                  dragOverId={dragOverId}
+                  setDraggingId={setDraggingId}
+                  setDragOverId={setDragOverId}
+                  onSelectViewport={onSelectViewport}
+                  onSelectObject={onSelectObject}
+                  onSelectBranchPoint={onSelectBranchPoint}
+                  onSelectOrbitPoint={onSelectOrbitPoint}
+                  onSelectLimitCyclePoint={onSelectLimitCyclePoint}
+                  onComputeEventSeriesFromOrbit={onComputeEventSeriesFromOrbit}
+                  onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+                  onReorderViewport={onReorderViewport}
+                  onToggleViewport={onToggleViewport}
+                  onContextMenu={openNodeMenu}
+                  onOpenMenu={openNodeMenuAt}
+                  canMaximize={viewports.length > 1}
+                  isMaximized={entry.node.id === activeMaximizedId}
+                  onToggleMaximize={toggleMaximize}
+                  onUpdateScene={onUpdateScene}
+                  onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
+                  isEditing={isEditing}
+                  draftName={isEditing ? draftName : entry.node.name}
+                  onDraftNameChange={(value) => setDraftName(value)}
+                  onCommitRename={() => commitRename(entry.node)}
+                  onCancelRename={cancelRename}
+                  plotlyTheme={plotlyTheme}
+                  isoclineGeometryCache={isoclineGeometryCache}
+                  mode={mode}
+                  showHeader={showHeaders ?? (mode === 'editor' || viewports.length > 1)}
+                  interaction={interaction}
+                  captureEnabled={
+                    Boolean(onFigureCapture) &&
+                    !(
+                      entry.scene &&
+                      resolveSceneProjection(systemConfig, entry.scene.axisVariables)?.kind ===
+                        'map_cobweb_1d' &&
+                      !hasMapSamples
+                    )
+                  }
+                  captureStaticFallback={captureStaticFallbacks}
+                  onFigureCapture={onFigureCapture}
+                />
+              </div>
+              {showHandle && next ? (
+                <div
+                  className={`viewport-resize-handle${
+                    resizingId === entry.node.id ? ' is-active' : ''
+                  }`}
+                  onPointerDown={(event) => startResize(entry.node.id, next.node.id, event)}
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label={`Resize ${entry.node.name} viewport`}
+                  data-testid={`viewport-resize-${entry.node.id}`}
+                />
+              ) : null}
+            </Fragment>
+          )
+        })}
+      </div>
       {createMenuNode}
       {mode === 'editor' && nodeContextMenu ? (
         <div
@@ -8358,6 +8766,33 @@ export function ViewportPanel({
           </button>
           <button
             className="context-menu__item"
+            disabled={contextCollapsed}
+            onClick={() => {
+              const nodeId = nodeContextMenu.id
+              setNodeContextMenu(null)
+              void exportPng(nodeId)
+            }}
+            data-testid="viewport-context-export-png"
+          >
+            Export PNG
+          </button>
+          {onOpenEmbed ? (
+            <button
+              className="context-menu__item"
+              onClick={() => {
+                const nodeId = nodeContextMenu.id
+                setNodeContextMenu(null)
+                onSelectViewport(nodeId)
+                onOpenEmbed(nodeId)
+              }}
+              data-testid="viewport-context-embed"
+            >
+              Embed…
+            </button>
+          ) : null}
+          <hr className="context-menu__separator" />
+          <button
+            className="context-menu__item context-menu__item--danger"
             onClick={() => {
               const nodeId = nodeContextMenu.id
               const node = system.nodes[nodeId]

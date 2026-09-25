@@ -13,6 +13,8 @@ test('system settings open in a modal and inspector has no tabs', async ({ page 
   const settingsDialog = page.getByTestId('system-settings-dialog')
   await expect(settingsDialog).toBeVisible()
   await expect(page.getByTestId('system-name')).toHaveValue(/Modal_System/i)
+  await expect(page.getByTestId('system-apply')).toBeDisabled()
+  await expect(settingsDialog.getByText('Unsaved changes')).toHaveCount(0)
 
   await page.getByTestId('close-system-settings').click()
   await expect(settingsDialog).toHaveCount(0)
@@ -36,7 +38,7 @@ test('system string import replaces the variable and parameter setup', async ({ 
   await expect(page.getByTestId('system-param-0')).toHaveValue('alpha')
   await expect(page.getByTestId('system-param-value-0')).toHaveValue('0.25')
   const importStatus = page.getByTestId('system-settings-dialog').getByRole('status')
-  await expect(importStatus).toContainText('Apply changes to save')
+  await expect(importStatus).toHaveText('Imported 1 variable, 1 parameter.')
 
   await page.getByTestId('system-apply').click()
   await expect(importStatus).toHaveCount(0)

@@ -169,9 +169,26 @@ describe('system tree commands', () => {
     expect(harness.getState().currentSystem?.nodes[rootFolderA ?? '']?.name).toBe('Folder_1')
     expect(harness.getState().currentSystem?.nodes[rootFolderB ?? '']?.name).toBe('Folder_2')
 
+    // Names stay unique across the whole tree, not just among siblings.
     const childFolderA = harness.commands.createFolder(first.nodeId)
     const childFolderB = harness.commands.createFolder(first.nodeId)
-    expect(harness.getState().currentSystem?.nodes[childFolderA ?? '']?.name).toBe('Folder_1')
-    expect(harness.getState().currentSystem?.nodes[childFolderB ?? '']?.name).toBe('Folder_2')
+    expect(harness.getState().currentSystem?.nodes[childFolderA ?? '']?.name).toBe('Folder_3')
+    expect(harness.getState().currentSystem?.nodes[childFolderB ?? '']?.name).toBe('Folder_4')
+  })
+
+  it('wraps a node in a new sibling folder at its position', () => {
+    const base = createSystem({ name: 'Folder_Wrap' })
+    const first = addObject(base, makeOrbit('Orbit_A', base.config))
+    const second = addObject(first.system, makeOrbit('Orbit_B', base.config))
+    const third = addObject(second.system, makeOrbit('Orbit_C', base.config))
+    const harness = setupTreeCommands(third.system)
+
+    const folderId = harness.commands.createFolder(null, { wrapNodeId: second.nodeId })
+    const state = harness.getState().currentSystem
+    if (!folderId || !state) throw new Error('Folder was not created')
+    expect(state.rootIds).toEqual([first.nodeId, folderId, third.nodeId])
+    expect(state.nodes[folderId]?.children).toEqual([second.nodeId])
+    expect(state.nodes[second.nodeId]?.parentId).toBe(folderId)
+    expect(state.ui.selectedNodeId).toBe(folderId)
   })
 })

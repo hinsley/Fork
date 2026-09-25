@@ -45,6 +45,8 @@ export type IconName =
   | 'analysis'
   | 'manifold'
   | 'palette'
+  | 'code'
+  | 'enter'
 
 const paths: Record<IconName, string> = {
   fork: 'M4 18c5 0 5-12 10-12h6M4 18c5 0 5-4 10-4h6M4 18h16',
@@ -93,6 +95,8 @@ const paths: Record<IconName, string> = {
   analysis: 'M4 3v17h17M8 14h.01M11 10h.01M14 12h.01M17 7h.01',
   manifold: 'M3 18c4-2 5-10 9-12M12 6c4 2 5 10 9 12M3 18h18',
   palette: 'M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-1.2-1-1.6-1-2.6 0-.9.7-1.7 1.7-1.7H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8ZM7.5 11h.01M10 7.5h.01M14.5 7.5h.01',
+  code: 'm8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14',
+  enter: 'M20 5v7a3 3 0 0 1-3 3H5M9 11l-4 4 4 4',
 }
 
 export function Icon({

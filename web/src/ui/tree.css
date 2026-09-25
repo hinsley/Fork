@@ -1,0 +1,377 @@
+/*
+ * Objects tree: single-line rows (glyph · name · data summary · badges · eye),
+ * filter box, create/context menus, and the objects-panel header buttons.
+ */
+
+.panel--objects {
+  container-type: inline-size;
+  container-name: objects-panel;
+}
+
+.panel--objects [data-testid='create-object-button'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+/* Narrow panel: icon-only create button (accessible name stays "Create object"). */
+@container objects-panel (max-width: 250px) {
+  .panel--objects [data-testid='create-object-button'] {
+    gap: 0;
+    padding-inline: 7px;
+    font-size: 0;
+  }
+}
+
+.objects-tree {
+  min-height: 100%;
+  container-type: inline-size;
+  container-name: objects-tree;
+}
+
+/* Filter */
+.objects-tree__filter {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  margin: 0 0 6px;
+  padding: 0 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text-faint);
+  background: var(--input-bg);
+}
+
+.objects-tree__filter:focus-within {
+  border-color: var(--accent);
+}
+
+.objects-tree__filter input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.objects-tree__empty {
+  margin: 4px 8px;
+  font-size: 0.78rem;
+}
+
+.objects-tree__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-x: hidden;
+}
+
+/* Rows */
+.tree-node__row {
+  position: relative;
+  min-width: 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.tree-node__row:active {
+  cursor: grabbing;
+}
+
+.tree-node__row-motion {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: var(--row-h, 24px);
+  padding: 0 2px 0 4px;
+  border-radius: 4px;
+  transition: background 120ms ease;
+}
+
+.tree-node__row-motion:hover {
+  background: color-mix(in srgb, var(--button-bg-hover) 72%, transparent);
+}
+
+.tree-node__row--selected .tree-node__row-motion {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.objects-tree--touch-dragging .tree-node__row-motion {
+  pointer-events: none;
+}
+
+.tree-node__indent {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: calc(var(--tree-node-depth, 0) * 14px);
+}
+
+.tree-node__expand,
+.tree-node__spacer {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 20px;
+}
+
+.tree-node__expand {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: var(--text-faint);
+  background: none;
+  cursor: pointer;
+}
+
+.tree-node__expand:hover {
+  color: var(--text);
+}
+
+.tree-node__glyph {
+  display: inline-grid;
+  flex: 0 0 14px;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.tree-node__glyph .ui-icon {
+  stroke-width: 2;
+}
+
+.tree-node__label {
+  flex: 0 1 auto;
+  min-width: 2.5em;
+  padding: 0 2px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 3px;
+  color: var(--text);
+  background: none;
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 20px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: inherit;
+  user-select: none;
+}
+
+.tree-node__label:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.tree-node__name {
+  font-weight: 500;
+}
+
+.tree-node__row--selected .tree-node__name {
+  color: var(--accent);
+}
+
+.tree-node__rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--text);
+  background: var(--input-bg);
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: text;
+  user-select: text;
+}
+
+.tree-node__flag {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/*
+ * Right-aligned summary. Its parts are row flex items (display: contents) so the
+ * data text truncates first (ellipsis), then the name; chips and badges keep
+ * their size and are never clipped.
+ */
+.tree-node__summary {
+  display: contents;
+}
+
+/* Pushes the summary and the eye to the right edge when there is room. */
+.tree-node__fill {
+  flex: 1 1 0;
+  min-width: 2px;
+}
+
+.tree-node__data {
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+}
+
+.tree-node__data--pending {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.tree-node__count {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+}
+
+.tree-node__status {
+  flex: 0 0 auto;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 0.66rem;
+}
+
+.tree-node__bif,
+.tree-node__warn {
+  flex: 0 0 auto;
+}
+
+.tree-node__bif {
+  min-width: 18px;
+  height: 15px;
+  font-size: 0.62rem;
+}
+
+.tree-node__bif-more {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+}
+
+.tree-node__warn {
+  height: 15px;
+  padding: 0 5px;
+  cursor: help;
+}
+
+/* Visibility: shown on hover/focus/selection, always when hidden. */
+.tree-node__visibility {
+  flex: 0 0 20px;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.tree-node__row-motion:hover .tree-node__visibility,
+.tree-node__row-motion:focus-within .tree-node__visibility,
+.tree-node__row--selected .tree-node__visibility,
+.tree-node__visibility[data-visible='false'],
+.tree-node__visibility:focus-visible {
+  opacity: 1;
+}
+
+.tree-node__visibility[data-visible='false'] {
+  color: var(--text-faint);
+}
+
+@media (hover: none) {
+  .tree-node__visibility {
+    opacity: 1;
+  }
+}
+
+.tree-node__row--hidden .tree-node__glyph,
+.tree-node__row--hidden .tree-node__label,
+.tree-node__row--hidden .tree-node__summary {
+  opacity: 0.45;
+}
+
+.tree-node__row--hidden .tree-node__label {
+  font-style: italic;
+}
+
+.tree-node__row--hidden .tree-node__glyph {
+  filter: grayscale(1);
+}
+
+.tree-node__row--inherited-hidden .tree-node__glyph,
+.tree-node__row--inherited-hidden .tree-node__label,
+.tree-node__row--inherited-hidden .tree-node__summary {
+  opacity: 0.6;
+}
+
+/* Narrow panel: drop the data text, keep chips/badges. */
+@container objects-tree (max-width: 220px) {
+  .tree-node__data {
+    display: none;
+  }
+}
+
+@container objects-tree (max-width: 170px) {
+  .tree-node__summary {
+    display: none;
+  }
+}
+
+/* Menus */
+.tree-menu {
+  position: fixed;
+  z-index: 50;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  box-shadow: var(--shadow);
+}
+
+.tree-menu .menu-item {
+  font: inherit;
+  font-size: 0.84rem;
+  white-space: nowrap;
+}
+
+.tree-menu .menu-item .ui-icon {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.tree-menu .menu-item:focus-visible {
+  outline: none;
+  background: var(--button-bg-hover);
+}
+
+.tree-menu__hint {
+  margin-left: auto;
+  padding-left: 4px;
+}
+
+.tree-menu .tree-menu__danger,
+.tree-menu .tree-menu__danger .ui-icon {
+  color: var(--danger);
+}

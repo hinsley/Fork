@@ -25,12 +25,11 @@ test('builder downloads a standalone stacked Plotly HTML page', async ({ page })
   await harness.openSystem('Demo_System')
   await page.getByTestId('viewport-insert-empty').click()
   await page.getByTestId('viewport-create-scene').click()
-  await page.getByRole('button', { name: 'Add viewport' }).click()
+  await page.getByTestId('viewport-add').click()
   await page.getByTestId('viewport-create-bifurcation').click()
 
   await page.getByTestId('open-systems').click()
-  await page.getByRole('button', { name: 'Export' }).click()
-  await page.getByRole('button', { name: 'Create embed' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Create embed' }).click()
   await expect(page.getByTestId('embed-dialog')).toBeVisible()
   await expect(page.getByTestId('embed-source')).toHaveValue('./Demo_System_embed.html')
   await expect(page.getByTestId('embed-code')).toHaveValue(/<iframe/)
@@ -96,6 +95,25 @@ test('builder downloads a standalone stacked Plotly HTML page', async ({ page })
   expect(requests.some((url) => url.includes('fork_wasm'))).toBe(false)
 })
 
+test('viewport menu opens the embed builder for that viewport', async ({ page }) => {
+  const harness = createHarness(page)
+  await harness.goto({ fixture: 'demo' })
+  await harness.openSystem('Demo_System')
+  await harness.createScene()
+  await page.getByTestId('viewport-add').click()
+  await page.getByTestId('viewport-create-bifurcation').click()
+
+  const diagramHeader = page
+    .locator('[data-testid^="viewport-header-"]')
+    .filter({ hasText: 'Bifurcation_Diagram_1' })
+  await diagramHeader.locator('[data-testid^="viewport-more-"]').click()
+  await page.getByTestId('viewport-context-embed').click()
+  await expect(page.getByTestId('embed-dialog')).toBeVisible()
+  const checks = page.locator('.embed-dialog__viewport-list label')
+  await expect(checks.filter({ hasText: 'Bifurcation_Diagram_1' }).locator('input')).toBeChecked()
+  await expect(checks.filter({ hasText: 'Scene_1' }).locator('input')).not.toBeChecked()
+})
+
 test('generated static presentation disables Plotly interaction', async ({ page }) => {
   const harness = createHarness(page)
   await harness.goto({ fixture: 'demo' })
@@ -103,8 +121,7 @@ test('generated static presentation disables Plotly interaction', async ({ page 
   await page.getByTestId('viewport-insert-empty').click()
   await page.getByTestId('viewport-create-scene').click()
   await page.getByTestId('open-systems').click()
-  await page.getByRole('button', { name: 'Export' }).click()
-  await page.getByRole('button', { name: 'Create embed' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Create embed' }).click()
   await page.getByLabel('Interaction').selectOption('none')
 
   const downloadButton = page.getByTestId('download-embed-html')
@@ -131,8 +148,7 @@ test('bundled export renders under restrictive CSP without network dependencies'
   await page.getByTestId('viewport-insert-empty').click()
   await page.getByTestId('viewport-create-scene').click()
   await page.getByTestId('open-systems').click()
-  await page.getByRole('button', { name: 'Export' }).click()
-  await page.getByRole('button', { name: 'Create embed' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Create embed' }).click()
   await page.getByRole('checkbox', {
     name: /^Bundle dependencies/,
   }).check()
@@ -215,9 +231,8 @@ test('bundled 3D export falls back to its captured camera without WebGL', async 
   await page
     .locator('.dialog__list-row')
     .filter({ has: page.getByRole('button', { name: 'Lorenz', exact: true }) })
-    .getByRole('button', { name: 'Export' })
+    .getByRole('button', { name: 'Create embed' })
     .click()
-  await page.getByRole('button', { name: 'Create embed' }).click()
   await page.getByRole('checkbox', {
     name: /^Bundle dependencies/,
   }).check()

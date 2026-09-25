@@ -7,13 +7,15 @@ async function setupAnalysisViewport(page: Page) {
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true })
   await harness.openSystem('Lorenz')
+  // Create the event map first: running the orbit adds a default scene after it,
+  // and the assertions below read the first Plotly viewport.
+  await page.getByTestId('viewport-insert-empty').waitFor({ state: 'visible' })
+  await page.getByTestId('viewport-insert-empty').click()
+  await page.getByTestId('viewport-create-analysis').click()
   await harness.createOrbit()
   await harness.selectTreeNode('Orbit_1')
   await revealInspectorAction(page, 'action-orbit-run-toggle')
   await harness.runOrbit()
-  await page.getByTestId('viewport-insert-empty').waitFor({ state: 'visible' })
-  await page.getByTestId('viewport-insert-empty').click()
-  await page.getByTestId('viewport-create-analysis').click()
   await page.locator('[data-testid^="viewport-header-"]').first().click()
 }
 

@@ -1,5 +1,6 @@
 import { buildSystemArchiveBlob, parseSystemArchiveFile } from './archive'
 import { emptySystemIndex, normalizeSystem, shardForEntityId } from './model'
+import { rowSummaryField, summarizeBranch, summarizeObject } from './rowSummary'
 import type { LoadedEntities, SystemStore } from './store'
 import type {
   AnalysisObject,
@@ -193,6 +194,7 @@ function ensureObjectIndex(system: System): Record<string, ObjectIndexEntry> {
       objectType: payload.type,
       shard: existing?.shard ?? shardForEntityId(id),
       updatedAt: metadataChanged ? system.updatedAt : existing.updatedAt,
+      ...rowSummaryField(summarizeObject(payload, system.config)),
     }
   })
   return index
@@ -216,6 +218,7 @@ function ensureBranchIndex(system: System): Record<string, BranchIndexEntry> {
       startObjectId: payload.startObjectId ?? null,
       shard: existing?.shard ?? shardForEntityId(id),
       updatedAt: metadataChanged ? system.updatedAt : existing.updatedAt,
+      ...rowSummaryField(summarizeBranch(payload, system.config)),
     }
   })
   return index
@@ -325,6 +328,8 @@ export class IndexedDbSystemStore implements SystemStore {
           name: system.name,
           updatedAt: system.updatedAt,
           type: system.config.type,
+          varNames: [...system.config.varNames],
+          paramNames: [...system.config.paramNames],
         } satisfies SystemSummary
       })
       return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))

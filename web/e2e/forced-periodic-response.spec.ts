@@ -50,11 +50,8 @@ test('solves a real-WASM time-forced flow and preserves autonomous guards', asyn
   await clickInspectorAction(page, 'action-forced-response-continuation-toggle')
   await page.getByLabel('Max pts').fill('3')
   await page.getByTestId('forced-response-branch-submit').click()
-  await clickInspectorAction(page, 'action-branch-points-toggle')
   await page.getByTestId('branch-point-prev').click()
-  await expect(page.getByTestId('branch-point-render-lc')).toHaveText(
-    'Render Forced Response Here'
-  )
+  await expect(page.getByTestId('branch-point-render-lc')).toHaveText('Show response')
   await page.getByTestId('branch-point-render-lc').click()
   await expect(page.getByTestId('branch-point-render-lc')).toHaveCount(0)
 

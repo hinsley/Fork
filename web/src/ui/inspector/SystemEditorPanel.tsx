@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, type SetStateAction } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState, type SetStateAction } from 'react'
 import type { SystemConfig } from '../../system/types'
 import { parseConstantExpression } from '../../system/constantExpression'
 import {
@@ -15,7 +15,9 @@ import {
 } from '../../system/periodicity'
 import type { SystemStringDefinition } from '../../system/systemString'
 import { normalizePeriodicForcing } from '../../system/forcing'
+import { Icon } from '../Icon'
 import { SystemStringTools } from './SystemStringTools'
+import { systemConfigsEqual } from './systemConfigEquality'
 import type { SystemEditorActions } from './types'
 
 const FLOW_SOLVERS = ['rk4', 'tsit5']
@@ -36,7 +38,6 @@ type SystemDraft = {
 
 type EditorState = {
   draft: SystemDraft
-  sections: Record<'model' | 'variables' | 'parameters', boolean>
   touched: boolean
   equationErrors: Array<string | null>
   message: string | null
@@ -45,7 +46,6 @@ type EditorState = {
 
 type EditorAction =
   | { type: 'set-draft'; update: SetStateAction<SystemDraft> }
-  | { type: 'toggle-section'; section: keyof EditorState['sections'] }
   | { type: 'touch' }
   | { type: 'validation-started' }
   | { type: 'validation-finished'; equationErrors: Array<string | null>; message: string | null }
@@ -57,6 +57,8 @@ function adjustArray<T>(values: T[], targetLength: number, fill: () => T): T[] {
   while (next.length < targetLength) next.push(fill())
   return next
 }
+
+const defaultPeriodic = () => ({ enabled: false, period: String(DEFAULT_VARIABLE_PERIOD) })
 
 function makeDraft(config: SystemConfig): SystemDraft {
   const periodic = normalizePeriodicVariables(config)
@@ -82,7 +84,6 @@ function makeDraft(config: SystemConfig): SystemDraft {
 function createState(config: SystemConfig): EditorState {
   return {
     draft: makeDraft(config),
-    sections: { model: true, variables: true, parameters: true },
     touched: false,
     equationErrors: [],
     message: null,
@@ -99,11 +100,6 @@ function systemEditorReducer(state: EditorState, action: EditorAction): EditorSt
           typeof action.update === 'function'
             ? action.update(state.draft)
             : action.update,
-      }
-    case 'toggle-section':
-      return {
-        ...state,
-        sections: { ...state.sections, [action.section]: !state.sections[action.section] },
       }
     case 'touch':
       return { ...state, touched: true }
@@ -133,25 +129,18 @@ function buildConfig(draft: SystemDraft): SystemConfig {
     equations: draft.equations.map((equation) => equation.trim()),
     paramNames: draft.paramNames.map((name) => name.trim()),
     params: draft.params.map((value) => parseConstantExpression(value) ?? Number.NaN),
-    periodicVariables: adjustArray(
-      draft.periodicVariables,
-      varNames.length,
-      () => ({ enabled: false, period: String(DEFAULT_VARIABLE_PERIOD) })
-    ).map((entry) => ({
-      enabled: entry.enabled,
-      period: parsePeriodExpression(entry.period) ?? Number.NaN,
-    })),
+    periodicVariables: adjustArray(draft.periodicVariables, varNames.length, defaultPeriodic).map(
+      (entry) => ({
+        enabled: entry.enabled,
+        period: parsePeriodExpression(entry.period) ?? Number.NaN,
+      })
+    ),
     periodicForcing: !draft.periodicForcingEnabled
       ? undefined
       : draft.type === 'flow'
         ? { symbol: 't', periodExpression: draft.flowPeriodExpression.trim() }
         : { symbol: 'n', iterationPeriod: Number(draft.mapIterationPeriod) },
   }
-}
-
-function configsEqual(left: SystemConfig, right: SystemConfig): boolean {
-  return JSON.stringify({ ...left, periodicVariables: normalizePeriodicVariables(left), periodicForcing: normalizePeriodicForcing(left) }) ===
-    JSON.stringify({ ...right, periodicVariables: normalizePeriodicVariables(right), periodicForcing: normalizePeriodicForcing(right) })
 }
 
 function configKey(config: SystemConfig): string {
@@ -178,76 +167,52 @@ function parseValues(value: string): number[] {
 
 function ExpressionLanguageReference({ systemType }: { systemType: 'flow' | 'map' }) {
   return (
-    <details className="system-editor__expression-reference" data-testid="expression-reference">
-      <summary>Expression syntax and functions</summary>
-      <div className="system-editor__expression-reference-body">
-        <p>
-          Names may contain spaces. Wrap names that are not plain identifiers in backticks
-          when using them in equations.
-        </p>
-        <p>
-          Use variable and parameter names with <code>+</code>, <code>-</code>, <code>*</code>,{' '}
-          <code>/</code>, <code>^</code>, parentheses, and scientific notation such as{' '}
-          <code>1e-3</code>.
-        </p>
-        <p>
-          {systemType === 'map' ? (
-            <>
-              Use <code>n</code> for the current map iteration. It starts at the orbit&apos;s{' '}
-              <code>n₀</code> and advances by one per iterate.
-            </>
-          ) : (
-            <>
-              Use <code>t</code> for the current flow time. Runge–Kutta stages evaluate it at their
-              stage times.
-            </>
-          )}{' '}
-          Declared variables or parameters with that name take precedence. Parameter values remain
-          constant expressions and cannot use the contextual symbol.
-        </p>
-        <p>
-          Built-in constants:{' '}
-          {EXPRESSION_CONSTANTS.map((constant, index) => (
-            <span key={constant}>
-              {index > 0 ? ', ' : ''}<code>{constant}</code>
-            </span>
-          ))}. Parameter values also accept finite constant expressions such as{' '}
-          <code>tau / 4</code>.
-        </p>
-        <div className="system-editor__expression-groups">
-          {EXPRESSION_FUNCTION_GROUPS.map((group) => (
-            <div key={group.label}>
-              <strong>{group.label}</strong>
-              <span>
-                {group.functions.map((signature) => (
-                  <code key={signature}>{signature}</code>
-                ))}
-              </span>
-            </div>
-          ))}
-          <div>
-            <strong>Comparisons</strong>
+    <div className="system-editor__reference" role="note">
+      <p>
+        Backtick names with spaces: <code>`my var`</code>. {systemType === 'map' ? (
+          <><code>n</code> = iteration.</>
+        ) : (
+          <><code>t</code> = time.</>
+        )}{' '}
+        Constants:{' '}
+        {EXPRESSION_CONSTANTS.map((constant) => (
+          <code key={constant}>{constant}</code>
+        ))}
+        . Parameter values accept constant expressions (<code>tau / 4</code>).
+      </p>
+      <div className="system-editor__expression-groups">
+        {EXPRESSION_FUNCTION_GROUPS.map((group) => (
+          <div key={group.label}>
+            <strong>{group.label}</strong>
             <span>
-              {EXPRESSION_COMPARISONS.map((operator) => (
-                <code key={operator}>{operator}</code>
-              ))}
-            </span>
-          </div>
-          <div>
-            <strong>Piecewise</strong>
-            <span>
-              {PIECEWISE_EXPRESSION_FUNCTIONS.map((signature) => (
+              {group.functions.map((signature) => (
                 <code key={signature}>{signature}</code>
               ))}
             </span>
           </div>
+        ))}
+        <div>
+          <strong>Comparisons</strong>
+          <span>
+            {EXPRESSION_COMPARISONS.map((operator) => (
+              <code key={operator}>{operator}</code>
+            ))}
+          </span>
         </div>
-        <p className="field-warning">
-          Piecewise functions are differentiated on their current branch but are not differentiable
-          at jumps, ties, or corners. Avoid those points in continuation and normal-form calculations.
-        </p>
+        <div>
+          <strong>Piecewise</strong>
+          <span>
+            {PIECEWISE_EXPRESSION_FUNCTIONS.map((signature) => (
+              <code key={signature}>{signature}</code>
+            ))}
+          </span>
+        </div>
       </div>
-    </details>
+      <p className="field-warning">
+        Piecewise functions are not differentiable at jumps, ties, or corners; avoid those points in
+        continuation and normal forms.
+      </p>
+    </div>
   )
 }
 
@@ -264,6 +229,8 @@ type SystemEditorPanelProps = {
   systemId: string
   config: SystemConfig
   actions: SystemEditorActions
+  /** Optional element (e.g. a dialog header) that receives the Import/Copy buttons. */
+  toolsContainer?: HTMLElement | null
 }
 
 export function SystemEditorPanel(props: SystemEditorPanelProps) {
@@ -271,12 +238,62 @@ export function SystemEditorPanel(props: SystemEditorPanelProps) {
   return <SystemEditorSession key={key} {...props} />
 }
 
-function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
+function ParameterMenu({
+  disabled,
+  onCopy,
+  onPaste,
+}: {
+  disabled: boolean
+  onCopy: () => void
+  onPaste: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLSpanElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (event: PointerEvent) => {
+      if (ref.current && event.target instanceof Node && ref.current.contains(event.target)) return
+      setOpen(false)
+    }
+    window.addEventListener('pointerdown', close)
+    return () => window.removeEventListener('pointerdown', close)
+  }, [open])
+  return (
+    <span className="system-editor__menu" ref={ref}>
+      <button
+        type="button"
+        className="icon-btn icon-btn--sm"
+        onClick={() => setOpen((value) => !value)}
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Parameter value actions"
+        title="Copy / paste values"
+        data-testid="system-param-menu"
+      >
+        <Icon name="more" size={14} />
+      </button>
+      {open ? (
+        <span className="menu-surface system-editor__menu-list" role="menu">
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onCopy() }}>
+            Copy values
+          </button>
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onPaste() }}>
+            Paste values
+          </button>
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+function SystemEditorSession({ config, actions, toolsContainer }: SystemEditorPanelProps) {
   const [state, dispatch] = useReducer(systemEditorReducer, config, createState)
-  const { draft, sections } = state
+  const [referenceOpen, setReferenceOpen] = useState(false)
+  const { draft } = state
   const systemConfig = useMemo(() => buildConfig(draft), [draft])
   const validation = useMemo(() => validateSystemConfig(systemConfig), [systemConfig])
-  const dirty = useMemo(() => !configsEqual(systemConfig, config), [config, systemConfig])
+  const dirty = useMemo(() => !systemConfigsEqual(systemConfig, config), [config, systemConfig])
   const showErrors = state.touched || dirty || !validation.valid
 
   const setDraft = (update: SetStateAction<SystemDraft>) =>
@@ -353,9 +370,6 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
     }))
   }
 
-  const toggle = (section: keyof EditorState['sections']) =>
-    dispatch({ type: 'toggle-section', section })
-
   const replaceFromSystemString = (definition: SystemStringDefinition) => {
     setDraft((previous) => ({
       ...previous,
@@ -363,13 +377,20 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
       equations: definition.equations,
       paramNames: definition.paramNames,
       params: definition.params.map(String),
-      periodicVariables: definition.varNames.map(() => ({
-        enabled: false,
-        period: String(DEFAULT_VARIABLE_PERIOD),
-      })),
+      periodicVariables: definition.varNames.map(defaultPeriodic),
     }))
     dispatch({ type: 'clear-validation' })
   }
+
+  const updatePeriodic = (index: number, update: Partial<SystemDraft['periodicVariables'][number]>) =>
+    setDraft((previous) => ({
+      ...previous,
+      periodicVariables: adjustArray(previous.periodicVariables, previous.varNames.length, defaultPeriodic).map(
+        (value, current) => (current === index ? { ...value, ...update } : value)
+      ),
+    }))
+
+  const isMap = draft.type === 'map'
 
   return (
     <div className="inspector-panel system-editor" data-testid="inspector-panel-body">
@@ -378,143 +399,165 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
           definition={systemConfig}
           canCopy={validation.valid}
           onImport={replaceFromSystemString}
+          actionsContainer={toolsContainer}
         />
-        <section className={`inspector-section system-editor__card${sections.model ? '' : ' is-collapsed'}`}>
-          <header className="system-editor__card-header">
-            <button type="button" className="system-editor__section-toggle" aria-expanded={sections.model} onClick={() => toggle('model')} data-testid="system-toggle-model">
-              <span aria-hidden="true">{sections.model ? '▾' : '▸'}</span>
-              <span className="system-editor__section-copy">
-                <span className="system-editor__section-title">Model</span>
-              </span>
-            </button>
-            <div className="system-editor__counts"><span>{draft.varNames.length} variables</span><span>{draft.paramNames.length} parameters</span></div>
-          </header>
-          {sections.model ? (
-            <div className="system-editor__card-body">
-              <div className={`system-editor__model-grid system-editor__model-grid--${draft.type}`}>
-                <label className="system-editor__field system-editor__field--name">
-                  <span>System name</span>
-                  <input value={draft.name} onChange={(event) => setDraft((previous) => ({ ...previous, name: event.target.value }))} data-testid="system-name" />
-                  {showErrors && validation.errors.name ? <span className="field-error">{validation.errors.name}</span> : null}
-                </label>
-                <div className="system-editor__field system-editor__field--type">
-                  <span>System type</span>
-                  <div className="system-type-switch" role="group" aria-label="System type" data-testid="system-type">
-                    <button type="button" className={draft.type === 'flow' ? 'is-active' : undefined} aria-pressed={draft.type === 'flow'} title="Ordinary differential equations in continuous time" onClick={() => setType('flow')} data-testid="system-type-flow"><strong>Flow</strong></button>
-                    <button type="button" className={draft.type === 'map' ? 'is-active' : undefined} aria-pressed={draft.type === 'map'} title="Discrete iterations of a state update" onClick={() => setType('map')} data-testid="system-type-map"><strong>Discrete map</strong></button>
+
+        <div className="system-editor__model">
+          <input
+            className="system-editor__name"
+            value={draft.name}
+            aria-label="System name"
+            placeholder="Name"
+            onChange={(event) => setDraft((previous) => ({ ...previous, name: event.target.value }))}
+            data-testid="system-name"
+          />
+          <div className="system-type-switch" role="group" aria-label="System type" data-testid="system-type">
+            <button type="button" className={!isMap ? 'is-active' : undefined} aria-pressed={!isMap} title="Ordinary differential equations" onClick={() => setType('flow')} data-testid="system-type-flow">Flow</button>
+            <button type="button" className={isMap ? 'is-active' : undefined} aria-pressed={isMap} title="Discrete map (iterated update)" onClick={() => setType('map')} data-testid="system-type-map">Map</button>
+          </div>
+          {!isMap ? (
+            <select
+              className="system-editor__solver"
+              value={draft.solver}
+              aria-label="Solver"
+              title="Solver"
+              onChange={(event) => setDraft((previous) => ({ ...previous, solver: event.target.value }))}
+              data-testid="system-solver"
+            >
+              {FLOW_SOLVERS.map((solver) => <option key={solver} value={solver}>{solver}</option>)}
+            </select>
+          ) : null}
+          <label className="system-editor__check" data-testid="system-periodic-forcing">
+            <input
+              type="checkbox"
+              checked={draft.periodicForcingEnabled}
+              onChange={(event) => setDraft((previous) => ({ ...previous, periodicForcingEnabled: event.target.checked }))}
+              data-testid="system-periodic-forcing-enabled"
+            />
+            Periodic forcing
+          </label>
+        </div>
+        {showErrors && validation.errors.name ? <div className="field-error">{validation.errors.name}</div> : null}
+        {draft.periodicForcingEnabled ? (
+          <div className="system-editor__forcing">
+            {!isMap ? (
+              <label>
+                <span>Period</span>
+                <input
+                  value={draft.flowPeriodExpression}
+                  placeholder="tau / omega"
+                  onChange={(event) => setDraft((previous) => ({ ...previous, flowPeriodExpression: event.target.value }))}
+                  data-testid="system-forcing-period-expression"
+                />
+              </label>
+            ) : (
+              <label>
+                <span>Period (iterations)</span>
+                <input
+                  type="number"
+                  step="1"
+                  value={draft.mapIterationPeriod}
+                  onChange={(event) => setDraft((previous) => ({ ...previous, mapIterationPeriod: event.target.value }))}
+                  data-testid="system-forcing-iteration-period"
+                />
+              </label>
+            )}
+            <span className="faint">Used by stroboscopic analysis; not inferred.</span>
+            {showErrors && validation.errors.periodicForcing ? <span className="field-error" data-testid="system-periodic-forcing-error">{validation.errors.periodicForcing}</span> : null}
+          </div>
+        ) : null}
+        {validation.warnings.length > 0 ? <div className="field-warning system-editor__message">{validation.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}
+
+        <section className="system-editor__section system-editor__variables">
+          <h3 className="section-head">
+            <span className="system-editor__head-title">
+              Variables
+              <button
+                type="button"
+                className={`icon-btn icon-btn--sm${referenceOpen ? ' is-active' : ''}`}
+                onClick={() => setReferenceOpen((open) => !open)}
+                aria-expanded={referenceOpen}
+                aria-label="Expression syntax and functions"
+                title="Expression syntax and functions"
+                data-testid="expression-reference"
+              >
+                <Icon name="help" size={14} />
+              </button>
+            </span>
+            <button type="button" className="btn btn--ghost system-editor__add-button" onClick={() => setDraft((previous) => ({ ...previous, varNames: [...previous.varNames, `x${previous.varNames.length + 1}`], equations: [...previous.equations, ''], periodicVariables: [...previous.periodicVariables, defaultPeriodic()] }))} data-testid="system-add-variable"><Icon name="plus" size={13} /> Variable</button>
+          </h3>
+          {referenceOpen ? <ExpressionLanguageReference systemType={draft.type} /> : null}
+          {showErrors && validation.errors.varNames ? <div className="field-error">{validation.errors.varNames}</div> : null}
+          <div className="system-editor__variable-list">
+            {draft.varNames.length > 0 ? (
+              <div className="system-editor__variable-head" aria-hidden="true">
+                <span />
+                <span />
+                <span>Periodic</span>
+                <span />
+              </div>
+            ) : null}
+            {draft.varNames.map((name, index) => {
+              const label = name || `x${index + 1}`
+              const periodic = draft.periodicVariables[index]
+              const equationError = state.equationErrors[index] ?? (state.touched ? validation.errors.equations?.[index] : null)
+              return (
+                <div className="system-editor__variable-row" key={`variable-${index}`}>
+                  <input className="system-editor__var-name" value={name} aria-label={`Variable ${index + 1} name`} onChange={(event) => setDraft((previous) => ({ ...previous, varNames: previous.varNames.map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-var-${index}`} />
+                  <div className="system-editor__equation-input">
+                    <span aria-hidden="true">{isMap ? `${label}ₙ₊₁` : `${label}′`} =</span>
+                    <textarea rows={1} value={draft.equations[index] ?? ''} aria-label={`${label} equation`} spellCheck={false} onChange={(event) => setDraft((previous) => ({ ...previous, equations: adjustArray(previous.equations, previous.varNames.length, () => '').map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-eq-${index}`} />
                   </div>
+                  <span className="system-editor__periodic">
+                    <input type="checkbox" checked={Boolean(periodic?.enabled)} aria-label={`${label} periodic`} title={`Periodic ${label}`} onChange={(event) => updatePeriodic(index, { enabled: event.target.checked })} data-testid={`system-periodic-enabled-${index}`} />
+                    {periodic?.enabled ? <input className="system-editor__period" value={periodic.period} aria-label={`${label} period`} title="Period" onChange={(event) => updatePeriodic(index, { period: event.target.value })} data-testid={`system-periodic-period-${index}`} /> : null}
+                  </span>
+                  <button type="button" className="icon-btn icon-btn--sm system-editor__remove-button" aria-label={`Remove ${label}`} title="Remove" onClick={() => setDraft((previous) => ({ ...previous, varNames: previous.varNames.filter((_, current) => current !== index), equations: previous.equations.filter((_, current) => current !== index), periodicVariables: previous.periodicVariables.filter((_, current) => current !== index) }))} data-testid={`system-remove-var-${index}`}><Icon name="close" size={13} /></button>
+                  {equationError ? <span className="field-error system-editor__row-error" data-testid={state.equationErrors[index] ? `system-eq-error-${index}` : undefined}>{equationError}</span> : null}
+                  {periodic?.enabled && showErrors && validation.errors.periodicVariables?.[index] ? <span className="field-error system-editor__row-error" data-testid={`system-periodic-error-${index}`}>{validation.errors.periodicVariables[index]}</span> : null}
                 </div>
-                {draft.type === 'flow' ? (
-                  <label className="system-editor__field system-editor__field--solver">
-                    <span>Integrator</span>
-                    <select value={draft.solver} onChange={(event) => setDraft((previous) => ({ ...previous, solver: event.target.value }))} data-testid="system-solver">
-                      {FLOW_SOLVERS.map((solver) => <option key={solver} value={solver}>{solver}</option>)}
-                    </select>
-                  </label>
-                ) : null}
-              </div>
-              {validation.warnings.length > 0 ? <div className="field-warning system-editor__message">{validation.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}
-              <div className="periodic-control system-editor__forcing" data-testid="system-periodic-forcing">
-                <label className="periodic-control__toggle">
-                  <input
-                    type="checkbox"
-                    checked={draft.periodicForcingEnabled}
-                    onChange={(event) => setDraft((previous) => ({ ...previous, periodicForcingEnabled: event.target.checked }))}
-                    data-testid="system-periodic-forcing-enabled"
-                  />
-                  Periodic forcing
-                </label>
-                {draft.periodicForcingEnabled ? (
-                  draft.type === 'flow' ? (
-                    <label className="system-editor__field">
-                      <span>Forcing period expression</span>
-                      <input
-                        value={draft.flowPeriodExpression}
-                        placeholder="e.g. tau / omega"
-                        onChange={(event) => setDraft((previous) => ({ ...previous, flowPeriodExpression: event.target.value }))}
-                        data-testid="system-forcing-period-expression"
-                      />
-                    </label>
-                  ) : (
-                    <label className="system-editor__field">
-                      <span>Forcing period (iterations)</span>
-                      <input
-                        type="number"
-                        step="1"
-                        value={draft.mapIterationPeriod}
-                        onChange={(event) => setDraft((previous) => ({ ...previous, mapIterationPeriod: event.target.value }))}
-                        data-testid="system-forcing-iteration-period"
-                      />
-                    </label>
-                  )
-                ) : null}
-                {showErrors && validation.errors.periodicForcing ? <span className="field-error" data-testid="system-periodic-forcing-error">{validation.errors.periodicForcing}</span> : null}
-                {draft.periodicForcingEnabled ? <span className="field-warning">This declares the forcing periodicity used by stroboscopic response analysis; Fork does not infer it from the equations.</span> : null}
-              </div>
+              )
+            })}
+          </div>
+        </section>
+
+        <section className="system-editor__section system-editor__parameters">
+          <h3 className="section-head">
+            <span className="system-editor__head-title">
+              Parameters
+              <ParameterMenu
+                disabled={draft.paramNames.length === 0}
+                onCopy={() => void copyText(formatValues(draft.params))}
+                onPaste={() => void pasteParameters()}
+              />
+            </span>
+            <button type="button" className="btn btn--ghost system-editor__add-button" onClick={() => setDraft((previous) => ({ ...previous, paramNames: [...previous.paramNames, `p${previous.paramNames.length + 1}`], params: [...previous.params, '0'] }))} data-testid="system-add-parameter"><Icon name="plus" size={13} /> Parameter</button>
+          </h3>
+          {showErrors && validation.errors.paramNames ? <div className="field-error">{validation.errors.paramNames}</div> : null}
+          {draft.paramNames.length > 0 ? (
+            <div className="system-editor__parameter-list">
+              {draft.paramNames.map((name, index) => {
+                const valueError = showErrors ? validation.errors.params?.[index] : null
+                return (
+                  <div className={`system-editor__parameter-row${valueError ? ' is-invalid' : ''}`} key={`parameter-${index}`} title={valueError ?? undefined}>
+                    <input className="system-editor__param-name" value={name} aria-label={`Parameter ${index + 1} name`} onChange={(event) => setDraft((previous) => ({ ...previous, paramNames: previous.paramNames.map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-param-${index}`} />
+                    <span className="system-editor__equals" aria-hidden="true">=</span>
+                    <input className="system-editor__param-value" type="text" inputMode="text" placeholder="0" value={draft.params[index] ?? ''} aria-label={`${name || `Parameter ${index + 1}`} value`} aria-invalid={valueError ? true : undefined} onChange={(event) => setDraft((previous) => ({ ...previous, params: adjustArray(previous.params, previous.paramNames.length, () => '0').map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-param-value-${index}`} />
+                    <button type="button" className="icon-btn icon-btn--sm system-editor__remove-button" aria-label={`Remove ${name || `parameter ${index + 1}`}`} title="Remove" onClick={() => setDraft((previous) => ({ ...previous, paramNames: previous.paramNames.filter((_, current) => current !== index), params: previous.params.filter((_, current) => current !== index) }))} data-testid={`system-remove-param-${index}`}><Icon name="close" size={13} /></button>
+                  </div>
+                )
+              })}
             </div>
           ) : null}
         </section>
-
-        <div className="system-editor__workspace">
-          <section className={`inspector-section system-editor__card system-editor__variables${sections.variables ? '' : ' is-collapsed'}`}>
-            <header className="system-editor__card-header">
-              <button type="button" className="system-editor__section-toggle" aria-expanded={sections.variables} onClick={() => toggle('variables')} data-testid="system-toggle-variables">
-                <span aria-hidden="true">{sections.variables ? '▾' : '▸'}</span>
-                <span className="system-editor__section-copy"><span className="system-editor__section-title">Variables and equations</span></span>
-              </button>
-              <button type="button" className="system-editor__add-button" onClick={() => setDraft((previous) => ({ ...previous, varNames: [...previous.varNames, `x${previous.varNames.length + 1}`], equations: [...previous.equations, ''], periodicVariables: [...previous.periodicVariables, { enabled: false, period: String(DEFAULT_VARIABLE_PERIOD) }] }))} data-testid="system-add-variable">+ Variable</button>
-            </header>
-            {sections.variables ? (
-              <div className="system-editor__card-body">
-                {showErrors && validation.errors.varNames ? <div className="field-error">{validation.errors.varNames}</div> : null}
-                <ExpressionLanguageReference systemType={draft.type} />
-                <div className="system-editor__table-head system-editor__table-head--variables" aria-hidden="true"><span>Name</span><span>{draft.type === 'map' ? 'Next-state expression' : 'Derivative'}</span><span>Domain</span><span /></div>
-                <div className="inspector-list system-editor__variable-list">
-                  {draft.varNames.map((name, index) => (
-                    <div className="system-editor__variable-row" key={`variable-${index}`}>
-                      <label className="system-editor__compact-field"><span className="system-editor__mobile-label">Variable</span><input value={name} aria-label={`Variable ${index + 1} name`} onChange={(event) => setDraft((previous) => ({ ...previous, varNames: previous.varNames.map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-var-${index}`} /></label>
-                      <div className="system-editor__equation-field">
-                        <span className="system-editor__mobile-label">{draft.type === 'map' ? 'Next-state expression' : 'Derivative'}</span>
-                        <div className="system-editor__equation-input"><span>{draft.type === 'map' ? `${name || `x${index + 1}`}ₙ₊₁` : `${name || `x${index + 1}`}′`} =</span><textarea value={draft.equations[index] ?? ''} aria-label={`${name} equation`} onChange={(event) => setDraft((previous) => ({ ...previous, equations: adjustArray(previous.equations, previous.varNames.length, () => '').map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-eq-${index}`} /></div>
-                        {state.equationErrors[index] ? <span className="field-error" data-testid={`system-eq-error-${index}`}>{state.equationErrors[index]}</span> : null}
-                      </div>
-                      <div className="system-editor__domain-field">
-                        <span className="system-editor__mobile-label">Domain</span>
-                        <div className="periodic-control">
-                          <label className="periodic-control__toggle"><input type="checkbox" checked={Boolean(draft.periodicVariables[index]?.enabled)} onChange={(event) => setDraft((previous) => ({ ...previous, periodicVariables: adjustArray(previous.periodicVariables, previous.varNames.length, () => ({ enabled: false, period: String(DEFAULT_VARIABLE_PERIOD) })).map((value, current) => current === index ? { ...value, enabled: event.target.checked } : value) }))} data-testid={`system-periodic-enabled-${index}`} />Periodic</label>
-                          {draft.periodicVariables[index]?.enabled ? <input className="periodic-control__period" value={draft.periodicVariables[index]?.period ?? String(DEFAULT_VARIABLE_PERIOD)} aria-label={`${name} period`} onChange={(event) => setDraft((previous) => ({ ...previous, periodicVariables: adjustArray(previous.periodicVariables, previous.varNames.length, () => ({ enabled: false, period: String(DEFAULT_VARIABLE_PERIOD) })).map((value, current) => current === index ? { ...value, period: event.target.value } : value) }))} data-testid={`system-periodic-period-${index}`} /> : null}
-                        </div>
-                        {draft.periodicVariables[index]?.enabled && showErrors && validation.errors.periodicVariables?.[index] ? <span className="field-error" data-testid={`system-periodic-error-${index}`}>{validation.errors.periodicVariables[index]}</span> : null}
-                      </div>
-                      <button type="button" className="system-editor__remove-button" onClick={() => setDraft((previous) => ({ ...previous, varNames: previous.varNames.filter((_, current) => current !== index), equations: previous.equations.filter((_, current) => current !== index), periodicVariables: previous.periodicVariables.filter((_, current) => current !== index) }))} data-testid={`system-remove-var-${index}`}>Remove</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </section>
-
-          <section className={`inspector-section system-editor__card system-editor__parameters${sections.parameters ? '' : ' is-collapsed'}`}>
-            <header className="system-editor__card-header">
-              <button type="button" className="system-editor__section-toggle" aria-expanded={sections.parameters} onClick={() => toggle('parameters')} data-testid="system-toggle-parameters"><span aria-hidden="true">{sections.parameters ? '▾' : '▸'}</span><span className="system-editor__section-copy"><span className="system-editor__section-title">Parameters</span></span></button>
-              <button type="button" className="system-editor__add-button" onClick={() => setDraft((previous) => ({ ...previous, paramNames: [...previous.paramNames, `p${previous.paramNames.length + 1}`], params: [...previous.params, '0'] }))} data-testid="system-add-parameter">+ Parameter</button>
-            </header>
-            {sections.parameters ? (
-              <div className="system-editor__card-body">
-                <div className="system-editor__parameter-tools"><button type="button" className="inspector-inline-button" onClick={() => void copyText(formatValues(draft.params))} disabled={draft.paramNames.length === 0}>Copy values</button><button type="button" className="inspector-inline-button" onClick={() => void pasteParameters()} disabled={draft.paramNames.length === 0}>Paste values</button></div>
-                {draft.paramNames.length > 0 ? <div className="inspector-list system-editor__parameter-list">{draft.paramNames.map((name, index) => <div className="system-editor__parameter-row" key={`parameter-${index}`}><label className="system-editor__compact-field"><span className="system-editor__mobile-label">Parameter</span><input value={name} onChange={(event) => setDraft((previous) => ({ ...previous, paramNames: previous.paramNames.map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-param-${index}`} /></label><label className="system-editor__compact-field"><span className="system-editor__mobile-label">Value</span><input type="text" inputMode="text" placeholder="e.g. tau / 4" value={draft.params[index] ?? ''} onChange={(event) => setDraft((previous) => ({ ...previous, params: adjustArray(previous.params, previous.paramNames.length, () => '0').map((value, current) => current === index ? event.target.value : value) }))} data-testid={`system-param-value-${index}`} /></label><button type="button" className="system-editor__remove-button" onClick={() => setDraft((previous) => ({ ...previous, paramNames: previous.paramNames.filter((_, current) => current !== index), params: previous.params.filter((_, current) => current !== index) }))} data-testid={`system-remove-param-${index}`}>Remove</button></div>)}</div> : <div className="system-editor__empty">No parameters.</div>}
-              </div>
-            ) : null}
-          </section>
-        </div>
       </div>
       <footer className="system-editor__footer">
         <div className="system-editor__status" aria-live="polite">
           {state.message ? <div className="field-error">{state.message}</div> : null}
           {state.validating ? <div className="field-warning">Validating equations…</div> : null}
-          {!state.message && !state.validating && dirty ? <span>Unsaved changes</span> : null}
+          {!state.message && !state.validating && dirty ? <span className="muted">Unsaved changes</span> : null}
         </div>
-        <button className="system-editor__apply inspector-primary-action" onClick={() => void apply()} disabled={state.validating || !dirty} data-testid="system-apply">Apply changes</button>
+        <button className="btn btn--primary system-editor__apply" onClick={() => void apply()} disabled={state.validating || !dirty} data-testid="system-apply">Apply</button>
       </footer>
     </div>
   )

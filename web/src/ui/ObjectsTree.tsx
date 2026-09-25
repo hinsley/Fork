@@ -8,14 +8,30 @@ import {
   useRef,
   useState,
 } from 'react'
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
-import type { ContinuationObject, System, TreeNode } from '../system/types'
-import { canMoveNodeIntoParent, DEFAULT_RENDER } from '../system/model'
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react'
+import type { ContinuationObject, RowSummary, System, TreeNode } from '../system/types'
+import {
+  canMoveNodeIntoParent,
+  DEFAULT_RENDER,
+  isNodeEffectivelyVisible,
+} from '../system/model'
 import type { ReorderPlacement } from '../system/model'
 import { hasCustomObjectParams } from '../system/parameters'
 import { formatEquilibriumLabel } from '../system/labels'
+import {
+  formatBifurcationBadges,
+  rowSummaryMatches,
+  summarizeBranch,
+  summarizeObject,
+} from '../system/rowSummary'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
-import { clampMenuX, clampMenuY } from './contextMenu'
+import { clampMenuX, clampMenuY, focusMenuItem } from './contextMenu'
+import { Icon, type IconName } from './Icon'
+import './tree.css'
 
 export type ObjectsTreeHandle = {
   openCreateMenu: (position: { x: number; y: number }) => void
@@ -30,7 +46,14 @@ type ObjectsTreeProps = {
   onToggleExpanded: (id: string) => void
   onReorderNode: (nodeId: string, targetId: string, placement?: ReorderPlacement) => void
   onMoveNodeIntoParent?: (nodeId: string, parentId: string | null) => void
-  onCreateFolder?: (parentId?: string | null) => void
+  /**
+   * Creates a folder under `parentId`. With `wrapNodeId` the folder replaces that
+   * sibling and contains it. Returning the new folder id starts an inline rename.
+   */
+  onCreateFolder?: (
+    parentId?: string | null,
+    options?: { wrapNodeId?: string }
+  ) => string | null | void
   onCreateOrbit: () => void
   onCreateEquilibrium: () => void
   onCreateForcedPeriodicResponse?: (orbitId?: string) => void
@@ -39,6 +62,9 @@ type ObjectsTreeProps = {
   onDuplicateNode?: (id: string) => void | Promise<void>
   onDeleteNode: (id: string) => void
 }
+
+/** Show the filter box once the tree has this many rows (or while filtering). */
+const FILTER_MIN_NODES = 8
 
 const TOUCH_DRAG_THRESHOLD_PX = 8
 const TOUCH_DRAG_ARM_DELAY_MS = 220
@@ -138,6 +164,36 @@ function getNodeLabel(node: TreeNode, system: System) {
   return node.name
 }
 
+function getNodeGlyph(node: TreeNode, system: System): { icon: IconName; kind: string } {
+  if (node.kind === 'folder') return { icon: 'folder', kind: 'folder' }
+  if (node.kind === 'branch') {
+    const branchType =
+      system.branches[node.id]?.branchType ?? system.index.branches[node.id]?.branchType
+    if (branchType?.includes('manifold')) return { icon: 'manifold', kind: `branch-${branchType}` }
+    return { icon: 'branch', kind: branchType ? `branch-${branchType}` : 'branch' }
+  }
+  switch (node.objectType) {
+    case 'orbit':
+      return { icon: 'orbit', kind: 'orbit' }
+    case 'equilibrium':
+      return { icon: 'equilibrium', kind: 'equilibrium' }
+    case 'limit_cycle':
+      return { icon: 'cycle', kind: 'limit_cycle' }
+    case 'forced_periodic_response':
+      return { icon: 'cycle', kind: 'forced_periodic_response' }
+    case 'isocline':
+      return { icon: 'isocline', kind: 'isocline' }
+    case 'state_grid':
+      return { icon: 'grid', kind: 'state_grid' }
+    case 'invariant_measure':
+      return { icon: 'measure', kind: 'invariant_measure' }
+    case 'particles':
+      return { icon: 'particles', kind: 'particles' }
+    default:
+      return { icon: 'orbit', kind: node.objectType ?? node.kind }
+  }
+}
+
 function getLayoutTop(element: HTMLElement): number {
   let top = 0
   let cursor: HTMLElement | null = element
@@ -209,6 +265,11 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const previousRowTops = useRef(new Map<string, number>())
     const touchInteractionRef = useRef<TouchTreeInteraction | null>(null)
     const suppressNextClickRef = useRef(false)
+    const [filter, setFilter] = useState('')
+    const labelRefs = useRef(new Map<string, HTMLButtonElement>())
+    const pendingFocusRef = useRef<string | null>(null)
+    const menuOpenedByKeyboardRef = useRef(false)
+    const createdFolderRenameRef = useRef<string | null>(null)
     const equilibriumLabel = formatEquilibriumLabel(system.config.type)
     const createEquilibriumLabel =
       system.config.type === 'map' ? 'Fixed point / cycle' : equilibriumLabel
@@ -237,6 +298,32 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       setDraftName(node.name)
     }
 
+    const focusNodeLabel = useCallback((nodeId: string) => {
+      const label = labelRefs.current.get(nodeId)
+      if (label) {
+        label.focus()
+        pendingFocusRef.current = null
+      } else {
+        // The row may not be rendered yet (e.g. right after a rename or expand).
+        pendingFocusRef.current = nodeId
+      }
+    }, [])
+
+    useEffect(() => {
+      const pending = pendingFocusRef.current
+      if (!pending) return
+      const label = labelRefs.current.get(pending)
+      if (label) {
+        label.focus()
+        pendingFocusRef.current = null
+      }
+    })
+
+    const closeMenus = useCallback(() => {
+      setNodeContextMenu(null)
+      setCreateMenu(null)
+    }, [])
+
     useEffect(() => {
       if (!nodeContextMenu && !createMenu) return
       const handlePointerDown = () => {
@@ -245,8 +332,20 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       }
       const handleKeyDown = (event: KeyboardEvent) => {
         if (event.key === 'Escape') {
+          const returnId = menuOpenedByKeyboardRef.current ? nodeContextMenu?.id : null
           setNodeContextMenu(null)
           setCreateMenu(null)
+          if (returnId) focusNodeLabel(returnId)
+          return
+        }
+        const menu = nodeContextMenuRef.current ?? createMenuRef.current
+        if (!menu) return
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault()
+          focusMenuItem(menu, event.key === 'ArrowDown' ? 1 : -1)
+        } else if (event.key === 'Home' || event.key === 'End') {
+          event.preventDefault()
+          focusMenuItem(menu, event.key === 'Home' ? 'first' : 'last')
         }
       }
       const handleBlur = () => {
@@ -261,7 +360,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         window.removeEventListener('keydown', handleKeyDown)
         window.removeEventListener('blur', handleBlur)
       }
-    }, [nodeContextMenu, createMenu])
+    }, [nodeContextMenu, createMenu, focusNodeLabel])
 
     useLayoutEffect(() => {
       if (!createMenu || !createMenuRef.current) return
@@ -344,11 +443,22 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       setEditingId(null)
     }
 
-    const openNodeContextMenu = (nodeId: string, x: number, y: number) => {
+    const openNodeContextMenu = (
+      nodeId: string,
+      x: number,
+      y: number,
+      viaKeyboard = false
+    ) => {
       onSelect(nodeId)
       setCreateMenu(null)
+      menuOpenedByKeyboardRef.current = viaKeyboard
       setNodeContextMenu({ id: nodeId, x, y })
     }
+
+    useEffect(() => {
+      if (!nodeContextMenu || !menuOpenedByKeyboardRef.current) return
+      focusMenuItem(nodeContextMenuRef.current, 'first')
+    }, [nodeContextMenu])
 
     const openCreateMenu = useCallback((position: { x: number; y: number }) => {
       setNodeContextMenu(null)
@@ -752,245 +862,541 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       event.currentTarget.releasePointerCapture?.(event.pointerId)
     }
 
-    const renderNode = (nodeId: string, depth: number) => {
-    const node = system.nodes[nodeId]
-    if (!node) return null
-    let inferredDepth = 0
-    let cursor = node
-    const visited = new Set<string>([nodeId])
-    while (cursor.parentId) {
-      if (visited.has(cursor.parentId)) break
-      const parent = system.nodes[cursor.parentId]
-      if (!parent) break
-      inferredDepth += 1
-      visited.add(cursor.parentId)
-      cursor = parent
-    }
-    const paddingDepth = Math.max(depth, inferredDepth)
-    const indentStyle = { '--tree-node-depth': paddingDepth } as CSSProperties
-    const isSelected = nodeId === selectedNodeId
-    const directChildren = node.children.filter((id) => Boolean(system.nodes[id]))
-    const derivedChildren = childrenByParent.get(nodeId) ?? []
-    const childIds =
-      directChildren.length > 0
+    const getChildIds = (nodeId: string): string[] => {
+      const node = system.nodes[nodeId]
+      if (!node) return []
+      const directChildren = node.children.filter((id) => Boolean(system.nodes[id]))
+      const derivedChildren = childrenByParent.get(nodeId) ?? []
+      return directChildren.length > 0
         ? [...directChildren, ...derivedChildren.filter((id) => !directChildren.includes(id))]
         : derivedChildren
-    const hasChildren = childIds.length > 0
-    const isEditing = editingId === nodeId
-    const nodeColor = node.render?.color ?? DEFAULT_RENDER.color
-    const visibilityStyle = { '--node-color': nodeColor } as CSSProperties
-    const object = system.objects[nodeId]
-    const customParameters =
-      object && object.type !== 'continuation' && 'customParameters' in object
-        ? object.customParameters
-        : null
-    const hasFrozenVariables =
-      object &&
-      object.type !== 'continuation' &&
-      'frozenVariables' in object &&
-      Object.keys(object.frozenVariables?.frozenValuesByVarName ?? {}).length > 0
+    }
 
-    return (
-      <div key={nodeId} className="tree-node">
+    // Row summaries: hydrated payloads win, otherwise the persisted index digest.
+    const summaries = useMemo(() => {
+      const map = new Map<string, RowSummary | undefined>()
+      Object.values(system.nodes).forEach((node) => {
+        if (node.kind === 'object') {
+          const object = system.objects[node.id]
+          map.set(
+            node.id,
+            object ? summarizeObject(object, system.config) : system.index.objects[node.id]?.summary
+          )
+        } else if (node.kind === 'branch') {
+          const branch = system.branches[node.id]
+          map.set(
+            node.id,
+            branch ? summarizeBranch(branch, system.config) : system.index.branches[node.id]?.summary
+          )
+        }
+      })
+      return map
+    }, [system.nodes, system.objects, system.branches, system.index, system.config])
+
+    const treeNodeCount = useMemo(
+      () =>
+        Object.values(system.nodes).filter(
+          (node) => node.kind === 'object' || node.kind === 'branch' || node.kind === 'folder'
+        ).length,
+      [system.nodes]
+    )
+    const showFilter = treeNodeCount >= FILTER_MIN_NODES || filter.length > 0
+    const activeFilter = showFilter ? filter.trim() : ''
+
+    // Filter: matches and their ancestors are forced open; descendants of a match
+    // stay visible (following their own expansion). `null` means no filter.
+    const filterState = (() => {
+      if (!activeFilter) return null
+      const forced = new Set<string>()
+      const shown = new Set<string>()
+      const visited = new Set<string>()
+      const visit = (nodeId: string, ancestors: string[], underMatch: boolean) => {
+        if (visited.has(nodeId)) return
+        visited.add(nodeId)
+        const node = system.nodes[nodeId]
+        if (!node) return
+        const matches = rowSummaryMatches(activeFilter, node.name, summaries.get(nodeId), [
+          getNodeLabel(node, system),
+        ])
+        if (matches) {
+          forced.add(nodeId)
+          ancestors.forEach((id) => forced.add(id))
+        }
+        if (matches || underMatch) shown.add(nodeId)
+        getChildIds(nodeId).forEach((childId) =>
+          visit(childId, [...ancestors, nodeId], underMatch || matches)
+        )
+      }
+      rootNodes.forEach((id) => visit(id, [], false))
+      forced.forEach((id) => shown.add(id))
+      return { forced, shown }
+    })()
+
+    const isShown = (nodeId: string) => !filterState || filterState.shown.has(nodeId)
+    const isForcedOpen = (nodeId: string) =>
+      Boolean(filterState) && getChildIds(nodeId).some((id) => filterState?.forced.has(id))
+    const isOpen = (nodeId: string) =>
+      isForcedOpen(nodeId) || Boolean(system.nodes[nodeId]?.expanded)
+
+    // Rows in display order (ignoring drag previews) for keyboard navigation.
+    const visibleOrder: string[] = []
+    const parentOf = new Map<string, string | null>()
+    {
+      const seen = new Set<string>()
+      const walk = (ids: string[], parentId: string | null) => {
+        ids.forEach((id) => {
+          if (seen.has(id) || !system.nodes[id] || !isShown(id)) return
+          seen.add(id)
+          visibleOrder.push(id)
+          parentOf.set(id, parentId)
+          if (isOpen(id)) walk(getChildIds(id), id)
+        })
+      }
+      walk(rootNodes, null)
+    }
+    const tabStopId =
+      selectedNodeId && visibleOrder.includes(selectedNodeId) ? selectedNodeId : visibleOrder[0]
+
+    const moveFocusTo = (nodeId: string | null | undefined) => {
+      if (!nodeId) return
+      onSelect(nodeId)
+      focusNodeLabel(nodeId)
+    }
+
+    const requestDelete = (nodeId: string) => {
+      const node = system.nodes[nodeId]
+      if (!node) return
+      if (confirmDelete({ name: node.name, kind: getDeleteKindLabel(node, system) })) {
+        onDeleteNode(nodeId)
+      }
+    }
+
+    const openContextMenuFromKeyboard = (nodeId: string) => {
+      const rect = rowRefs.current.get(nodeId)?.getBoundingClientRect()
+      openNodeContextMenu(nodeId, rect ? rect.left + 24 : 0, rect ? rect.bottom : 0, true)
+    }
+
+    const handleTreeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      const target = event.target as HTMLElement
+      if (target.closest('input, textarea, select')) return
+      if (event.altKey || event.ctrlKey || event.metaKey) return
+      const nodeId =
+        target.closest<HTMLElement>('[data-tree-node-id]')?.dataset.treeNodeId ?? tabStopId
+      if (!nodeId) return
+      const node = system.nodes[nodeId]
+      if (!node) return
+      const index = visibleOrder.indexOf(nodeId)
+      const hasChildren = getChildIds(nodeId).length > 0
+      const expanded = isOpen(nodeId)
+      let handled = true
+      switch (event.key) {
+        case 'ArrowDown':
+          moveFocusTo(visibleOrder[Math.min(visibleOrder.length - 1, index + 1)])
+          break
+        case 'ArrowUp':
+          moveFocusTo(visibleOrder[Math.max(0, index - 1)])
+          break
+        case 'Home':
+          moveFocusTo(visibleOrder[0])
+          break
+        case 'End':
+          moveFocusTo(visibleOrder[visibleOrder.length - 1])
+          break
+        case 'ArrowRight':
+          if (hasChildren && !expanded) onToggleExpanded(nodeId)
+          else if (hasChildren && expanded) moveFocusTo(visibleOrder[index + 1])
+          break
+        case 'ArrowLeft':
+          if (hasChildren && expanded && !isForcedOpen(nodeId)) onToggleExpanded(nodeId)
+          else moveFocusTo(parentOf.get(nodeId))
+          break
+        case ' ':
+          onToggleVisibility(nodeId)
+          break
+        case 'F2':
+          startRename(node)
+          break
+        case 'Delete':
+          requestDelete(nodeId)
+          break
+        case 'ContextMenu':
+          openContextMenuFromKeyboard(nodeId)
+          break
+        case 'F10':
+          if (event.shiftKey) openContextMenuFromKeyboard(nodeId)
+          else handled = false
+          break
+        default:
+          handled = false
+      }
+      if (handled) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+    }
+
+    const renderSummary = (nodeId: string, node: TreeNode, summaryId: string) => {
+      if (node.kind === 'folder') {
+        const count = getChildIds(nodeId).length
+        return count > 0 ? (
+          <span className="tree-node__summary" id={summaryId}>
+            <span className="tree-node__count num" title={`${count} items`}>
+              {count}
+            </span>
+          </span>
+        ) : null
+      }
+      const summary = summaries.get(nodeId)
+      if (!summary) return null
+      const badges = formatBifurcationBadges(summary.bifs)
+      const pending = summary.tone === 'muted' && !summary.status
+      return (
+        <span className="tree-node__summary" id={summaryId}>
+          {summary.text ? (
+            <span className={`tree-node__data num${pending ? ' tree-node__data--pending' : ''}`}>
+              {summary.text}
+            </span>
+          ) : null}
+          {summary.status ? (
+            <span className={`chip chip--${summary.tone ?? 'muted'} tree-node__status`}>
+              {summary.status}
+            </span>
+          ) : null}
+          {badges.shown.map((badge) => (
+            <span
+              key={badge.code}
+              className={`bif bif--${badge.tone} tree-node__bif`}
+              title={badge.count > 1 ? `${badge.code} × ${badge.count}` : badge.code}
+            >
+              {badge.label}
+            </span>
+          ))}
+          {badges.overflow > 0 ? (
+            <span
+              className="tree-node__bif-more faint num"
+              title={(summary.bifs ?? [])
+                .slice(badges.shown.length)
+                .map(([code, total]) => (total > 1 ? `${code}×${total}` : code))
+                .join(' ')}
+            >
+              +{badges.overflow}
+            </span>
+          ) : null}
+          {summary.warn ? (
+            <span className="chip chip--warning tree-node__warn" title={summary.warn}>
+              !
+            </span>
+          ) : null}
+        </span>
+      )
+    }
+
+    const renderNode = (nodeId: string, depth: number) => {
+      const node = system.nodes[nodeId]
+      if (!node) return null
+      if (!isShown(nodeId) && draggingId !== nodeId) return null
+      let inferredDepth = 0
+      let cursor = node
+      const visited = new Set<string>([nodeId])
+      while (cursor.parentId) {
+        if (visited.has(cursor.parentId)) break
+        const parent = system.nodes[cursor.parentId]
+        if (!parent) break
+        inferredDepth += 1
+        visited.add(cursor.parentId)
+        cursor = parent
+      }
+      const paddingDepth = Math.max(depth, inferredDepth)
+      const indentStyle = { '--tree-node-depth': paddingDepth } as CSSProperties
+      const isSelected = nodeId === selectedNodeId
+      const childIds = getChildIds(nodeId)
+      const hasChildren = childIds.length > 0
+      const expanded = isOpen(nodeId)
+      const isEditing = editingId === nodeId
+      const isFolder = node.kind === 'folder'
+      const nodeColor = node.render?.color ?? DEFAULT_RENDER.color
+      const glyph = getNodeGlyph(node, system)
+      const hidden = !node.visibility
+      const inheritedHidden = !hidden && !isNodeEffectivelyVisible(system.nodes, nodeId)
+      const summaryId = `tree-summary-${nodeId}`
+      const summaryContent = renderSummary(nodeId, node, summaryId)
+      const object = system.objects[nodeId]
+      const customParameters =
+        object && object.type !== 'continuation' && 'customParameters' in object
+          ? object.customParameters
+          : null
+      const hasFrozenVariables =
+        object &&
+        object.type !== 'continuation' &&
+        'frozenVariables' in object &&
+        Object.keys(object.frozenVariables?.frozenValuesByVarName ?? {}).length > 0
+      const rowClassName = [
+        'tree-node__row',
+        isSelected ? 'tree-node__row--selected' : '',
+        hidden ? 'tree-node__row--hidden' : '',
+        inheritedHidden ? 'tree-node__row--inherited-hidden' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+      const visibilityLabel = isFolder
+        ? node.visibility
+          ? 'Hide folder'
+          : 'Show folder'
+        : node.visibility
+          ? 'Hide node'
+          : 'Show node'
+
+      return (
         <div
-          className={`tree-node__row${isSelected ? ' tree-node__row--selected' : ''}`}
-          draggable={!isEditing}
-          ref={(row) => {
-            if (row) {
-              rowRefs.current.set(nodeId, row)
-            } else {
-              rowRefs.current.delete(nodeId)
-            }
-          }}
-          style={indentStyle}
-          onClickCapture={(event) => {
-            if (!suppressNextClickRef.current) return
-            suppressNextClickRef.current = false
-            event.preventDefault()
-            event.stopPropagation()
-          }}
-          onClick={() => onSelect(nodeId)}
-          onDragStart={(event) => {
-            if (isEditing) {
-              event.preventDefault()
-              return
-            }
-            event.dataTransfer.effectAllowed = 'move'
-            event.dataTransfer.setData('text/plain', nodeId)
-            draggingIdRef.current = nodeId
-            setTouchDragging(false)
-            setDraggingId(nodeId)
-          }}
-          onDragEnd={(event) => {
-            commitDropPreview(getCurrentDragSourceId(event.dataTransfer))
-            draggingIdRef.current = null
-            setTouchDragging(false)
-            setDraggingId(null)
-            updateDropPreview(null)
-          }}
-          onContextMenu={(event) => {
-            event.preventDefault()
-            openNodeContextMenu(nodeId, event.clientX, event.clientY)
-          }}
-          onPointerDown={(event) => {
-            startTouchInteraction(event, nodeId, isEditing)
-          }}
-          onPointerMove={(event) => {
-            updateTouchInteraction(event)
-          }}
-          onPointerUp={(event) => {
-            endTouchInteraction(event)
-          }}
-          onPointerCancel={(event) => {
-            cancelTouchInteraction(event)
-          }}
-          onDragOver={(event) => {
-            const sourceId =
-              draggingIdRef.current || draggingId || event.dataTransfer.getData('text/plain')
-            if (!sourceId || sourceId === nodeId) {
-              return
-            }
-            event.preventDefault()
-            event.dataTransfer.dropEffect = updateDropPreviewForTarget(
-              sourceId,
-              nodeId,
-              event.clientY
-            )
-              ? 'move'
-              : 'none'
-          }}
-          data-tree-node-id={nodeId}
-          data-testid={`object-tree-row-${nodeId}`}
+          key={nodeId}
+          className="tree-node"
+          role="treeitem"
+          aria-level={paddingDepth + 1}
+          aria-selected={isSelected}
+          aria-expanded={hasChildren ? expanded : undefined}
+          aria-labelledby={isEditing ? undefined : `object-tree-label-${nodeId}`}
         >
           <div
-            className="tree-node__row-motion"
+            className={rowClassName}
+            draggable={!isEditing}
             ref={(row) => {
               if (row) {
-                rowMotionRefs.current.set(nodeId, row)
+                rowRefs.current.set(nodeId, row)
               } else {
-                rowMotionRefs.current.delete(nodeId)
+                rowRefs.current.delete(nodeId)
               }
             }}
+            style={indentStyle}
+            onClickCapture={(event) => {
+              if (!suppressNextClickRef.current) return
+              suppressNextClickRef.current = false
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={() => onSelect(nodeId)}
+            onDragStart={(event) => {
+              if (isEditing) {
+                event.preventDefault()
+                return
+              }
+              event.dataTransfer.effectAllowed = 'move'
+              event.dataTransfer.setData('text/plain', nodeId)
+              draggingIdRef.current = nodeId
+              setTouchDragging(false)
+              setDraggingId(nodeId)
+            }}
+            onDragEnd={(event) => {
+              commitDropPreview(getCurrentDragSourceId(event.dataTransfer))
+              draggingIdRef.current = null
+              setTouchDragging(false)
+              setDraggingId(null)
+              updateDropPreview(null)
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault()
+              openNodeContextMenu(nodeId, event.clientX, event.clientY)
+            }}
+            onPointerDown={(event) => {
+              startTouchInteraction(event, nodeId, isEditing)
+            }}
+            onPointerMove={(event) => {
+              updateTouchInteraction(event)
+            }}
+            onPointerUp={(event) => {
+              endTouchInteraction(event)
+            }}
+            onPointerCancel={(event) => {
+              cancelTouchInteraction(event)
+            }}
+            onDragOver={(event) => {
+              const sourceId =
+                draggingIdRef.current || draggingId || event.dataTransfer.getData('text/plain')
+              if (!sourceId || sourceId === nodeId) {
+                return
+              }
+              event.preventDefault()
+              event.dataTransfer.dropEffect = updateDropPreviewForTarget(
+                sourceId,
+                nodeId,
+                event.clientY
+              )
+                ? 'move'
+                : 'none'
+            }}
+            data-tree-node-id={nodeId}
+            data-testid={`object-tree-row-${nodeId}`}
           >
-            <span className="tree-node__indent" aria-hidden="true" />
-            {hasChildren ? (
-              <button
-                className="tree-node__expand"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onToggleExpanded(nodeId)
-                }}
-                aria-label={node.expanded ? 'Collapse node' : 'Expand node'}
-                data-testid={`node-expand-${nodeId}`}
+            <div
+              className="tree-node__row-motion"
+              ref={(row) => {
+                if (row) {
+                  rowMotionRefs.current.set(nodeId, row)
+                } else {
+                  rowMotionRefs.current.delete(nodeId)
+                }
+              }}
+            >
+              <span className="tree-node__indent" aria-hidden="true" />
+              {hasChildren ? (
+                <button
+                  className="tree-node__expand"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onToggleExpanded(nodeId)
+                  }}
+                  tabIndex={-1}
+                  aria-label={expanded ? 'Collapse node' : 'Expand node'}
+                  data-testid={`node-expand-${nodeId}`}
+                >
+                  <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} />
+                </button>
+              ) : (
+                <span className="tree-node__spacer" aria-hidden="true" />
+              )}
+              <span
+                className="tree-node__glyph"
+                style={isFolder ? undefined : ({ color: nodeColor } as CSSProperties)}
+                data-kind={glyph.kind}
+                aria-hidden="true"
+                data-testid={isFolder ? `node-folder-icon-${nodeId}` : undefined}
               >
-                {node.expanded ? '▾' : '▸'}
-              </button>
-            ) : (
-              <span className="tree-node__spacer" />
-            )}
-            {node.kind === 'folder' ? (
+                <Icon name={glyph.icon} size={14} />
+              </span>
+              {isEditing ? (
+                <input
+                  className="tree-node__rename"
+                  value={draftName}
+                  autoFocus
+                  onFocus={(event) => event.currentTarget.select()}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => setDraftName(event.target.value)}
+                  onBlur={() => commitRename(node)}
+                  onKeyDown={(event) => {
+                    event.stopPropagation()
+                    if (event.key === 'Enter') {
+                      commitRename(node)
+                      focusNodeLabel(nodeId)
+                    }
+                    if (event.key === 'Escape') {
+                      setEditingId(null)
+                      focusNodeLabel(nodeId)
+                    }
+                  }}
+                  aria-label={`Rename ${node.name}`}
+                  data-testid={`node-rename-input-${nodeId}`}
+                />
+              ) : (
+                <button
+                  className="tree-node__label"
+                  ref={(label) => {
+                    if (label) labelRefs.current.set(nodeId, label)
+                    else labelRefs.current.delete(nodeId)
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onSelect(nodeId)
+                  }}
+                  onDoubleClick={(event) => {
+                    event.stopPropagation()
+                    startRename(node)
+                  }}
+                  tabIndex={nodeId === tabStopId ? 0 : -1}
+                  title={node.name}
+                  id={`object-tree-label-${nodeId}`}
+                  aria-label={getNodeLabel(node, system)}
+                  aria-describedby={summaryContent ? summaryId : undefined}
+                  aria-current={isSelected ? 'true' : undefined}
+                  data-testid={`object-tree-node-${nodeId}`}
+                >
+                  <span className="tree-node__name">{node.name}</span>
+                </button>
+              )}
+              {hasCustomObjectParams(system.config, customParameters) ? (
+                <span
+                  className="tree-node__flag"
+                  data-testid={`object-tree-custom-${nodeId}`}
+                  title="Custom parameters"
+                >
+                  c
+                </span>
+              ) : null}
+              {hasFrozenVariables ? (
+                <span
+                  className="tree-node__flag"
+                  data-testid={`object-tree-frozen-${nodeId}`}
+                  title="Frozen variables configured"
+                  aria-label="Frozen variables configured"
+                >
+                  ❄
+                </span>
+              ) : null}
+              <span className="tree-node__fill" aria-hidden="true" />
+              {summaryContent}
               <button
-                className="tree-node__visibility tree-node__visibility--folder"
+                className="icon-btn icon-btn--sm tree-node__visibility"
                 onClick={(event) => {
                   event.stopPropagation()
                   onToggleVisibility(nodeId)
                 }}
+                tabIndex={-1}
                 data-visible={node.visibility ? 'true' : 'false'}
-                aria-label={node.visibility ? 'Hide folder' : 'Show folder'}
-                title={node.visibility ? 'Hide folder' : 'Show folder'}
+                aria-label={visibilityLabel}
+                title={visibilityLabel}
                 data-testid={`node-visibility-${nodeId}`}
               >
-                <span
-                  className="tree-node__folder-icon"
-                  aria-hidden="true"
-                  data-testid={`node-folder-icon-${nodeId}`}
-                >
-                  📁
-                </span>
+                <Icon name={node.visibility ? 'eye' : 'eye-off'} size={14} />
               </button>
-            ) : (
-            <button
-              className="tree-node__visibility"
-              onClick={(event) => {
-                event.stopPropagation()
-                onToggleVisibility(nodeId)
-              }}
-              style={visibilityStyle}
-              data-visible={node.visibility ? 'true' : 'false'}
-              aria-label={node.visibility ? 'Hide node' : 'Show node'}
-              data-testid={`node-visibility-${nodeId}`}
-            />
-            )}
-            <button
-              className="tree-node__label"
-              onClick={(event) => {
-                event.stopPropagation()
-                onSelect(nodeId)
-              }}
-              aria-label={getNodeLabel(node, system)}
-              aria-current={isSelected ? 'true' : undefined}
-              data-testid={`object-tree-node-${nodeId}`}
-            >
-              {isEditing ? (
-                <input
-                  value={draftName}
-                  onChange={(event) => setDraftName(event.target.value)}
-                  onBlur={() => commitRename(node)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') commitRename(node)
-                    if (event.key === 'Escape') setEditingId(null)
-                  }}
-                  data-testid={`node-rename-input-${nodeId}`}
-                />
-              ) : (
-                <span className="tree-node__label-content">
-                  <span className="tree-node__label-text">
-                    <span className="tree-node__name">{node.name}</span>
-                    {node.kind !== 'folder' ? (
-                      <span className="tree-node__kind">
-                        {getNodeLabel(node, system).slice(
-                          (node.kind === 'branch' ? 'Branch: '.length : 0) + node.name.length
-                        ).trim().replace(/^\(|\)$/g, '')}
-                        {node.kind === 'branch' &&
-                        ['equilibrium', 'limit_cycle', 'forced_periodic_response'].includes(
-                          system.branches[nodeId]?.branchType ?? ''
-                        ) ? ' branch' : ''}
-                      </span>
-                    ) : null}
-                  </span>
-                  {hasCustomObjectParams(system.config, customParameters) ? (
-                    <span
-                      className="tree-node__tag"
-                      data-testid={`object-tree-custom-${nodeId}`}
-                    >
-                      custom
-                    </span>
-                  ) : null}
-                  {hasFrozenVariables ? (
-                    <span
-                      className="tree-node__tag"
-                      data-testid={`object-tree-frozen-${nodeId}`}
-                      title="Frozen variables configured"
-                      aria-label="Frozen variables configured"
-                    >
-                      ❄️
-                    </span>
-                  ) : null}
-                </span>
+            </div>
+          </div>
+          {(hasChildren || dropPreview?.targetId === nodeId) &&
+          (expanded || dropPreview?.targetId === nodeId) ? (
+            <div className="tree-node__children" role="group">
+              {getPreviewOrder(childIds, nodeId).map((childId) =>
+                renderNode(childId, depth + 1)
               )}
-            </button>
-          </div>
+            </div>
+          ) : null}
         </div>
-        {(hasChildren || dropPreview?.targetId === nodeId) &&
-        (node.expanded || dropPreview?.targetId === nodeId) ? (
-          <div className="tree-node__children">
-            {getPreviewOrder(childIds, nodeId).map((childId) =>
-              renderNode(childId, depth + 1)
-            )}
-          </div>
-        ) : null}
-      </div>
-    )
+      )
+    }
+
+    const contextNode = nodeContextMenu ? system.nodes[nodeContextMenu.id] ?? null : null
+    const contextParent = contextNode?.parentId
+      ? system.nodes[contextNode.parentId] ?? null
+      : null
+    const canWrapInFolder =
+      contextNode?.kind === 'object' &&
+      contextNode.objectType !== 'particles' &&
+      (!contextParent || contextParent.kind === 'folder')
+    const contextHasBranches =
+      contextNode?.kind === 'object' &&
+      getChildIds(contextNode.id).some((id) => system.nodes[id]?.kind === 'branch')
+
+    const createFolderAndRename = (
+      parentId: string | null,
+      options?: { wrapNodeId?: string }
+    ) => {
+      const created = options ? onCreateFolder(parentId, options) : onCreateFolder(parentId)
+      if (typeof created === 'string' && created) {
+        createdFolderRenameRef.current = created
+        setEditingId(created)
+        setDraftName('')
+      }
+    }
+
+    // Fill the rename draft once a just-created folder shows up in the tree.
+    useEffect(() => {
+      const pendingId = createdFolderRenameRef.current
+      if (!pendingId) return
+      const node = system.nodes[pendingId]
+      if (!node) return
+      createdFolderRenameRef.current = null
+      if (editingId === pendingId) setDraftName(node.name)
+    }, [editingId, system.nodes])
+
+    const runMenuAction = (action: () => void) => {
+      closeMenus()
+      action()
     }
 
     return (
@@ -1024,168 +1430,205 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         }}
         data-testid="objects-tree"
       >
-        <div className="objects-tree__list">
-          {rootNodes.length === 0 ? <p className="empty-state">No objects yet.</p> : null}
+        {showFilter ? (
+          <label className="objects-tree__filter">
+            <Icon name="search" size={14} />
+            <input
+              type="search"
+              value={filter}
+              placeholder="Filter"
+              aria-label="Filter objects"
+              onChange={(event) => setFilter(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' && filter) {
+                  event.stopPropagation()
+                  setFilter('')
+                } else if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  moveFocusTo(visibleOrder[0])
+                }
+              }}
+              data-testid="objects-tree-filter"
+            />
+          </label>
+        ) : null}
+        <div
+          className="objects-tree__list"
+          role="tree"
+          aria-label="Objects"
+          onKeyDown={handleTreeKeyDown}
+          onKeyUp={(event) => {
+            // Space toggles visibility; keep it from also clicking the focused label.
+            if (event.key === ' ' && !(event.target as HTMLElement).closest('input')) {
+              event.preventDefault()
+            }
+          }}
+        >
+          {activeFilter && visibleOrder.length === 0 ? (
+            <p className="objects-tree__empty faint">No matches</p>
+          ) : null}
           {getPreviewOrder(rootNodes, null).map((nodeId) => renderNode(nodeId, 0))}
         </div>
         {createMenu ? (
           <div
-            className="context-menu"
+            className="tree-menu menu-surface"
             style={{ left: createMenu.x, top: createMenu.y }}
             onPointerDown={(event) => event.stopPropagation()}
             ref={createMenuRef}
             data-testid="create-object-menu"
           >
             <button
-              className="context-menu__item"
-              onClick={() => {
-                onCreateOrbit()
-                setCreateMenu(null)
-              }}
+              className="menu-item"
+              onClick={() => runMenuAction(onCreateOrbit)}
               data-testid="create-orbit"
             >
+              <Icon name="orbit" size={14} />
               Orbit
             </button>
             <button
-              className="context-menu__item"
-              onClick={() => {
-                onCreateEquilibrium()
-                setCreateMenu(null)
-              }}
+              className="menu-item"
+              onClick={() => runMenuAction(onCreateEquilibrium)}
               data-testid="create-equilibrium"
             >
+              <Icon name="equilibrium" size={14} />
               {createEquilibriumLabel}
             </button>
             {system.config.periodicForcing ? (
               <button
-                className="context-menu__item"
-                onClick={() => {
-                  onCreateForcedPeriodicResponse()
-                  setCreateMenu(null)
-                }}
+                className="menu-item"
+                onClick={() => runMenuAction(() => onCreateForcedPeriodicResponse())}
                 data-testid="create-forced-periodic-response"
               >
+                <Icon name="cycle" size={14} />
                 Forced periodic response
               </button>
             ) : null}
+            <hr />
             <button
-              className="context-menu__item"
-              onClick={() => {
-                onCreateIsocline()
-                setCreateMenu(null)
-              }}
+              className="menu-item"
+              onClick={() => runMenuAction(onCreateIsocline)}
               data-testid="create-isocline"
             >
+              <Icon name="isocline" size={14} />
               Isocline
             </button>
             <button
-              className="context-menu__item"
-              onClick={() => {
-                onCreateStateGrid()
-                setCreateMenu(null)
-              }}
+              className="menu-item"
+              onClick={() => runMenuAction(onCreateStateGrid)}
               data-testid="create-state-grid"
             >
+              <Icon name="grid" size={14} />
               State grid
+            </button>
+            <hr />
+            <button
+              className="menu-item"
+              onClick={() => runMenuAction(() => createFolderAndRename(null))}
+              data-testid="create-folder"
+            >
+              <Icon name="folder" size={14} />
+              Folder
             </button>
           </div>
         ) : null}
-        {nodeContextMenu ? (
+        {nodeContextMenu && contextNode ? (
           <div
-            className="context-menu"
+            className="tree-menu menu-surface"
             style={{ left: nodeContextMenu.x, top: nodeContextMenu.y }}
             onPointerDown={(event) => event.stopPropagation()}
             ref={nodeContextMenuRef}
             data-testid="object-context-menu"
           >
             <button
-              className="context-menu__item"
-              onClick={() => {
-                const node = system.nodes[nodeContextMenu.id]
-                if (node) startRename(node)
-                setNodeContextMenu(null)
-              }}
+              className="menu-item"
+              onClick={() => runMenuAction(() => startRename(contextNode))}
               data-testid="object-context-rename"
             >
+              <Icon name="pencil" size={14} />
               Rename
+              <span className="kbd tree-menu__hint">F2</span>
             </button>
-            {(() => {
-              const node = system.nodes[nodeContextMenu.id]
-              if (!node || (node.kind !== 'object' && node.kind !== 'branch')) return null
-              return (
-                <button
-                  className="context-menu__item"
-                  onClick={() => {
-                    const nodeId = nodeContextMenu.id
-                    setNodeContextMenu(null)
-                    void onDuplicateNode(nodeId)
-                  }}
-                  data-testid="object-context-duplicate"
-                >
-                  Duplicate
-                </button>
-              )
-            })()}
-            {(() => {
-              const node = system.nodes[nodeContextMenu.id]
-              if (
-                !system.config.periodicForcing ||
-                !node ||
-                node.kind !== 'object' ||
-                node.objectType !== 'orbit'
-              ) {
-                return null
-              }
-              return (
-                <button
-                  className="context-menu__item"
-                  onClick={() => {
-                    const orbitId = nodeContextMenu.id
-                    setNodeContextMenu(null)
-                    onCreateForcedPeriodicResponse(orbitId)
-                  }}
-                  data-testid="object-context-create-forced-periodic-response"
-                >
-                  Create forced periodic response
-                </button>
-              )
-            })()}
-            {(() => {
-              const node = system.nodes[nodeContextMenu.id]
-              if (!node || (node.kind !== 'object' && node.kind !== 'folder')) return null
-              return (
-                <button
-                  className="context-menu__item"
-                  onClick={() => {
-                    const parentId = nodeContextMenu.id
-                    setNodeContextMenu(null)
-                    onCreateFolder(parentId)
-                  }}
-                  data-testid="object-context-create-folder"
-                >
-                  {node.kind === 'folder' ? 'Create subfolder' : 'Create folder'}
-                </button>
-              )
-            })()}
+            {contextNode.kind === 'object' || contextNode.kind === 'branch' ? (
+              <button
+                className="menu-item"
+                onClick={() => runMenuAction(() => void onDuplicateNode(contextNode.id))}
+                data-testid="object-context-duplicate"
+              >
+                <Icon name="copy" size={14} />
+                Duplicate
+              </button>
+            ) : null}
             <button
-              className="context-menu__item"
-              onClick={() => {
-                const nodeId = nodeContextMenu.id
-                const node = system.nodes[nodeId]
-                setNodeContextMenu(null)
-                if (!node) return
-                if (
-                  confirmDelete({
-                    name: node.name,
-                    kind: getDeleteKindLabel(node, system),
-                  })
-                ) {
-                  onDeleteNode(nodeId)
+              className="menu-item"
+              onClick={() => runMenuAction(() => onToggleVisibility(contextNode.id))}
+              data-testid="object-context-visibility"
+            >
+              <Icon name={contextNode.visibility ? 'eye-off' : 'eye'} size={14} />
+              {contextNode.visibility ? 'Hide' : 'Show'}
+              <span className="kbd tree-menu__hint">Space</span>
+            </button>
+            {system.config.periodicForcing &&
+            contextNode.kind === 'object' &&
+            contextNode.objectType === 'orbit' ? (
+              <button
+                className="menu-item"
+                onClick={() =>
+                  runMenuAction(() => onCreateForcedPeriodicResponse(contextNode.id))
                 }
-              }}
+                data-testid="object-context-create-forced-periodic-response"
+              >
+                <Icon name="cycle" size={14} />
+                Create forced periodic response
+              </button>
+            ) : null}
+            {contextNode.kind === 'folder' || canWrapInFolder || contextHasBranches ? (
+              <hr />
+            ) : null}
+            {contextNode.kind === 'folder' ? (
+              <button
+                className="menu-item"
+                onClick={() => runMenuAction(() => createFolderAndRename(contextNode.id))}
+                data-testid="object-context-create-folder"
+              >
+                <Icon name="folder" size={14} />
+                New subfolder
+              </button>
+            ) : null}
+            {canWrapInFolder ? (
+              <button
+                className="menu-item"
+                onClick={() =>
+                  runMenuAction(() =>
+                    createFolderAndRename(contextNode.parentId ?? null, {
+                      wrapNodeId: contextNode.id,
+                    })
+                  )
+                }
+                data-testid="object-context-create-folder"
+              >
+                <Icon name="folder" size={14} />
+                Move to new folder
+              </button>
+            ) : null}
+            {contextHasBranches ? (
+              <button
+                className="menu-item"
+                onClick={() => runMenuAction(() => createFolderAndRename(contextNode.id))}
+                data-testid="object-context-create-branch-folder"
+              >
+                <Icon name="folder" size={14} />
+                New branch folder
+              </button>
+            ) : null}
+            <hr />
+            <button
+              className="menu-item tree-menu__danger"
+              onClick={() => runMenuAction(() => requestDelete(contextNode.id))}
               data-testid="object-context-delete"
             >
+              <Icon name="trash" size={14} />
               Delete
+              <span className="kbd tree-menu__hint">Del</span>
             </button>
           </div>
         ) : null}

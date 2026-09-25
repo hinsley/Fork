@@ -63,7 +63,6 @@ test('continues a real map Neimark-Sacker curve in two parameters', async ({ pag
     .first()
   await expect(nsPoint).toBeVisible({ timeout: 20_000 })
   await nsPoint.click()
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-codim1-curve-toggle')
 
   await page.getByTestId('ns-curve-name').fill('map_ns_curve')

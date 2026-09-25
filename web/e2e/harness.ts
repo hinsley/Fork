@@ -54,18 +54,18 @@ export class ForkHarness {
     this.page = page
   }
 
-  private async openSystemsDialog() {
-    if ((await this.page.getByRole('dialog').count()) > 0) return
+  /** The systems list: inline on home, otherwise inside the Systems dialog. */
+  private async openSystemsDialog(): Promise<Locator> {
+    const library = this.page.getByTestId('system-library')
     await this.page.waitForSelector(
-      '[data-testid="open-systems"], [data-testid="open-systems-empty"]',
+      '[data-testid="open-systems"], [data-testid="system-library"]',
       { state: 'visible' }
     )
-    if (await this.page.getByTestId('open-systems').isVisible()) {
+    if (!(await library.isVisible())) {
       await this.page.getByTestId('open-systems').click()
-    } else {
-      await this.page.getByTestId('open-systems-empty').click()
+      await this.page.getByRole('dialog').waitFor()
     }
-    await this.page.getByRole('dialog').waitFor()
+    return library
   }
 
   async goto(options: HarnessLaunchOptions = {}) {
@@ -82,15 +82,15 @@ export class ForkHarness {
   }
 
   async createSystem(name: string) {
-    await this.openSystemsDialog()
-    await this.page.getByTestId('system-name-input').fill(name)
-    await this.page.getByTestId('create-system').click()
+    const library = await this.openSystemsDialog()
+    await library.getByTestId('system-name-input').fill(name)
+    await library.getByTestId('create-system').click()
     await this.page.getByTestId('workspace').waitFor()
   }
 
   async openSystem(name: string) {
-    await this.openSystemsDialog()
-    await this.page.getByRole('dialog').getByRole('button', { name, exact: true }).click()
+    const library = await this.openSystemsDialog()
+    await library.getByRole('button', { name, exact: true }).click()
     await this.page.getByTestId('workspace').waitFor()
   }
 
@@ -101,6 +101,11 @@ export class ForkHarness {
   }
 
   async openDisclosure(testId: string) {
+    // Branch points render inline on the branch's root page (no workflow page).
+    if (testId === 'branch-points-toggle') {
+      await this.page.getByTestId('branch-point-panel').waitFor({ state: 'visible' })
+      return
+    }
     const summary = this.page.getByTestId(testId)
     const action = this.page.getByTestId(`action-${testId}`)
     if (await action.count()) {

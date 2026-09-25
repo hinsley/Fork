@@ -858,16 +858,224 @@ describe('ViewportPanel view state wiring', () => {
     expect(plotlyCalls.find((entry) => entry.plotId === first.nodeId)?.onPointClick).toBeUndefined()
   })
 
-  it('lets one unsized viewport fill the workspace and labels its resize handle', () => {
+  it('lets a single viewport fill the workspace without a resize handle', () => {
     const scene = addScene(createSystem({ name: 'Viewport_Fill' }), 'State Space')
 
     renderPanel(scene.system)
 
     const tile = screen.getByTestId(`viewport-tile-${scene.nodeId}`)
-    expect(tile.closest('.viewport-item')).toHaveClass('viewport-item--fill-workspace')
-    expect(screen.getByTestId(`viewport-resize-${scene.nodeId}`)).toHaveAccessibleName(
-      'Resize State Space viewport'
+    expect(tile.closest('.viewport-item')).toHaveStyle({ flexGrow: '360' })
+    expect(screen.queryByTestId(`viewport-resize-${scene.nodeId}`)).toBeNull()
+    expect(screen.queryByTestId(`viewport-maximize-${scene.nodeId}`)).toBeNull()
+    expect(screen.getByTestId('viewport-add')).toHaveAccessibleName('Create viewport')
+  })
+
+  it('shows type, axes and item count in the compact header', () => {
+    let system = createSystem({ name: 'Header_System' })
+    const scene = addScene(system, 'Scene_A')
+    system = scene.system
+    const diagram = addBifurcationDiagram(system, 'Diagram_A')
+    system = diagram.system
+
+    renderPanel(system)
+
+    const sceneHeader = screen.getByTestId(`viewport-header-${scene.nodeId}`)
+    expect(sceneHeader).toHaveTextContent('Scene_A')
+    expect(screen.getByTestId(`viewport-axes-${scene.nodeId}`)).toHaveTextContent('x · y')
+    expect(sceneHeader).toHaveTextContent('0 objects')
+    expect(screen.getByRole('img', { name: 'State space' })).toBeInTheDocument()
+    expect(screen.getByTestId(`viewport-axes-${diagram.nodeId}`)).toHaveTextContent('— · —')
+    expect(screen.getByTestId(`viewport-header-${diagram.nodeId}`)).toHaveTextContent('0 branches')
+    expect(sceneHeader).not.toHaveTextContent('State Space')
+  })
+
+  it('shares the height between neighbours and commits both weights after a border drag', async () => {
+    let system = createSystem({ name: 'Resize_System' })
+    const first = addScene(system, 'First')
+    system = first.system
+    const second = addScene(system, 'Second')
+    system = second.system
+    const onResizeViewport = vi.fn()
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onResizeViewport={onResizeViewport}
+      />
     )
+
+    const handle = screen.getByTestId(`viewport-resize-${first.nodeId}`)
+    expect(handle).toHaveAccessibleName('Resize First viewport')
+    expect(screen.queryByTestId(`viewport-resize-${second.nodeId}`)).toBeNull()
+    for (const id of [first.nodeId, second.nodeId]) {
+      const item = screen.getByTestId(`viewport-tile-${id}`).closest('.viewport-item') as HTMLElement
+      item.getBoundingClientRect = () => ({ height: 300 }) as DOMRect
+    }
+
+    fireEvent(handle, new MouseEvent('pointerdown', { bubbles: true, clientY: 300 }))
+    fireEvent(window, new MouseEvent('pointermove', { clientY: 400 }))
+    const firstItem = screen.getByTestId(`viewport-tile-${first.nodeId}`).closest('.viewport-item')
+    expect(Number((firstItem as HTMLElement).style.flexGrow)).toBeCloseTo(480)
+    fireEvent(window, new MouseEvent('pointerup', { clientY: 400 }))
+
+    expect(onResizeViewport).toHaveBeenCalledWith(first.nodeId, 480)
+    await waitFor(() => expect(onResizeViewport).toHaveBeenCalledWith(second.nodeId, 240))
+  })
+
+  it('maximizes one viewport and switches between viewports with chips', async () => {
+    const user = userEvent.setup()
+    let system = createSystem({ name: 'Maximize_System' })
+    const first = addScene(system, 'First')
+    system = first.system
+    const second = addScene(system, 'Second')
+    system = second.system
+
+    renderPanel(system)
+
+    expect(screen.queryByTestId('viewport-chips')).toBeNull()
+    await user.click(screen.getByTestId(`viewport-maximize-${first.nodeId}`))
+    expect(screen.getByTestId('viewport-chips')).toBeInTheDocument()
+    expect(screen.getByTestId(`viewport-tile-${first.nodeId}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`viewport-tile-${second.nodeId}`)).toBeNull()
+
+    await user.click(screen.getByTestId(`viewport-chip-${second.nodeId}`))
+    expect(screen.queryByTestId(`viewport-tile-${first.nodeId}`)).toBeNull()
+    expect(screen.getByTestId(`viewport-tile-${second.nodeId}`)).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByTestId('viewport-chips')).toBeNull()
+    expect(screen.getByTestId(`viewport-tile-${first.nodeId}`)).toBeInTheDocument()
+
+    await user.dblClick(screen.getByTestId(`viewport-header-${second.nodeId}`))
+    expect(screen.queryByTestId(`viewport-tile-${first.nodeId}`)).toBeNull()
+  })
+
+  it('opens an axis picker from the header and updates the scene axes', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Axes_4D',
+      equations: ['y', 'z', 'w', '-x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z', 'w'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const scene = addScene(createSystem({ name: 'Axes_4D', config }), 'Scene')
+    const onUpdateScene = vi.fn()
+    const onSelectViewport = vi.fn()
+
+    render(
+      <ViewportPanel
+        system={scene.system}
+        selectedNodeId={null}
+        theme="light"
+        onSelectViewport={onSelectViewport}
+        onUpdateScene={onUpdateScene}
+      />
+    )
+
+    await user.click(screen.getByTestId(`viewport-axes-${scene.nodeId}`))
+    expect(onSelectViewport).toHaveBeenCalledWith(scene.nodeId)
+    expect(screen.getByTestId(`viewport-axis-popover-${scene.nodeId}`)).toBeInTheDocument()
+    await user.selectOptions(screen.getByTestId(`viewport-axis-y-${scene.nodeId}`), 'w')
+    expect(onUpdateScene).toHaveBeenCalledWith(scene.nodeId, {
+      axisVariables: ['x', 'w', 'z'],
+    })
+  })
+
+  it('shows the axis picker inside a new bifurcation diagram', async () => {
+    const user = userEvent.setup()
+    const system = createSystem({ name: 'Diagram_Setup' })
+    system.config.paramNames = ['mu']
+    system.config.params = [0.1]
+    const diagram = addBifurcationDiagram(system, 'Diagram')
+    const onUpdateBifurcationDiagram = vi.fn()
+
+    render(
+      <ViewportPanel
+        system={diagram.system}
+        selectedNodeId={null}
+        theme="light"
+        onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
+      />
+    )
+
+    expect(screen.getByTestId(`viewport-axis-setup-${diagram.nodeId}`)).toBeInTheDocument()
+    const layout = plotlyCalls.filter((call) => call.plotId === diagram.nodeId).at(-1)?.layout
+    expect(JSON.stringify(layout?.annotations ?? [])).not.toContain('Select axes')
+    await user.selectOptions(
+      screen.getByTestId(`viewport-axis-x-${diagram.nodeId}`),
+      'parameter:mu'
+    )
+    expect(onUpdateBifurcationDiagram).toHaveBeenCalledWith(diagram.nodeId, {
+      xAxis: { kind: 'parameter', name: 'mu' },
+    })
+  })
+
+  it('edits system parameters in place from the parameter strip', async () => {
+    const user = userEvent.setup()
+    const scene = addScene(createSystem({ name: 'Param_Strip' }), 'Scene')
+    const system = scene.system
+    system.config.paramNames = ['mu', 'nu']
+    system.config.params = [0.2, 1]
+    const onUpdateSystem = vi.fn()
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onUpdateSystem={onUpdateSystem}
+      />
+    )
+
+    const mu = screen.getByTestId('param-strip-value-0')
+    expect(mu).toHaveValue('0.2')
+    await user.clear(mu)
+    await user.type(mu, 'tau / 4{Enter}')
+    expect(onUpdateSystem).toHaveBeenCalledWith(
+      expect.objectContaining({ params: [Math.PI / 2, 1], paramNames: ['mu', 'nu'] })
+    )
+
+    const nu = screen.getByTestId('param-strip-value-1')
+    await user.clear(nu)
+    await user.type(nu, 'abc{Enter}')
+    expect(nu).toHaveAttribute('aria-invalid', 'true')
+    await user.keyboard('{Escape}')
+    expect(nu).toHaveValue('1')
+    expect(onUpdateSystem).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides the parameter strip when the system has no parameters', () => {
+    const scene = addScene(createSystem({ name: 'No_Params' }), 'Scene')
+    scene.system.config.paramNames = []
+    scene.system.config.params = []
+    renderPanel(scene.system)
+    expect(screen.queryByTestId('param-strip')).toBeNull()
+  })
+
+  it('offers export and embed actions in the viewport menu', async () => {
+    const user = userEvent.setup()
+    const scene = addScene(createSystem({ name: 'Menu_System' }), 'Scene')
+    const onOpenEmbed = vi.fn()
+
+    render(
+      <ViewportPanel
+        system={scene.system}
+        selectedNodeId={null}
+        theme="light"
+        onOpenEmbed={onOpenEmbed}
+      />
+    )
+
+    await user.click(screen.getByTestId(`viewport-more-${scene.nodeId}`))
+    expect(screen.getByTestId('viewport-context-rename')).toBeInTheDocument()
+    expect(screen.getByTestId('viewport-context-export-png')).toBeInTheDocument()
+    await user.click(screen.getByTestId('viewport-context-embed'))
+    expect(onOpenEmbed).toHaveBeenCalledWith(scene.nodeId)
   })
 
   it('keeps 1D map figure capture pending until function sampling settles', async () => {

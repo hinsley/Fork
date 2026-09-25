@@ -398,7 +398,7 @@ describe('ObjectsTree', () => {
     expect(tree).not.toHaveClass('objects-tree--dragging')
   })
 
-  it('renders root folders and creates a child folder from an object context menu', async () => {
+  it('renders root folders and wraps an object in a new folder from its context menu', async () => {
     const user = userEvent.setup()
     const { system, objectNodeId } = createDemoSystem()
     const withFolder = addFolder(system, 'Folder_1')
@@ -428,9 +428,15 @@ describe('ObjectsTree', () => {
     await user.click(screen.getByTestId(`node-visibility-${withFolder.nodeId}`))
     expect(onToggleVisibility).toHaveBeenCalledWith(withFolder.nodeId)
 
+    // On an object, "create folder" wraps it in a new sibling folder instead of nesting.
     fireEvent.contextMenu(screen.getByTestId(`object-tree-row-${objectNodeId}`))
     await user.click(screen.getByTestId('object-context-create-folder'))
-    expect(onCreateFolder).toHaveBeenCalledWith(objectNodeId)
+    expect(onCreateFolder).toHaveBeenCalledWith(null, { wrapNodeId: objectNodeId })
+
+    // Objects with branches can still get a folder for their branches.
+    fireEvent.contextMenu(screen.getByTestId(`object-tree-row-${objectNodeId}`))
+    await user.click(screen.getByTestId('object-context-create-branch-folder'))
+    expect(onCreateFolder).toHaveBeenLastCalledWith(objectNodeId)
 
     fireEvent.contextMenu(screen.getByTestId(`object-tree-row-${withFolder.nodeId}`))
     await user.click(screen.getByTestId('object-context-create-folder'))
@@ -1570,5 +1576,250 @@ describe('ObjectsTree', () => {
 
     await user.click(toggle)
     expect(screen.getByTestId(`object-tree-row-${branchId}`)).toBeInTheDocument()
+  })
+
+  describe('single-line rows', () => {
+    function renderTree(
+      system: ReturnType<typeof createDemoSystem>['system'],
+      overrides: Partial<Parameters<typeof ObjectsTree>[0]> = {}
+    ) {
+      const props = {
+        system,
+        selectedNodeId: null as string | null,
+        onSelect: vi.fn(),
+        onToggleVisibility: vi.fn(),
+        onRename: vi.fn(),
+        onToggleExpanded: vi.fn(),
+        onReorderNode: vi.fn(),
+        onCreateOrbit: vi.fn(),
+        onCreateEquilibrium: vi.fn(),
+        onDeleteNode: vi.fn(),
+        ...overrides,
+      }
+      const utils = render(<ObjectsTree {...props} />)
+      return { ...utils, props }
+    }
+
+    function withBifurcatingBranch() {
+      const demo = createDemoSystem()
+      const branch = demo.system.branches[demo.branchNodeId]
+      const points = [-0.5, 0, 0.5, 1, 1.5].map((param_value, index) => ({
+        state: [0, 0],
+        param_value,
+        stability: index === 1 || index === 3 ? 'Fold' : index === 2 ? 'Hopf' : 'None',
+        eigenvalues: [],
+      }))
+      const system = structuredClone(demo.system)
+      system.branches[demo.branchNodeId] = {
+        ...branch,
+        data: { ...branch.data, points, bifurcations: [1, 2, 3], indices: [0, 1, 2, 3, 4] },
+      }
+      return { ...demo, system }
+    }
+
+    it('shows a type glyph, a data summary and deduplicated bifurcation badges', () => {
+      const demo = withBifurcatingBranch()
+      renderTree(demo.system)
+
+      const orbitRow = screen.getByTestId(`object-tree-row-${demo.objectNodeId}`)
+      expect(orbitRow.querySelector('.tree-node__glyph')).toHaveAttribute('data-kind', 'orbit')
+      expect(orbitRow.querySelector('.tree-node__data')).toHaveTextContent('t 0–0.2 · 3')
+
+      const branchRow = screen.getByTestId(`object-tree-row-${demo.branchNodeId}`)
+      expect(branchRow.querySelector('.tree-node__glyph')).toHaveAttribute(
+        'data-kind',
+        'branch-equilibrium'
+      )
+      expect(branchRow.querySelector('.tree-node__data')).toHaveTextContent('p1 −0.5…1.5 · 5')
+      const badges = Array.from(branchRow.querySelectorAll('.bif')).map((el) => el.textContent)
+      expect(badges).toEqual(['LP×2', 'H'])
+
+      const label = screen.getByTestId(`object-tree-node-${demo.branchNodeId}`)
+      expect(label).toHaveAccessibleName('Branch: eq_branch (equilibrium)')
+      expect(label).toHaveAccessibleDescription(/p1 −0.5…1.5 · 5/)
+    })
+
+    it('falls back to index summaries for entities that are not hydrated', () => {
+      const demo = withBifurcatingBranch()
+      const skeleton = structuredClone(demo.system)
+      skeleton.index.branches[demo.branchNodeId].summary = {
+        text: 'p1 −0.5…1.5 · 5',
+        bifs: [
+          ['LP', 2],
+          ['H', 1],
+        ],
+      }
+      skeleton.index.objects[demo.objectNodeId].summary = { status: 'saddle 1u', tone: 'saddle' }
+      skeleton.objects = {}
+      skeleton.branches = {}
+      renderTree(skeleton)
+
+      const objectRow = screen.getByTestId(`object-tree-row-${demo.objectNodeId}`)
+      expect(objectRow.querySelector('.chip--saddle')).toHaveTextContent('saddle 1u')
+      const branchRow = screen.getByTestId(`object-tree-row-${demo.branchNodeId}`)
+      expect(branchRow.querySelector('.tree-node__data')).toHaveTextContent('p1 −0.5…1.5 · 5')
+      expect(branchRow.querySelectorAll('.bif')).toHaveLength(2)
+    })
+
+    it('uses an explicit eye toggle, dims hidden rows and counts folder children', async () => {
+      const user = userEvent.setup()
+      const demo = createDemoSystem()
+      const withFolder = addFolder(demo.system, 'Folder_1')
+      const moved = moveNodeIntoParent(withFolder.system, demo.objectNodeId, withFolder.nodeId)
+      moved.nodes[demo.objectNodeId].visibility = false
+      const { props } = renderTree(moved)
+
+      const folderLabel = screen.getByTestId(`object-tree-node-${withFolder.nodeId}`)
+      expect(folderLabel.textContent).toBe('Folder_1')
+      const folderRow = screen.getByTestId(`object-tree-row-${withFolder.nodeId}`)
+      expect(folderRow.querySelector('.tree-node__count')).toHaveTextContent('1')
+
+      const hiddenRow = screen.getByTestId(`object-tree-row-${demo.objectNodeId}`)
+      expect(hiddenRow).toHaveClass('tree-node__row--hidden')
+      const eye = screen.getByTestId(`node-visibility-${demo.objectNodeId}`)
+      expect(eye).toHaveAttribute('data-visible', 'false')
+      expect(eye).toHaveAccessibleName('Show node')
+      await user.click(eye)
+      expect(props.onToggleVisibility).toHaveBeenCalledWith(demo.objectNodeId)
+      expect(props.onSelect).not.toHaveBeenCalled()
+      expect(screen.getByTestId(`object-tree-row-${demo.branchNodeId}`)).toHaveClass(
+        'tree-node__row--inherited-hidden'
+      )
+    })
+
+    it('filters rows by name or summary and keeps ancestors visible', async () => {
+      const user = userEvent.setup()
+      const demo = withBifurcatingBranch()
+      let system = demo.system
+      const extraIds: string[] = []
+      for (let index = 0; index < 7; index += 1) {
+        const orbit: OrbitObject = {
+          type: 'orbit',
+          name: `Extra_${index}`,
+          systemName: system.config.name,
+          data: [],
+          t_start: 0,
+          t_end: 1,
+          dt: 0.1,
+        }
+        const added = addObject(system, orbit)
+        system = added.system
+        extraIds.push(added.nodeId)
+      }
+      // Collapse the parent: matches inside collapsed nodes are still found.
+      system = toggleNodeExpanded(system, demo.objectNodeId)
+      renderTree(system)
+
+      const filter = screen.getByTestId('objects-tree-filter')
+      await user.type(filter, 'H')
+      expect(screen.getByTestId(`object-tree-row-${demo.branchNodeId}`)).toBeInTheDocument()
+      expect(screen.getByTestId(`object-tree-row-${demo.objectNodeId}`)).toBeInTheDocument()
+      expect(screen.queryByTestId(`object-tree-row-${extraIds[0]}`)).toBeNull()
+
+      await user.clear(filter)
+      await user.type(filter, 'extra_3')
+      expect(screen.getByTestId(`object-tree-row-${extraIds[3]}`)).toBeInTheDocument()
+      expect(screen.queryByTestId(`object-tree-row-${demo.objectNodeId}`)).toBeNull()
+
+      await user.clear(filter)
+      await user.type(filter, 'zzz')
+      expect(screen.getByText('No matches')).toBeInTheDocument()
+    })
+
+    it('supports keyboard navigation, visibility, rename, delete and the context menu key', () => {
+      const demo = createDemoSystem()
+      const orbitB: OrbitObject = {
+        type: 'orbit',
+        name: 'Orbit B',
+        systemName: demo.system.config.name,
+        data: [],
+        t_start: 0,
+        t_end: 1,
+        dt: 0.1,
+      }
+      const second = addObject(demo.system, orbitB)
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+      const { props } = renderTree(second.system, { selectedNodeId: demo.objectNodeId })
+      expect(screen.getByRole('tree')).toBeInTheDocument()
+      const first = screen.getByTestId(`object-tree-node-${demo.objectNodeId}`)
+      expect(first).toHaveAttribute('tabindex', '0')
+      expect(screen.getByTestId(`object-tree-node-${second.nodeId}`)).toHaveAttribute(
+        'tabindex',
+        '-1'
+      )
+
+      fireEvent.keyDown(first, { key: 'ArrowDown' })
+      expect(props.onSelect).toHaveBeenLastCalledWith(demo.branchNodeId)
+      fireEvent.keyDown(first, { key: 'ArrowLeft' })
+      expect(props.onToggleExpanded).toHaveBeenLastCalledWith(demo.objectNodeId)
+      fireEvent.keyDown(screen.getByTestId(`object-tree-node-${demo.branchNodeId}`), {
+        key: 'ArrowLeft',
+      })
+      expect(props.onSelect).toHaveBeenLastCalledWith(demo.objectNodeId)
+      fireEvent.keyDown(first, { key: 'End' })
+      expect(props.onSelect).toHaveBeenLastCalledWith(second.nodeId)
+
+      fireEvent.keyDown(first, { key: ' ' })
+      expect(props.onToggleVisibility).toHaveBeenLastCalledWith(demo.objectNodeId)
+
+      fireEvent.keyDown(first, { key: 'Delete' })
+      expect(confirmSpy).toHaveBeenCalled()
+      expect(props.onDeleteNode).toHaveBeenCalledWith(demo.objectNodeId)
+      confirmSpy.mockRestore()
+
+      fireEvent.keyDown(first, { key: 'ContextMenu' })
+      expect(screen.getByTestId('object-context-menu')).toBeInTheDocument()
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(screen.queryByTestId('object-context-menu')).toBeNull()
+
+      fireEvent.keyDown(first, { key: 'F2' })
+      expect(screen.getByTestId(`node-rename-input-${demo.objectNodeId}`)).toHaveValue('Orbit A')
+    })
+
+    it('renames on double click', async () => {
+      const user = userEvent.setup()
+      const demo = createDemoSystem()
+      const { props } = renderTree(demo.system)
+      await user.dblClick(screen.getByTestId(`object-tree-node-${demo.objectNodeId}`))
+      const input = screen.getByTestId(`node-rename-input-${demo.objectNodeId}`)
+      expect(input).toHaveFocus()
+      await user.clear(input)
+      await user.type(input, 'Renamed{enter}')
+      expect(props.onRename).toHaveBeenCalledWith(demo.objectNodeId, 'Renamed')
+    })
+
+    it('starts renaming a folder created from the menus', async () => {
+      const user = userEvent.setup()
+      const demo = createDemoSystem()
+
+      function Harness() {
+        const [system, setSystem] = useState(demo.system)
+        return (
+          <ObjectsTree
+            system={system}
+            selectedNodeId={null}
+            onSelect={vi.fn()}
+            onToggleVisibility={vi.fn()}
+            onRename={vi.fn()}
+            onToggleExpanded={vi.fn()}
+            onReorderNode={vi.fn()}
+            onCreateOrbit={vi.fn()}
+            onCreateEquilibrium={vi.fn()}
+            onDeleteNode={vi.fn()}
+            onCreateFolder={(parentId) => {
+              const created = addFolder(system, 'Folder_7', parentId ?? null)
+              setSystem(created.system)
+              return created.nodeId
+            }}
+          />
+        )
+      }
+
+      render(<Harness />)
+      fireEvent.contextMenu(screen.getByTestId(`object-tree-row-${demo.objectNodeId}`))
+      await user.click(screen.getByTestId('object-context-create-folder'))
+      const input = await screen.findByDisplayValue('Folder_7')
+      expect(input.getAttribute('data-testid')).toMatch(/^node-rename-input-/)
+    })
   })
 })

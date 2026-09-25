@@ -60,14 +60,13 @@ test('rossler hopf curve continuation', async ({ page }) => {
   let hopfFound = false
   for (let i = 0; i < bifCount; i += 1) {
     await bifurcations.nth(i).click()
-    if (await page.getByText('Stability: Hopf').isVisible()) {
+    if (/Hopf/.test((await page.getByTestId('branch-point-bif-chip').textContent()) ?? '')) {
       hopfFound = true
       break
     }
   }
   expect(hopfFound).toBeTruthy()
 
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-codim1-curve-toggle')
   await page.getByTestId('hopf-curve-name').fill('hopf_curve_rossler')
   await page.getByTestId('hopf-curve-param2').selectOption('b')

@@ -1,31 +1,40 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   formatSystemString,
   parseSystemString,
   type SystemStringDefinition,
 } from '../../system/systemString'
+import { Icon } from '../Icon'
 
 type SystemStringToolsProps = {
   definition: SystemStringDefinition
   canCopy: boolean
   onImport: (definition: SystemStringDefinition) => void
+  /** When given, the Import/Copy buttons render into this element (e.g. a dialog header). */
+  actionsContainer?: HTMLElement | null
+}
+
+function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? '' : 's'}`
 }
 
 export function SystemStringTools({
   definition,
   canCopy,
   onImport,
+  actionsContainer,
 }: SystemStringToolsProps) {
   const [importOpen, setImportOpen] = useState(false)
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
 
-  const openImport = () => {
+  const toggleImport = () => {
     setInput('')
     setError(null)
     setStatus(null)
-    setImportOpen(true)
+    setImportOpen((open) => !open)
   }
 
   const closeImport = () => {
@@ -56,11 +65,10 @@ export function SystemStringTools({
       setError(null)
       setImportOpen(false)
       setStatus(
-        `Imported ${parsed.varNames.length} ${
-          parsed.varNames.length === 1 ? 'variable' : 'variables'
-        } and ${parsed.paramNames.length} ${
-          parsed.paramNames.length === 1 ? 'parameter' : 'parameters'
-        }. Apply changes to save.`
+        `Imported ${plural(parsed.varNames.length, 'variable')}, ${plural(
+          parsed.paramNames.length,
+          'parameter'
+        )}.`
       )
     } catch (parseError) {
       setStatus(null)
@@ -68,85 +76,84 @@ export function SystemStringTools({
     }
   }
 
+  const actions = (
+    <span className="system-string-actions">
+      <button
+        type="button"
+        className={`icon-btn${importOpen ? ' is-active' : ''}`}
+        onClick={toggleImport}
+        aria-expanded={importOpen}
+        aria-label="Import system string"
+        title="Import from text (x' = …, p = …)"
+        data-testid="import-system-string"
+      >
+        <Icon name="upload" />
+      </button>
+      <button
+        type="button"
+        className="icon-btn"
+        onClick={() => void copySystemString()}
+        disabled={!canCopy}
+        aria-label="Copy system string"
+        title={canCopy ? 'Copy as text' : 'Fix the draft before copying.'}
+        data-testid="copy-system-string"
+      >
+        <Icon name="copy" />
+      </button>
+    </span>
+  )
+
+  const hasBody = importOpen || Boolean(error) || Boolean(status)
+
   return (
-    <section className="system-editor__string-tools" aria-label="System string tools">
-      <div className="system-editor__string-tools-summary">
-        <div className="system-editor__string-tools-copy">
-          <strong>System string</strong>
-        </div>
-        <div className="system-editor__string-tools-actions">
-          <button
-            type="button"
-            className="inspector-inline-button"
-            onClick={openImport}
-            aria-expanded={importOpen}
-            aria-label="Import system string"
-            title="Import variables, equations, and parameter values from text"
-            data-testid="import-system-string"
-          >
-            Import
-          </button>
-          <button
-            type="button"
-            className="inspector-inline-button"
-            onClick={() => void copySystemString()}
-            disabled={!canCopy}
-            aria-label="Copy system string"
-            title={canCopy ? 'Copy variables, equations, and parameter values as text' : 'Fix the current draft before copying it.'}
-            data-testid="copy-system-string"
-          >
-            Copy
-          </button>
-        </div>
-      </div>
-
-      {importOpen ? (
-        <div className="system-editor__string-import" data-testid="system-string-importer">
-          <label htmlFor="system-string-input">
-            <span>System definition</span>
-            <textarea
-              id="system-string-input"
-              value={input}
-              onChange={(event) => {
-                setInput(event.target.value)
-                setError(null)
-              }}
-              placeholder={"x' = sigma * (y - x)\ny' = x - y\nsigma = 10"}
-              spellCheck={false}
-              autoFocus
-              data-testid="system-string-input"
-            />
-          </label>
-          <p>
-            Use one <code>name&apos; = equation</code> or{' '}
-            <code>name = numeric value</code> entry per line.
-          </p>
-          <div className="system-editor__string-import-actions">
-            <button type="button" onClick={closeImport}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="system-editor__string-replace inspector-primary-action"
-              onClick={replaceFromSystemString}
-              data-testid="replace-from-system-string"
-            >
-              Replace variables and parameters
-            </button>
-          </div>
-        </div>
+    <>
+      {actionsContainer ? createPortal(actions, actionsContainer) : null}
+      {!actionsContainer || hasBody ? (
+        <section className="system-editor__string-tools" aria-label="System string tools">
+          {actionsContainer ? null : actions}
+          {importOpen ? (
+            <div className="system-editor__string-import" data-testid="system-string-importer">
+              <textarea
+                id="system-string-input"
+                aria-label="System definition"
+                value={input}
+                onChange={(event) => {
+                  setInput(event.target.value)
+                  setError(null)
+                }}
+                placeholder={"x' = sigma * (y - x)\ny' = x - y\nsigma = 10"}
+                spellCheck={false}
+                autoFocus
+                data-testid="system-string-input"
+              />
+              <div className="system-editor__string-import-actions">
+                <button type="button" className="btn btn--ghost" onClick={closeImport}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={replaceFromSystemString}
+                  title="Replace variables and parameters"
+                  data-testid="replace-from-system-string"
+                >
+                  Replace
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {error ? (
+            <div className="field-error system-editor__string-feedback" role="alert">
+              {error}
+            </div>
+          ) : null}
+          {status ? (
+            <div className="system-editor__string-feedback" role="status">
+              {status}
+            </div>
+          ) : null}
+        </section>
       ) : null}
-
-      {error ? (
-        <div className="field-error system-editor__string-feedback" role="alert">
-          {error}
-        </div>
-      ) : null}
-      {status ? (
-        <div className="system-editor__string-feedback" role="status">
-          {status}
-        </div>
-      ) : null}
-    </section>
+    </>
   )
 }

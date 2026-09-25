@@ -33,15 +33,21 @@ describe('SystemEditorPanel', () => {
     })
   })
 
-  it('keeps major editor sections independently open', async () => {
+  it('opens clean: Apply stays disabled until a real edit', async () => {
     const user = userEvent.setup()
-    renderEditor()
+    renderEditor({ withParameter: true })
 
-    expect(screen.getByTestId('system-toggle-model')).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByTestId('system-toggle-variables')).toHaveAttribute('aria-expanded', 'true')
-    await user.click(screen.getByTestId('system-toggle-model'))
-    expect(screen.getByTestId('system-toggle-model')).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.getByTestId('system-toggle-variables')).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByTestId('system-apply')).toBeDisabled()
+    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+
+    await user.clear(screen.getByTestId('system-param-value-0'))
+    await user.type(screen.getByTestId('system-param-value-0'), '98')
+    expect(screen.getByTestId('system-apply')).toBeEnabled()
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+
+    await user.clear(screen.getByTestId('system-param-value-0'))
+    await user.type(screen.getByTestId('system-param-value-0'), '99')
+    expect(screen.getByTestId('system-apply')).toBeDisabled()
   })
 
   it('only renders a period input when periodic wrapping is enabled', async () => {
@@ -75,7 +81,8 @@ describe('SystemEditorPanel', () => {
     const user = userEvent.setup()
     renderEditor()
 
-    await user.click(screen.getByText('Expression syntax and functions'))
+    expect(screen.queryByText('atan2(y, x)')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Expression syntax and functions' }))
 
     expect(screen.getByText('atan2(y, x)')).toBeVisible()
     expect(screen.getByText('log(x, base)')).toBeVisible()
@@ -129,7 +136,8 @@ describe('SystemEditorPanel', () => {
     })
     renderEditor({ withParameter: true })
 
-    await user.click(screen.getByRole('button', { name: 'Paste values' }))
+    await user.click(screen.getByTestId('system-param-menu'))
+    await user.click(screen.getByRole('menuitem', { name: 'Paste values' }))
 
     await waitFor(() =>
       expect(screen.getByTestId('system-param-value-0')).toHaveValue(String(Math.PI / 2))

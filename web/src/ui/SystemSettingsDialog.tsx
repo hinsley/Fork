@@ -1,6 +1,9 @@
+import { useState } from 'react'
 import { SystemEditorPanel } from './inspector/SystemEditorPanel'
 import type { System } from '../system/types'
 import type { SystemEditorActions } from './inspector/types'
+import { Icon } from './Icon'
+import './dialogs.css'
 
 type SystemSettingsDialogProps = {
   open: boolean
@@ -15,6 +18,7 @@ export function SystemSettingsDialog({
   onClose,
   actions,
 }: SystemSettingsDialogProps) {
+  const [toolsSlot, setToolsSlot] = useState<HTMLSpanElement | null>(null)
   if (!open || !system) return null
 
   return (
@@ -27,26 +31,24 @@ export function SystemSettingsDialog({
     >
       <div className="dialog dialog--workspace dialog--system-settings">
         <header className="dialog__header system-settings-dialog__header">
-          <div className="system-settings-dialog__heading">
-            <h2 id="system-settings-title">System settings</h2>
-            <span className="dialog__context">{system.config.name}</span>
-          </div>
+          <h2 id="system-settings-title">System settings</h2>
+          <span className="system-settings-dialog__tools" ref={setToolsSlot} />
           <button
-            className="dialog__close"
+            className="icon-btn dialog__close"
             onClick={onClose}
             aria-label="Close system settings"
+            title="Close"
             data-testid="close-system-settings"
           >
-            ✕
+            <Icon name="close" />
           </button>
         </header>
-        <div className="dialog__section dialog__section--flush">
-          <SystemEditorPanel
-            systemId={system.id}
-            config={system.config}
-            actions={actions}
-          />
-        </div>
+        <SystemEditorPanel
+          systemId={system.id}
+          config={system.config}
+          actions={actions}
+          toolsContainer={toolsSlot}
+        />
       </div>
     </div>
   )

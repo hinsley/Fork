@@ -339,3 +339,8 @@
   font-size: 0.68rem;
   color: var(--text-faint);
 }
+
+/* Dark theme: the cool accent is too light behind white chip text. */
+:root:not([data-theme='light']) .bif--hopf {
+  background: #4a78c9;
+}

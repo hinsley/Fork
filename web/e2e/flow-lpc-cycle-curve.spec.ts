@@ -65,7 +65,6 @@ test('continues a detected cycle fold as a real LPC curve', async ({ page }) => 
     .first()
   await expect(cycleFold).toBeVisible({ timeout: 30_000 })
   await cycleFold.click()
-  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-limit-cycle-codim1-curve-toggle')
 
   await page.getByTestId('limit-cycle-codim1-curve-name').fill('lpc_bautin')

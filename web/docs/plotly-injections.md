@@ -89,6 +89,16 @@ state, or rendering injection.
   `Plotly.toImage()` after saved camera restoration for figures containing true
   3D WebGL traces. The resulting current-camera PNG is presentation-only and
   is used as a static fallback by viewers where WebGL is unavailable.
+- `web/src/ui/ViewportPanel.tsx`: the viewport header's `⋯` menu item
+  "Export PNG" calls `capturePlotImage()` (`Plotly.toImage()`, PNG at the
+  current plot size, scale 1) on the viewport's graph div and downloads the
+  data URL. It only reads the rendered figure; no layout or view state changes.
+- `web/src/ui/viewports.css`: inside viewport tiles the native modebar is shown
+  only while the tile is hovered or focused (CSS `opacity`, fine pointers only);
+  the Plotly `displayModeBar` config is unchanged.
+- `web/src/ui/ViewportPanel.tsx`: `buildDiagramBaseLayout()` omits the
+  "Select axes" annotation when the in-viewport axis picker is shown for a
+  diagram without axes (layout content only).
 - `web/src/viewports/plotly/plotlyAdapter.ts`: the loaded Plotly module is
   assigned to `window.Plotly` so browser tests can invoke `Plotly.relayout`.
 - `web/src/embed/standaloneHtml.ts`: downloaded embed pages call
@@ -229,7 +239,8 @@ state, or rendering injection.
   translucent white name panel.
 - `web/src/ui/inspector/InspectorSelectionController.tsx` constructs the shared
   eigenvalue/multiplier mini-plot data and layouts; the selection shell,
-  equilibrium section, and branch-data section render those layouts through
+  equilibrium section, and the branch point panel's "More" disclosure
+  (`inspector/sections/branch/BranchPointPanel.tsx`) render those layouts through
   `PlotlyViewport`. These plots set `dragmode: 'pan'`, compute fixed
   `xaxis.range`/`yaxis.range` values for the complex plane, and add unit
   circle/disc overlays for multiplier/eigenvalue views. Equilibrium eigenvalue

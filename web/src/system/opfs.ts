@@ -1,5 +1,6 @@
 import { buildSystemArchiveBlob, parseSystemArchiveFile } from './archive'
 import { emptySystemIndex, normalizeSystem, shardForEntityId } from './model'
+import { rowSummaryField, summarizeBranch, summarizeObject } from './rowSummary'
 import type { LoadedEntities, SystemStore } from './store'
 import type {
   AnalysisObject,
@@ -301,6 +302,8 @@ function resolveSummary(system: System): SystemSummary {
     name: system.name,
     updatedAt: system.updatedAt,
     type: system.config.type,
+    varNames: [...system.config.varNames],
+    paramNames: [...system.config.paramNames],
   }
 }
 
@@ -315,6 +318,7 @@ function ensureIndex(system: System): SystemIndex {
       objectType: obj.type,
       shard: existing?.shard ?? shardForEntityId(id),
       updatedAt: metadataChanged ? system.updatedAt : existing.updatedAt,
+      ...rowSummaryField(summarizeObject(obj, system.config)),
     }
   })
   Object.entries(system.branches).forEach(([id, branch]) => {
@@ -333,6 +337,7 @@ function ensureIndex(system: System): SystemIndex {
       startObjectId: branch.startObjectId ?? null,
       shard: existing?.shard ?? shardForEntityId(id),
       updatedAt: metadataChanged ? system.updatedAt : existing.updatedAt,
+      ...rowSummaryField(summarizeBranch(branch, system.config)),
     }
   })
   return index
@@ -531,6 +536,8 @@ export class OpfsSystemStore implements SystemStore {
               ? currentMeta.updatedAt
               : system.updatedAt,
           type: currentMeta.config.type,
+          varNames: [...currentMeta.config.varNames],
+          paramNames: [...currentMeta.config.paramNames],
         }
       : resolveSummary(system)
     await Promise.all([writeUi(systemDir, system), writeManifest(systemDir, summary)])

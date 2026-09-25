@@ -1,207 +1,133 @@
-import type { ContinuationObject, ContinuationPoint } from '../system/types'
-import { formatBifurcationLabel } from '../system/continuation'
-import {
-  formatContinuationDisplayNumber,
-  summarizeContinuationPointEigenvalues,
-  type ContinuationParameterReadout,
-} from './branchPointDisplay'
+import type { ReactNode } from 'react'
+import { Icon } from './Icon'
 
 type BranchNavigatorContentProps = {
-  branch: ContinuationObject
-  branchIndices: number[]
   branchSortedOrder: number[]
   branchSortedIndex: number
   branchPointIndex: number | null
   branchPointInput: string
   branchPointError: string | null
-  selectedBranchPoint: ContinuationPoint | null | undefined
-  selectedBranchPointParameterReadout: ContinuationParameterReadout | null
-  selectedPointStability?: string | null
-  selectedPointPeriod?: number | null
-  branchBifurcations: number[]
+  /** Logical index range shown after the input, e.g. `0…40`. */
+  indexRange?: string
   onPointSelect: (arrayIndex: number) => void
   onPointInputChange: (value: string) => void
   onJumpToPoint: () => void
-  onRenderPeriodicOrbitHere?: () => void
-  renderPeriodicOrbitLabel?: string
+  /** Trailing controls on the stepper row (e.g. Copy). */
+  trailing?: ReactNode
+  /** Chips rendered on their own line under the stepper. */
+  children?: ReactNode
 }
 
+/** Point stepper: first / previous / index input / next / last. */
 export function BranchNavigatorContent({
-  branch,
-  branchIndices,
   branchSortedOrder,
   branchSortedIndex,
   branchPointIndex,
   branchPointInput,
   branchPointError,
-  selectedBranchPoint,
-  selectedBranchPointParameterReadout,
-  selectedPointStability,
-  selectedPointPeriod,
-  branchBifurcations,
+  indexRange,
   onPointSelect,
   onPointInputChange,
   onJumpToPoint,
-  onRenderPeriodicOrbitHere,
-  renderPeriodicOrbitLabel = 'Render LC Here',
+  trailing,
+  children,
 }: BranchNavigatorContentProps) {
-  const finitePeriod =
-    typeof selectedPointPeriod === 'number' && Number.isFinite(selectedPointPeriod)
-      ? selectedPointPeriod
-      : null
-
-  if (branch.data.points.length === 0) {
-    return <p className="empty-state">No branch points stored yet.</p>
-  }
-
+  const count = branchSortedOrder.length
+  const noSelection = branchPointIndex === null || count === 0
+  const atStart = noSelection || branchSortedIndex <= 0
+  const atEnd = noSelection || branchSortedIndex < 0 || branchSortedIndex >= count - 1
   return (
-    <>
-      <div className="inspector-row inspector-row--nav">
+    <div className="branch-stepper">
+      <div className="branch-stepper__controls">
         <button
           type="button"
+          className="icon-btn icon-btn--sm"
           onClick={() => {
-            if (branchSortedOrder.length === 0) return
+            if (count === 0) return
             onPointSelect(branchSortedOrder[0])
           }}
-          disabled={
-            branchPointIndex === null ||
-            branchSortedOrder.length === 0 ||
-            branchSortedIndex <= 0
-          }
+          disabled={atStart}
+          title="First point"
+          aria-label="First point"
           data-testid="branch-point-least"
         >
-          Start
+          <Icon name="first" size={14} />
         </button>
         <button
           type="button"
+          className="icon-btn icon-btn--sm"
           onClick={() => {
             if (branchSortedIndex <= 0) return
             onPointSelect(branchSortedOrder[branchSortedIndex - 1])
           }}
-          disabled={branchPointIndex === null || branchSortedIndex <= 0}
+          disabled={atStart}
+          title="Previous point (←)"
+          aria-label="Previous point"
           data-testid="branch-point-prev"
         >
-          Previous
+          <Icon name="chevron-left" size={14} />
+        </button>
+        <input
+          type="number"
+          className="branch-stepper__input"
+          value={branchPointInput}
+          onChange={(event) => onPointInputChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              onJumpToPoint()
+            }
+          }}
+          aria-label="Point index"
+          title="Point index (Enter to jump)"
+          aria-invalid={branchPointError ? true : undefined}
+          data-testid="branch-point-input"
+        />
+        <button
+          type="button"
+          className="icon-btn icon-btn--sm"
+          onClick={onJumpToPoint}
+          title="Jump to index"
+          aria-label="Jump to index"
+          data-testid="branch-point-jump"
+        >
+          <Icon name="enter" size={14} />
         </button>
         <button
           type="button"
+          className="icon-btn icon-btn--sm"
           onClick={() => {
-            if (
-              branchSortedIndex < 0 ||
-              branchSortedIndex >= branchSortedOrder.length - 1
-            )
-              return
+            if (atEnd) return
             onPointSelect(branchSortedOrder[branchSortedIndex + 1])
           }}
-          disabled={
-            branchPointIndex === null ||
-            branchSortedIndex < 0 ||
-            branchSortedIndex >= branchSortedOrder.length - 1
-          }
+          disabled={atEnd}
+          title="Next point (→)"
+          aria-label="Next point"
           data-testid="branch-point-next"
         >
-          Next
+          <Icon name="chevron-right" size={14} />
         </button>
         <button
           type="button"
+          className="icon-btn icon-btn--sm"
           onClick={() => {
-            if (branchSortedOrder.length === 0) return
-            onPointSelect(branchSortedOrder[branchSortedOrder.length - 1])
+            if (count === 0) return
+            onPointSelect(branchSortedOrder[count - 1])
           }}
-          disabled={
-            branchPointIndex === null ||
-            branchSortedOrder.length === 0 ||
-            branchSortedIndex >= branchSortedOrder.length - 1
-          }
+          disabled={atEnd}
+          title="Last point"
+          aria-label="Last point"
           data-testid="branch-point-greatest"
         >
-          End
+          <Icon name="last" size={14} />
         </button>
+        {indexRange ? <span className="branch-stepper__range faint num">{indexRange}</span> : null}
+        {trailing ? <span className="branch-stepper__trailing">{trailing}</span> : null}
       </div>
-
-      <label>
-        Point index
-        <div className="inspector-row">
-          <input
-            type="number"
-            value={branchPointInput}
-            onChange={(event) => onPointInputChange(event.target.value)}
-            data-testid="branch-point-input"
-          />
-          <button type="button" onClick={onJumpToPoint} data-testid="branch-point-jump">
-            Jump
-          </button>
-        </div>
-      </label>
-      {branchPointError ? <div className="field-error">{branchPointError}</div> : null}
-
-      {branchPointIndex !== null ? (
-        <div className="inspector-data">
-          <div>
-            {`Selected point: ${branchIndices[branchPointIndex]} ([${branchPointIndex}] memaddr)`}
-          </div>
-          {selectedBranchPoint ? (
-            <>
-              {selectedBranchPointParameterReadout ? (
-                <div>
-                  {selectedBranchPointParameterReadout.label}:{' '}
-                  {selectedBranchPointParameterReadout.value}
-                </div>
-              ) : null}
-              <div>
-                Stability: {selectedPointStability ?? selectedBranchPoint.stability}
-              </div>
-              {finitePeriod !== null ? (
-                <div>
-                  Period: {formatContinuationDisplayNumber(finitePeriod, 6)}
-                </div>
-              ) : null}
-              <div>
-                {summarizeContinuationPointEigenvalues(
-                  selectedBranchPoint,
-                  branch.branchType
-                )}
-              </div>
-            </>
-          ) : null}
-        </div>
+      {children ? <div className="branch-stepper__chips">{children}</div> : null}
+      {branchPointError ? (
+        <div className="field-error branch-stepper__error">{branchPointError}</div>
       ) : null}
-
-      {branchPointIndex !== null && onRenderPeriodicOrbitHere ? (
-        <div className="inspector-row">
-          <button
-            type="button"
-            onClick={onRenderPeriodicOrbitHere}
-            data-testid="branch-point-render-lc"
-          >
-            {renderPeriodicOrbitLabel}
-          </button>
-        </div>
-      ) : null}
-
-      {branchBifurcations.length > 0 ? (
-        <div className="inspector-section">
-          <h4 className="inspector-subheading">Bifurcations</h4>
-          <div className="inspector-list">
-            {branchBifurcations.map((idx) => {
-              const logical = branchIndices[idx]
-              const point = branch.data.points[idx]
-              const displayIndex = Number.isFinite(logical) ? logical : idx
-              const label = formatBifurcationLabel(displayIndex, point?.stability)
-              return (
-                <button
-                  type="button"
-                  key={`bif-${idx}`}
-                  onClick={() => onPointSelect(idx)}
-                  data-testid={`branch-bifurcation-${idx}`}
-                >
-                  {label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      ) : null}
-    </>
+    </div>
   )
 }

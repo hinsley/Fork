@@ -8,6 +8,8 @@ test('context menus clamp to the viewport width', async ({ page }) => {
   await harness.goto({ deterministic: true, mock: true })
 
   await harness.openSystem('Lorenz')
+  // Narrow layouts start with side panels closed; the Objects panel opens as an overlay.
+  await page.getByTestId('toggle-objects-panel').click()
 
   const button = page.getByTestId('create-object-button')
   const box = await button.boundingBox()
@@ -54,7 +56,7 @@ test('object and viewport menus remain reachable at the bottom edge', async ({ p
       menu: page.getByTestId('object-context-menu'),
     },
     {
-      trigger: page.getByRole('button', { name: 'Add viewport', exact: true }),
+      trigger: page.getByTestId('viewport-add'),
       event: 'click',
       menu: page.getByTestId('viewport-create-menu'),
     },
