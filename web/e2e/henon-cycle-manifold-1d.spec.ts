@@ -33,10 +33,12 @@ test('Henon two-cycle stable manifold phases initialize and extend at one physic
   await harness.createEquilibrium()
   await harness.selectTreeNode('Fixed_point_1')
 
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-guess-0').fill('-0.4758000511750577')
   await page.getByTestId('equilibrium-solve-guess-1').fill('0.2927400153525173')
   await page.getByTestId('equilibrium-solve-cycle-length').fill('2')
   await page.getByTestId('equilibrium-solve-submit').click()
+  await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible({ timeout: 30_000 })
 
   await clickInspectorAction(page, 'action-equilibrium-manifold-toggle')

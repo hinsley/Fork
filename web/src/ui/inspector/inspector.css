@@ -651,7 +651,6 @@
 }
 
 .inspector-form-grid,
-.inspector-browser .inspector-inline-form,
 .inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] .inspector-section,
 .inspector-advanced__body {
   display: grid;
@@ -660,7 +659,6 @@
   min-width: 0;
 }
 
-.inspector-browser .inspector-inline-form > *,
 .inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] .inspector-section > *,
 .inspector-advanced__body > * {
   grid-column: 1 / -1;
@@ -668,14 +666,12 @@
 }
 
 .inspector-form-grid > label,
-.inspector-browser .inspector-inline-form > label:is(:has(> input[type='number']), :has(> input[type='text']), :has(> input:not([type])), :has(> select)),
 .inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] .inspector-section > label:is(:has(> input[type='number']), :has(> input[type='text']), :has(> input:not([type])), :has(> select)),
 .inspector-advanced__body > label:is(:has(> input[type='number']), :has(> input[type='text']), :has(> input:not([type])), :has(> select)) {
   grid-column: auto;
   min-width: 0;
 }
 
-.inspector-browser .inspector-inline-form > label:has(> input[data-testid$='-expression']),
 .inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] .inspector-section > label:has(> input[data-testid$='-name']),
 .inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] .inspector-section > label:has(> input[data-testid$='-expression']) {
   grid-column: 1 / -1;

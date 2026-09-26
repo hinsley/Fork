@@ -10,8 +10,10 @@ test('logistic map continuation reports local map bifurcations only', async ({ p
 
   await harness.createEquilibrium()
   await harness.selectTreeNode('Fixed_point_1')
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-guess-0').fill('0.5')
   await page.getByTestId('equilibrium-solve-submit').click()
+  await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible()
 
   await clickInspectorAction(page, 'action-equilibrium-continuation-toggle')

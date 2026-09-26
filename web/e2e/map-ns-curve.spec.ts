@@ -34,7 +34,9 @@ test('continues a real map Neimark-Sacker curve in two parameters', async ({ pag
 
   await harness.createEquilibrium()
   await harness.selectTreeNode('Fixed_point_1')
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-submit').click()
+  await page.getByTestId('inspector-workflow-back').click()
   await clickInspectorAction(page, 'action-equilibrium-continuation-toggle')
   await page.getByTestId('equilibrium-branch-name').fill('fixed_points_ns')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('p1')

@@ -1,5 +1,4 @@
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
-import { InlineSection } from '../InspectorChrome'
 
 export function IsoclineInspectorSections({
   scope,
@@ -7,6 +6,7 @@ export function IsoclineInspectorSections({
   scope: InspectorSelectionController
 }) {
   const {
+    InspectorDisclosure,
     StateTable,
     formatPointValues,
     handleClearParamOverride,
@@ -35,6 +35,7 @@ export function IsoclineInspectorSections({
     paramOverrideDraft,
     paramOverrideError,
     parseDraftNumber,
+    selectionKey,
     setIsoclineError,
     setIsoclineLevelDraft,
     systemDraft,
@@ -42,8 +43,13 @@ export function IsoclineInspectorSections({
   } = scope
   return <>
 {isocline ? (
-            <InlineSection title="Isocline" testId="isocline-section">
-              <div className="inspector-section inspector-inline-form">
+            <InspectorDisclosure
+              key={`${selectionKey}-isocline`}
+              title="Isocline"
+              testId="isocline-toggle"
+              actionOnly
+            >
+              <div className="inspector-section">
                 <label>
                   Source
                   <select
@@ -327,7 +333,7 @@ export function IsoclineInspectorSections({
                   {isoclineComputing ? 'Computing…' : 'Compute'}
                 </button>
               </div>
-            </InlineSection>
+            </InspectorDisclosure>
           ) : null}
   </>
 }

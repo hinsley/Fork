@@ -14,10 +14,12 @@ test('rossler hopf to limit cycle continuation rejects neutral saddle', async ({
   ).toBeVisible()
   await harness.selectTreeNode('Equilibrium_1')
 
+  await clickInspectorAction(page, 'action-equilibrium-solver-toggle')
   await page.getByTestId('equilibrium-solve-guess-0').fill('0')
   await page.getByTestId('equilibrium-solve-guess-1').fill('0')
   await page.getByTestId('equilibrium-solve-guess-2').fill('0')
   await page.getByTestId('equilibrium-solve-submit').click()
+  await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible()
   await clickInspectorAction(page, 'action-equilibrium-continuation-toggle')
   await page.getByTestId('equilibrium-branch-name').fill('eq_rossler_a')
