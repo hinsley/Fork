@@ -1392,9 +1392,14 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
+    // Groups start collapsed; the solver sits in the Compute group.
+    expect(screen.getByTestId('action-equilibrium-solver-toggle')).not.toBeVisible()
+    fireEvent.click(
+      within(screen.getByTestId('inspector-actions')).getByRole('button', { name: 'Compute' })
+    )
     expect(screen.getByTestId('action-equilibrium-solver-toggle')).toBeVisible()
     expect(screen.getByTestId('inspector-status-chip')).toHaveTextContent('unsolved')
-    expect(screen.queryByTestId('inspector-actions-more')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Continuation' })).toBeNull()
     expect(screen.queryByTestId('action-equilibrium-continuation-toggle')).toBeNull()
     expect(screen.queryByTestId('action-equilibrium-manifold-toggle')).toBeNull()
   })
@@ -1430,13 +1435,17 @@ describe('InspectorDetailsPanel', () => {
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
     const actions = screen.getByTestId('inspector-actions')
-    expect(within(actions).getByTestId('action-equilibrium-solver-toggle')).toBeVisible()
-    expect(within(actions).getByTestId('action-equilibrium-continuation-toggle')).toBeVisible()
-    const manifoldAction = screen.getByTestId('action-equilibrium-manifold-toggle')
-    expect(manifoldAction).not.toBeVisible()
-    fireEvent.click(screen.getByTestId('inspector-actions-more'))
-    expect(manifoldAction).toBeVisible()
-    expect(manifoldAction).toHaveAttribute('role', 'menuitem')
+    for (const [group, actionId] of [
+      ['Compute', 'action-equilibrium-solver-toggle'],
+      ['Continuation', 'action-equilibrium-continuation-toggle'],
+      ['Manifolds', 'action-equilibrium-manifold-toggle'],
+    ] as const) {
+      const action = within(actions).getByTestId(actionId)
+      expect(action).not.toBeVisible()
+      fireEvent.click(within(actions).getByRole('button', { name: group }))
+      expect(action).toBeVisible()
+      expect(action).toHaveClass('inspector-action-row')
+    }
     expect(screen.queryByTestId('action-equilibrium-data-toggle')).toBeNull()
     expect(screen.getByTestId('equilibrium-glance-state')).toBeVisible()
     expect(screen.getByTestId('equilibrium-data-parameters')).toBeVisible()

@@ -13,7 +13,6 @@ import {
   fmtRelativeTime,
   fmtSci,
 } from '../../../utils/format'
-import { Icon } from '../../Icon'
 import { KeyValues, type HeaderChip } from '../InspectorChrome'
 import { computeInvariantMeasureStats } from './invariantMeasureStats'
 import {
@@ -27,7 +26,6 @@ export type ObjectHeaderModel = {
   chip: HeaderChip | null
   meta: string[]
   glance: ReactNode
-  barExtra?: ReactNode
 }
 
 /** Moduli for merged conjugate pairs, in the same order as `fmtEigenvalues`. */
@@ -422,8 +420,6 @@ function isoclineModel(scope: InspectorSelectionController): ObjectHeaderModel |
     isocline,
     isoclineStale,
     isoclineResolvedExpression,
-    isoclineComputing,
-    handleComputeIsocline,
   } = scope
   if (!isocline) return null
   const computedAt = isocline.lastComputed?.computedAt
@@ -438,7 +434,6 @@ function isoclineModel(scope: InspectorSelectionController): ObjectHeaderModel |
           testId: 'isocline-stale-indicator',
         }
       : null
-  const needsCompute = !computedAt || isoclineStale
   return {
     chip,
     meta: computedAt ? [`computed ${fmtRelativeTime(computedAt)}`] : [],
@@ -458,18 +453,6 @@ function isoclineModel(scope: InspectorSelectionController): ObjectHeaderModel |
         ]}
       />
     ),
-    barExtra: needsCompute ? (
-      <button
-        type="button"
-        className="btn"
-        onClick={() => void handleComputeIsocline()}
-        disabled={isoclineComputing}
-        data-testid="isocline-quick-compute"
-      >
-        <Icon name="play" size={13} />
-        {isoclineComputing ? 'Computing…' : 'Compute'}
-      </button>
-    ) : null,
   }
 }
 

@@ -130,6 +130,12 @@ function SelectionHarness({
   )
 }
 
+async function openLimitCycleFromHopf(user: ReturnType<typeof userEvent.setup>) {
+  const actions = within(screen.getByTestId('inspector-actions'))
+  await user.click(actions.getByRole('button', { name: 'Bifurcations' }))
+  await user.click(actions.getByTestId('action-limit-cycle-from-hopf-toggle'))
+}
+
 describe('branch point panel', () => {
   it('shows the branch summary and real stability on the root page', () => {
     const { system, nodeId } = hopfBranchSystem()
@@ -147,7 +153,7 @@ describe('branch point panel', () => {
     expect(screen.queryByTestId('branch-point-bif-chip')).toBeNull()
   })
 
-  it('moves point actions into the point panel and opens their workflows', async () => {
+  it('lists point actions in the Bifurcations and Continuation menus', async () => {
     const user = userEvent.setup()
     const { system, nodeId } = hopfBranchSystem()
     render(<InspectorDetailsPanel {...baseProps(system, nodeId)} />)
@@ -155,20 +161,22 @@ describe('branch point panel', () => {
     await user.click(screen.getByTestId('branch-bifurcation-2'))
     expect(screen.getByTestId('branch-point-bif-chip')).toHaveTextContent('Hopf')
     const panel = within(screen.getByTestId('branch-point-panel'))
-    expect(panel.getByTestId('action-limit-cycle-from-hopf-toggle')).toHaveTextContent(
-      'Limit cycle'
+    expect(panel.queryByTestId('action-limit-cycle-from-hopf-toggle')).toBeNull()
+    const actions = within(screen.getByTestId('inspector-actions'))
+    await user.click(actions.getByRole('button', { name: 'Bifurcations' }))
+    expect(actions.getByTestId('action-limit-cycle-from-hopf-toggle')).toHaveTextContent(
+      'Limit cycle from Hopf'
     )
-    expect(panel.getByTestId('action-codim1-curve-toggle')).toHaveTextContent('Hopf curve')
-    expect(panel.getByTestId('action-branch-continue-toggle')).toHaveTextContent(
-      'Continue from here'
+    expect(actions.getByTestId('action-codim1-curve-toggle')).toHaveTextContent(
+      'Codimension-1 curve'
     )
-    const rootActions = screen.queryByTestId('inspector-actions')
-    if (rootActions) {
-      expect(within(rootActions).queryByTestId('action-limit-cycle-from-hopf-toggle')).toBeNull()
-    }
+    await user.click(actions.getByRole('button', { name: 'Continuation' }))
+    expect(actions.getByTestId('action-branch-continue-toggle')).toHaveTextContent(
+      'Continue from point'
+    )
 
-    await user.click(panel.getByTestId('action-limit-cycle-from-hopf-toggle'))
-    expect(screen.getByTestId('inspector-workflow-focus')).toHaveTextContent('Limit cycle')
+    await user.click(actions.getByTestId('action-limit-cycle-from-hopf-toggle'))
+    expect(screen.getByTestId('inspector-workflow-focus')).toHaveTextContent('Limit cycle from Hopf')
     expect(
       screen.getByTestId('limit-cycle-from-hopf-toggle').closest('details')
     ).toHaveAttribute('data-workflow-active', 'true')
@@ -243,11 +251,7 @@ describe('branch point panel', () => {
     render(<InspectorDetailsPanel {...baseProps(system, nodeId)} />)
 
     await user.click(screen.getByTestId('branch-bifurcation-2'))
-    await user.click(
-      within(screen.getByTestId('branch-point-panel')).getByTestId(
-        'action-limit-cycle-from-hopf-toggle'
-      )
-    )
+    await openLimitCycleFromHopf(user)
     expect(screen.getByTestId('limit-cycle-from-hopf-parameter')).toHaveValue('nu')
     expect(
       (screen.getByTestId('limit-cycle-from-hopf-branch-name') as HTMLInputElement).value
@@ -260,11 +264,7 @@ describe('branch point panel', () => {
     render(<InspectorDetailsPanel {...baseProps(system, nodeId)} />)
 
     await user.click(screen.getByTestId('branch-bifurcation-2'))
-    await user.click(
-      within(screen.getByTestId('branch-point-panel')).getByTestId(
-        'action-limit-cycle-from-hopf-toggle'
-      )
-    )
+    await openLimitCycleFromHopf(user)
     const submit = screen.getByTestId('limit-cycle-from-hopf-submit')
     expect(submit).toHaveTextContent(/^Continue$/)
     expect(submit).toBeEnabled()

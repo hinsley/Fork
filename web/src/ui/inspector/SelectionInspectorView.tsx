@@ -606,7 +606,7 @@ export function SelectionInspectorView({
               </div>
             ) : null}
 
-            <ActionBar entries={workflowActions} extra={objectModel?.barExtra} />
+            <ActionBar entries={workflowActions} />
 
             <OrbitInspectorSections scope={scope} />
 

@@ -196,23 +196,20 @@ export function StateGridInspector({
               ? 'Compute the conditional operator of a fixed sampled flow map.'
               : 'Compute the conditional State Grid transfer operator.'),
           disabled: !transferEnabled,
-          primary: true,
         }]
       : []),
     {
       id: 'state-grid-entropy-toggle',
       group: 'Compute',
-      label: 'Entropy',
-      title: 'Expansion entropy',
+      label: 'Expansion entropy',
       description: 'Configure and run the finite-region expansion-entropy calculation.',
-      primary: true,
     },
     ...(isFlow ? [{ id: 'state-grid-particles-toggle' as const, group: 'Compute' as const,
-      label: 'Particles', description: 'Animate particles inside this grid.', primary: true }] : []),
+      label: 'Particles', description: 'Animate particles inside this grid.' }] : []),
     {
       id: 'state-grid-setup-toggle',
       group: 'Configure',
-      label: 'Grid setup',
+      label: 'State Grid setup',
       description: 'Set bounds and resolution for the free state variables.',
     },
   ]

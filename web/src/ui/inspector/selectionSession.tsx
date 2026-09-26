@@ -24,6 +24,12 @@ export function WorkflowFocusProvider({
   children: ReactNode
   onActiveWorkflowChange?: () => void
 }) {
+  const [collapsedActionGroups, setCollapsedActionGroups] = useState<
+    Partial<Record<WorkflowActionEntry['group'], boolean>>
+  >({})
+  const toggleActionGroup = useCallback((group: WorkflowActionEntry['group']) => {
+    setCollapsedActionGroups((previous) => ({ ...previous, [group]: !(previous[group] ?? true) }))
+  }, [])
   const [state, dispatch] = useReducer(selectionSessionReducer, {
     activeWorkflow: null,
     navigationDirection: null,
@@ -74,8 +80,10 @@ export function WorkflowFocusProvider({
       ...state,
       openWorkflow: (workflow) => navigate(workflow),
       closeWorkflow: () => navigate(null),
+      collapsedActionGroups,
+      toggleActionGroup,
     }),
-    [navigate, state]
+    [collapsedActionGroups, navigate, state, toggleActionGroup]
   )
   return <WorkflowFocusContext.Provider value={value}>{children}</WorkflowFocusContext.Provider>
 }
@@ -119,7 +127,7 @@ export function WorkflowFocusToolbar({
       >
         <span aria-hidden="true">←</span>
       </button>
-      <strong className="truncate">{entry?.title ?? entry?.label ?? 'Workflow'}</strong>
+      <strong className="truncate">{entry?.label ?? 'Workflow'}</strong>
     </div>
   )
 }

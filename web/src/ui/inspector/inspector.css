@@ -352,44 +352,6 @@
   min-width: 0;
 }
 
-/* ---------------------------------------------------------------------------
- * Action bar: primary buttons + ⋯ overflow menu.
- * ------------------------------------------------------------------------- */
-.inspector-action-bar {
-  margin: 0 0 12px;
-  padding: 0 0 10px;
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.inspector-action-bar__more {
-  position: relative;
-  margin-left: auto;
-}
-
-.inspector-action-menu {
-  position: absolute;
-  z-index: 25;
-  top: calc(100% + 4px);
-  right: 0;
-  display: grid;
-  width: max-content;
-  min-width: 190px;
-  max-width: min(280px, 80vw);
-}
-
-.inspector-action-menu[hidden] {
-  display: none;
-}
-
-.inspector-action-menu [role='menuitem'] {
-  justify-content: space-between;
-  font-size: 12px;
-}
-
-.inspector-action-bar .chip {
-  height: 16px;
-}
-
 /* Shared button primitives inside the inspector (beat `.inspector-section button`). */
 .inspector-browser .icon-btn {
   min-height: 0;
@@ -1087,4 +1049,143 @@
 
 .scene-object-row--implicit .scene-object-row__name {
   color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+ * Action groups (Compute, Continuation, …): collapsible menus of workflows.
+ * ------------------------------------------------------------------------- */
+.inspector-actions {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 20px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.inspector-actions__group h4 {
+  margin: 0;
+}
+
+.inspector-actions__group h4,
+.inspector-workflow-toolbar > div span {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+.inspector-actions__group {
+  display: grid;
+  gap: 2px;
+}
+
+.inspector-actions__group h4 {
+  padding: 0;
+}
+
+.inspector-actions__toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.inspector-actions__toggle:hover {
+  background: var(--button-bg-hover);
+  color: var(--text);
+}
+
+.inspector-actions__chevron {
+  display: inline-block;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.inspector-actions__toggle[aria-expanded='true'] .inspector-actions__chevron {
+  transform: rotate(90deg);
+}
+
+.inspector-actions__items:not([hidden]) {
+  display: grid;
+  gap: 2px;
+}
+
+.inspector-action-row {
+  display: flex;
+  min-height: 36px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.inspector-action-row:hover {
+  border-color: transparent;
+  background: var(--button-bg-hover);
+}
+
+.inspector-action-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.inspector-action-row:disabled:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
+.inspector-action-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.inspector-action-row > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.inspector-action-row strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.inspector-action-row__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inspector-action-row small {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 450;
+  line-height: 1.35;
+}
+
+.inspector-action-row > span:last-child {
+  color: var(--text-faint);
+  font-size: 18px;
 }

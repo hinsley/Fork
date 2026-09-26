@@ -1,5 +1,6 @@
 import {
   Fragment,
+  useId,
   useEffect,
   useRef,
   useState,
@@ -243,105 +244,71 @@ export function EntityHeader({
   )
 }
 
-const GROUP_ORDER: WorkflowActionEntry['group'][] = [
+const ACTION_GROUPS = [
+  'Configure',
+  'Inspect',
   'Compute',
   'Continuation',
-  'Bifurcations',
   'Manifolds',
-  'Inspect',
-  'Configure',
-]
-
-function EntryTag({ entry }: { entry: WorkflowActionEntry }) {
-  return entry.tag ? <span className="chip chip--muted">{entry.tag}</span> : null
-}
+  'Bifurcations',
+] as const
 
 /**
- * Primary actions as visible buttons plus a `⋯` overflow menu for the rest.
- * Every entry keeps the `action-<workflowId>` test id. Overflow items stay in
- * the DOM (hidden) so they remain addressable while the menu is closed.
+ * Collapsible action groups (Compute, Continuation, …). Each row opens its
+ * workflow page; every row keeps the `action-<workflowId>` test id.
  */
-export function ActionBar({
-  entries,
-  extra,
-}: {
-  entries: WorkflowActionEntry[]
-  extra?: ReactNode
-}) {
+export function ActionBar({ entries }: { entries: WorkflowActionEntry[] }) {
   const focus = useWorkflowFocus()
-  const [menuOpen, setMenuOpen] = useState(false)
-  const moreRef = useRef<HTMLDivElement>(null)
-  useDismiss(menuOpen, () => setMenuOpen(false), [moreRef])
-  if (!focus || focus.activeWorkflow) return null
-  const primary = entries.filter((entry) => entry.primary)
-  const rest = entries.filter((entry) => !entry.primary)
-  if (primary.length === 0 && rest.length === 0 && !extra) return null
-  const groups = GROUP_ORDER.map((group) => rest.filter((entry) => entry.group === group)).filter(
-    (group) => group.length > 0
-  )
+  const listId = useId()
+  if (!focus || focus.activeWorkflow || entries.length === 0) return null
   return (
-    <div className="action-bar inspector-action-bar" data-testid="inspector-actions">
-      {primary.map((entry, index) => (
-        <button
-          key={entry.id}
-          type="button"
-          className={`btn${index === 0 ? ' btn--primary' : ''}`}
-          onClick={() => focus.openWorkflow(entry.id)}
-          disabled={entry.disabled}
-          title={entry.description}
-          data-testid={`action-${entry.id}`}
-        >
-          {entry.label}
-          <EntryTag entry={entry} />
-        </button>
-      ))}
-      {extra}
-      {rest.length > 0 ? (
-        <div className="inspector-action-bar__more" ref={moreRef}>
-          <button
-            type="button"
-            className={`icon-btn${menuOpen ? ' is-active' : ''}`}
-            onClick={() => setMenuOpen((open) => !open)}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            aria-label="More actions"
-            title="More actions"
-            data-testid="inspector-actions-more"
-          >
-            <Icon name="more" />
-          </button>
-          <div
-            className="menu-surface inspector-action-menu"
-            role="menu"
-            hidden={!menuOpen}
-            data-testid="inspector-actions-menu"
-          >
-            {groups.map((group, groupIndex) => (
-              <Fragment key={group[0].group}>
-                {groupIndex > 0 ? <hr /> : null}
-                {group.map((entry) => (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      focus.openWorkflow(entry.id)
-                    }}
-                    disabled={entry.disabled}
-                    title={entry.description}
-                    data-testid={`action-${entry.id}`}
-                  >
-                    <span className="truncate">{entry.label}</span>
-                    <EntryTag entry={entry} />
-                  </button>
-                ))}
-              </Fragment>
-            ))}
+    <section className="inspector-actions" data-testid="inspector-actions">
+      {ACTION_GROUPS.map((group) => {
+        const groupEntries = entries.filter((entry) => entry.group === group)
+        if (groupEntries.length === 0) return null
+        const expanded = focus.collapsedActionGroups[group] === false
+        const contentId = `${listId}-${group}`
+        return (
+          <div className="inspector-actions__group" key={group}>
+            <h4>
+              <button
+                type="button"
+                className="inspector-actions__toggle"
+                aria-expanded={expanded}
+                aria-controls={contentId}
+                onClick={() => focus.toggleActionGroup(group)}
+              >
+                <span className="inspector-actions__chevron" aria-hidden="true">›</span>
+                {group}
+              </button>
+            </h4>
+            <div className="inspector-actions__items" id={contentId} hidden={!expanded}>
+              {groupEntries.map((entry) => (
+                <button
+                  type="button"
+                  className="inspector-action-row"
+                  onClick={() => focus.openWorkflow(entry.id)}
+                  disabled={entry.disabled}
+                  title={entry.description}
+                  aria-description={entry.description}
+                  data-testid={`action-${entry.id}`}
+                  key={entry.id}
+                >
+                  <span>
+                    <strong className="inspector-action-row__title">
+                      <span>{entry.label}</span>
+                      {entry.tag ? <span className="tree-node__tag">{entry.tag}</span> : null}
+                    </strong>
+                    {entry.disabled ? <small>{entry.description}</small> : null}
+                  </span>
+                  <span aria-hidden="true">›</span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      ) : null}
-    </div>
+        )
+      })}
+    </section>
   )
 }
 

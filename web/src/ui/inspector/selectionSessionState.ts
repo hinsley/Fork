@@ -42,10 +42,6 @@ export type WorkflowActionEntry = {
   description: string
   tag?: string
   disabled?: boolean
-  /** Rendered as a visible button in the action bar instead of the overflow menu. */
-  primary?: boolean
-  /** Longer heading shown while the workflow is open (defaults to `label`). */
-  title?: string
 }
 
 export type WorkflowNavigationDirection = 'forward' | 'backward'

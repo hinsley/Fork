@@ -41,25 +41,7 @@ function noiseFloor(values: number[]): number {
   return 1e-12 * scale
 }
 
-// Bifurcation-specific next steps first, generic continuation last.
-const POINT_ACTION_ORDER = [
-  'limit-cycle-from-hopf-toggle',
-  'limit-cycle-from-pd-toggle',
-  'codim1-curve-toggle',
-  'limit-cycle-codim1-curve-toggle',
-  'codim2-branch-switch-toggle',
-  'branch-continue-toggle',
-]
-
-function orderPointActions<T extends { id: string }>(entries: T[]): T[] {
-  const rank = (id: string) => {
-    const index = POINT_ACTION_ORDER.indexOf(id)
-    return index < 0 ? POINT_ACTION_ORDER.length : index
-  }
-  return [...entries].sort((left, right) => rank(left.id) - rank(right.id))
-}
-
-/** Selected-point panel: stepper, key values, spectrum, point actions, and More. */
+/** Selected-point panel: stepper, key values, spectrum, and More. */
 export function BranchPointPanel({ scope }: { scope: InspectorSelectionController }) {
   const {
     PlotlyViewport,
@@ -69,7 +51,6 @@ export function BranchPointPanel({ scope }: { scope: InspectorSelectionControlle
     branchEigenvalues,
     branchIndices,
     branchMultiplierPlot,
-    branchPointActions,
     branchPointError,
     branchPointIndex,
     branchPointInput,
@@ -92,7 +73,6 @@ export function BranchPointPanel({ scope }: { scope: InspectorSelectionControlle
     setBranchPoint,
     setBranchPointInput,
     systemDraft,
-    workflowFocus,
     writeClipboardText,
   } = scope
   const panelRef = useRef<HTMLElement | null>(null)
@@ -336,22 +316,9 @@ export function BranchPointPanel({ scope }: { scope: InspectorSelectionControlle
             </div>
           ) : null}
 
-          {branchPointActions.length > 0 || renderTargetAction ? (
+          {renderTargetAction ? (
           <div className="branch-point__actions">
             <div className="action-bar">
-              {orderPointActions(branchPointActions).map((entry) => (
-                <button
-                  type="button"
-                  className="btn"
-                  key={entry.id}
-                  onClick={() => workflowFocus?.openWorkflow(entry.id)}
-                  disabled={entry.disabled}
-                  title={entry.description}
-                  data-testid={`action-${entry.id}`}
-                >
-                  {entry.label}
-                </button>
-              ))}
               {renderTargetAction ? (
                 <button
                   type="button"

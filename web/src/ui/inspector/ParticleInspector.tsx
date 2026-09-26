@@ -25,7 +25,7 @@ export function ParticleInspector({ system, nodeId, object, onUpdate, onRename,
   const actionOnly = Boolean(workflowFocus)
   const entries: WorkflowActionEntry[] = [
     { id: 'particles-animation-toggle', group: 'Configure', label: 'Animation',
-      description: 'Choose evolution mode, playback speed, and lifetime.', primary: true },
+      description: 'Choose evolution mode, playback speed, and lifetime.' },
   ]
   const navigationClass =
     workflowFocus?.navigationPhase !== 'idle' && workflowFocus?.navigationDirection

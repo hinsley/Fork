@@ -18,11 +18,10 @@ export async function revealInspectorAction(page: Page, actionId: string): Promi
     await page.keyboard.press('Escape')
   }
   if (!(await action.isVisible())) {
-    // Secondary actions live in the inspector's `⋯` overflow menu.
-    const more = page.getByTestId('inspector-actions-more')
-    if ((await more.count()) && (await more.getAttribute('aria-expanded')) !== 'true') {
-      await more.click()
-    }
+    // Workflow actions live in collapsible groups (Compute, Continuation, …).
+    const group = page.locator('.inspector-actions__group').filter({ has: action })
+    const toggle = group.locator('.inspector-actions__toggle[aria-expanded="false"]')
+    if (await toggle.count()) await toggle.click()
   }
   await action.waitFor({ state: 'visible' })
   return action

@@ -132,7 +132,7 @@ describe('selection inspector workflow shell', () => {
     expect(screen.queryByText('Cached solver parameters')).toBeNull()
   })
 
-  it('shows primary actions as buttons and the rest in the overflow menu', () => {
+  it('groups actions in collapsible menus and keeps configuration in the header', () => {
     const base = createSystem({ name: 'Workflow_Groups' })
     const added = addObject(
       base,
@@ -148,21 +148,21 @@ describe('selection inspector workflow shell', () => {
 
     const actions = screen.getByTestId('inspector-actions')
     expect(within(actions).getAllByTestId(/^action-/)[0]).toHaveTextContent('Simulation')
-    expect(screen.getByTestId('action-orbit-run-toggle')).toBeVisible()
-    expect(screen.getByTestId('action-oseledets-toggle')).toBeVisible()
-    // Extend lives in the Simulation form, not the action bar.
+    // Extend lives in the Simulation form.
     expect(screen.queryByTestId('orbit-extend-quick')).toBeNull()
-    // Appearance, parameters and frozen variables live in the header.
+    // Appearance, parameters and frozen variables live in the header, not a Configure group.
     expect(within(actions).queryByTestId('action-appearance-toggle')).toBeNull()
     expect(screen.getByTestId('action-appearance-toggle')).toHaveAttribute('aria-label', 'Appearance')
     expect(screen.getByTestId('action-parameters-toggle')).toBeVisible()
     expect(screen.getByTestId('action-frozen-variables-toggle')).toBeVisible()
     expect(actions).not.toHaveTextContent('Configure')
-    const more = screen.getByTestId('inspector-actions-more')
+    expect(within(actions).getByRole('heading', { name: 'Compute' })).toBeVisible()
+    expect(within(actions).getByRole('heading', { name: 'Continuation' })).toBeVisible()
     expect(screen.getByTestId('action-limit-cycle-toggle')).not.toBeVisible()
-    expect(more).toHaveAttribute('aria-expanded', 'false')
-    fireEvent.click(more)
-    expect(more).toHaveAttribute('aria-expanded', 'true')
+    const continuation = screen.getByRole('button', { name: 'Continuation' })
+    expect(continuation).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(continuation)
+    expect(continuation).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByTestId('action-limit-cycle-toggle')).toBeVisible()
     expect(screen.getByTestId('action-heteroclinic-from-orbit-toggle')).toHaveTextContent(
       'Heteroclinic connection'
@@ -198,10 +198,13 @@ describe('selection inspector workflow shell', () => {
     })
     render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
 
+    await user.click(
+      within(screen.getByTestId('inspector-actions')).getByRole('button', { name: 'Compute' })
+    )
     expect(screen.getByTestId('action-orbit-run-toggle')).toBeVisible()
     expect(screen.getByTestId('action-oseledets-toggle')).toBeVisible()
     expect(screen.queryByTestId('action-limit-cycle-toggle')).toBeNull()
-    expect(screen.queryByTestId('inspector-actions-more')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Continuation' })).toBeNull()
     expect(screen.queryByTestId('action-orbit-data-toggle')).toBeNull()
 
     for (const testId of ['orbit-run-toggle', 'oseledets-toggle']) {

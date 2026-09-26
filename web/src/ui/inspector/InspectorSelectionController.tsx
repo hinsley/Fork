@@ -5119,18 +5119,14 @@ function useInspectorSelectionController({
       id: 'orbit-run-toggle',
       group: 'Compute',
       label: 'Simulation',
-      title: 'Simulation',
       description: 'Integrate or iterate this orbit from a chosen initial state.',
-      primary: true,
     })
     if (orbit.data.length >= 2) {
       workflowActions.push({
         id: 'oseledets-toggle',
         group: 'Compute',
-        label: 'Lyapunov',
-        title: 'Lyapunov analysis',
+        label: 'Lyapunov analysis',
         description: 'Compute exponents and covariant Lyapunov vectors.',
-        primary: true,
       })
     }
     if (!isDiscreteMap && orbit.data.length > 0) {
@@ -5154,20 +5150,16 @@ function useInspectorSelectionController({
     workflowActions.push({
       id: 'equilibrium-solver-toggle',
       group: 'Compute',
-      label: 'Solve',
-      title: `Solve ${equilibriumLabelLower}`,
+      label: `Solve ${equilibriumLabel}`,
       description: 'Refine the state and compute its local spectrum.',
-      primary: true,
     })
     if (equilibrium.solution) {
       workflowActions.push(
         {
           id: 'equilibrium-continuation-toggle',
           group: 'Continuation',
-          label: 'Continue',
-          title: `Continue ${equilibriumLabelLower}`,
+          label: `Continue ${equilibriumLabel}`,
           description: 'Create a one-parameter continuation branch.',
-          primary: true,
         },
         {
           id: 'equilibrium-manifold-toggle',
@@ -5182,19 +5174,15 @@ function useInspectorSelectionController({
     workflowActions.push({
       id: 'forced-response-solver-toggle',
       group: 'Compute',
-      label: 'Solve',
-      title: 'Solve forced response',
+      label: 'Solve forced response',
       description: 'Correct a phase-locked response on the declared stroboscopic section.',
-      primary: true,
     })
     if (forcedPeriodicResponse.solution) {
       workflowActions.push({
         id: 'forced-response-continuation-toggle',
         group: 'Continuation',
-        label: 'Continue',
-        title: 'Continue forced response',
+        label: 'Continue forced response',
         description: 'Create a one-parameter stroboscopic continuation branch.',
-        primary: true,
       })
     }
   }
@@ -5203,10 +5191,8 @@ function useInspectorSelectionController({
       workflowActions.push({
         id: 'limit-cycle-floquet-toggle',
         group: 'Compute',
-        label: 'Floquet modes',
-        title: 'Compute Floquet modes',
+        label: 'Compute Floquet modes',
         description: 'Compute the cycle multipliers and mode vectors.',
-        primary: true,
       })
     }
     workflowActions.push({
@@ -5225,27 +5211,20 @@ function useInspectorSelectionController({
     workflowActions.push({
       id: 'isocline-toggle',
       group: 'Compute',
-      label: 'Configure',
-      title: 'Isocline',
+      label: 'Configure and compute isocline',
       description: 'Choose active axes, frozen values, and recompute the geometry.',
-      primary: true,
     })
   }
   if (invariantMeasure) {
     workflowActions.push({
       id: 'invariant-measure-eigenmodes-toggle',
       group: 'Compute',
-      label: 'Eigenmodes',
-      title: 'Compute eigenmodes',
+      label: 'Compute eigenmodes',
       disabled: Boolean(invariantEigenmodeUnavailableReason),
       description: invariantEigenmodeUnavailableReason ??
         'Compute nontrivial modes of the stored transfer operator.',
-      primary: true,
     })
   }
-  // Point-dependent branch actions render as buttons in the branch point panel
-  // (BranchPointPanel) instead of the root action list.
-  const branchPointActions: WorkflowActionEntry[] = []
   if (showNormalFormWorkflow) {
     workflowActions.push({
       id: 'normal-form-workflow-toggle',
@@ -5255,7 +5234,7 @@ function useInspectorSelectionController({
     })
   }
   if (showCodim2BranchSwitch) {
-    branchPointActions.push({
+    workflowActions.push({
       id: 'codim2-branch-switch-toggle',
       group: 'Bifurcations',
       label: 'Branch switching',
@@ -5266,46 +5245,36 @@ function useInspectorSelectionController({
     workflowActions.push({
       id: 'manifold-extend-toggle',
       group: 'Manifolds',
-      label: 'Extend',
-      title: 'Extend invariant manifold',
+      label: 'Extend invariant manifold',
       description: 'Continue the selected manifold beyond its current endpoint.',
-      primary: true,
     })
   }
   if (canExtendBranch) {
     workflowActions.push({
       id: 'branch-extend-toggle',
       group: 'Continuation',
-      label: 'Extend',
-      title: 'Extend branch',
+      label: 'Extend branch',
       description: 'Continue the selected branch from an existing endpoint.',
-      primary: true,
     })
   }
   if (showBranchContinueFromPoint) {
-    branchPointActions.push({
+    workflowActions.push({
       id: 'branch-continue-toggle',
       group: 'Continuation',
-      label: 'Continue from here',
+      label: 'Continue from point',
       description: 'Start another continuation branch from the selected point.',
     })
   }
   if (showCodim1CurveContinuations) {
-    branchPointActions.push({
+    workflowActions.push({
       id: 'codim1-curve-toggle',
       group: 'Bifurcations',
-      label: showFoldCurveContinuation
-        ? 'Fold curve'
-        : showHopfCurveContinuation
-          ? 'Hopf curve'
-          : showNSCurveContinuation
-            ? 'NS curve'
-            : 'Codimension-1 curve',
+      label: 'Codimension-1 curve',
       description: 'Continue an eligible fold, Hopf, or Neimark-Sacker point.',
     })
   }
   if (showLimitCycleCodim1CurveContinuation && limitCycleCodim1Curve) {
-    branchPointActions.push({
+    workflowActions.push({
       id: 'limit-cycle-codim1-curve-toggle',
       group: 'Bifurcations',
       label: `${limitCycleCodim1Curve.label} curve`,
@@ -5324,18 +5293,18 @@ function useInspectorSelectionController({
     })
   }
   if (showLimitCycleFromHopf) {
-    branchPointActions.push({
+    workflowActions.push({
       id: 'limit-cycle-from-hopf-toggle',
       group: 'Bifurcations',
-      label: 'Limit cycle',
+      label: 'Limit cycle from Hopf',
       description: 'Initialize a periodic orbit and its continuation branch.',
     })
   }
   if (showLimitCycleFromPD) {
-    branchPointActions.push({
+    workflowActions.push({
       id: 'limit-cycle-from-pd-toggle',
       group: 'Bifurcations',
-      label: 'Doubled cycle',
+      label: limitCycleFromPDLabel,
       description: 'Initialize the doubled cycle and continue it.',
     })
   }
@@ -5375,14 +5344,6 @@ function useInspectorSelectionController({
     })
   }
 
-  const activeBranchPointAction = branchPointActions.find(
-    (entry) => entry.id === workflowFocus?.activeWorkflow
-  )
-  if (activeBranchPointAction) {
-    // Keeps the workflow toolbar title; the root action list is hidden while a
-    // workflow is open, so this never renders as a root action.
-    workflowActions.push(activeBranchPointAction)
-  }
 
   const handleRunOrbit = async () => {
     if (runDisabled) {
@@ -8705,7 +8666,6 @@ function useInspectorSelectionController({
     branchExtensionError,
     branchIndices,
     branchMultiplierPlot,
-    branchPointActions,
     branchPointRevealToken,
     branchParameterName,
     branchParams,

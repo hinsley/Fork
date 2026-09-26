@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { addObject, createSystem } from '../../system/model'
@@ -98,7 +98,7 @@ describe('StateGridInspector', () => {
     expect(onUpdateObjectFrozenVariables).toHaveBeenCalledWith(initial.nodeId, { x: 0 })
   })
 
-  it('keeps State Grid setup in the overflow and gates invariant measure by dynamics support', () => {
+  it('keeps State Grid setup in Configure and gates invariant measure by dynamics support', () => {
     const initial = fixture()
     const mapSystem = {
       ...initial.system,
@@ -121,16 +121,17 @@ describe('StateGridInspector', () => {
       </WorkflowFocusProvider>
     )
 
-    const menu = screen.getByTestId('inspector-actions-menu')
-    expect(
-      Array.from(menu.querySelectorAll('[data-testid^="action-"]')).map((button) =>
-        button.getAttribute('data-testid')
-      )
-    ).toEqual(['action-state-grid-setup-toggle'])
-    const primary = Array.from(
-      screen.getByTestId('inspector-actions').querySelectorAll('.btn[data-testid^="action-"]')
-    ).map((button) => button.getAttribute('data-testid'))
-    expect(primary).toEqual([
+    const groupIds = (name: string) =>
+      Array.from(
+        within(screen.getByTestId('inspector-actions'))
+          .getByRole('button', { name })
+          .closest('.inspector-actions__group')
+          ?.querySelectorAll(
+          '[data-testid^="action-"]'
+        ) ?? []
+      ).map((button) => button.getAttribute('data-testid'))
+    expect(groupIds('Configure')).toEqual(['action-state-grid-setup-toggle'])
+    expect(groupIds('Compute')).toEqual([
       'action-state-grid-transfer-toggle',
       'action-state-grid-entropy-toggle',
     ])
